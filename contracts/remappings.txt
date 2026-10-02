@@ -1,0 +1,5 @@
+@openzeppelin/=lib/openzeppelin-contracts/
+@creator-token-standards/=lib/creator-token-standards/src/
+erc721a/=lib/creator-token-standards/lib/ERC721A/
+@limitbreak/permit-c/=lib/creator-token-standards/lib/PermitC/src/
+forge-std/=lib/forge-std/src/

@@ -2,7 +2,7 @@
 
 A no-code, permissionless NFT launchpad. A creator arrives, launches one collection, and manages it. Cobweb is a rebuild of Kingdomly as the lightest version we can run: about $70 a month at rest, with AWS cut down to Lambda, SQS and S3 for art rendering.
 
-**Status:** Phase 0 done. The workspace is scaffolded with empty packages and CI; there is no application code yet. Next are contracts (Phase 1) and the web shell (Phase 2). See [Build status](#build-status).
+**Status:** Phase 1 contracts are built and tested locally; the testnet deployment is still to do. Next is the web shell (Phase 2). See [Build status](#build-status).
 
 ## Contents
 
@@ -174,6 +174,7 @@ You need:
 - [Foundry](https://book.getfoundry.sh/getting-started/installation) for the contracts
 
 ```
+git submodule update --init --recursive   # contract libraries
 pnpm install
 
 pnpm typecheck      # all packages, through Turborepo
@@ -250,6 +251,8 @@ What grows with success, in the order we would feel it: Filebase storage as coll
 
 ## Contracts in brief
 
+Full documentation, diagrams and a function-by-function reference are in [contracts/README.md](contracts/README.md).
+
 Two contracts per chain:
 
 - **Factory.** Deploys a full collection contract with CREATE2, with no proxies. The creation code arrives in calldata and is checked against an allowlisted hash. The factory holds the per-chain platform fees and takes the art-generation payment, emitting the event that marks a render job as paid.
@@ -308,16 +311,16 @@ Before porting anything, open the matching context doc: it says which files impl
 
 ## Build status
 
-| Phase | What                                                              | Status                  |
-| ----- | ----------------------------------------------------------------- | ----------------------- |
-| 0     | Scaffold: workspace, empty packages, CI                           | Done                    |
-| 1     | Contracts: factory, collection, testnet deploy                    | Next                    |
-| 2     | Web shell: palette, `packages/ui`, sign-in, database schema       | Next, alongside Phase 1 |
-| 3     | Art generator: trait engine, layer upload, curation, lock and pay | Not started             |
-| 4     | Render pipeline: SQS, Lambdas, Filebase                           | Not started             |
-| 5     | Deploy and manage: phases, whitelist, reveal, airdrop             | Not started             |
-| 6     | Freshness server and mint page                                    | Not started             |
-| 7     | Hardening and launch: load test, mainnet deploys                  | Not started             |
+| Phase | What                                                              | Status                                   |
+| ----- | ----------------------------------------------------------------- | ---------------------------------------- |
+| 0     | Scaffold: workspace, empty packages, CI                           | Done                                     |
+| 1     | Contracts: factory, collection, testnet deploy                    | Built and tested; testnet deploy pending |
+| 2     | Web shell: palette, `packages/ui`, sign-in, database schema       | Next, alongside Phase 1                  |
+| 3     | Art generator: trait engine, layer upload, curation, lock and pay | Not started                              |
+| 4     | Render pipeline: SQS, Lambdas, Filebase                           | Not started                              |
+| 5     | Deploy and manage: phases, whitelist, reveal, airdrop             | Not started                              |
+| 6     | Freshness server and mint page                                    | Not started                              |
+| 7     | Hardening and launch: load test, mainnet deploys                  | Not started                              |
 
 Each phase's tasks and exit criteria are in [docs/MASTER_PLAN.md](docs/MASTER_PLAN.md).
 

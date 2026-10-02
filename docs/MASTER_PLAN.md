@@ -28,7 +28,6 @@ Plan open questions plus what the legacy review raised.
 | D1 | Mint fee: A, B or C | Phase 1 (default values only; the mechanism is the same) |
 | D2 | Art fee: $0.11 from token one, or 4,000 free | Phase 3 |
 | D3 | Rulings on C1 to C8 above | Phase 1 and 3 |
-| D13 | Robinhood Chain: mainnet status, chain id, RPC, explorer verification, and whether the Limit Break transfer validator is deployed there | Phase 1 |
 
 ## Decided (Oct 2, 2026)
 
@@ -43,6 +42,7 @@ Plan open questions plus what the legacy review raised.
 | D12 | Mint group model | As in TheSuits: one open/closed flag per group plus an optional scheduled start, no global gate. The creator closes a phase by hand. This amends locked decisions 1 and 11 in PLAN.md, which say no toggles |
 | C1 | Art check at lock | The browser submits the final token list; the server validates it against the project's rules, stores it and hashes it. The engine is not re-run at lock |
 | C2 | Layer images | Originals are uploaded and kept, and must be square (1:1). The browser makes a separate small thumbnail for preview screens. Maximum 2048 x 2048, every image in a project the same size, 10 MB per file. Proposed and not yet confirmed: 5 GB of layer files per project, 500 traits per layer |
+| D13 | Robinhood Chain | Deployable. Mainnet live since July 2026, chain id 4663 (testnet 46630), ETH for gas, Arbitrum Nitro (standard EVM), Blockscout explorer. The CREATE2 deployer, delegate.xyz registry and Limit Break's default validator all have code there. A testnet dry run should confirm that deploys are not restricted and that verification works |
 | D21 | Art payment | No separate payments contract. The factory takes the art-generation fee through a `pay(jobId)` function and emits the paid event. Two contracts per chain: `CobwebFactory` and `CobwebCollection` |
 | D22 | Fee currency | Every fee is an amount of the chain's native token, set by the admin. No USD peg and no price oracle |
 | D10 | Brand | The product is named Cobweb. The Kingdomly logo stays for now. All "realm" and medieval copy is dropped for a professional tone |
@@ -118,6 +118,8 @@ flowchart LR
 **Done when:** a fresh clone installs, builds and passes CI with empty packages.
 
 ### Phase 1: Contracts
+
+**Status:** contracts, tests, deploy script and documentation are done ([contracts/README.md](../contracts/README.md)). Remaining: the testnet deploy and verification, which needs a funded deployer wallet, an RPC URL and an explorer key.
 
 Source: [legacy/contracts.md](legacy/contracts.md), sections 2, 3, 8 and 9.
 
