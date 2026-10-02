@@ -2,7 +2,7 @@
 
 A no-code, permissionless NFT launchpad. A creator arrives, launches one collection, and manages it. This is a rebuild of Kingdomly as the lightest version we can run: about $60 to $80 a month fixed, with AWS cut down to Lambda, SQS and S3 for art rendering.
 
-**Status:** planning. No application code yet. The legacy repos have been analysed and the build order is set.
+**Status:** Phase 0 done. The workspace is scaffolded with empty packages; no application code yet. Next are contracts (Phase 1) and the web shell (Phase 2).
 
 ## The product
 
@@ -27,14 +27,14 @@ The old app let creators build art projects and drop contracts separately and wi
 
 ## Architecture
 
-| Piece | Runs on | Job |
-| --- | --- | --- |
-| Web app (dashboard and mint page) | Next.js on Vercel | Creator flow; mint page |
-| Database, auth, job queue | Supabase | Postgres with row-level security, Sign in with Ethereum |
-| Contracts | Any EVM chain | Factory, collection (ERC721AC), payments |
-| Freshness server | Node on Railway, behind Cloudflare | The only reader of chain state for mint pages |
-| Render pipeline | AWS SQS and Lambda | Composites 100 tokens per batch with sharp, uploads CARs to Filebase |
-| Layer storage | S3, CloudFront for thumbnails | Source layers only |
+| Piece                             | Runs on                            | Job                                                                  |
+| --------------------------------- | ---------------------------------- | -------------------------------------------------------------------- |
+| Web app (dashboard and mint page) | Next.js on Vercel                  | Creator flow; mint page                                              |
+| Database, auth, job queue         | Supabase                           | Postgres with row-level security, Sign in with Ethereum              |
+| Contracts                         | Any EVM chain                      | Factory, collection (ERC721AC), payments                             |
+| Freshness server                  | Node on Railway, behind Cloudflare | The only reader of chain state for mint pages                        |
+| Render pipeline                   | AWS SQS and Lambda                 | Composites 100 tokens per batch with sharp, uploads CARs to Filebase |
+| Layer storage                     | S3, CloudFront for thumbnails      | Source layers only                                                   |
 
 Full detail, costs and the reasoning are in [docs/PLAN.md](docs/PLAN.md).
 
@@ -53,16 +53,25 @@ docs/              Plan, master plan, legacy context
 legacy/            Old Kingdomly repos, reference only, not in git
 ```
 
-Nothing above `docs/` exists yet; it is created phase by phase in the master plan.
+The packages are empty stubs; each is filled in phase by phase in the master plan.
+
+## Commands
+
+```
+pnpm install
+pnpm typecheck | lint | test | build     # all packages, through Turborepo
+pnpm format                               # Prettier
+cd contracts && forge test                # contracts
+```
 
 ## Docs
 
-| Doc | What it is |
-| --- | --- |
-| [docs/PLAN.md](docs/PLAN.md) | The source plan: scope, locked decisions, costs, revenue |
-| [docs/MASTER_PLAN.md](docs/MASTER_PLAN.md) | Build order, exit criteria per phase, decisions still needed |
+| Doc                                            | What it is                                                    |
+| ---------------------------------------------- | ------------------------------------------------------------- |
+| [docs/PLAN.md](docs/PLAN.md)                   | The source plan: scope, locked decisions, costs, revenue      |
+| [docs/MASTER_PLAN.md](docs/MASTER_PLAN.md)     | Build order, exit criteria per phase, decisions still needed  |
 | [docs/legacy/README.md](docs/legacy/README.md) | Index of the legacy context docs: what to lift and from where |
-| [docs/SKILLS.md](docs/SKILLS.md) | Claude Code skills worth building for this repo |
+| [docs/SKILLS.md](docs/SKILLS.md)               | Claude Code skills worth building for this repo               |
 
 ## Rules that hold everywhere
 
