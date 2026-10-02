@@ -43,10 +43,16 @@ Plan open questions plus what the legacy review raised.
 | D12 | Mint group model | As in TheSuits: one open/closed flag per group plus an optional scheduled start, no global gate. The creator closes a phase by hand. This amends locked decisions 1 and 11 in PLAN.md, which say no toggles |
 | C1 | Art check at lock | The browser submits the final token list; the server validates it against the project's rules, stores it and hashes it. The engine is not re-run at lock |
 | C2 | Layer images | Originals are uploaded and kept, and must be square (1:1). The browser makes a separate small thumbnail for preview screens. Maximum 2048 x 2048, every image in a project the same size, 10 MB per file. Proposed and not yet confirmed: 5 GB of layer files per project, 500 traits per layer |
+| D21 | Art payment | No separate payments contract. The factory takes the art-generation fee through a `pay(jobId)` function and emits the paid event. Two contracts per chain: `CobwebFactory` and `CobwebCollection` |
+| D22 | Fee currency | Every fee is an amount of the chain's native token, set by the admin. No USD peg and no price oracle |
 | D10 | Brand | The product is named Cobweb. The Kingdomly logo stays for now. All "realm" and medieval copy is dropped for a professional tone |
 | D10b | Look | Layout and Poppins are kept; no full redesign. The green palette is replaced by a neutral warm gray, dark only. UI and UX improvements are welcome where a review finds them |
 | D16 | Accent colour | The Kingdomly yellow (`#fadc69`) stays for now, to be revisited in the design review |
 | D11 | Components | Full port to shadcn. Every screen, lifted or new, is built from shadcn components in `packages/ui`; the old hand-rolled components are not carried over. Layout and structure are kept. Legacy functionality is respected, not frozen: a better or more efficient way to do the same job is preferred, and any deliberate change is noted |
+| D17 | Factory | Reuse the legacy factory's code, with a fresh deployment per chain. One factory and one approved collection contract per chain, connected by approving the collection's creation-code hash |
+| D18 | Fee settings | Held on the factory and changeable by the admin only. The collection reads them from the factory in its constructor, which is safe because the factory is the caller. Fully flexible: the factory admin can raise or lower the fee on an already deployed collection. This amends locked decision 6 in PLAN.md, which says a snapshot can only be lowered. The platform payout address is read from the factory at withdrawal time |
+| D19 | Collection addresses | Predictable and the same on every chain: the salt drops `block.timestamp`, and the factory itself is deployed to the same address on each chain |
+| D20 | Naming | No Kingdomly branding in contract names, events or errors. Use Cobweb: `CobwebFactory`, `CobwebCollection`, `CobwebPayments` |
 | D14 | `mintOnBehalf` | Kept, alongside the delegate.xyz mint: caller pays, the receiver's quota is used, the receiver gets the tokens, behind the owner switch |
 | D15 | Lowering a group's supply | `setMintGroupMaxSupply` rejects a value below what the group has already minted |
 | D6 | Locked tokens | No new contract code. The lock is the ERC721AC transfer validator's security level, set by the creator to the non-transferable level and back |
@@ -120,17 +126,17 @@ Source: [legacy/contracts.md](legacy/contracts.md), sections 2, 3, 8 and 9.
 - **Collection:** new contract on ERC721AC.
   - Mint groups ported from TheSuits: per-group flag and scheduled start, price, supply allocation, public per-wallet cap, issued and claimed quotas. Apply the fixes in the analysis doc.
   - Quota writes chunked by the dashboard at 300 to 500 addresses per tx.
-  - Fee snapshot read from the factory in the constructor, held in storage, lowerable only.
+  - Fee snapshot read from the factory in the constructor, held in storage, changeable in either direction by the factory admin only.
   - Reveal, airdrop with per-token fee (burn is an airdrop to the dead address), delegated mint to the hot wallet, royalties, withdraw. Locking is the validator's security level, not contract code.
   - View functions built for one multicall: phase state, supply, per-wallet quota.
 - **Payments contract:** takes the art fee, emits an event keyed by job id.
-- Tests: port the legacy unit and invariant structure; add invariants for fee-never-rises, timestamp-only liveness, supply, quota accounting and that all collected value is withdrawable.
+- Tests: port the legacy unit and invariant structure; add invariants for fee changes being admin-only, liveness matching the `mintGroupActive` view, supply, quota accounting and that all collected value is withdrawable.
 - Checks in CI: runtime bytecode identical across two deploys with different arguments; creation code under 24 KB.
 - Deploy and verify on one testnet.
 
 **Done when:** a collection deployed through the factory on testnet can be minted through a public phase and an allowlist phase, revealed and airdropped, and a second deploy verifies automatically.
 
-**Do not carry over:** the 3% fee that is credited to nobody, admin-raisable fees, the Pyth dependency, the global mint toggle (the per-group flag stays), `immutable maxSupply`, `block.timestamp` in the salt.
+**Do not carry over:** the 3% fee that is credited to nobody, the Pyth dependency, the global mint toggle (the per-group flag stays), `immutable maxSupply`, `block.timestamp` in the salt.
 
 ### Phase 2: Web shell, auth and schema
 

@@ -15,7 +15,7 @@ A no-code NFT launchpad with one linear flow: create a collection, make its art,
 apps/web           Next.js app: creator dashboard and mint page
 apps/freshness     Railway service that reads chain state for mint pages
 services/render    Render and metadata Lambdas
-contracts/         Foundry: factory, collection, payments
+contracts/         Foundry: factory and collection
 packages/dna       Trait assignment engine
 packages/ui        Component library
 packages/shared    Types, ABIs, chain config
@@ -38,7 +38,7 @@ cd contracts && forge test                # contracts
 2. **Simulate, then send the simulated request.** The wallet opens only after `simulateContract` passes.
 3. **Mint pages never call an RPC for shared state.** They poll the freshness server.
 4. **Every server action checks the session and ownership.** Every table has row-level security.
-5. **Fees are flat native amounts snapshotted at deploy,** read from the factory in the collection constructor. No oracle. Lowerable only.
+5. **Fees are flat native amounts snapshotted at deploy,** read from the factory in the collection constructor. No oracle. Only the factory admin can change a deployed collection's fee, up or down.
 6. **Render jobs run only when `paid` or `waived`.**
 7. **`legacy/` is reference only.** Never import from it, never commit it, never copy its secrets or its ABIs (`lib/contracts` there is stale).
 8. **Contracts keep identical runtime bytecode across deploys.** No per-collection immutables, no hard-coded per-chain addresses.

@@ -45,7 +45,7 @@ None of these is a loss-of-funds bug. Issue 1 is the only one a user would hit: 
 
 ## What must be added from the Kingdomly design
 
-- Platform mint fee: snapshot read from the factory in the constructor, held in storage, lowerable only; added in `quoteBatchMint` and credited to the platform's ledger entry (the old 3% was credited to nobody).
+- Platform mint fee: snapshot read from the factory in the constructor, held in storage, changeable by the factory admin only; added in `quoteBatchMint` and credited to the platform's ledger entry (the old 3% was credited to nobody).
 - Airdrop fee per token, taken as `msg.value`.
 - Delegated mint through delegate.xyz, landing in the hot wallet.
 - Factory deployment with identical runtime bytecode.

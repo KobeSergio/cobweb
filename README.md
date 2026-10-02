@@ -80,7 +80,6 @@ flowchart TB
   subgraph chain[Chain, per launch chain]
     factory[Factory]
     collection[Collection<br/>ERC721AC]
-    payments[Payments]
   end
 
   creator --> web
@@ -89,8 +88,8 @@ flowchart TB
   web --> db
   web -- presigned upload --> s3
   s3 --> cf --> web
-  web -- lock and pay --> payments
-  payments -. paid event .-> db
+  web -- lock and pay --> factory
+  factory -. paid event .-> db
   db -- paid job --> sqs --> render
   s3 --> render
   render -- image CARs --> filebase
@@ -105,7 +104,7 @@ flowchart TB
 | ----------------- | ----------------- | -------------------------- | ----------------------------------------------------------------- |
 | Web app           | `apps/web`        | Vercel                     | Creator dashboard and the public mint page                        |
 | Database and auth | `supabase/`       | Supabase                   | Postgres with row-level security, Sign in with Ethereum, job rows |
-| Contracts         | `contracts/`      | Each launch chain          | Factory, collection, payments                                     |
+| Contracts         | `contracts/`      | Each launch chain          | Factory and collection                                            |
 | Freshness server  | `apps/freshness`  | Railway, behind Cloudflare | The only reader of chain state for mint pages                     |
 | Render pipeline   | `services/render` | AWS SQS and Lambda         | Composites tokens, packs CARs, uploads to Filebase                |
 | Layer storage     |                   | S3, CloudFront             | Source layers and their thumbnails                                |
@@ -129,7 +128,7 @@ flowchart LR
 
 - The browser generates and edits the collection for free. Nothing is rendered until the creator pays.
 - At lock the browser submits the final token list. The server checks it against the project's rules, stores it and hashes it. That stored list is what gets rendered.
-- A job runs only when its row is `paid` (from the payments contract event) or `waived` (admin only, logged).
+- A job runs only when its row is `paid` (from the factory's payment event) or `waived` (admin only, logged).
 - Failed batches retry through SQS, with a dead-letter queue. The last batch to finish flips the job to `finalizing` exactly once.
 - A re-run of the same job must produce the same CIDs, so metadata carries no timestamps.
 
@@ -155,7 +154,7 @@ The freshness server polls each chain on a tiered schedule (slow when idle, fast
 apps/web           Next.js app: creator dashboard and mint page
 apps/freshness     Railway service: chain polling, quota batching, HTTP with ETag
 services/render    Render and metadata Lambdas, SQS wiring
-contracts/         Foundry: factory, collection, payments
+contracts/         Foundry: factory and collection
 packages/dna       Trait assignment engine, shared by browser and server
 packages/ui        Component library: shadcn components themed with the shared tokens
 packages/shared    Types, ABIs, chain config
@@ -251,18 +250,17 @@ What grows with success, in the order we would feel it: Filebase storage as coll
 
 ## Contracts in brief
 
-Three contracts per chain:
+Two contracts per chain:
 
-- **Factory.** Deploys a full collection contract with CREATE2, with no proxies. The creation code arrives in calldata and is checked against an allowlisted hash. The factory holds the per-chain platform fees.
+- **Factory.** Deploys a full collection contract with CREATE2, with no proxies. The creation code arrives in calldata and is checked against an allowlisted hash. The factory holds the per-chain platform fees and takes the art-generation payment, emitting the event that marks a render job as paid.
 - **Collection.** ERC721AC with mint groups, modelled on [docs/reference/TheSuits.sol](docs/reference/TheSuits.sol). Runtime bytecode is identical across deploys, so explorer verification happens once per chain.
-- **Payments.** Takes the art-generation fee and emits the event that marks a render job as paid.
 
 How minting works:
 
 - **Mint groups.** Group 0 is public; the others are allowlist groups. Each has a price, a supply allocation, an open/closed flag and an optional scheduled start.
 - **Liveness.** A group is live if its flag is on, or if a start is scheduled and the block timestamp has reached it. There is no end time and no global switch. The creator closes a group by hand.
 - **Limits.** Public has a per-wallet cap. Allowlist groups use a per-address quota, written on-chain from a CSV in chunks of 300 to 500 addresses.
-- **Fees.** Flat native amounts set by the admin on the factory and snapshotted into each collection at deploy. No price oracle. A snapshot can be lowered, never raised.
+- **Fees.** Flat native amounts set by the admin on the factory and snapshotted into each collection at deploy. No price oracle. Only the factory admin can change a deployed collection's fee, up or down.
 - **Also supported.** Reveal, airdrops (a burn is an airdrop to the dead address), delegated minting that lands in the hot wallet, mint on behalf, royalties, and locking transfers through the ERC721AC transfer validator.
 
 ## How we make money
@@ -271,7 +269,7 @@ All three streams are collected on-chain in the chain's native token.
 
 | Stream                    | Who pays | When                                   |
 | ------------------------- | -------- | -------------------------------------- |
-| Art generation, per token | Creator  | At lock, through the payments contract |
+| Art generation, per token | Creator  | At lock, through the factory           |
 | Airdrop, per token        | Creator  | At airdrop, through the collection     |
 | Mint fee, per token       | Minter   | At mint, on top of the creator's price |
 
@@ -285,7 +283,7 @@ These come from the plan's locked decisions and from bugs found in the legacy co
 2. **Simulate, then send the simulated request.** The wallet opens only after `simulateContract` passes.
 3. **Mint pages never call an RPC for shared state.** They poll the freshness server through Cloudflare.
 4. **Every server action checks the session and ownership,** and every table has row-level security. The legacy app had neither.
-5. **Fees are flat native amounts snapshotted at deploy.** No oracle. Admin can lower a snapshot, never raise it.
+5. **Fees are flat native amounts snapshotted at deploy.** No oracle. Only the factory admin can change a deployed collection's fee.
 6. **Render jobs run only when `paid` or `waived`.**
 7. **Contracts keep identical runtime bytecode across deploys.** No per-collection immutables, no hard-coded per-chain addresses.
 8. **`legacy/` is read-only reference.** Never import from it and never commit it; it contains secrets.
@@ -313,7 +311,7 @@ Before porting anything, open the matching context doc: it says which files impl
 | Phase | What                                                              | Status                  |
 | ----- | ----------------------------------------------------------------- | ----------------------- |
 | 0     | Scaffold: workspace, empty packages, CI                           | Done                    |
-| 1     | Contracts: factory, collection, payments, testnet deploy          | Next                    |
+| 1     | Contracts: factory, collection, testnet deploy                    | Next                    |
 | 2     | Web shell: palette, `packages/ui`, sign-in, database schema       | Next, alongside Phase 1 |
 | 3     | Art generator: trait engine, layer upload, curation, lock and pay | Not started             |
 | 4     | Render pipeline: SQS, Lambdas, Filebase                           | Not started             |
