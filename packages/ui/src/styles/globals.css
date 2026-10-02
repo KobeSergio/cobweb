@@ -1,0 +1,185 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/* The app is always dark. shadcn's `dark:` styles follow the class on <html>, not the visitor's OS. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@source '../../../../apps/**/*.{ts,tsx}';
+@source '../**/*.{ts,tsx}';
+
+/*
+ * Cobweb is dark only. Every colour in the product comes from the tokens below; components never
+ * hard-code a colour.
+ */
+:root {
+  --background: #262624;
+  --foreground: #f5f4ef;
+
+  /* Panels that sit on the page: cards, inputs, chips */
+  --card: #30302e;
+  --card-foreground: #f5f4ef;
+  /* Floating layers: dialogs, menus, tooltips */
+  --popover: #2c2c2a;
+  --popover-foreground: #f5f4ef;
+
+  /* The accent. Dark text sits on it. */
+  --primary: #fadc69;
+  --primary-hover: #fde047;
+  --primary-foreground: #262624;
+  --primary-soft: rgb(250 220 105 / 0.15);
+
+  --secondary: #3a3a37;
+  --secondary-foreground: #f5f4ef;
+  --muted: #30302e;
+  --muted-foreground: #a6a39a;
+  --accent: #3a3a37;
+  --accent-foreground: #f5f4ef;
+
+  /* Fills and borders. Too dark for text on these surfaces; use destructive-foreground for text. */
+  --destructive: #dc3838;
+  --destructive-foreground: #f87171;
+  --success: #4caf50;
+  --warning: #f59e0b;
+
+  --border: rgb(255 255 255 / 0.08);
+  --border-strong: rgb(255 255 255 / 0.14);
+  /* Edges of fields and other controls. Strong enough to find the control (3:1 on the page). */
+  --input: rgb(255 255 255 / 0.35);
+  --ring: #fadc69;
+
+  --sidebar: #1f1e1d;
+  --sidebar-foreground: #f5f4ef;
+  --sidebar-primary: #fadc69;
+  --sidebar-primary-foreground: #262624;
+  --sidebar-accent: #30302e;
+  --sidebar-accent-foreground: #f5f4ef;
+  --sidebar-border: rgb(255 255 255 / 0.08);
+  --sidebar-ring: #fadc69;
+
+  --radius: 0.5rem;
+}
+
+@theme inline {
+  --font-sans: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-sm: calc(var(--radius) - 0.25rem);
+  --radius-md: calc(var(--radius) - 0.125rem);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 0.25rem);
+  --radius-2xl: calc(var(--radius) + 0.5rem);
+}
+
+/* Breakpoints carried over from the legacy app. Note xl is 1440px, not Tailwind's 1280px. */
+@theme {
+  --breakpoint-xxs: 320px;
+  --breakpoint-xs: 425px;
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1440px;
+  --breakpoint-2xl: 1536px;
+  --breakpoint-3xl: 1760px;
+}
+
+@layer base {
+  /*
+   * The root font size steps up with the viewport, as in the legacy app. Every rem, including
+   * Tailwind spacing and text sizes, scales with it.
+   */
+  :root {
+    font-size: 12px;
+    color-scheme: dark;
+  }
+  @media (min-width: 640px) {
+    :root {
+      font-size: 14px;
+    }
+  }
+  @media (min-width: 1024px) {
+    :root {
+      font-size: 16px;
+    }
+  }
+
+  * {
+    border-color: var(--border);
+    outline-color: color-mix(in oklab, var(--ring) 50%, transparent);
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(255 255 255 / 0.18);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+}
+
+/* Visitors who ask for less motion get state changes without the movement. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@utility scrollbar-hide {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}

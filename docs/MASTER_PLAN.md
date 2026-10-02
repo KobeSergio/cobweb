@@ -142,6 +142,14 @@ Source: [legacy/contracts.md](legacy/contracts.md), sections 2, 3, 8 and 9.
 
 ### Phase 2: Web shell, auth and schema
 
+**Status:** done locally. The app signs in with a wallet, creates collections, lists only the creator's own, and walks the seven-step layout. Checked in a browser with an injected test wallet, and by `pnpm --filter @cobweb/web verify:local` (64 checks against a local Supabase). Not yet connected to a hosted Supabase project or tried with a real wallet extension.
+
+What changed from the list below:
+
+- **Schema scope.** `profiles`, `collections`, `mint_groups` and `whitelist_entries` exist. The art tables (layers, traits, rules, tokens, render jobs, batches) are left for Phase 3, when their shapes are settled.
+- **Dashboard search and sort** from the legacy top bar were not carried over; a creator has a handful of collections.
+- **Design review** was done against screenshots with the impeccable and design-taste skills, and its findings applied. Its one open point is the logo: the Kingdomly crown is still in use.
+
 Source: [legacy/market-design-system.md](legacy/market-design-system.md), [legacy/market-mint-and-data.md](legacy/market-mint-and-data.md) sections 3 and 4.
 
 - Next.js app keeping the legacy layout, root font scaling, 1440px `xl` and Poppins.
@@ -220,6 +228,13 @@ Source: [legacy/market-mint-and-data.md](legacy/market-mint-and-data.md), sectio
 - Lifecycle rule deleting layer sources after 90 days.
 - Alerts on the dead-letter queue, freshness server health and RPC errors.
 - Rotate every legacy secret listed in [legacy/README.md](legacy/README.md).
+- Hosted Supabase settings, from the Phase 2 security review:
+  - Email provider off. Wallet sign-ups stay on.
+  - `site_url` and redirect URLs set to exact production origins. No wildcard preview domains: this list decides which sites' sign-in signatures are accepted.
+  - Session limits and a short access-token lifetime, as in `supabase/config.toml`.
+  - Captcha on wallet sign-in, and a per-wallet cap on collections so mint page addresses cannot be squatted.
+  - Asymmetric JWT signing keys, so sessions are verified without a network call.
+- A full Content-Security-Policy for scripts. Only framing is blocked today.
 
 **Done when:** one real collection has been launched end to end on mainnet.
 

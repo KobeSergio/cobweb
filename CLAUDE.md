@@ -30,6 +30,8 @@ pnpm install
 pnpm typecheck | lint | test | build     # all packages, through Turborepo
 pnpm format                               # Prettier
 cd contracts && forge test                # contracts
+supabase start && pnpm --filter @cobweb/web dev      # web app against local Supabase
+pnpm --filter @cobweb/web verify:local    # sign-in and access-rule checks; run after any migration change
 ```
 
 ## Rules

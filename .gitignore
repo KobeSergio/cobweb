@@ -19,3 +19,10 @@ coverage/
 .DS_Store
 .remember/
 .vercel/
+
+# Browser test output
+.playwright-mcp/
+
+# Next.js
+next-env.d.ts
+*.tsbuildinfo

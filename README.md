@@ -2,7 +2,7 @@
 
 A no-code, permissionless NFT launchpad. A creator arrives, launches one collection, and manages it. Cobweb is a rebuild of Kingdomly as the lightest version we can run: about $70 a month at rest, with AWS cut down to Lambda, SQS and S3 for art rendering.
 
-**Status:** Phase 1 contracts are built and tested locally; the testnet deployment is still to do. Next is the web shell (Phase 2). See [Build status](#build-status).
+**Status:** Phase 1 (contracts) and Phase 2 (web shell, sign-in, database schema) are built and tested locally. Nothing is deployed yet. Next is the art generator (Phase 3). See [Build status](#build-status).
 
 ## Contents
 
@@ -191,7 +191,23 @@ forge test
 
 CI runs the same commands on every pull request and on pushes to `main` (`.github/workflows/ci.yml`).
 
-**Environment variables.** None are needed yet. Each phase adds its own, documented in a `.env.example` beside the package that reads them. Real `.env` files are never committed.
+**Environment variables.** Each package that needs them has a `.env.example` beside it (`apps/web`, `contracts`). Real `.env` files are never committed.
+
+### Running the web app locally
+
+You also need Docker and the [Supabase CLI](https://supabase.com/docs/guides/local-development).
+
+```
+supabase start                      # local Postgres, auth and API, in Docker
+supabase status                     # prints the API URL and publishable key
+cp apps/web/.env.example apps/web/.env.local   # then paste those two values in
+pnpm --filter @cobweb/web dev       # http://localhost:3000
+```
+
+- The local Supabase uses ports 55320 to 55329, so it can run beside another Supabase project on the default ports.
+- `supabase db reset` re-applies the migrations to a clean local database.
+- `pnpm --filter @cobweb/web verify:local` signs in with throwaway wallets against the local Supabase and checks sign-in and every access rule (64 checks). Run it after any change to `supabase/migrations`.
+- A browser-extension wallet is enough to sign in locally. WalletConnect needs a project id in `.env.local`.
 
 **Branches.** Work on a branch and open a pull request into `main`.
 
@@ -315,8 +331,8 @@ Before porting anything, open the matching context doc: it says which files impl
 | ----- | ----------------------------------------------------------------- | ---------------------------------------- |
 | 0     | Scaffold: workspace, empty packages, CI                           | Done                                     |
 | 1     | Contracts: factory, collection, testnet deploy                    | Built and tested; testnet deploy pending |
-| 2     | Web shell: palette, `packages/ui`, sign-in, database schema       | Next, alongside Phase 1                  |
-| 3     | Art generator: trait engine, layer upload, curation, lock and pay | Not started                              |
+| 2     | Web shell: palette, `packages/ui`, sign-in, database schema       | Built and tested locally                 |
+| 3     | Art generator: trait engine, layer upload, curation, lock and pay | Next                                     |
 | 4     | Render pipeline: SQS, Lambdas, Filebase                           | Not started                              |
 | 5     | Deploy and manage: phases, whitelist, reveal, airdrop             | Not started                              |
 | 6     | Freshness server and mint page                                    | Not started                              |
