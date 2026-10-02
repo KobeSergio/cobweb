@@ -47,6 +47,6 @@ cd contracts && forge test                # contracts
 
 - Product name is Cobweb. No "Kingdomly" or "realm" wording in user-facing copy; the Kingdomly logo is the only exception.
 - Colours come from tokens, never hard-coded hex values.
-- Lifted screens use the cleaned-up components in `packages/ui`; new screens use shadcn from the same package.
+- All UI is built from shadcn components in `packages/ui`. Legacy hand-rolled components are not copied; a lifted screen keeps the legacy layout and structure, rebuilt on shadcn. Respect what the legacy screen could do, but prefer a better or simpler way where one exists, and note what changed. Never drop a function by accident.
 - Layer images are square, at most 2048 x 2048, the same size across a project, 10 MB per file.
 - Launch chains: Ethereum, Arbitrum, Base, Berachain, Monad, Robinhood Chain.

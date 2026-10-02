@@ -46,7 +46,7 @@ Plan open questions plus what the legacy review raised.
 | D10 | Brand | The product is named Cobweb. The Kingdomly logo stays for now. All "realm" and medieval copy is dropped for a professional tone |
 | D10b | Look | Layout and Poppins are kept; no full redesign. The green palette is replaced by a neutral warm gray, dark only. UI and UX improvements are welcome where a review finds them |
 | D16 | Accent colour | The Kingdomly yellow (`#fadc69`) stays for now, to be revisited in the design review |
-| D11 | Components | Lifted screens keep the old hand-rolled components, cleaned up and moved into a shared UI library. New screens use shadcn, which is the long-run direction |
+| D11 | Components | Full port to shadcn. Every screen, lifted or new, is built from shadcn components in `packages/ui`; the old hand-rolled components are not carried over. Layout and structure are kept. Legacy functionality is respected, not frozen: a better or more efficient way to do the same job is preferred, and any deliberate change is noted |
 | D14 | `mintOnBehalf` | Kept, alongside the delegate.xyz mint: caller pays, the receiver's quota is used, the receiver gets the tokens, behind the owner switch |
 | D15 | Lowering a group's supply | `setMintGroupMaxSupply` rejects a value below what the group has already minted |
 | D6 | Locked tokens | No new contract code. The lock is the ERC721AC transfer validator's security level, set by the creator to the non-transferable level and back |
@@ -138,7 +138,8 @@ Source: [legacy/market-design-system.md](legacy/market-design-system.md), [legac
 
 - Next.js app keeping the legacy layout, root font scaling, 1440px `xl` and Poppins.
 - New palette as tokens: neutral warm gray in place of the Kingdomly green. Proposed starting values, to tune on screen: background `#262624`, surface `#30302e`, raised `#3a3a37`, text `#f5f4ef`, muted text `#a6a39a`, borders as white at low opacity. Every hard-coded legacy colour (the old surface `#1b2425` appears 255 times) is replaced by a token during the lift.
-- `packages/ui`: the cleaned-up legacy components (`BaseModal`, spinner, step indicator, alert and error modals, side nav, buttons, inputs) with Dynamic removed, one consistent props style, and a `cn` helper. shadcn is installed into the same package and shares the tokens, so old and new components look the same.
+- `packages/ui`: shadcn components themed with the tokens above. Each legacy component gets a shadcn replacement with the same behaviour: `BaseModal` (about 66 importers) becomes Dialog, the alert, error and pending modals become AlertDialog variants, the side nav becomes Sidebar, toasts become Sonner, and the step indicator and spinner are small custom components built on shadcn primitives. Headless UI is not carried over.
+- A feature inventory per lifted screen: what the legacy screen lets a user do is listed from the legacy code first. The port respects that list but is not bound by it: where a simpler or better way to do the same job exists, take it, and note what changed and why. Nothing is dropped by accident.
 - Shell: navbar and side nav built from `packages/ui`, Kingdomly logo, Cobweb name, professional copy.
 - Design review of the shell and the step flow with the frontend-design, design-taste and impeccable skills before Phase 3 builds on them.
 - RainbowKit with Supabase Sign in with Ethereum; session available in server components and actions.

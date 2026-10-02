@@ -46,7 +46,7 @@ apps/freshness     Railway service: chain polling, quota batching, HTTP with ETa
 services/render    Render and metadata Lambdas, SQS wiring
 contracts/         Foundry: factory, collection, payments
 packages/dna       Trait assignment engine, shared by browser and server
-packages/ui        Component library: cleaned-up legacy components plus shadcn, shared tokens
+packages/ui        Component library: shadcn components themed with the shared tokens
 packages/shared    Types, ABIs, chain config
 supabase/          Migrations and policies
 docs/              Plan, master plan, legacy context
