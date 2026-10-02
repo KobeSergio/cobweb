@@ -1,0 +1,21 @@
+# Legacy Kingdomly repos: reference only, contain their own .git and secrets
+legacy/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies and build output
+node_modules/
+.next/
+.turbo/
+dist/
+out/
+cache/
+coverage/
+
+# Local tooling
+.DS_Store
+.remember/
+.vercel/
