@@ -150,12 +150,15 @@ async function signInCreator(): Promise<Creator> {
 const runId = Math.random().toString(36).slice(2, 8)
 let slugCount = 0
 const slug = () => `verify-${runId}-${++slugCount}`
+let nameCount = 0
+const uniqueName = () => `Verify ${runId} ${++nameCount}`
 
 type Collection = {
   id: string
   owner_id: string
   name: string
-  slug: string
+  slug: string | null
+  slug_reserved_at: string | null
   status: string
   chain_id: number | null
   contract_address: string | null
@@ -165,9 +168,8 @@ type Collection = {
 
 function collectionInput(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    name: 'Verify',
+    name: uniqueName(),
     symbol: 'VFY',
-    slug: slug(),
     project_type: 'generative',
     max_supply: 100,
     ...overrides,
@@ -188,9 +190,15 @@ async function stored(id: string): Promise<Collection | null> {
   return data as Collection | null
 }
 
-async function slugExists(value: string): Promise<boolean> {
-  const { data } = await admin.from('collections').select('id').eq('slug', value)
+async function nameExists(value: string): Promise<boolean> {
+  const { data } = await admin.from('collections').select('id').eq('name', value)
   return (data?.length ?? 0) > 0
+}
+
+// Reserves a mint page address through the public RPC, as the given client.
+async function reserve(client: SupabaseClient, collectionId: string, value: string) {
+  const { error } = await client.rpc('reserve_slug', { p_collection_id: collectionId, p_slug: value })
+  return error as DbError
 }
 
 async function expectRejectedInsert(
@@ -202,7 +210,7 @@ async function expectRejectedInsert(
   const { data, error } = await client.from('collections').insert(input).select()
   const problem = expectError(error, codes, data)
   if (problem) return problem
-  if (await slugExists(input.slug as string)) return 'error returned but a row was stored'
+  if (await nameExists(input.name as string)) return 'error returned but a row was stored'
   return null
 }
 
@@ -257,7 +265,6 @@ async function main(): Promise<void> {
       .insert({
         name: 'No wallet',
         symbol: 'NOW',
-        slug: `verify-${runId}-nowallet`,
         project_type: 'generative',
         max_supply: 10,
       })
@@ -362,6 +369,7 @@ async function main(): Promise<void> {
     if (created.error || !created.row) return describe(created.error)
     if (created.row.owner_id !== A.userId) return `owner_id ${created.row.owner_id}`
     if (created.row.status !== 'draft') return `status ${created.row.status}`
+    if (created.row.slug !== null) return `slug ${created.row.slug}, expected none`
     return null
   })
   if (!created.row) return
@@ -391,6 +399,8 @@ async function main(): Promise<void> {
     ['owner_id', B.userId],
     ['project_type', 'single_asset'],
     ['created_at', '2000-01-01T00:00:00Z'],
+    ['slug', `verify-${runId}-direct`],
+    ['slug_reserved_at', '2000-01-01T00:00:00Z'],
   ] as const) {
     await check(`collections: A cannot update ${column}; stored row unchanged`, async () => {
       // A fresh collection each time, so one hole does not contaminate the next check.
@@ -462,36 +472,27 @@ async function main(): Promise<void> {
     })
   }
   await check('anon: cannot insert a collection', () => expectRejectedInsert(anon, {}, PERMISSION))
+  await check('collections: A cannot insert with a slug', () =>
+    expectRejectedInsert(A.client, { slug: slug() }, PERMISSION),
+  )
 
   // 6. Constraints -----------------------------------------------------------------------------
-  await check('constraints: reserved slug "collections" rejected', () =>
-    expectRejectedInsert(A.client, { slug: 'collections' }, CHECK),
-  )
-  await check('constraints: malformed slug rejected', () =>
-    expectRejectedInsert(A.client, { slug: `Bad_Slug-${runId}` }, CHECK),
-  )
-  await check('constraints: slug with trailing hyphen rejected', () =>
-    expectRejectedInsert(A.client, { slug: `verify-${runId}-` }, CHECK),
-  )
+  for (const [label, value] of [
+    ['reserved slug "collections"', 'collections'],
+    ['malformed slug', `Bad_Slug-${runId}`],
+    ['slug with trailing hyphen', `verify-${runId}-`],
+  ] as const) {
+    await check(`reserve_slug: ${label} rejected`, async () => {
+      const target = await insertCollection(A.client)
+      if (!target.row) return `setup: ${describe(target.error)}`
+      const problem = expectError(await reserve(A.client, target.row.id, value), CHECK)
+      if (problem) return problem
+      return (await stored(target.row.id))?.slug === null ? null : 'a slug was stored'
+    })
+  }
   await check('constraints: lowercase symbol rejected', () =>
     expectRejectedInsert(A.client, { symbol: 'vfy' }, CHECK),
   )
-  await check('constraints: duplicate slug rejected', async () => {
-    const { data, error } = await A.client
-      .from('collections')
-      .insert(collectionInput({ slug: colA.slug }))
-      .select()
-    return expectError(error, UNIQUE, data)
-  })
-  await check("constraints: duplicate of B's slug rejected for A too", async () => {
-    const own = await insertCollection(B.client)
-    if (own.error || !own.row) return `B setup: ${describe(own.error)}`
-    const { data, error } = await A.client
-      .from('collections')
-      .insert(collectionInput({ slug: own.row.slug }))
-      .select()
-    return expectError(error, UNIQUE, data)
-  })
   await check('constraints: max_supply 0 rejected', () =>
     expectRejectedInsert(A.client, { max_supply: 0 }, CHECK),
   )
@@ -633,6 +634,127 @@ async function main(): Promise<void> {
     return `${problem}; B adding the same wallet to their own group then gets: ${describe(blocked.error)}`
   })
 
+  // 7b. Mint page address reservations ---------------------------------------------------------
+  const DAY_MS = 24 * 3600 * 1000
+  const reservedSlug = slug()
+  const first = await insertCollection(A.client)
+  await check('reserve_slug: the owner reserves an address; slug_reserved_at is set', async () => {
+    if (!first.row) return `setup: ${describe(first.error)}`
+    const error = await reserve(A.client, first.row.id, reservedSlug)
+    if (error) return describe(error)
+    const row = await stored(first.row.id)
+    if (row?.slug !== reservedSlug) return `slug ${row?.slug}`
+    if (!row.slug_reserved_at) return 'slug_reserved_at not set'
+    const age = Date.now() - Date.parse(row.slug_reserved_at)
+    return Math.abs(age) < 60_000 ? null : `slug_reserved_at ${row.slug_reserved_at} is not now`
+  })
+  await check("reserve_slug: B cannot reserve on A's collection", async () => {
+    if (!first.row) return 'no collection'
+    const before = await stored(first.row.id)
+    const problem = expectError(await reserve(B.client, first.row.id, slug()), PERMISSION)
+    if (problem) return problem
+    return sameStoredRow(before, await stored(first.row.id)) ? null : 'stored row changed'
+  })
+  await check('reserve_slug: anon cannot call it', async () => {
+    if (!first.row) return 'no collection'
+    const error = await reserve(anon, first.row.id, slug())
+    return error ? null : 'accepted'
+  })
+  const second = await insertCollection(B.client)
+  await check('reserve_slug: a live reservation (under 3 days) cannot be taken; 23505', async () => {
+    if (!second.row) return `setup: ${describe(second.error)}`
+    const problem = expectError(await reserve(B.client, second.row.id, reservedSlug), UNIQUE)
+    if (problem) return problem
+    return (await stored(second.row.id))?.slug === null ? null : 'a slug was stored'
+  })
+  await check(
+    'reserve_slug: a lapsed reservation (4 days old) is taken over; the first loses it',
+    async () => {
+      if (!first.row || !second.row) return 'setup failed'
+      const aged = await admin
+        .from('collections')
+        .update({ slug_reserved_at: new Date(Date.now() - 4 * DAY_MS).toISOString() })
+        .eq('id', first.row.id)
+      if (aged.error) return `service role could not age it: ${describe(aged.error)}`
+      const error = await reserve(B.client, second.row.id, reservedSlug)
+      if (error) return describe(error)
+      const [was, now] = [await stored(first.row.id), await stored(second.row.id)]
+      if (now?.slug !== reservedSlug) return `second has ${now?.slug}`
+      if (was?.slug !== null || was.slug_reserved_at !== null)
+        return `first still has ${was?.slug} (${was?.slug_reserved_at})`
+      return null
+    },
+  )
+  await check('reserve_slug: the owner can change their reservation; the old address is freed', async () => {
+    if (!second.row) return 'no collection'
+    const next = slug()
+    const error = await reserve(B.client, second.row.id, next)
+    if (error) return describe(error)
+    if ((await stored(second.row.id))?.slug !== next) return 'not changed'
+    const reuse = await insertCollection(A.client)
+    if (!reuse.row) return `setup: ${describe(reuse.error)}`
+    const again = await reserve(A.client, reuse.row.id, reservedSlug)
+    return again ? `old address not free: ${describe(again)}` : null
+  })
+
+  const deployedSlug = slug()
+  const shipped = await insertCollection(A.client)
+  await check('reserve_slug: a deployed collection that has an address is refused; P0001', async () => {
+    if (!shipped.row) return `setup: ${describe(shipped.error)}`
+    const reserved = await reserve(A.client, shipped.row.id, deployedSlug)
+    if (reserved) return `setup reserve: ${describe(reserved)}`
+    const set = await admin
+      .from('collections')
+      .update({ status: 'deployed', chain_id: 1, contract_address: '0x' + '5'.repeat(40) })
+      .eq('id', shipped.row.id)
+    if (set.error) return `service role could not deploy it: ${describe(set.error)}`
+    const problem = expectError(await reserve(A.client, shipped.row.id, slug()), ['P0001'])
+    if (problem) return problem
+    return (await stored(shipped.row.id))?.slug === deployedSlug ? null : 'address changed'
+  })
+  await check("reserve_slug: a deployed collection's address is never taken over, however old", async () => {
+    if (!shipped.row) return 'no collection'
+    await admin
+      .from('collections')
+      .update({ slug_reserved_at: new Date(Date.now() - 30 * DAY_MS).toISOString() })
+      .eq('id', shipped.row.id)
+    const other = await insertCollection(B.client)
+    if (!other.row) return `setup: ${describe(other.error)}`
+    const problem = expectError(await reserve(B.client, other.row.id, deployedSlug), UNIQUE)
+    if (problem) return problem
+    return (await stored(shipped.row.id))?.slug === deployedSlug ? null : 'deployed address lost'
+  })
+  await check('reserve_slug: a deployed collection without an address can set one, once', async () => {
+    const bare = await insertCollection(A.client)
+    if (!bare.row) return `setup: ${describe(bare.error)}`
+    await admin
+      .from('collections')
+      .update({ status: 'deployed', chain_id: 1, contract_address: '0x' + '6'.repeat(40) })
+      .eq('id', bare.row.id)
+    const value = slug()
+    const error = await reserve(A.client, bare.row.id, value)
+    if (error) return describe(error)
+    if ((await stored(bare.row.id))?.slug !== value) return 'not stored'
+    return expectError(await reserve(A.client, bare.row.id, slug()), ['P0001'])
+  })
+  await check('collections: a reservation that lapsed before deploy is released at deploy', async () => {
+    const late = await insertCollection(A.client)
+    if (!late.row) return `setup: ${describe(late.error)}`
+    const reserved = await reserve(A.client, late.row.id, slug())
+    if (reserved) return `setup reserve: ${describe(reserved)}`
+    await admin
+      .from('collections')
+      .update({ slug_reserved_at: new Date(Date.now() - 4 * DAY_MS).toISOString() })
+      .eq('id', late.row.id)
+    const set = await admin
+      .from('collections')
+      .update({ status: 'deployed', chain_id: 1, contract_address: '0x' + '7'.repeat(40) })
+      .eq('id', late.row.id)
+    if (set.error) return `service role could not deploy it: ${describe(set.error)}`
+    const row = await stored(late.row.id)
+    return row?.slug === null ? null : `slug ${row?.slug} kept`
+  })
+
   // 8. updated_at ------------------------------------------------------------------------------
   await check('collections: updated_at advances on update', async () => {
     await pause(50)
@@ -727,9 +849,10 @@ async function main(): Promise<void> {
 // ---------------------------------------------------------------------------------------------
 async function cleanup(): Promise<void> {
   await check('cleanup: delete collections created by this run', async () => {
-    const { error } = await admin.from('collections').delete().like('slug', `verify-${runId}-%`)
+    const owners = [...createdUserIds]
+    const { error } = await admin.from('collections').delete().in('owner_id', owners)
     if (error) return describe(error)
-    const { data } = await admin.from('collections').select('id').like('slug', `verify-${runId}-%`)
+    const { data } = await admin.from('collections').select('id').in('owner_id', owners)
     return data && data.length > 0 ? `${data.length} left` : null
   })
   await check('cleanup: delete auth users created by this run', async () => {
