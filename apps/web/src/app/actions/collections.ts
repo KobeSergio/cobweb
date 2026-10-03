@@ -3,12 +3,13 @@
 import { redirect } from 'next/navigation'
 import { getVerifiedUser } from '@/lib/auth'
 import { createCollectionSchema } from '@/lib/collections'
+import { stageHref } from '@/lib/steps'
 import { createClient } from '@/lib/supabase/server'
 
 export type CreateCollectionState = {
   /** A message for the whole form, when the problem is not one field's. */
   formError?: string
-  fieldErrors?: Partial<Record<'name' | 'symbol' | 'slug' | 'projectType' | 'maxSupply', string>>
+  fieldErrors?: Partial<Record<'name' | 'symbol' | 'projectType' | 'maxSupply', string>>
 }
 
 /** A form field as text. A missing field becomes '', so validation gives its own message. */
@@ -31,7 +32,6 @@ export async function createCollection(
   const parsed = createCollectionSchema.safeParse({
     name: text(formData, 'name'),
     symbol: text(formData, 'symbol'),
-    slug: text(formData, 'slug'),
     projectType: text(formData, 'projectType'),
     maxSupply: text(formData, 'maxSupply'),
   })
@@ -51,20 +51,14 @@ export async function createCollection(
     .insert({
       name: parsed.data.name,
       symbol: parsed.data.symbol,
-      slug: parsed.data.slug,
       project_type: parsed.data.projectType,
       max_supply: parsed.data.maxSupply,
     })
     .select('id')
     .single()
 
-  if (error) {
-    // 23505 is a unique violation; the only unique column a creator sets is the slug.
-    if (error.code === '23505') {
-      return { fieldErrors: { slug: 'That address is already taken. Choose another.' } }
-    }
-    return { formError: 'The collection could not be created. Try again.' }
-  }
+  if (error) return { formError: 'The collection could not be created. Try again.' }
 
-  redirect(`/collections/${data.id}/art`)
+  // Straight into the art: the first Art sub-step for this project type.
+  redirect(stageHref(data.id, 'art', parsed.data.projectType))
 }

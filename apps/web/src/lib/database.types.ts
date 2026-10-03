@@ -39,7 +39,8 @@ export type Database = {
           name: string
           owner_id: string
           project_type: Database['public']['Enums']['project_type']
-          slug: string
+          slug: string | null
+          slug_reserved_at: string | null
           status: Database['public']['Enums']['collection_status']
           symbol: string
           updated_at: string
@@ -54,7 +55,8 @@ export type Database = {
           name: string
           owner_id?: string
           project_type: Database['public']['Enums']['project_type']
-          slug: string
+          slug?: string | null
+          slug_reserved_at?: string | null
           status?: Database['public']['Enums']['collection_status']
           symbol: string
           updated_at?: string
@@ -69,7 +71,8 @@ export type Database = {
           name?: string
           owner_id?: string
           project_type?: Database['public']['Enums']['project_type']
-          slug?: string
+          slug?: string | null
+          slug_reserved_at?: string | null
           status?: Database['public']['Enums']['collection_status']
           symbol?: string
           updated_at?: string
@@ -182,7 +185,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      reserve_slug: {
+        Args: { p_collection_id: string; p_slug: string }
+        Returns: undefined
+      }
     }
     Enums: {
       collection_status: 'draft' | 'art_locked' | 'rendering' | 'rendered' | 'deployed'

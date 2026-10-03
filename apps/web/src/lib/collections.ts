@@ -53,6 +53,53 @@ export function slugify(name: string): string {
     .slice(0, 48)
 }
 
+/** A mint page address: the same rules the database enforces in `reserve_slug`. */
+export const slugSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$/, 'Use 3 to 48 lowercase letters, numbers or hyphens.')
+  .refine((slug) => !RESERVED_SLUGS.includes(slug), 'That address is reserved. Choose another.')
+
+/** How long a mint page address stays reserved before the contract must be deployed. */
+export const RESERVATION_DAYS = 3
+
+export type SlugState =
+  | { kind: 'none' }
+  | { kind: 'reserved'; slug: string; until: Date }
+  | { kind: 'lapsed'; slug: string }
+  | { kind: 'permanent'; slug: string }
+
+/**
+ * Where a collection's mint page address stands. A deployed collection's address is permanent;
+ * before that it is a reservation that lapses `RESERVATION_DAYS` after it was made.
+ */
+export function slugState(
+  collection: { slug: string | null; slug_reserved_at: string | null; status: string },
+  now: number = Date.now(),
+): SlugState {
+  const { slug } = collection
+  if (!slug) return { kind: 'none' }
+  if (collection.status === 'deployed') return { kind: 'permanent', slug }
+  const reservedAt = collection.slug_reserved_at ? Date.parse(collection.slug_reserved_at) : NaN
+  const until = new Date(reservedAt + RESERVATION_DAYS * 24 * 3600 * 1000)
+  if (Number.isNaN(reservedAt) || until.getTime() <= now) return { kind: 'lapsed', slug }
+  return { kind: 'reserved', slug, until }
+}
+
+/** A reservation's end, e.g. "Oct 6, 2026, 14:05 UTC". */
+export function formatReservedUntil(until: Date): string {
+  return `${until.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    timeZone: 'UTC',
+  })} UTC`
+}
+
 /** The same rules the database enforces, checked first so the creator gets a clear message. */
 export const createCollectionSchema = z
   .object({
@@ -62,12 +109,6 @@ export const createCollectionSchema = z
       .trim()
       .toUpperCase()
       .regex(/^[A-Z0-9]{1,12}$/, 'Use 1 to 12 letters or numbers.'),
-    slug: z
-      .string()
-      .trim()
-      .toLowerCase()
-      .regex(/^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$/, 'Use 3 to 48 lowercase letters, numbers or hyphens.')
-      .refine((slug) => !RESERVED_SLUGS.includes(slug), 'That address is reserved. Choose another.'),
     projectType: z.enum(['generative', 'one_of_one', 'metadata', 'single_asset'], {
       error: 'Choose a collection type.',
     }),

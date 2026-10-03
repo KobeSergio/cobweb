@@ -1,78 +1,289 @@
 import type { Enums } from '@/lib/database.types'
 
 export type CollectionStatus = Enums<'collection_status'>
+export type ProjectType = Enums<'project_type'>
 
-/** The linear launch flow. The order here is the order a creator moves through it. */
-export const STEPS = [
+/**
+ * The five stages of a launch, in the order a creator moves through them. Each stage is a route
+ * segment under `/collections/[id]/`. Art and Manage have their own second level (sub-steps and
+ * tabs, below).
+ */
+export const STAGES = [
   {
     slug: 'details',
     name: 'Details',
-    summary: 'The name, symbol, supply and kind of collection.',
-    upcoming: 'editing these details, a description, and the banner and avatar for the mint page.',
+    summary: 'The name, symbol, supply and kind of collection, and the description collectors will read.',
   },
   {
     slug: 'art',
     name: 'Art',
     summary:
-      'Upload layers, generate the collection and curate it. Then lock it and pay the generation fee, and the final images are rendered and stored on IPFS.',
-    upcoming: 'layers, rarity, rules, preview and token editing, then lock and pay.',
+      'Upload your layers, set rarity and the rules for which traits go together, then generate and curate the collection.',
+  },
+  {
+    slug: 'upload',
+    name: 'Lock and upload',
+    summary:
+      'Lock the art, pay the generation fee, and the final images and metadata are rendered and stored on IPFS.',
   },
   {
     slug: 'deploy',
     name: 'Deploy',
-    summary: 'Choose a chain and deploy the collection contract from your wallet.',
-    upcoming: 'the chain picker, contract settings, royalties and the deploy transaction.',
-  },
-  {
-    slug: 'phases',
-    name: 'Phases',
-    summary: 'Set up the public sale and any whitelist phases: price, supply and start time.',
-    upcoming: 'creating and editing phases, with Open now, Close and Schedule for each.',
-  },
-  {
-    slug: 'whitelist',
-    name: 'Whitelist',
-    summary: 'Upload a CSV of wallet addresses and how many each may mint.',
-    upcoming: 'CSV upload, validation, and writing the list on-chain in batches.',
-  },
-  {
-    slug: 'mint-page',
-    name: 'Mint page',
-    summary: 'The public page where collectors mint.',
-    upcoming: 'a preview of the mint page, its customisation, and the link to share.',
+    summary:
+      'Choose a chain, set royalties and the payout address, and deploy the contract from your wallet.',
   },
   {
     slug: 'manage',
-    name: 'Manage',
-    summary: 'Reveal, airdrop, withdraw proceeds and lock transfers after launch.',
-    upcoming: 'reveal, airdrops, withdrawals, phase changes and transfer locking.',
+    name: 'Manage drop',
+    summary:
+      'Set up phases and whitelists, customise the mint page, then reveal, airdrop and withdraw once it is live.',
   },
 ] as const
 
-export type Step = (typeof STEPS)[number]
-export type StepSlug = Step['slug']
-export type StepState = 'done' | 'current' | 'pending'
+/** Kept for the sign-in and help pages, which list the flow. Same list as `STAGES`. */
+export const STEPS = STAGES
 
-export function getStep(slug: string): Step | undefined {
-  return STEPS.find((step) => step.slug === slug)
+export type Stage = (typeof STAGES)[number]
+export type StageSlug = Stage['slug']
+/** Display state in the stage navigation. */
+export type StageState = 'done' | 'current' | 'next' | 'pending'
+/** Whether a stage can be opened. Done stages stay open (read-only where that applies). */
+export type StageAccess = 'open' | 'locked'
+
+/** @deprecated Use `Stage`. */
+export type Step = Stage
+/** @deprecated Use `StageSlug`. */
+export type StepSlug = StageSlug
+
+export function getStage(slug: string): Stage | undefined {
+  return STAGES.find((stage) => stage.slug === slug)
 }
 
-/** Position of each status in the flow, as the index of the first step that is not yet done. */
-const FIRST_OPEN_STEP: Record<CollectionStatus, number> = {
+/** @deprecated Use `getStage`. */
+export const getStep = getStage
+
+// ---------------------------------------------------------------------------------------------
+// Art sub-steps. They depend on the project type: a generative project builds its art from
+// layers; every other type uploads finished assets on one screen.
+// ---------------------------------------------------------------------------------------------
+
+export const ART_SUBSTEPS = {
+  layers: { slug: 'layers', name: 'Layers', summary: 'Upload trait layers, order them and set rarity.' },
+  rules: { slug: 'rules', name: 'Rules', summary: 'Choose which traits must, always or never go together.' },
+  generate: {
+    slug: 'generate',
+    name: 'Generate',
+    summary: 'Generate the tokens, then review, edit and curate them.',
+  },
+  'upload-assets': {
+    slug: 'upload-assets',
+    name: 'Assets',
+    summary: 'Upload your finished images and metadata.',
+  },
+} as const
+
+export type ArtSubStep = (typeof ART_SUBSTEPS)[keyof typeof ART_SUBSTEPS]
+export type ArtSubStepSlug = ArtSubStep['slug']
+
+const GENERATIVE_ART: readonly ArtSubStep[] = [ART_SUBSTEPS.layers, ART_SUBSTEPS.rules, ART_SUBSTEPS.generate]
+const ASSET_ART: readonly ArtSubStep[] = [ART_SUBSTEPS['upload-assets']]
+
+/** The Art sub-steps for a project type, in order. */
+export function artSubSteps(projectType: ProjectType): readonly ArtSubStep[] {
+  return projectType === 'generative' ? GENERATIVE_ART : ASSET_ART
+}
+
+/** Whether a sub-step belongs to this project type's Art stage. */
+export function hasArtSubStep(projectType: ProjectType, slug: ArtSubStepSlug): boolean {
+  return artSubSteps(projectType).some((sub) => sub.slug === slug)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Manage tabs. Not a sequence: once deployed, the creator moves between them freely.
+// ---------------------------------------------------------------------------------------------
+
+/** `slug` is the route segment under `manage/`; the overview is `manage` itself (empty segment). */
+export const MANAGE_TABS = [
+  { slug: '', key: 'overview', name: 'Overview' },
+  { slug: 'phases', key: 'phases', name: 'Phases' },
+  { slug: 'whitelist', key: 'whitelist', name: 'Whitelist' },
+  { slug: 'mint-page', key: 'mint-page', name: 'Mint page' },
+  { slug: 'airdrop', key: 'airdrop', name: 'Airdrop' },
+  { slug: 'settings', key: 'settings', name: 'Settings' },
+] as const
+
+export type ManageTab = (typeof MANAGE_TABS)[number]
+export type ManageTabKey = ManageTab['key']
+
+// ---------------------------------------------------------------------------------------------
+// Links
+// ---------------------------------------------------------------------------------------------
+
+/** `/collections/<id>` plus any segments. */
+export function collectionHref(collectionId: string, ...segments: string[]): string {
+  return ['/collections', collectionId, ...segments.filter(Boolean)].join('/')
+}
+
+/** The landing route of a stage. Art opens on its first sub-step for the project type. */
+export function stageHref(collectionId: string, stage: StageSlug, projectType: ProjectType): string {
+  if (stage === 'art') return artSubStepHref(collectionId, artSubSteps(projectType)[0]!.slug)
+  return collectionHref(collectionId, stage)
+}
+
+export function artSubStepHref(collectionId: string, sub: ArtSubStepSlug): string {
+  return collectionHref(collectionId, 'art', sub)
+}
+
+export function manageTabHref(collectionId: string, tab: ManageTabKey): string {
+  const entry = MANAGE_TABS.find((candidate) => candidate.key === tab)!
+  return collectionHref(collectionId, 'manage', entry.slug)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Progress from the collection's status
+// ---------------------------------------------------------------------------------------------
+
+/** Index in `STAGES` of the stage to work on next, for each status. */
+const NEXT_STAGE_INDEX: Record<CollectionStatus, number> = {
   draft: 1, // details exist; art is next
-  art_locked: 1,
-  rendering: 1,
-  rendered: 2, // art is done; deploy is next
-  deployed: 3, // deployed; phases onward are open
+  art_locked: 2, // art is locked; pay, render and pin
+  rendering: 2,
+  rendered: 3, // on IPFS; deploy is next
+  deployed: 4, // deployed; manage the drop
 }
 
-/** Whether a step is finished for a collection in the given status. */
-export function isStepDone(slug: StepSlug, status: CollectionStatus): boolean {
-  const index = STEPS.findIndex((step) => step.slug === slug)
-  return index < FIRST_OPEN_STEP[status]
+/**
+ * Whether a stage is finished. Manage is never finished: it is where a deployed collection lives.
+ */
+export function isStageDone(stage: StageSlug, status: CollectionStatus): boolean {
+  if (stage === 'manage') return false
+  return STAGES.findIndex((entry) => entry.slug === stage) < NEXT_STAGE_INDEX[status]
 }
 
-/** The step a creator should be working on for a collection in the given status. */
-export function nextStep(status: CollectionStatus): Step {
-  return STEPS[FIRST_OPEN_STEP[status]]!
+/** @deprecated Use `isStageDone`. */
+export const isStepDone = isStageDone
+
+/** The stage a creator should be working on for a collection in the given status. */
+export function nextStage(status: CollectionStatus): Stage {
+  return STAGES[NEXT_STAGE_INDEX[status]]!
+}
+
+/** @deprecated Use `nextStage`. Returns the stage, which has `slug` and `name`. */
+export const nextStep = nextStage
+
+/** Sample-data mode: every stage is open and screens render `lib/demo`. Set in `.env.local`. */
+export function isDemoMode(): boolean {
+  return process.env.NEXT_PUBLIC_DEMO_DATA === '1'
+}
+
+/**
+ * Options shared by the access rules. `artDeferred`: the creator chose "Finish the art later"
+ * (decision D25) and has not locked the real set yet.
+ */
+export type StageOptions = { demo?: boolean; artDeferred?: boolean }
+
+/**
+ * Whether a stage can be opened. A stage is locked until the one before it is done; done stages
+ * stay open. With deferred art, Lock and upload opens without finished art, for the placeholder.
+ * In sample-data mode everything is open.
+ */
+export function stageAccess(
+  status: CollectionStatus,
+  stage: StageSlug,
+  options: StageOptions = {},
+): StageAccess {
+  if (options.demo ?? isDemoMode()) return 'open'
+  if (stage === 'upload' && options.artDeferred) return 'open'
+  const index = STAGES.findIndex((entry) => entry.slug === stage)
+  if (index === 0) return 'open'
+  return isStageDone(STAGES[index - 1]!.slug, status) ? 'open' : 'locked'
+}
+
+/**
+ * Whether a stage's screens are read-only: the stage is done and its result is frozen. Details is
+ * never wholly read-only; individual fields freeze instead (see `frozenDetailFields`). Deferred art
+ * is the one exception for a done stage: Art stays editable after lock, render and deploy until
+ * the real set is locked. Not read-only in sample-data mode, so every control can be tried.
+ */
+export function isStageReadOnly(
+  status: CollectionStatus,
+  stage: StageSlug,
+  options: StageOptions = {},
+): boolean {
+  if (options.demo ?? isDemoMode()) return false
+  if (stage === 'details' || stage === 'manage') return false
+  if (stage === 'art' && options.artDeferred) return false
+  return isStageDone(stage, status)
+}
+
+/**
+ * Detail fields the database will refuse to change in this status
+ * (the `collections_guard_frozen_fields` trigger). The project type never changes after creation.
+ */
+export function frozenDetailFields(
+  status: CollectionStatus,
+): ReadonlySet<'name' | 'symbol' | 'maxSupply' | 'projectType'> {
+  const frozen = new Set<'name' | 'symbol' | 'maxSupply' | 'projectType'>(['projectType'])
+  if (status !== 'draft') frozen.add('maxSupply')
+  if (status === 'deployed') {
+    frozen.add('name')
+    frozen.add('symbol')
+  }
+  return frozen
+}
+
+/** What has to happen before a locked stage opens, and where to do it. */
+export const UNLOCK_REQUIREMENTS: Record<
+  Exclude<StageSlug, 'details' | 'art'>,
+  { requirement: string; action: string; stage: StageSlug }
+> = {
+  upload: {
+    requirement: 'Finish your art and lock it before it can be rendered and uploaded.',
+    action: 'Go to Art',
+    stage: 'art',
+  },
+  deploy: {
+    requirement: 'Your art has to be rendered and stored on IPFS before the contract can be deployed.',
+    action: 'Go to Lock and upload',
+    stage: 'upload',
+  },
+  manage: {
+    requirement: 'Deploy the contract first. Phases, whitelists and the mint page are set up on it.',
+    action: 'Go to Deploy',
+    stage: 'deploy',
+  },
+}
+
+// ---------------------------------------------------------------------------------------------
+// The linear path, for Back and Continue
+// ---------------------------------------------------------------------------------------------
+
+export type FlowLink = { href: string; name: string }
+
+/** Every screen of the linear flow, in order, as `[path under the collection, name]`. */
+export function flowScreens(projectType: ProjectType): { path: string; name: string }[] {
+  return [
+    { path: 'details', name: 'Details' },
+    ...artSubSteps(projectType).map((sub) => ({ path: `art/${sub.slug}`, name: sub.name })),
+    { path: 'upload', name: 'Lock and upload' },
+    { path: 'deploy', name: 'Deploy' },
+    { path: 'manage', name: 'Manage drop' },
+  ]
+}
+
+/**
+ * The screens before and after `path` in the linear flow, for a page's Back and Continue
+ * buttons. `path` is relative to the collection, for example `art/rules` or `deploy`.
+ */
+export function flowNeighbours(
+  collectionId: string,
+  projectType: ProjectType,
+  path: string,
+): { previous?: FlowLink; next?: FlowLink } {
+  const screens = flowScreens(projectType)
+  const index = screens.findIndex((screen) => screen.path === path)
+  if (index === -1) return {}
+  const link = (screen: { path: string; name: string } | undefined) =>
+    screen && { href: collectionHref(collectionId, screen.path), name: screen.name }
+  return { previous: link(screens[index - 1]), next: link(screens[index + 1]) }
 }
