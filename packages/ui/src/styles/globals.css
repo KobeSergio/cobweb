@@ -8,84 +8,117 @@
 @source '../**/*.{ts,tsx}';
 
 /*
- * Cobweb is dark only. Every colour in the product comes from the tokens below; components never
- * hard-code a colour.
+ * Cobweb is dark only: "gallery at night". The chrome is warm graphite and quiet; the artwork
+ * carries the colour. Every colour in the product comes from the tokens below; components never
+ * hard-code one. See docs/DESIGN.md for what each token is for.
  */
 :root {
-  --background: #262624;
+  /* Surface scale, darkest to lightest. Each step up is one level closer to the viewer. */
+  --sidebar: #161614; /* chrome rail, the deepest layer */
+  --background: #1a1a18; /* the page */
+  --card: #222220; /* surface-1: cards and panels on the page */
+  --surface-2: #2a2a28; /* raised: hover on surface-1, popovers, menus, controls on cards */
+  --surface-3: #343431; /* highest: pressed states, chips and wells inside raised layers */
+  --well: #141413; /* recessed: the inside of fields, image frames, progress tracks */
+
   --foreground: #f5f4ef;
-
-  /* Panels that sit on the page: cards, inputs, chips */
-  --card: #30302e;
   --card-foreground: #f5f4ef;
-  /* Floating layers: dialogs, menus, tooltips */
-  --popover: #2c2c2a;
+  --popover: #2a2a28;
   --popover-foreground: #f5f4ef;
+  /* Secondary text. Passes 4.5:1 on every surface up to surface-3. */
+  --muted-foreground: #aaa79e;
+  /* Non-text only: icons at rest, rules, decorative marks. Never for words. */
+  --faint: #6f6c65;
 
-  /* The accent. Dark text sits on it. */
+  /* The accent. Primary action, live or active state, progress. Nowhere else. Dark text on it. */
   --primary: #fadc69;
-  --primary-hover: #fde047;
-  --primary-foreground: #262624;
-  --primary-soft: rgb(250 220 105 / 0.15);
+  --primary-hover: #ffe58a;
+  --primary-pressed: #ecc94c;
+  --primary-foreground: #1a1a18;
+  --primary-soft: rgb(250 220 105 / 0.12);
+  --primary-line: rgb(250 220 105 / 0.36);
 
-  --secondary: #3a3a37;
+  --secondary: #2a2a28;
   --secondary-foreground: #f5f4ef;
-  --muted: #30302e;
-  --muted-foreground: #a6a39a;
-  --accent: #3a3a37;
+  --muted: #222220;
+  --accent: #2a2a28;
   --accent-foreground: #f5f4ef;
 
-  /* Fills and borders. Too dark for text on these surfaces; use destructive-foreground for text. */
-  --destructive: #dc3838;
-  --destructive-foreground: #f87171;
-  --success: #4caf50;
-  --warning: #f59e0b;
+  /* Status hues. The fill is for dots, rings and soft backgrounds; the -foreground is for text. */
+  --destructive: #c43e35;
+  --destructive-foreground: #f2877e;
+  --destructive-soft: rgb(196 62 53 / 0.16);
+  --success: #5fb36a;
+  --success-foreground: #8fd198;
+  --success-soft: rgb(95 179 106 / 0.14);
+  --warning: #e8914a;
+  --warning-foreground: #f2b27c;
+  --warning-soft: rgb(232 145 74 / 0.14);
 
-  --border: rgb(255 255 255 / 0.08);
-  --border-strong: rgb(255 255 255 / 0.14);
-  /* Edges of fields and other controls. Strong enough to find the control (3:1 on the page). */
-  --input: rgb(255 255 255 / 0.35);
+  /* Lines. Tinted from the foreground so they stay warm. */
+  --border: rgb(245 244 239 / 0.08);
+  --border-strong: rgb(245 244 239 / 0.15);
+  /* Edges of fields and other controls: 3:1 against the surface so the control can be found. */
+  --input: rgb(245 244 239 / 0.3);
   --ring: #fadc69;
+  /* The 1px inner top light on raised surfaces. */
+  --highlight: rgb(255 255 250 / 0.06);
+  /* Shadows are tinted to the base, never pure black. */
+  --shadow-color: 20 20 16;
 
-  --sidebar: #1f1e1d;
   --sidebar-foreground: #f5f4ef;
   --sidebar-primary: #fadc69;
-  --sidebar-primary-foreground: #262624;
-  --sidebar-accent: #30302e;
+  --sidebar-primary-foreground: #1a1a18;
+  --sidebar-accent: #222220;
   --sidebar-accent-foreground: #f5f4ef;
-  --sidebar-border: rgb(255 255 255 / 0.08);
+  --sidebar-border: rgb(245 244 239 / 0.07);
   --sidebar-ring: #fadc69;
 
-  --radius: 0.5rem;
+  /* The radius rule: controls 10px, menus 12px, cards and dialogs 16px, chips round. */
+  --radius: 10px;
 }
 
 @theme inline {
   --font-sans: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, 'SFMono-Regular', Menlo, monospace;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
+  --color-surface-1: var(--card);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-well: var(--well);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-hover: var(--primary-hover);
+  --color-primary-pressed: var(--primary-pressed);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary-soft: var(--primary-soft);
+  --color-primary-line: var(--primary-line);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-faint: var(--faint);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-soft: var(--destructive-soft);
   --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-soft: var(--success-soft);
   --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-soft: var(--warning-soft);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-highlight: var(--highlight);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -95,11 +128,70 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
-  --radius-sm: calc(var(--radius) - 0.25rem);
-  --radius-md: calc(var(--radius) - 0.125rem);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 0.25rem);
-  --radius-2xl: calc(var(--radius) + 0.5rem);
+  /* Radius scale. sm: items inside a menu. md: controls. lg: menus, popovers, tooltips.
+     xl: cards, panels, dialogs. full: chips, dots, avatars. */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: var(--radius);
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+
+  /* Elevation. Every raised layer carries the inner top light. */
+  --shadow-raised:
+    inset 0 1px 0 0 var(--highlight), 0 1px 2px 0 rgb(var(--shadow-color) / 0.5),
+    0 4px 14px -4px rgb(var(--shadow-color) / 0.55);
+  --shadow-lifted:
+    inset 0 1px 0 0 var(--highlight), 0 2px 4px 0 rgb(var(--shadow-color) / 0.45),
+    0 14px 32px -10px rgb(var(--shadow-color) / 0.75);
+  --shadow-overlay:
+    inset 0 1px 0 0 var(--highlight), 0 4px 10px 0 rgb(var(--shadow-color) / 0.45),
+    0 28px 64px -16px rgb(var(--shadow-color) / 0.85);
+  --shadow-inset: inset 0 1px 2px 0 rgb(var(--shadow-color) / 0.6);
+  --shadow-button: inset 0 1px 0 0 rgb(255 255 245 / 0.35), 0 1px 2px 0 rgb(var(--shadow-color) / 0.5);
+}
+
+/* Type scale. Display sizes are semibold with tight tracking; body stays comfortable. */
+@theme {
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --text-display: 2.25rem;
+  --text-display--line-height: 1.1;
+  --text-display--letter-spacing: -0.03em;
+  --text-display--font-weight: 600;
+  --text-title: 1.5rem;
+  --text-title--line-height: 1.2;
+  --text-title--letter-spacing: -0.02em;
+  --text-title--font-weight: 600;
+  --text-heading: 1.0625rem;
+  --text-heading--line-height: 1.35;
+  --text-heading--letter-spacing: -0.01em;
+  --text-heading--font-weight: 600;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1.4;
+
+  --animate-live-pulse: live-pulse 2.4s var(--ease-out-expo) infinite;
+  --animate-shimmer: shimmer 1.8s linear infinite;
+
+  @keyframes live-pulse {
+    0% {
+      transform: scale(1);
+      opacity: 0.6;
+    }
+    70%,
+    100% {
+      transform: scale(2.6);
+      opacity: 0;
+    }
+  }
+  @keyframes shimmer {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(100%);
+    }
+  }
 }
 
 /* Breakpoints carried over from the legacy app. Note xl is 1440px, not Tailwind's 1280px. */
@@ -112,6 +204,33 @@
   --breakpoint-xl: 1440px;
   --breakpoint-2xl: 1536px;
   --breakpoint-3xl: 1760px;
+}
+
+/* Numbers that are data: prices, supply, token ids, addresses, countdowns. */
+@utility numeric {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-feature-settings:
+    'tnum' 1,
+    'zero' 1;
+  letter-spacing: -0.01em;
+}
+
+/* A soft light falling from the top of a surface. For empty frames and hero panels only. */
+@utility spotlight {
+  background-image: radial-gradient(
+    120% 80% at 50% -10%,
+    rgb(255 248 220 / 0.07) 0%,
+    rgb(255 248 220 / 0.02) 45%,
+    transparent 75%
+  );
+}
+
+@utility scrollbar-hide {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 @layer base {
@@ -139,29 +258,74 @@
     outline-color: color-mix(in oklab, var(--ring) 50%, transparent);
   }
 
+  html {
+    background-color: var(--sidebar);
+  }
+
   body {
     background-color: var(--background);
     color: var(--foreground);
     font-family: var(--font-sans);
+    font-feature-settings: 'ss01' 0;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+
+  ::selection {
+    background: var(--primary);
+    color: var(--primary-foreground);
+  }
+
+  input,
+  textarea {
+    caret-color: var(--primary);
   }
 
   ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgb(255 255 255 / 0.18);
+    background: var(--border-strong);
+    border: 3px solid transparent;
+    background-clip: padding-box;
     border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--input);
+    background-clip: padding-box;
+    border: 3px solid transparent;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
+  }
+  * {
+    scrollbar-color: var(--border-strong) transparent;
+    scrollbar-width: thin;
   }
 
   input[type='number']::-webkit-inner-spin-button,
   input[type='number']::-webkit-outer-spin-button {
     -webkit-appearance: none;
     margin: 0;
+  }
+
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--foreground);
+    -webkit-box-shadow: 0 0 0 1000px var(--well) inset;
+    transition: background-color 9999s ease-out;
   }
 }
 
@@ -174,12 +338,5 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
-  }
-}
-
-@utility scrollbar-hide {
-  scrollbar-width: none;
-  &::-webkit-scrollbar {
-    display: none;
   }
 }

@@ -1,4 +1,4 @@
-import { ChevronLeftIcon } from 'lucide-react'
+import { ChevronLeftIcon, FlaskConicalIcon } from 'lucide-react'
 import Link from 'next/link'
 import { Badge } from '@cobweb/ui/components/badge'
 import { WalletMenu } from '@/components/auth/wallet-menu'
@@ -11,10 +11,13 @@ export function CollectionTopbar({
   name,
   status,
   walletAddress,
+  demo = false,
 }: {
   name: string
   status: CollectionStatus
   walletAddress: string
+  /** Sample-data mode: shows a chip so sample screens are not mistaken for real state. */
+  demo?: boolean
 }) {
   return (
     <header className="bg-background flex h-[4.57rem] shrink-0 items-center justify-between gap-4 border-b px-6">
@@ -32,6 +35,16 @@ export function CollectionTopbar({
           <Badge variant="secondary" className="shrink-0">
             {STATUS_LABELS[status]}
           </Badge>
+          {demo && (
+            <Badge
+              variant="outline"
+              className="border-primary/40 text-primary shrink-0"
+              title="Sample-data mode is on. Screens show the Night Owls sample, not this collection."
+            >
+              <FlaskConicalIcon aria-hidden="true" />
+              Sample data
+            </Badge>
+          )}
         </div>
       </div>
       <WalletMenu address={walletAddress} />

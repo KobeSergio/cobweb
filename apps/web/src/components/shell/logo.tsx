@@ -16,7 +16,7 @@ export function LogoMark({ className }: { className?: string }) {
 
 export function Logo({ className, markClassName }: { className?: string; markClassName?: string }) {
   return (
-    <span className={cn('flex items-center gap-2 text-xl font-bold tracking-tight', className)}>
+    <span className={cn('flex items-center gap-2.5 text-xl font-semibold tracking-[-0.02em]', className)}>
       <LogoMark className={markClassName} />
       Cobweb
     </span>

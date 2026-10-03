@@ -21,22 +21,28 @@ const NAV_ITEMS = [
   { name: 'Help', href: '/help', icon: CircleHelpIcon },
 ]
 
-/** The dashboard sidebar. Collapses to an icon rail, as the legacy creator sidebar did. */
+/**
+ * The dashboard sidebar: the deepest layer of the chrome. Collapses to an icon rail, as the legacy
+ * creator sidebar did. The active item is the yellow pill.
+ */
 export function AppSidebar() {
   const pathname = usePathname()
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className="h-[4.57rem] flex-row items-center justify-between border-b px-4 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
-        <Link href="/collections" className="flex items-center gap-2 text-xl font-bold tracking-tight">
-          <LogoMark />
+      <SidebarHeader className="h-[4.57rem] flex-row items-center justify-between border-b border-sidebar-border px-5 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+        <Link
+          href="/collections"
+          className="flex items-center gap-2.5 rounded-md text-xl font-semibold tracking-[-0.02em] outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <LogoMark className="size-7" />
           <span className="group-data-[collapsible=icon]:hidden">Cobweb</span>
         </Link>
         <SidebarTrigger className="text-muted-foreground group-data-[collapsible=icon]:hidden" />
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup className="p-4 group-data-[collapsible=icon]:p-2">
-          <SidebarMenu className="gap-2.5">
+        <SidebarGroup className="px-4 py-5 group-data-[collapsible=icon]:px-2">
+          <SidebarMenu className="gap-1.5">
             {NAV_ITEMS.map((item) => {
               const active = pathname === item.href || pathname.startsWith(`${item.href}/`)
               return (
@@ -45,7 +51,7 @@ export function AppSidebar() {
                     asChild
                     isActive={active}
                     tooltip={item.name}
-                    className="text-muted-foreground data-[active=true]:bg-primary data-[active=true]:text-primary-foreground ring-offset-sidebar h-11 focus-visible:ring-offset-2 gap-2 px-3 font-medium"
+                    className="h-11 cursor-pointer gap-3 rounded-md px-3 font-medium text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[active=true]:bg-primary data-[active=true]:font-semibold data-[active=true]:text-primary-foreground data-[active=true]:shadow-button [&>svg]:size-[1.125rem]"
                   >
                     <Link href={item.href}>
                       <item.icon />

@@ -23,14 +23,16 @@ export function WalletMenu({ address }: { address: string }) {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="bg-card hover:bg-accent focus-visible:ring-ring/50 flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium outline-none focus-visible:ring-[3px]">
-        <span className="font-mono text-[0.8125rem]">{truncate(address)}</span>
-        <ChevronDownIcon className="text-muted-foreground size-4" />
+      <DropdownMenuTrigger className="group flex h-10 cursor-pointer items-center gap-2.5 rounded-md border bg-surface-2 pr-2.5 pl-3 text-sm font-medium shadow-raised transition-colors outline-none hover:bg-surface-3 focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-surface-3">
+        {/* Connected: the session is tied to this wallet. */}
+        <span aria-hidden="true" className="size-2 rounded-full bg-success ring-3 ring-success-soft" />
+        <span className="numeric text-[0.8125rem]">{truncate(address)}</span>
+        <ChevronDownIcon className="size-4 text-muted-foreground transition-transform duration-200 group-data-[state=open]:rotate-180" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel className="text-muted-foreground text-xs font-normal">
-          Signed in wallet
-        </DropdownMenuLabel>
+      <DropdownMenuContent align="end" className="w-64">
+        <DropdownMenuLabel>Signed in wallet</DropdownMenuLabel>
+        <p className="numeric truncate px-2.5 pb-2 text-xs text-foreground/85">{address}</p>
+        <DropdownMenuSeparator />
         <DropdownMenuItem
           onSelect={() => {
             navigator.clipboard.writeText(address).then(() => toast.success('Address copied.'))
