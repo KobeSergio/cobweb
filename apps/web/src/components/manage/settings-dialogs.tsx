@@ -175,7 +175,7 @@ export function RevealDialog({
   const id = useId()
   const [source, setSource] = useState<'rendered' | 'custom'>('rendered')
   const [custom, setCustom] = useState('')
-  // Single Asset: no trailing slash, so every token returns the base as-is (decision D8).
+  // Single Asset: no trailing slash, so every token returns the base as-is (MASTER_PLAN, Contracts: single asset tokenURI).
   const withSlash = (cid: string) => `ipfs://${cid}${singleAsset ? '' : '/'}`
   const customCid = custom
     .trim()

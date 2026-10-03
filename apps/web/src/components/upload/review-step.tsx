@@ -28,7 +28,7 @@ const STRIP = 8
 
 /**
  * Review and lock: what is being locked, the checks the server runs, "Reveal later" with its
- * placeholder, and the lock itself. With deferred art (decision D25) only the placeholder is
+ * placeholder, and the lock itself. With deferred art (MASTER_PLAN, Flow: pre-reveal) only the placeholder is
  * locked in this run; the real set is locked later, from Art.
  */
 export function ReviewStep({

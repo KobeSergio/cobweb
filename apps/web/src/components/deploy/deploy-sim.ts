@@ -5,7 +5,7 @@
  *  - `useFactoryRead`     → `readContract(factory.collectionFees())` and a gas estimate for the
  *                           chosen chain (the props carry today's sample values).
  *  - `predictAddress`     → `factory.predictCollectionAddress(deployer, creationCode, args, salt)`.
- *                           The factory has the same address on every chain (decision D19), so the
+ *                           The factory has the same address on every chain (MASTER_PLAN, Contracts: addresses), so the
  *                           result does not depend on the chain, only on the deployer and the args.
  *  - `deployCollection`   → wagmi: `switchChain` if needed, `simulateContract(deployCollection(...))`,
  *                           `writeContract(request)`, `waitForTransactionReceipt`, then a server

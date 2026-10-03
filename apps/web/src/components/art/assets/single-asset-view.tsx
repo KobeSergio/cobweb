@@ -21,7 +21,7 @@ import type { AssetItem } from './types'
 
 /**
  * One artwork shared by every token, and how many tokens there are. Unlike 1/1s it may be a GIF
- * or an MP4 video as well as an image (decision D28).
+ * or an MP4 video as well as an image (MASTER_PLAN, Art: media types).
  */
 export function SingleAssetView({
   item,

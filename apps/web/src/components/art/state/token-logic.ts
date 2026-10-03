@@ -8,7 +8,7 @@ import { constantTotal, weightedTraits, weightsValid, type TraitIndex } from '..
  * `lib/demo/art.ts`.
  *
  * Seam: replaced by the trait engine in `packages/dna` (Phase 3). The browser still curates; at
- * lock the final list is validated and hashed on the server (decision C1).
+ * lock the final list is validated and hashed on the server (MASTER_PLAN, Art: lock check).
  */
 
 type Draft = Omit<GeneratedToken, 'rank' | 'previewUrl'>
@@ -166,7 +166,7 @@ export function changeTrait(
   const from = index.get(token.dna[layerIndex] ?? '')?.trait
   const to = index.get(traitId)?.trait
   if (!to) return { ok: false, reason: 'That trait no longer exists.' }
-  // A maximum count is a cap (decision D27): moving a token off it is fine, adding past it is not.
+  // A maximum count is a cap (MASTER_PLAN, Art: maximum counts): moving a token off it is fine, adding past it is not.
   if (to.constant && from?.id !== to.id) {
     const carrying = tokens.filter((t) => t.dna[layerIndex] === to.id).length
     if (carrying >= to.constant)

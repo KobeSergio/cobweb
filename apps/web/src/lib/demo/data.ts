@@ -57,7 +57,7 @@ export const DEMO_COLLECTION = {
   description:
     'Seven hundred and seventy-seven owls who keep odd hours. Each one is drawn from seven layers of hand-built traits, with a few golden owls hidden among them.',
   /**
-   * "Finish the art later" (decision D25): the creator deploys on a placeholder and locks the real
+   * "Finish the art later" (MASTER_PLAN, Flow: pre-reveal): the creator deploys on a placeholder and locks the real
    * set afterwards. Replaced by: the collection's deferred-art column (Phase 3). The second sample
    * scenario, `DEMO_ART_DEFERRED`, has it on.
    */
@@ -114,7 +114,7 @@ export const SUPPORTED_CHAINS: SupportedChain[] = [
     transferLock: true,
   },
   { id: 143, name: 'Monad', nativeSymbol: 'MON', explorerUrl: 'https://monadscan.com', transferLock: true },
-  // Explorer URL to confirm (decision D13: Blockscout).
+  // Explorer URL to confirm (MASTER_PLAN, Launch chains: Blockscout).
   {
     id: 4663,
     name: 'Robinhood Chain',
@@ -200,7 +200,7 @@ const payment = { txHash: sampleTxHash(1), paidAt: lockedAt + 20 * 60, amountWei
 const BATCH_SIZE = 50
 const batchTotal = Math.ceil(DEMO_TOKEN_COUNT / BATCH_SIZE)
 
-/** The pre-reveal placeholder the sample creator chose with "Reveal later" (decision D25). */
+/** The pre-reveal placeholder the sample creator chose with "Reveal later" (MASTER_PLAN, Flow: pre-reveal). */
 export const DEMO_PLACEHOLDER: RenderPlaceholder = {
   cid: 'bafkreie7q3iidccmpvszul7kudcvvuavuo7u6gzlbobczuk5nqk3b4akba',
   mediaType: 'image',
@@ -290,7 +290,7 @@ export const DEMO_DEFERRED_RENDER_JOBS: RenderJobsByState = {
 }
 
 /**
- * The second sample scenario: Night Owls deployed before its art was finished (decision D25).
+ * The second sample scenario: Night Owls deployed before its art was finished (MASTER_PLAN, Flow: pre-reveal).
  * Reached with `?art=deferred` on the Art, Lock and upload, Deploy and Settings pages in sample mode.
  */
 export const DEMO_ART_DEFERRED = {
@@ -425,7 +425,7 @@ function chunks(entries: WhitelistEntry[], size: number, written: number, seed: 
   return result
 }
 
-/** Addresses per `setMintQuota` transaction (decision D26). */
+/** Addresses per `setMintQuota` transaction (MASTER_PLAN, Contracts: whitelist chunks). */
 export const WHITELIST_CHUNK_SIZE = 500
 
 const owlList = buildWhitelist(1, 620, [1, 1, 1, 2, 2, 3], 186)

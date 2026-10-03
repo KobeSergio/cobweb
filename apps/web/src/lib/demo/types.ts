@@ -21,7 +21,7 @@ export type Trait = {
   weight: number
   /**
    * A fixed-quantity trait: placed on at most this many tokens instead of by weight. A cap, not an
-   * exact count (decision D27): rules and uniqueness can stop the generator from reaching it.
+   * exact count (MASTER_PLAN, Art: maximum counts): rules and uniqueness can stop the generator from reaching it.
    */
   constant?: number
   /** The empty trait: the layer is left out of a token. Has no image. */
@@ -63,7 +63,7 @@ export type RuleConflict = {
   message: string
 }
 
-/** One generated token. Replaced by: the token list the browser submits at lock (decision C1). */
+/** One generated token. Replaced by: the token list the browser submits at lock (MASTER_PLAN, Art: lock check). */
 export type GeneratedToken = {
   /** Token id, starting at 1. Also the number in the name. */
   id: number
@@ -80,7 +80,7 @@ export type GeneratedToken = {
 export type TraitCounts = Record<string, number>
 
 /**
- * What an uploaded file is (decision D28). 1/1s and metadata projects take images only (PNG, JPG,
+ * What an uploaded file is (MASTER_PLAN, Art: media types). 1/1s and metadata projects take images only (PNG, JPG,
  * WebP); a single asset may also be a GIF or an MP4 video, and so may a pre-reveal placeholder.
  */
 export type MediaType = 'image' | 'gif' | 'video'
@@ -118,7 +118,7 @@ export type ArtFeeQuote = {
 }
 
 /**
- * The pre-reveal placeholder (decision D25): one file every token shows until the reveal, pinned
+ * The pre-reveal placeholder (MASTER_PLAN, Flow: pre-reveal): one file every token shows until the reveal, pinned
  * to its own small CID. Replaced by: the placeholder columns of `render_jobs` (Phase 4).
  */
 export type RenderPlaceholder = {
@@ -134,7 +134,7 @@ type RenderJobBase = {
   jobId: Hex
   tokenCount: number
   lockedAt: number
-  /** Hash of the token list stored at lock (decision C1). */
+  /** Hash of the token list stored at lock (MASTER_PLAN, Art: lock check). */
   tokenListHash: Hex
   quote: ArtFeeQuote
   /**
@@ -161,7 +161,7 @@ export type RenderJob =
       startedAt: number
       finishedAt: number
       /**
-       * The real set. Null when the art is deferred (decision D25) and this run rendered only the
+       * The real set. Null when the art is deferred (MASTER_PLAN, Flow: pre-reveal) and this run rendered only the
        * placeholder; the real set is locked and rendered in a second run once the art is finished.
        */
       imagesCid: string | null
@@ -215,7 +215,7 @@ export type Deployment = {
   payoutAddress: Address
   baseUri: string
   revealed: boolean
-  /** The transfer validator's level: locked is the non-transferable level (decision D6). */
+  /** The transfer validator's level: locked is the non-transferable level (MASTER_PLAN, Contracts: lock). */
   transfersLocked: boolean
   mintOnBehalfActive: boolean
 }
@@ -268,7 +268,7 @@ export type WhitelistChunk = {
 export type GroupWhitelist = {
   groupId: number
   entries: WhitelistEntry[]
-  /** Addresses per `setMintQuota` transaction: 500 (decision D26). */
+  /** Addresses per `setMintQuota` transaction: 500 (MASTER_PLAN, Contracts: whitelist chunks). */
   chunkSize: number
   chunks: WhitelistChunk[]
 }
@@ -297,7 +297,7 @@ export type WalletState = {
   /** Tokens minted from the public group, against `publicMaxMintPerWallet`. */
   publicMinted: number
   groups: { groupId: number; quota: number; used: number; eligible: boolean }[]
-  /** Vaults that delegated to this wallet on delegate.xyz, with their own quotas (decision D7). */
+  /** Vaults that delegated to this wallet on delegate.xyz, with their own quotas (MASTER_PLAN, Contracts: delegated mint). */
   delegatedVaults: { vault: Address; groups: { groupId: number; quota: number; used: number }[] }[]
 }
 
@@ -368,6 +368,6 @@ export type AirdropRecord = {
   recipients: number
   tokens: number
   feePaidWei: string
-  /** An airdrop to the dead address is a burn (decision D5). */
+  /** An airdrop to the dead address is a burn (MASTER_PLAN, Contracts: burn). */
   burn: boolean
 }

@@ -26,7 +26,7 @@ export type AirdropScreenProps = {
   collection: Tables<'collections'>
   deployment: Deployment
   chain: SupportedChain
-  /** Past airdrops; `burn` marks one to the dead address (decision D5). */
+  /** Past airdrops; `burn` marks one to the dead address (MASTER_PLAN, Contracts: burn). */
   airdrops: AirdropRecord[]
   totalMinted: number
 }

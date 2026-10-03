@@ -245,7 +245,7 @@ function repairPairs(dna: string[], layers: Layer[], rules: ArtRule[], random: (
 
 /**
  * Generates `count` unique tokens that satisfy the rules, deterministically from the seed.
- * A fixed quantity is a cap (decision D27): the trait lands on at most its count of tokens. Each
+ * A fixed quantity is a cap (MASTER_PLAN, Art: maximum counts): the trait lands on at most its count of tokens. Each
  * one is offered to a token up front; when no unique token within the rules can carry it, that
  * token is rolled without it and the trait ends below its cap (`cappedShortfalls` reports it).
  * Rules named in a conflict are skipped, as the generator would refuse them.

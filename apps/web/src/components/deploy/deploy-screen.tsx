@@ -33,7 +33,7 @@ export type DeployScreenProps = {
    */
   sampleOutcome?: string
   /**
-   * "Finish the art later" (decision D25): the contract starts on the placeholder and the real set
+   * "Finish the art later" (MASTER_PLAN, Flow: pre-reveal): the contract starts on the placeholder and the real set
    * is not rendered yet.
    */
   artDeferred?: boolean

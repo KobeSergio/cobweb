@@ -26,7 +26,7 @@ const STATE_FOR_STATUS: Record<CollectionStatus, RenderJobState> = {
  * Stage 3, Lock and upload. Sample data until the render pipeline exists. In sample-data mode,
  * `?job=locked|payment_due|rendering|done` picks the state to show,
  * `?outcome=rejected|reverted|balance|check-failed|batch-failed` makes the first attempt fail, and
- * `?art=deferred` shows the deferred-art scenario (the placeholder run, decision D25).
+ * `?art=deferred` shows the deferred-art scenario (the placeholder run, MASTER_PLAN, Flow: pre-reveal).
  */
 export default async function UploadPage({
   params,

@@ -36,7 +36,7 @@ const STEPS = [
 ]
 
 /**
- * "Finish the art later" (decision D25): a secondary action in the Art footer. Confirming marks the
+ * "Finish the art later" (MASTER_PLAN, Flow: pre-reveal): a secondary action in the Art footer. Confirming marks the
  * art as deferred and opens Lock and upload with "Reveal later" on and the real set's lock off.
  *
  * Seam: the deferred flag is the sample scenario in the URL (`?art=deferred`) until Phase 3 adds

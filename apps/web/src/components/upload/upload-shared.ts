@@ -5,7 +5,7 @@ export type ArtSummary = {
   layers: number
   traits: number
   rules: number
-  /** Traits with a maximum count (a cap, decision D27) and that maximum. */
+  /** Traits with a maximum count (a cap, MASTER_PLAN, Art: maximum counts) and that maximum. */
   constants: { name: string; count: number }[]
 }
 

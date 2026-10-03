@@ -37,7 +37,7 @@ export type LayersScreenProps = {
   traitCounts: TraitCounts
   /** Art is locked: show, do not edit. */
   readOnly: boolean
-  /** "Finish the art later" is on (decision D25): the contract starts on a placeholder. */
+  /** "Finish the art later" is on (MASTER_PLAN, Flow: pre-reveal): the contract starts on a placeholder. */
   artDeferred?: boolean
   /** Offer "Finish the art later". Sample mode only until Phase 3 stores the deferred flag. */
   canDefer?: boolean

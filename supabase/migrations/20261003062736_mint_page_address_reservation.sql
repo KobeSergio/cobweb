@@ -1,4 +1,4 @@
--- Mint page address reservation (decision D24, spec S12).
+-- Mint page address reservation (MASTER_PLAN, Flow: mint page address, spec S12).
 --
 -- No mint page without a contract. The address (`collections.slug`) is no longer chosen when a
 -- collection is created. The creator reserves it in the Deploy form; a reservation lasts 3 days

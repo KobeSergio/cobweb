@@ -96,7 +96,7 @@ export function AirdropHistory({
 }
 
 /**
- * Burn: an airdrop to the dead address (decision D5). It mints new tokens straight to an
+ * Burn: an airdrop to the dead address (MASTER_PLAN, Contracts: burn). It mints new tokens straight to an
  * address nobody controls, so it uses supply for good. Kept apart from the airdrop and confirmed
  * by typing.
  */

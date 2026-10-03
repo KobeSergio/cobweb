@@ -19,7 +19,7 @@ export type UploadScreenProps = {
   /** The chain the art fee is paid on (`job.quote.chainId`). */
   chain: SupportedChain
   readOnly: boolean
-  /** "Finish the art later" (decision D25): lock and render the placeholder alone. */
+  /** "Finish the art later" (MASTER_PLAN, Flow: pre-reveal): lock and render the placeholder alone. */
   artDeferred?: boolean
   /** The flow screens either side, for the footer the screen renders itself. */
   previous?: FlowLink

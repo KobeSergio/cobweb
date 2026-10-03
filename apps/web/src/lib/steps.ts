@@ -178,7 +178,7 @@ export function isDemoMode(): boolean {
 
 /**
  * Options shared by the access rules. `artDeferred`: the creator chose "Finish the art later"
- * (decision D25) and has not locked the real set yet.
+ * (MASTER_PLAN, Flow: pre-reveal) and has not locked the real set yet.
  */
 export type StageOptions = { demo?: boolean; artDeferred?: boolean }
 

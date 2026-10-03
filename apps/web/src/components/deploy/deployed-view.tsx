@@ -44,7 +44,7 @@ export function DeployedView({
   const slug = state.kind === 'permanent' || state.kind === 'reserved' ? state.slug : null
   const explorerName = new URL(chain.explorerUrl).hostname.replace(/^www\./, '')
   const nextSteps = [
-    // Deferred art (decision D25): the contract is on the placeholder until the real set is revealed.
+    // Deferred art (MASTER_PLAN, Flow: pre-reveal): the contract is on the placeholder until the real set is revealed.
     ...(artDeferred
       ? [
           {

@@ -20,7 +20,7 @@ import {
  * Stage 4, Deploy. Sample data until deployment is wired. In sample-data mode `?state=deployed`
  * shows the deployed result instead of the form, and
  * `?outcome=rejected|reverted|balance|switch-rejected|fees-error` makes the first attempt fail, and
- * `?art=deferred` deploys on the placeholder of the deferred-art scenario (decision D25).
+ * `?art=deferred` deploys on the placeholder of the deferred-art scenario (MASTER_PLAN, Flow: pre-reveal).
  */
 export default async function DeployPage({
   params,

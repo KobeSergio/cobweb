@@ -24,7 +24,7 @@ export type SearchParams = Promise<Record<string, string | string[] | undefined>
  * already called `requireOwnedCollection`). `path` is the screen's path under the collection,
  * e.g. `art/rules`.
  *
- * `artDeferred` ("Finish the art later", decision D25) comes from the sample data in sample mode,
+ * `artDeferred` ("Finish the art later", MASTER_PLAN, Flow: pre-reveal) comes from the sample data in sample mode,
  * where `sample.art` (the page's `?art=` param) can pick the deferred scenario. Outside sample
  * mode it is false until Phase 3 adds the collection's column.
  */

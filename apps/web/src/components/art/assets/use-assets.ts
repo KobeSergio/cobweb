@@ -116,7 +116,7 @@ export function useAssetItems(initial: UploadedAsset[], announce: (text: string)
 
   /**
    * Single asset: the one file is replaced, and its quantity is kept by the caller. Unlike 1/1s it
-   * may be a GIF or an MP4 video (decision D28), so it goes through the media checks.
+   * may be a GIF or an MP4 video (MASTER_PLAN, Art: media types), so it goes through the media checks.
    */
   const replace = useCallback(
     async (file: File | undefined) => {

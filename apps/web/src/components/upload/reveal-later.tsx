@@ -12,7 +12,7 @@ import { ACCEPT_MEDIA, checkMediaFile, mediaLabel, MEDIA_RULES_COPY } from '@/co
 import { MediaPreview } from '@/components/art/assets/media-preview'
 import { formatBytes } from '@/components/art/lib/image-checks'
 
-/** The placeholder file chosen for "Reveal later". Same rules as a single asset (decision D28). */
+/** The placeholder file chosen for "Reveal later". Same rules as a single asset (MASTER_PLAN, Art: media types). */
 export type PlaceholderFile = {
   url: string
   fileName: string
@@ -34,7 +34,7 @@ export type RevealLaterState = {
 const DESCRIPTION_MAX = 1000
 
 /**
- * "Reveal later" (decision D25): the contract starts on one placeholder file and its description,
+ * "Reveal later" (MASTER_PLAN, Flow: pre-reveal): the contract starts on one placeholder file and its description,
  * and Settings reveals it to the real art in one transaction. Seam: the file goes to storage and
  * is pinned to its own CID by the render pipeline (Phase 4).
  */

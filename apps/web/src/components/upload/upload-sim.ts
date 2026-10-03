@@ -3,7 +3,7 @@
  * stands in for one real action and reports the same states the real one will. Replace them
  * one by one when Phase 4 lands:
  *
- *  - `lockArt`      → a server action that submits the token list, runs the checks (decision C1),
+ *  - `lockArt`      → a server action that submits the token list, runs the checks (MASTER_PLAN, Art: lock check),
  *                     stores and hashes it, and returns the job with its quote.
  *  - `payArtFee`    → wagmi: `simulateContract(payForArt(jobId), value: quote.totalWei)`, then
  *                     `writeContract(request)`, `waitForTransactionReceipt`, then poll the job

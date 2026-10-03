@@ -13,7 +13,7 @@ type CidRow = { label: string; name: string; cid: string | null; help: string }
 
 /**
  * Done: the pinned CIDs, a sample of the final images, and a pointer to Deploy. Creators always see
- * their CIDs: the real set and, with "Reveal later", the placeholder (decision D25). With deferred
+ * their CIDs: the real set and, with "Reveal later", the placeholder (MASTER_PLAN, Flow: pre-reveal). With deferred
  * art the real set is not rendered yet and says so.
  */
 export function DoneStep({ result, tokenCount }: { result: RenderResult; tokenCount: number }) {

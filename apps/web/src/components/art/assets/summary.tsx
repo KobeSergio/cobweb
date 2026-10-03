@@ -20,7 +20,7 @@ export function AssetsSummary({
   maxSupply: number
   /** What a token is called for this project: "editions" for 1/1s, "tokens" otherwise. */
   tokenWord: 'editions' | 'tokens'
-  /** Single asset: what the shared file is, named in the summary (decision D28). */
+  /** Single asset: what the shared file is, named in the summary (MASTER_PLAN, Art: media types). */
   mediaType?: MediaType
 }) {
   const matches = tokens === maxSupply

@@ -1,5 +1,5 @@
 /**
- * Browser-side checks for a single-asset file or a pre-reveal placeholder (decision D28): an
+ * Browser-side checks for a single-asset file or a pre-reveal placeholder (MASTER_PLAN, Art: media types): an
  * image (PNG, JPG, WebP), a GIF or an MP4 video, each with its own size limit. 1/1s and metadata
  * projects take images only and use `ASSET_IMAGE_RULES` instead.
  *

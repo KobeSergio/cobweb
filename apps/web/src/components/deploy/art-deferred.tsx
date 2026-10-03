@@ -3,7 +3,7 @@
 import { createContext, useContext } from 'react'
 
 /**
- * Whether the collection's art is deferred ("Finish the art later", decision D25), for the Deploy
+ * Whether the collection's art is deferred ("Finish the art later", MASTER_PLAN, Flow: pre-reveal), for the Deploy
  * screens deep in the flow. Set by `DeployScreen`.
  */
 const ArtDeferredContext = createContext(false)

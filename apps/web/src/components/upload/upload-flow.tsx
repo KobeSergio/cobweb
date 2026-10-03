@@ -35,7 +35,7 @@ export type UploadFlowProps = {
   sampleResult: RenderResult
   /** The description saved with the job's placeholder, when it has one. */
   placeholderDescription: string
-  /** "Finish the art later" (decision D25): this run locks and renders the placeholder alone. */
+  /** "Finish the art later" (MASTER_PLAN, Flow: pre-reveal): this run locks and renders the placeholder alone. */
   deferred: boolean
   readOnly: boolean
   previous?: FlowLink

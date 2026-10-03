@@ -30,7 +30,7 @@ export function StatsView({
     0,
   )
   const all = layers.reduce((n, layer) => n + layer.traits.length, 0)
-  // A maximum count is a cap (decision D27); say so when a capped trait came out below it.
+  // A maximum count is a cap (MASTER_PLAN, Art: maximum counts); say so when a capped trait came out below it.
   const short = total > 0 ? cappedShortfalls(layers, counts) : []
   const shortIds = new Set(short.map((entry) => entry.trait.id))
 

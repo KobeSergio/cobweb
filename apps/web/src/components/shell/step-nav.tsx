@@ -26,7 +26,7 @@ type Props = {
   /** Sample-data mode: every stage is open. */
   demo: boolean
   /**
-   * "Finish the art later" is on (decision D25): Art carries a "deferred" marker, stays open, and
+   * "Finish the art later" is on (MASTER_PLAN, Flow: pre-reveal): Art carries a "deferred" marker, stays open, and
    * Lock and upload opens without finished art. In sample mode `?art=deferred` also turns it on.
    */
   artDeferred?: boolean

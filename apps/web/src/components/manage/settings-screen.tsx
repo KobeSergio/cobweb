@@ -29,7 +29,7 @@ export type SettingsScreenProps = {
   activity: DropActivity
   /**
    * Whether the real set is rendered. False while the art is deferred and not yet locked and
-   * rendered (decision D25): there is nothing to reveal to, so Reveal is off.
+   * rendered (MASTER_PLAN, Flow: pre-reveal): there is nothing to reveal to, so Reveal is off.
    */
   realArtRendered?: boolean
 }
@@ -300,7 +300,7 @@ export function SettingsScreen({
           actionLabel={dialog.at.locked ? 'Unlock' : 'Lock transfers'}
           successMessage={dialog.at.locked ? 'Transfers unlocked' : 'Transfers locked'}
           request={{
-            // SEAM: the validator's exact function and level per chain are confirmed in Phase 1 (decision D6).
+            // SEAM: the validator's exact function and level per chain are confirmed in Phase 1 (MASTER_PLAN, Contracts: lock).
             contract: 'Transfer validator',
             functionName: 'setTransferSecurityLevelOfCollection',
             args: [
