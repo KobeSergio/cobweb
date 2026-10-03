@@ -2,7 +2,7 @@
 
 A no-code, permissionless NFT launchpad. A creator arrives, launches one collection, and manages it. Cobweb is a rebuild of Kingdomly as the lightest version we can run: about $70 a month at rest, with AWS cut down to Lambda, SQS and S3 for art rendering.
 
-**Status:** Phase 1 (contracts) and Phase 2 (web shell, sign-in, database schema) are built and tested locally. Nothing is deployed yet. Next is the art generator (Phase 3). See [Build status](#build-status).
+**Status:** the contracts and the web app are built and tested locally. The web app has sign-in, the database schema, the five-stage creator flow and the public mint page; every screen past Details runs on sample data until its backend exists. Nothing is deployed yet. Next is the art generator (Phase 3). See [Build status](#build-status).
 
 ## Contents
 
@@ -25,16 +25,15 @@ One linear flow, no side doors:
 
 ```mermaid
 flowchart LR
-  A[Create collection] --> B[Art<br/>upload layers, generate, curate]
-  B --> C[Lock and pay<br/>render to IPFS]
+  A[Details] --> B[Art<br/>layers, rules, generate]
+  B --> C[Lock and upload<br/>pay, render to IPFS]
   C --> D[Deploy contract]
-  D --> E[Phases]
-  E --> F[Whitelist]
-  F --> G[Mint page live]
-  G --> H[Manage<br/>reveal, airdrop, phase edits]
+  D --> E[Manage drop<br/>phases, whitelist, mint page,<br/>airdrop, reveal, withdraw]
 ```
 
-The old Kingdomly app let creators build art projects and drop contracts separately and wire them together by hand. That flexibility is gone on purpose: a collection owns its art, its contract and its mint page.
+The first four stages happen once and in order. Manage drop is where the creator stays afterwards: everything about running the mint lives there as tabs, not as further steps.
+
+Unlike the legacy Kingdomly app, art projects and drop contracts are not built separately and wired together by hand: a collection owns its art, its contract and its mint page.
 
 **In v1:** create collection, generate art from layers, deploy, phases, whitelist, mint page, reveal, airdrops, phase edits.
 
@@ -163,7 +162,7 @@ docs/              Plan, master plan, legacy context, reference contract
 legacy/            Old Kingdomly repos. Reference only, not in git
 ```
 
-The packages are empty stubs today; each is filled in phase by phase.
+`apps/freshness`, `services/render`, `packages/dna` and `packages/shared` are stubs until their phases; see [Build status](#build-status).
 
 ## Getting started
 
@@ -252,13 +251,14 @@ What grows with success, in the order we would feel it: Filebase storage as coll
 | Tooling   | ESLint, typescript-eslint, Prettier            | Installed               | Lint and format                                |
 | Tooling   | Vitest                                         | Installed               | Unit tests                                     |
 | Contracts | Foundry, Solidity 0.8.30                       | Installed               | Build, test, deploy                            |
-| Contracts | Limit Break creator-token-standards (ERC721AC) | Planned, Phase 1        | Collection base, transfer validator, locking   |
-| Contracts | OpenZeppelin Contracts                         | Planned, Phase 1        | Ownable, ERC2981 royalties, ReentrancyGuard    |
-| Contracts | delegate.xyz registry                          | Planned, Phase 1        | Delegated minting                              |
-| Web       | Next.js, React                                 | Planned, Phase 2        | `apps/web`                                     |
-| Web       | Tailwind CSS, shadcn/ui                        | Planned, Phase 2        | Styling and `packages/ui`                      |
-| Web       | RainbowKit, wagmi, viem                        | Planned, Phase 2        | Wallet connection and contract calls           |
-| Web       | Supabase JS and SSR client                     | Planned, Phase 2        | Database access and sessions                   |
+| Contracts | Limit Break creator-token-standards (ERC721AC) | Installed               | Collection base, transfer validator, locking   |
+| Contracts | OpenZeppelin Contracts                         | Installed               | Ownable, ERC2981 royalties, ReentrancyGuard    |
+| Contracts | delegate.xyz registry                          | Installed (interface)   | Delegated minting                              |
+| Web       | Next.js, React                                 | Installed               | `apps/web`                                     |
+| Web       | Tailwind CSS, shadcn/ui                        | Installed               | Styling and `packages/ui`                      |
+| Web       | Motion, dnd-kit                                | Installed               | Animation, layer reordering                    |
+| Web       | RainbowKit, wagmi, viem                        | Installed               | Wallet connection and contract calls           |
+| Web       | Supabase JS and SSR client                     | Installed               | Database access and sessions                   |
 | Render    | sharp                                          | Planned, Phase 4        | Image compositing                              |
 | Render    | AWS SDK (S3, SQS)                              | Planned, Phases 3 and 4 | Presigned uploads, job fan-out                 |
 | Render    | A CAR packing library                          | Planned, Phase 4        | IPFS archives for Filebase. Not chosen yet     |
@@ -278,7 +278,7 @@ How minting works:
 
 - **Mint groups.** Group 0 is public; the others are allowlist groups. Each has a price, a supply allocation, an open/closed flag and an optional scheduled start.
 - **Liveness.** A group is live if its flag is on, or if a start is scheduled and the block timestamp has reached it. There is no end time and no global switch. The creator closes a group by hand.
-- **Limits.** Public has a per-wallet cap. Allowlist groups use a per-address quota, written on-chain from a CSV in chunks of 300 to 500 addresses.
+- **Limits.** Public has a per-wallet cap. Allowlist groups use a per-address quota, written on-chain from a CSV in chunks of 500 addresses.
 - **Fees.** Flat native amounts set by the admin on the factory and snapshotted into each collection at deploy. No price oracle. Only the factory admin can change a deployed collection's fee, up or down.
 - **Also supported.** Reveal, airdrops (a burn is an airdrop to the dead address), delegated minting that lands in the hot wallet, mint on behalf, royalties, and locking transfers through the ERC721AC transfer validator.
 
@@ -292,7 +292,7 @@ All three streams are collected on-chain in the chain's native token.
 | Airdrop, per token        | Creator  | At airdrop, through the collection     |
 | Mint fee, per token       | Minter   | At mint, on top of the creator's price |
 
-The rates are in [docs/PLAN.md](docs/PLAN.md). The mint fee option and the art fee's free allowance are still open decisions.
+The rates are in [docs/PLAN.md](docs/PLAN.md). The mint fee option and the art fee's free allowance are open decisions, listed in [docs/MASTER_PLAN.md](docs/MASTER_PLAN.md#open-decisions).
 
 ## Rules that hold everywhere
 
@@ -309,7 +309,7 @@ These come from the plan's locked decisions and from bugs found in the legacy co
 
 Design conventions:
 
-- The product name is Cobweb. The Kingdomly logo stays for now; "Kingdomly" and "realm" wording does not.
+- The product name is Cobweb. The Kingdomly logo is in use until the logo decision is made; "Kingdomly" and "realm" wording is not.
 - Dark theme on a neutral warm gray with a yellow accent, in Poppins. Colours come from tokens, never hard-coded values.
 - All UI is built from shadcn components in `packages/ui`. A screen ported from the old app keeps its layout and structure. Respect what the old screen could do, but take a better or simpler route where one exists, and note what changed.
 
@@ -327,26 +327,26 @@ Before porting anything, open the matching context doc: it says which files impl
 
 ## Build status
 
-| Phase | What                                                              | Status                                   |
-| ----- | ----------------------------------------------------------------- | ---------------------------------------- |
-| 0     | Scaffold: workspace, empty packages, CI                           | Done                                     |
-| 1     | Contracts: factory, collection, testnet deploy                    | Built and tested; testnet deploy pending |
-| 2     | Web shell: palette, `packages/ui`, sign-in, database schema       | Built and tested locally                 |
-| 3     | Art generator: trait engine, layer upload, curation, lock and pay | Next                                     |
-| 4     | Render pipeline: SQS, Lambdas, Filebase                           | Not started                              |
-| 5     | Deploy and manage: phases, whitelist, reveal, airdrop             | Not started                              |
-| 6     | Freshness server and mint page                                    | Not started                              |
-| 7     | Hardening and launch: load test, mainnet deploys                  | Not started                              |
+| Phase | Area                                                              | What exists today                                                                                                                                        | Not built yet                                                           |
+| ----- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| 0     | Scaffold: workspace, packages, CI                                 | Workspace, Turborepo, lint, format, CI                                                                                                                   |                                                                         |
+| 1     | Contracts: factory, collection                                    | `CobwebFactory` and `CobwebCollection`, tests, deploy script                                                                                             | Testnet deploy and verification                                         |
+| 2     | Web app: design, sign-in, schema, flow, mint page                 | `packages/ui`, wallet sign-in, schema with row-level security, the five-stage flow, the mint page, the address reservation, sample data for every screen | Hosted Supabase; checks at tablet widths                                |
+| 3     | Art generator: trait engine, layer upload, curation, lock and pay | Art screens on sample data                                                                                                                               | Trait engine, art tables, layer upload, lock and pay                    |
+| 4     | Render pipeline: SQS, Lambdas, Filebase                           | Render progress screens on sample data                                                                                                                   | Queue, Lambdas, IPFS upload                                             |
+| 5     | Deploy and manage: phases, whitelist, reveal, airdrop             | Deploy and Manage drop screens on sample data                                                                                                            | Real transactions, whitelist writes, holder snapshot, validator setting |
+| 6     | Freshness server and mint page                                    | Mint page on sample data                                                                                                                                 | Freshness server, live data, Team, Roadmap, FAQ, music, carousel        |
+| 7     | Hardening and launch: load test, mainnet deploys                  |                                                                                                                                                          | Load test, contract review, mainnet deploys                             |
 
 Each phase's tasks and exit criteria are in [docs/MASTER_PLAN.md](docs/MASTER_PLAN.md).
 
 ## Further reading
 
-| Doc                                                                                    | What it is                                                                                                    |
-| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| [docs/MASTER_PLAN.md](docs/MASTER_PLAN.md)                                             | Build order, exit criteria per phase, and every decision made so far. Where it differs from the plan, it wins |
-| [docs/PLAN.md](docs/PLAN.md)                                                           | The source plan: scope, costs, revenue, load. Kept verbatim                                                   |
-| [docs/legacy/README.md](docs/legacy/README.md)                                         | Index of the legacy context docs                                                                              |
-| [docs/reference/the-suits-mint-analysis.md](docs/reference/the-suits-mint-analysis.md) | How the reference contract mints, and what to fix when porting it                                             |
-| [docs/SKILLS.md](docs/SKILLS.md)                                                       | Claude Code skills worth building for this repo                                                               |
-| [CLAUDE.md](CLAUDE.md)                                                                 | Rules for AI agents working in this repo                                                                      |
+| Doc                                                                                    | What it is                                                                                                |
+| -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| [docs/MASTER_PLAN.md](docs/MASTER_PLAN.md)                                             | Build order, exit criteria per phase, and every product decision. Where it differs from the plan, it wins |
+| [docs/PLAN.md](docs/PLAN.md)                                                           | The source plan: scope, costs, revenue, load. Kept verbatim                                               |
+| [docs/legacy/README.md](docs/legacy/README.md)                                         | Index of the legacy context docs                                                                          |
+| [docs/reference/the-suits-mint-analysis.md](docs/reference/the-suits-mint-analysis.md) | How the reference contract mints, and what to fix when porting it                                         |
+| [docs/SKILLS.md](docs/SKILLS.md)                                                       | Claude Code skills worth building for this repo                                                           |
+| [CLAUDE.md](CLAUDE.md)                                                                 | Rules for AI agents working in this repo                                                                  |

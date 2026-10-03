@@ -1,10 +1,10 @@
 # Cobweb Launchpad
 
-A no-code NFT launchpad with one linear flow: create a collection, make its art, deploy, set phases and whitelist, run the mint page, manage it. It is a rebuild of Kingdomly.
+A no-code NFT launchpad with one linear flow: Details, Art (Layers, Rules, Generate), Lock and upload, Deploy, then Manage drop (phases, whitelist, mint page, airdrop, settings as tabs). It is a rebuild of Kingdomly.
 
 ## Read first
 
-- `docs/MASTER_PLAN.md`: build order, exit criteria per phase, and the Decided table. The Decided table wins over `docs/PLAN.md` where they differ.
+- `docs/MASTER_PLAN.md`: build order, exit criteria per phase, and the Decisions section. It wins over `docs/PLAN.md` where they differ.
 - `docs/PLAN.md`: the source plan (scope, costs, revenue). Kept verbatim; do not edit it.
 - `docs/legacy/README.md`: index of the legacy context docs. Open the relevant one before porting anything.
 - `docs/reference/the-suits-mint-analysis.md`: the model for mint groups, and the fixes to apply.
@@ -52,3 +52,5 @@ pnpm --filter @cobweb/web verify:local    # sign-in and access-rule checks; run 
 - All UI is built from shadcn components in `packages/ui`. Legacy hand-rolled components are not copied; a lifted screen keeps the legacy layout and structure, rebuilt on shadcn. Respect what the legacy screen could do, but prefer a better or simpler way where one exists, and note what changed. Never drop a function by accident.
 - Layer images are square, at most 2048 x 2048, the same size across a project, 10 MB per file.
 - Launch chains: Ethereum, Arbitrum, Base, Berachain, Monad, Robinhood Chain.
+- Wallet and chain stack: RainbowKit for wallet connection (as on TheSuits), wagmi hooks in components, viem for every chain call, ABI encoding and address check. No ethers, no web3.js.
+- Shared client state uses React Context (plus React Query for server data). No Zustand, Jotai, Redux or similar.
