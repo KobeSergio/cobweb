@@ -139,7 +139,7 @@ flowchart LR
 Source: [legacy/contracts.md](legacy/contracts.md), sections 2, 3, 8 and 9.
 
 - Foundry project with pinned dependencies, installed fresh (the legacy submodules are empty).
-- **Factory:** the legacy deploy path, plus the per-chain fee config, an admin-only codehash allowlist, a predictable salt, and `pay(jobId)` for the art fee, emitting an event keyed by job id.
+- **Factory:** the legacy deploy path, plus the per-chain fee config, an admin-only codehash allowlist, a predictable salt, and `payForArt(jobId)` for the art fee, emitting an event keyed by job id.
 - **Collection:** new contract on ERC721AC.
   - Mint groups ported from TheSuits: per-group flag and scheduled start, price, supply allocation, public per-wallet cap, issued and claimed quotas. Apply the fixes in the analysis doc.
   - Quota writes chunked by the dashboard at 500 addresses per transaction.
@@ -187,7 +187,7 @@ Source: [legacy/market-creator-flow.md](legacy/market-creator-flow.md), sections
 - Legacy behaviour fixed: adding a trait does not reset weights; auto-populate does not delete 1/1s; layer edits do not wipe the token list without warning.
 - Competitor features marked "Add", "Switch" or "Replace" in the plan.
 - Lock: the server validates and hashes the submitted token list and creates the job row with quote and TTL.
-- Pay: the factory's `pay(jobId)`; the job becomes `paid` only from the verified event.
+- Pay: the factory's `payForArt(jobId)`; the job becomes `paid` only from the verified event.
 
 **Done when:** a creator can upload layers, generate and curate 10,000 tokens, lock, and pay on testnet, leaving a `paid` job row with a stored assignment.
 
