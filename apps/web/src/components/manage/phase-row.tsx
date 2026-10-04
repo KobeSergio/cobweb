@@ -1,6 +1,6 @@
 'use client'
 
-import { MoreHorizontalIcon, PencilIcon } from 'lucide-react'
+import { EyeOffIcon, MoreHorizontalIcon, PencilIcon } from 'lucide-react'
 import { Badge } from '@cobweb/ui/components/badge'
 import { Button } from '@cobweb/ui/components/button'
 import {
@@ -16,7 +16,8 @@ import { cn } from '@cobweb/ui/lib/utils'
 import { formatNative, type MintGroup, type SupportedChain } from '@/lib/demo'
 import { count, percent, relativeTo, shortUtc } from './format'
 
-export type PhaseAction = 'open' | 'close' | 'schedule' | 'clear' | 'price' | 'supply' | 'cap'
+export type PhaseAction =
+  'open' | 'close' | 'schedule' | 'clear' | 'price' | 'supply' | 'cap' | 'details' | 'up' | 'down'
 
 /** Column template shared by the header and every row, once the list is 56rem wide. */
 export const PHASE_COLUMNS =
@@ -31,12 +32,17 @@ export function PhaseRow({
   chain,
   blockTimestamp,
   publicCap,
+  first,
+  last,
   onAction,
 }: {
   group: MintGroup
   chain: SupportedChain
   blockTimestamp: number
   publicCap: number
+  /** Its place in the mint page order, for Move up and Move down. */
+  first: boolean
+  last: boolean
   onAction: (action: PhaseAction) => void
 }) {
   const full = group.minted >= group.maxSupply
@@ -53,12 +59,25 @@ export function PhaseRow({
 
       <div className="col-span-2 flex min-w-0 items-center gap-3 @xl:col-span-4 @4xl:col-span-1">
         <div className="min-w-0">
-          <p className="text-heading truncate">{group.name}</p>
+          <p className="text-heading flex items-center gap-2">
+            <span className="truncate">{group.name}</span>
+            {group.visible === false && (
+              <Badge variant="secondary" className="h-5 shrink-0">
+                <EyeOffIcon aria-hidden="true" />
+                Hidden
+              </Badge>
+            )}
+          </p>
           <p className="text-muted-foreground flex items-center gap-2 text-[0.8125rem]">
             {group.kind === 'public' ? 'Public' : 'Whitelist'}
             <span aria-hidden="true" className="bg-faint size-0.5 rounded-full" />
             <span className="numeric">Group {group.id}</span>
           </p>
+          {group.description && (
+            <p className="text-muted-foreground mt-1 line-clamp-2 text-[0.8125rem]" title={group.description}>
+              {group.description}
+            </p>
+          )}
         </div>
         <div className="ml-auto flex items-center gap-2 @4xl:hidden">
           <StatusBadge status={status} />
@@ -143,6 +162,14 @@ export function PhaseRow({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuItem onSelect={() => onAction('details')}>Edit details</DropdownMenuItem>
+            <DropdownMenuItem disabled={first} onSelect={() => onAction('up')}>
+              Move up
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={last} onSelect={() => onAction('down')}>
+              Move down
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem disabled={group.active} onSelect={() => onAction('schedule')}>
               {group.scheduledStart > 0 ? 'Change scheduled start' : 'Schedule start'}
             </DropdownMenuItem>

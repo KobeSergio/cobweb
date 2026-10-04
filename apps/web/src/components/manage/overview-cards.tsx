@@ -4,6 +4,7 @@ import { ArrowUpRightIcon, EyeIcon } from 'lucide-react'
 import { useId, useState } from 'react'
 import { toast } from 'sonner'
 import { Artwork } from '@cobweb/ui/components/artwork'
+import { Badge } from '@cobweb/ui/components/badge'
 import { Button } from '@cobweb/ui/components/button'
 import { Progress } from '@cobweb/ui/components/progress'
 import { Switch } from '@cobweb/ui/components/switch'
@@ -57,9 +58,16 @@ export function OverviewHeader({
         className="size-14 shrink-0 rounded-lg border"
       />
       <Fact label="Minted" className="w-44 border-l-0 pl-0">
-        <p className="numeric text-lg leading-tight">
-          {count(totalMinted)}
-          <span className="text-muted-foreground text-sm"> / {count(maxSupply)}</span>
+        <p className="numeric flex items-center gap-2 text-lg leading-tight">
+          <span>
+            {count(totalMinted)}
+            <span className="text-muted-foreground text-sm"> / {count(maxSupply)}</span>
+          </span>
+          {maxSupply > 0 && totalMinted >= maxSupply && (
+            <Badge variant="success" className="h-5 font-sans">
+              Sold out
+            </Badge>
+          )}
         </p>
         <Progress
           size="sm"

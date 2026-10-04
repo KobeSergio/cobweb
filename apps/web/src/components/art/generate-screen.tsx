@@ -19,6 +19,7 @@ import { CollectionSizes } from './generate/collection-sizes'
 import { GenerateFooter } from './generate/generate-footer'
 import { StatsView } from './generate/stats-view'
 import { TokenGallery } from './generate/token-gallery'
+import { TokenNaming } from './generate/token-naming'
 import { useGenerator } from './generate/use-generator'
 import { ReadOnlyNotice } from './read-only-notice'
 import { compositeUrls } from './lib/trait-index'
@@ -55,7 +56,7 @@ export function GenerateScreen({
   readOnly,
   artDeferred = false,
 }: GenerateScreenProps) {
-  const generator = useGenerator(collection.id, collection.name, {
+  const generator = useGenerator(collection.id, collection, {
     collections,
     layers,
     rules,
@@ -121,7 +122,11 @@ export function GenerateScreen({
             />
           </StatGroup>
           {!readOnly && tokens && count > 0 && (
-            <Button variant="secondary" onClick={askRegenerate} disabled={generating}>
+            <Button
+              variant="secondary"
+              onClick={askRegenerate}
+              disabled={generating || !!generator.nameProblem}
+            >
               <RefreshCwIcon />
               Regenerate all
             </Button>
@@ -129,6 +134,9 @@ export function GenerateScreen({
         </div>
         <div className="border-t px-5 py-4 sm:px-6">
           <CollectionSizes generator={generator} readOnly={readOnly || generating} />
+        </div>
+        <div className="border-t px-5 py-4 sm:px-6">
+          <TokenNaming generator={generator} readOnly={readOnly || generating} />
         </div>
         {generating && (
           <div className="space-y-2 border-t px-6 py-4" role="status">
@@ -262,7 +270,7 @@ export function GenerateScreen({
             </p>
           </div>
           {!readOnly && (
-            <Button size="lg" onClick={generator.generate} disabled={generating}>
+            <Button size="lg" onClick={generator.generate} disabled={generating || !!generator.nameProblem}>
               <SparklesIcon />
               Generate {n(supply)} tokens
             </Button>

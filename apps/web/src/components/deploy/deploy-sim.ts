@@ -83,6 +83,11 @@ export type DeployArgs = {
   royaltyBps: number
   owner: Address
   royaltyReceiver: Address
+  /**
+   * The initial phases in group order, index 0 the public sale: `mintGroupMaxSupplies_` and
+   * `mintPrice_` (wei). Names stay with Cobweb. Seam: written to `mint_groups` once the deploy lands.
+   */
+  mintGroups: { name: string; priceWei: string; maxSupply: number }[]
 }
 
 /** The address `deployCollection` would produce for these args. Sample: a stable hash of them. */

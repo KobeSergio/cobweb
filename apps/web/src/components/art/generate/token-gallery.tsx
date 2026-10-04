@@ -15,6 +15,7 @@ import { Button } from '@cobweb/ui/components/button'
 import { cn } from '@cobweb/ui/lib/utils'
 import type { GeneratedToken } from '@/lib/demo'
 import { ConfirmDialog, type ConfirmRequest } from '../confirm-dialog'
+import { matchesSearch } from '../state/token-logic'
 import { FilterSidebar, type Sort } from './filter-sidebar'
 import { TierLegend } from './rarity'
 import { TokenCard } from './token-card'
@@ -56,14 +57,14 @@ export function TokenGallery({ generator, readOnly }: { generator: Generator; re
     const list = tokens.filter(
       (token) =>
         (filteredCollection === 'all' || token.collectionId === filteredCollection) &&
-        (!search || String(token.id).startsWith(search)) &&
+        matchesSearch(token, search, index) &&
         byLayer.every((ids) => ids.some((id) => token.dna.includes(id))),
     )
     if (sort === 'rank') list.sort((a, b) => a.rank - b.rank)
     else if (sort === 'rank-desc') list.sort((a, b) => b.rank - a.rank)
     else list.sort((a, b) => a.id - b.id)
     return list
-  }, [tokens, layers, filters, search, sort, filteredCollection])
+  }, [tokens, layers, filters, search, sort, filteredCollection, index])
 
   const pageCount = Math.max(1, Math.ceil(shown.length / PAGE_SIZE))
   const current = Math.min(page, pageCount - 1)
@@ -298,7 +299,7 @@ export function TokenGallery({ generator, readOnly }: { generator: Generator; re
 
         {shown.length === 0 ? (
           <div className="bg-card text-muted-foreground rounded-xl border border-dashed px-6 py-16 text-center text-sm">
-            {search ? `No token id starts with ${search}.` : 'No token has this mix of traits.'}{' '}
+            {search ? `No token matches ${search}.` : 'No token has this mix of traits.'}{' '}
             <button
               type="button"
               className="text-foreground underline underline-offset-2 hover:no-underline"

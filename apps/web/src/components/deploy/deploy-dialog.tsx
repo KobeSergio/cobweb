@@ -31,6 +31,8 @@ export type FinalCheck = {
   royaltyBps: number
   royaltyReceiver: Address
   publicCap: number
+  /** The phases the contract starts with, closed, in group order. */
+  phases: { name: string; priceWei: string; maxSupply: number }[]
   fees: FeeSnapshot
   deployCostWei: string | undefined
 }
@@ -108,6 +110,14 @@ export function DeployDialog({
                 <span className="numeric">{check.publicCap}</span> per wallet
               </span>
             </SummaryRow>
+            {check.phases.map((phase, index) => (
+              <SummaryRow key={index} label={`Phase ${index}: ${phase.name}`}>
+                <span className="numeric text-[0.8125rem]">
+                  {formatNative(phase.priceWei, chain.nativeSymbol, 18)} ·{' '}
+                  {phase.maxSupply.toLocaleString('en-US')} tokens
+                </span>
+              </SummaryRow>
+            ))}
             <SummaryRow label="Mint fee">
               <span className="numeric text-[0.8125rem]">{mintFeeText(check.fees, chain.nativeSymbol)}</span>
             </SummaryRow>

@@ -16,6 +16,7 @@ import type { MintGroup, SupportedChain } from '@/lib/demo'
 import { count } from './format'
 import { parseRecipients, type ParseOptions, type Recipient } from './recipients'
 import { ParsePreview, RecipientsInput } from './recipients-input'
+import type { SnapshotSource } from './snapshot-tab'
 import { TransactionDialog } from './transaction-dialog'
 import { sentQuota, type PendingChunk } from './whitelist-model'
 
@@ -37,6 +38,7 @@ export function AddAddressesDialog({
   onOpenChange,
   group,
   existing,
+  snapshot,
   onAdd,
 }: {
   open: boolean
@@ -44,6 +46,7 @@ export function AddAddressesDialog({
   group: MintGroup
   /** Addresses already on the list, lowercased, to say how many are updates. */
   existing: Set<string>
+  snapshot: SnapshotSource
   onAdd: (rows: Recipient[]) => void
 }) {
   const [text, setText] = useState('')
@@ -71,6 +74,7 @@ export function AddAddressesDialog({
           onTextChange={setText}
           options={WHITELIST_PARSE}
           template={WHITELIST_TEMPLATE}
+          snapshot={snapshot}
         />
         <ParsePreview result={result} amountName="quota" />
         {updates > 0 && (

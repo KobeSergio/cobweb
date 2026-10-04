@@ -124,7 +124,8 @@ export function setConstant(layers: Layer[], traitId: string, count: number | nu
         void _dropped
         return { ...rest, weight: 0 }
       }
-      return { ...trait, weight: 0, constant: Math.max(1, Math.round(count)) }
+      // A whole number of tokens, at least 1 (legacy: "Constant must be greater than 0").
+      return { ...trait, weight: 0, constant: Math.max(1, Math.round(count) || 1) }
     }),
   }))
 }
@@ -156,21 +157,29 @@ export function deleteTrait(layers: Layer[], traitId: string): Layer[] {
   return layers.map((layer) => ({ ...layer, traits: layer.traits.filter((trait) => trait.id !== traitId) }))
 }
 
-/** Splits 100% evenly across the layer's non-constant traits, in whole percents. */
+/**
+ * Weights that split 100% evenly over `count` traits, to two decimals, adding up to exactly 100:
+ * the leftover hundredths go one each to the first traits (3 traits: 33.34, 33.33, 33.33). The
+ * legacy "Even rarity" rounded each share to two decimals, which left 3 traits at 99.99% and
+ * failed its own check; whole percents would leave traits at 0% past 100 traits.
+ */
+export function evenWeights(count: number): number[] {
+  if (count <= 0) return []
+  const base = Math.floor(10_000 / count)
+  let remainder = 10_000 - base * count
+  return Array.from({ length: count }, () => (base + (remainder-- > 0 ? 1 : 0)) / 100)
+}
+
+/** Splits 100% evenly across the layer's non-constant traits (the blank included), to two decimals. */
 export function evenOut(layers: Layer[], layerId: string): Layer[] {
   return mapLayer(layers, layerId, (layer) => {
     const weighted = layer.traits.filter((trait) => !trait.constant)
     if (weighted.length === 0) return layer
-    const base = Math.floor(100 / weighted.length)
-    let remainder = 100 - base * weighted.length
+    const shares = evenWeights(weighted.length)
+    let next = 0
     return {
       ...layer,
-      traits: layer.traits.map((trait) => {
-        if (trait.constant) return trait
-        const extra = remainder > 0 ? 1 : 0
-        remainder -= extra
-        return { ...trait, weight: base + extra }
-      }),
+      traits: layer.traits.map((trait) => (trait.constant ? trait : { ...trait, weight: shares[next++]! })),
     }
   })
 }

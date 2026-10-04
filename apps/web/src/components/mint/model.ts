@@ -57,48 +57,51 @@ export function derivePhases(
   local: LocalMints = {},
 ): Phase[] {
   const collectionLeft = data.supply.max - totalMinted(data, local)
-  return data.groups.map((group) => {
-    const localForGroup = Object.entries(local)
-      .filter(([key]) => key.startsWith(`${group.id}:`))
-      .reduce((sum, [, count]) => sum + count, 0)
-    const minted = group.minted + localForGroup
-    const remainingSupply = Math.max(0, Math.min(group.maxSupply - minted, collectionLeft))
-    const startsIn = group.scheduledStart > 0 ? group.scheduledStart - chainNow : null
+  // A phase the creator hid (Phases, Edit details) is left off the page, as in legacy.
+  return data.groups
+    .filter((group) => group.visible !== false)
+    .map((group) => {
+      const localForGroup = Object.entries(local)
+        .filter(([key]) => key.startsWith(`${group.id}:`))
+        .reduce((sum, [, count]) => sum + count, 0)
+      const minted = group.minted + localForGroup
+      const remainingSupply = Math.max(0, Math.min(group.maxSupply - minted, collectionLeft))
+      const startsIn = group.scheduledStart > 0 ? group.scheduledStart - chainNow : null
 
-    let status: PhaseStatus
-    if (remainingSupply === 0 && (group.active || minted >= group.maxSupply || collectionLeft === 0)) {
-      status = 'soldout'
-    } else if (group.active) status = 'live'
-    else if (startsIn !== null) status = startsIn > 0 ? 'scheduled' : 'starting'
-    else status = minted > 0 ? 'closed' : 'unscheduled'
+      let status: PhaseStatus
+      if (remainingSupply === 0 && (group.active || minted >= group.maxSupply || collectionLeft === 0)) {
+        status = 'soldout'
+      } else if (group.active) status = 'live'
+      else if (startsIn !== null) status = startsIn > 0 ? 'scheduled' : 'starting'
+      else status = minted > 0 ? 'closed' : 'unscheduled'
 
-    let walletAllowance: Phase['wallet'] = null
-    const vaults: Phase['vaults'] = []
-    if (wallet) {
-      const own = localKey(group.id, wallet.address)
-      if (group.kind === 'public') {
-        walletAllowance = {
-          eligible: true,
-          ...allowance(data.publicMaxMintPerWallet, wallet.publicMinted, local[own]),
+      let walletAllowance: Phase['wallet'] = null
+      const vaults: Phase['vaults'] = []
+      if (wallet) {
+        const own = localKey(group.id, wallet.address)
+        if (group.kind === 'public') {
+          walletAllowance = {
+            eligible: true,
+            ...allowance(data.publicMaxMintPerWallet, wallet.publicMinted, local[own]),
+          }
+        } else {
+          const entry = wallet.groups.find((candidate) => candidate.groupId === group.id)
+          const eligible = !!entry && entry.eligible && entry.quota > 0
+          walletAllowance = { eligible, ...allowance(entry?.quota ?? 0, entry?.used ?? 0, local[own]) }
         }
-      } else {
-        const entry = wallet.groups.find((candidate) => candidate.groupId === group.id)
-        const eligible = !!entry && entry.eligible && entry.quota > 0
-        walletAllowance = { eligible, ...allowance(entry?.quota ?? 0, entry?.used ?? 0, local[own]) }
-      }
-      for (const delegated of wallet.delegatedVaults) {
-        const entry = delegated.groups.find((candidate) => candidate.groupId === group.id)
-        if (entry && entry.quota > 0) {
-          vaults.push({
-            vault: delegated.vault,
-            ...allowance(entry.quota, entry.used, local[localKey(group.id, delegated.vault)]),
-          })
+        for (const delegated of wallet.delegatedVaults) {
+          const entry = delegated.groups.find((candidate) => candidate.groupId === group.id)
+          if (entry && entry.quota > 0) {
+            vaults.push({
+              vault: delegated.vault,
+              ...allowance(entry.quota, entry.used, local[localKey(group.id, delegated.vault)]),
+            })
+          }
         }
       }
-    }
 
-    return { group, status, remainingSupply, startsIn, wallet: walletAllowance, vaults }
-  })
+      return { group, status, remainingSupply, startsIn, wallet: walletAllowance, vaults }
+    })
 }
 
 const ORDER: Record<PhaseStatus, number> = {

@@ -3,6 +3,7 @@
 import { Input } from '@cobweb/ui/components/input'
 import { Label } from '@cobweb/ui/components/label'
 import { cn } from '@cobweb/ui/lib/utils'
+import { MAX_COLLECTION_SIZE } from '../state/generation'
 import type { Generator } from './use-generator'
 
 const n = (value: number) => value.toLocaleString('en-US')
@@ -36,7 +37,7 @@ export function CollectionSizes({ generator, readOnly }: { generator: Generator;
                 id={id}
                 type="number"
                 min={0}
-                max={100000}
+                max={MAX_COLLECTION_SIZE}
                 step={1}
                 value={collection.size}
                 onChange={(event) => generator.setSize(collection.id, Number(event.target.value))}

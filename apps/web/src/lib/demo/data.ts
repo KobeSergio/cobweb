@@ -30,6 +30,7 @@ import type {
   GroupWhitelist,
   MintGroup,
   MintPageData,
+  MintPageSections,
   MintPageSettings,
   MintPageVariant,
   RenderJob,
@@ -365,6 +366,8 @@ export const DEMO_MINT_GROUPS: MintGroup[] = [
     flag: false,
     scheduledStart: PUBLIC_START,
     active: false,
+    description: 'Open to everyone, up to three per wallet.',
+    visible: true,
   },
   {
     id: 1,
@@ -376,6 +379,8 @@ export const DEMO_MINT_GROUPS: MintGroup[] = [
     flag: true,
     scheduledStart: 0,
     active: true,
+    description: 'Early supporters from the Discord. Your quota is on the list.',
+    visible: true,
   },
   {
     id: 2,
@@ -387,6 +392,8 @@ export const DEMO_MINT_GROUPS: MintGroup[] = [
     flag: false,
     scheduledStart: 0,
     active: false,
+    description: 'Reserved for the artists and the team.',
+    visible: false,
   },
 ]
 
@@ -469,6 +476,7 @@ export const DEMO_AIRDROPS: AirdropRecord[] = [
     tokens: 10,
     feePaidWei: mulWei(ethFees.airdropFeePerTokenWei, 10),
     burn: false,
+    firstTokenId: 1,
   },
   {
     txHash: sampleTxHash(21),
@@ -477,6 +485,7 @@ export const DEMO_AIRDROPS: AirdropRecord[] = [
     tokens: 2,
     feePaidWei: mulWei(ethFees.airdropFeePerTokenWei, 2),
     burn: true,
+    firstTokenId: 11,
   },
 ]
 
@@ -545,6 +554,61 @@ export const DEMO_MINT_PAGE_SETTINGS: MintPageSettings = {
   },
   featuredTokenIds: [5, 10, 12, 15, 4, 18],
   published: true,
+}
+
+/** The Phase 6 sections of the sample mint page, as the Mint page tab edits them. */
+export const DEMO_MINT_PAGE_SECTIONS: MintPageSections = {
+  team: {
+    enabled: true,
+    members: [
+      {
+        id: 'team-1',
+        name: 'Mara Quill',
+        role: 'Artist',
+        bio: 'Draws every owl by hand before it is layered.',
+        imageUrl: '/demo/avatar.svg',
+        x: 'https://x.com/example',
+      },
+      {
+        id: 'team-2',
+        name: 'Tobin Reyes',
+        role: 'Community',
+        bio: 'Runs the Discord and the holder calls.',
+        imageUrl: '',
+        discord: 'https://discord.gg/example',
+      },
+    ],
+  },
+  roadmap: {
+    enabled: true,
+    items: [
+      { id: 'road-1', date: 'Q4 2026', title: 'Mint', description: 'Whitelist first, then the public sale.' },
+      {
+        id: 'road-2',
+        date: 'Q1 2027',
+        title: 'Reveal',
+        description: 'Every owl revealed a week after sell out.',
+      },
+    ],
+  },
+  faq: {
+    enabled: true,
+    items: [
+      {
+        id: 'faq-1',
+        question: 'How many can I mint?',
+        answer: 'Up to three in the public sale. Whitelist wallets have their own quota.',
+      },
+    ],
+  },
+  music: { enabled: false, fileName: null, url: null },
+  carousel: {
+    enabled: true,
+    items: [
+      { id: 'slide-1', kind: 'token', tokenId: 5 },
+      { id: 'slide-2', kind: 'token', tokenId: 12 },
+    ],
+  },
 }
 
 function withGroups(overrides: Partial<Record<number, Partial<MintGroup>>>): MintGroup[] {

@@ -16,6 +16,7 @@ import type { GeneratedToken, MintPageData, MintPageSettings, Socials } from '@/
 import { CopyButton } from './bits'
 import { FeaturedPicker, ImageSlot } from './mint-page-fields'
 import { MintPagePreview } from './mint-page-preview'
+import { MintPageSections } from './mint-page-sections'
 import { saveOffChain } from './simulate'
 
 export type MintPageScreenProps = {
@@ -41,11 +42,21 @@ const SOCIALS: { key: keyof Socials; label: string; placeholder: string; hosts: 
     placeholder: 'https://discord.gg/invite',
     hosts: ['discord.gg', 'discord.com'],
   },
+  {
+    key: 'telegram',
+    label: 'Telegram',
+    placeholder: 'https://t.me/yourgroup',
+    hosts: ['t.me', 'telegram.me'],
+  },
 ]
+
+/** Longest link accepted, as in legacy. */
+const LINK_MAX = 200
 
 /** Why a social link is not usable, or null. Empty is fine: the icon is left off the page. */
 function socialError(value: string | undefined, hosts: string[]): string | null {
   if (!value?.trim()) return null
+  if (value.trim().length > LINK_MAX) return `Use a link of at most ${LINK_MAX} characters.`
   try {
     const url = new URL(value.trim())
     if (url.protocol !== 'https:') return 'Use a link that starts with https://.'
@@ -239,6 +250,8 @@ export function MintPageScreen({ collection, settings, featuredCandidates, previ
             onChange={(ids) => set('featuredTokenIds', ids)}
           />
         </Panel>
+
+        <MintPageSections candidates={featuredCandidates} />
       </div>
 
       <aside aria-label="Preview" className="grid gap-4 lg:sticky lg:top-6">

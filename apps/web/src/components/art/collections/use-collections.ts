@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import type { Collection } from '@/lib/demo'
 import type { ConfirmRequest } from '../confirm-dialog'
+import { buildTraitIndex } from '../lib/trait-index'
 import type { NameRequest } from '../name-dialog'
 import { useArtProject, type ArtSeed } from '../state/art-store'
 import { addCollection, renameCollection, rulesOf } from '../state/collection-edits'
@@ -126,7 +127,12 @@ export function useCollections(projectKey: string, tokenName: string, seed: ArtS
               activeCollectionId: nextCollections[0]?.id,
               layers: keptLayers,
               rules: pruneRules(p.rules ?? seed.rules ?? [], keptIds),
-              tokens: current ? deleteTokens(current, drop, tokenName) : current,
+              tokens: current
+                ? deleteTokens(current, drop, {
+                    tokenName: p.tokenName ?? tokenName,
+                    index: buildTraitIndex(keptLayers),
+                  })
+                : current,
             }
           }),
       })

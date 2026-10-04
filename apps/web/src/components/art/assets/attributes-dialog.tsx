@@ -14,9 +14,8 @@ import {
   DialogTrigger,
 } from '@cobweb/ui/components/dialog'
 import { Input } from '@cobweb/ui/components/input'
+import { ATTRIBUTE_TEXT_MAX, attributeRowsError, MAX_ATTRIBUTES } from './token-list'
 import type { Attribute } from './types'
-
-const MAX_ATTRIBUTES = 40
 
 function Editor({
   fileName,
@@ -36,7 +35,7 @@ function Editor({
     setRows((current) => current.map((row, at) => (at === index ? { ...row, ...patch } : row)))
 
   const filled = rows.filter((row) => row.traitType.trim() || row.value.trim())
-  const incomplete = filled.some((row) => !row.traitType.trim() || !row.value.trim())
+  const error = attributeRowsError(rows)
 
   return (
     <>
@@ -54,7 +53,7 @@ function Editor({
               aria-label={`Trait type ${index + 1}`}
               placeholder="Trait type"
               value={row.traitType}
-              maxLength={60}
+              maxLength={ATTRIBUTE_TEXT_MAX}
               aria-invalid={!!row.value.trim() && !row.traitType.trim() ? true : undefined}
               onChange={(event) => update(index, { traitType: event.target.value })}
             />
@@ -62,7 +61,7 @@ function Editor({
               aria-label={`Value ${index + 1}`}
               placeholder="Value"
               value={row.value}
-              maxLength={60}
+              maxLength={ATTRIBUTE_TEXT_MAX}
               aria-invalid={!!row.traitType.trim() && !row.value.trim() ? true : undefined}
               onChange={(event) => update(index, { value: event.target.value })}
             />
@@ -78,9 +77,9 @@ function Editor({
           </li>
         ))}
       </ul>
-      {incomplete && (
+      {error && (
         <p role="alert" className="text-xs text-destructive-foreground">
-          Fill in both the trait type and the value, or remove the row.
+          {error}
         </p>
       )}
       <div>
@@ -103,7 +102,7 @@ function Editor({
         </DialogClose>
         <Button
           type="button"
-          disabled={incomplete}
+          disabled={error !== null}
           onClick={() => {
             onSave(filled.map((row) => ({ traitType: row.traitType.trim(), value: row.value.trim() })))
             onDone()

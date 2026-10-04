@@ -1,5 +1,7 @@
 import type { Collection, Layer, Trait } from '@/lib/demo'
 import type { ArtProject } from '../../state/art-store'
+// Every layer starts evenly split, as the legacy upload did (100 / n each), to two decimals.
+import { evenWeights } from '../../state/layer-edits'
 import type { DetectedProject } from './folder-tree'
 
 /** What the upload produced for one trait: where the image is now. */
@@ -19,14 +21,6 @@ function unique(base: string, taken: Set<string>): string {
   for (let n = 2; taken.has(id); n++) id = `${base}-${n}`
   taken.add(id)
   return id
-}
-
-/** Whole-number weights that sum to 100, as the legacy upload did (100 / n each). */
-function evenWeights(count: number): number[] {
-  if (count === 0) return []
-  const base = Math.floor(100 / count)
-  let remainder = 100 - base * count
-  return Array.from({ length: count }, () => base + (remainder-- > 0 ? 1 : 0))
 }
 
 /**

@@ -7,7 +7,15 @@
 /** A file with its path inside the dropped or chosen folder, e.g. `Male/Eyes/starry.png`. */
 export type PathedFile = { path: string; file: File }
 
-export type DetectedTrait = { key: string; name: string; file: File; path: string }
+export type DetectedTrait = {
+  key: string
+  /** The trait name, from the file name (`traitNameFromFile`). */
+  name: string
+  file: File
+  path: string
+  /** Set when an earlier image in the same layer already has this name; the image is left out. */
+  clash?: string
+}
 export type DetectedLayer = { name: string; folder: string; traits: DetectedTrait[] }
 export type DetectedCollection = { name: string; folder: string; layers: DetectedLayer[] }
 
@@ -28,6 +36,31 @@ const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 export function cleanFolderName(folder: string): string {
   const cleaned = folder.replace(/^\d+\s*[-_.)\s]\s*/, '').trim()
   return cleaned || folder
+}
+
+/**
+ * A trait's name from its file name, as collectors will read it in the metadata. The legacy upload
+ * used the file name without its extension, as written; so does this, except that an ordering
+ * number in front (`01_Red.png`, `2 - Red.png`, `3.Red.png`) is dropped and runs of spaces close
+ * up. Case, inner underscores and hyphens stay. A name that is only a number (`7.png`) stays `7`.
+ */
+export function traitNameFromFile(fileName: string): string {
+  const base = fileName
+    .replace(/\.[^./]+$/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const cleaned = base.replace(/^\d+\s*[-_.)]\s*/, '').trim()
+  return cleaned || base || fileName
+}
+
+/** Names that read the same ignoring case, by their lower-case form, with every folder or file that has it. */
+function clashes<T>(items: T[], nameOf: (item: T) => string): Map<string, T[]> {
+  const seen = new Map<string, T[]>()
+  for (const item of items) {
+    const key = nameOf(item).toLowerCase()
+    seen.set(key, [...(seen.get(key) ?? []), item])
+  }
+  return new Map([...seen].filter(([, list]) => list.length > 1))
 }
 
 function cleanPath(path: string): string[] {
@@ -112,13 +145,51 @@ export function detectProject(files: PathedFile[], fallbackName = 'Collection'):
         .map(([layerFolder, entries]) => ({
           folder: layerFolder,
           name: cleanFolderName(layerFolder),
-          traits: entries
-            .sort((a, b) => collator.compare(a.file.name, b.file.name))
-            .map((entry) => ({ key: entry.path, name: entry.file.name, file: entry.file, path: entry.path })),
+          traits: markClashes(
+            entries
+              .sort((a, b) => collator.compare(a.file.name, b.file.name))
+              .map((entry) => ({
+                key: entry.path,
+                name: traitNameFromFile(entry.file.name),
+                file: entry.file,
+                path: entry.path,
+              })),
+          ),
         })),
     }))
 
+  // Two folders that read as one name (`01_Eyes` and `Eyes`) would give two layers, or two
+  // collections, of the same name; the legacy tool refused duplicate layer names.
+  for (const [, same] of clashes(collections, (c) => c.name))
+    structureErrors.push(
+      `${listExamples(same.map((c) => c.folder))} would all be the collection ${same[0]!.name}. Rename the folders so each name is used once.`,
+    )
+  for (const collection of collections)
+    for (const [, same] of clashes(collection.layers, (l) => l.name))
+      structureErrors.push(
+        `${listExamples(same.map((l) => l.folder))} in ${collection.name} would all be the layer ${same[0]!.name}. Rename the folders so each layer name is used once.`,
+      )
+  if (structureErrors.length > 0) return { projectName: null, collections: [], structureErrors, skipped }
+
   return { projectName: nested ? [...roots][0]! : null, collections, structureErrors, skipped }
+}
+
+/**
+ * Marks every image after the first that gives the same trait name in a layer, ignoring case
+ * (`Red.png` and `01_red.png`). Two traits of one name would be one attribute in the metadata, so
+ * the legacy tool refused duplicate trait names; the later images are left out with a reason.
+ */
+function markClashes(traits: DetectedTrait[]): DetectedTrait[] {
+  const first = new Map<string, DetectedTrait>()
+  return traits.map((trait) => {
+    const key = trait.name.toLowerCase()
+    const earlier = first.get(key)
+    if (!earlier) {
+      first.set(key, trait)
+      return trait
+    }
+    return { ...trait, clash: `Also named ${earlier.name}, like ${earlier.file.name}. Rename one of them.` }
+  })
 }
 
 export function countTraits(project: Pick<DetectedProject, 'collections'>): number {

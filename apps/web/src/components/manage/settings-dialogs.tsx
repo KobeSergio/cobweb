@@ -13,6 +13,8 @@ import {
   InputGroupText,
 } from '@cobweb/ui/components/input-group'
 import { RadioGroup, RadioGroupItem } from '@cobweb/ui/components/radio-group'
+// Royalty limits are Deploy's: 0 to 10%, in whole basis points, as in legacy.
+import { MAX_ROYALTY_PERCENT, royaltyBps as royaltyPercentToBps } from '@/components/deploy/deploy-form'
 import { formatBps, type Address, type SupportedChain } from '@/lib/demo'
 import { TransactionDialog } from './transaction-dialog'
 
@@ -30,6 +32,8 @@ function readAddress(value: string): { address: Address | null; error: string | 
         : 'Enter a full 0x address, 42 characters.',
     }
   }
+  if (/^0x0{40}$/i.test(trimmed))
+    return { address: null, error: 'The zero address cannot receive anything. The contract refuses it.' }
   return { address: getAddress(trimmed), error: null }
 }
 
@@ -97,8 +101,8 @@ export function RoyaltyDialog({
   const [percentValue, setPercent] = useState(String(bps / 100))
   const [receiverValue, setReceiver] = useState<string>(receiver)
   const { address, error: receiverError } = readAddress(receiverValue)
-  const valid = /^\d{1,3}(\.\d{1,2})?$/.test(percentValue.trim()) && Number(percentValue) <= 100
-  const nextBps = valid ? Math.round(Number(percentValue) * 100) : null
+  const nextBps = royaltyPercentToBps(percentValue)
+  const valid = nextBps !== null
   const unchanged = nextBps === bps && address?.toLowerCase() === receiver.toLowerCase()
   return (
     <TransactionDialog
@@ -138,12 +142,13 @@ export function RoyaltyDialog({
             </InputGroupAddon>
           </InputGroup>
           {!valid ? (
-            <FieldError>Enter 0 to 100, with up to two decimals.</FieldError>
-          ) : Number(percentValue) > 10 ? (
-            <FieldDescription className="text-warning-foreground">
-              Royalties above 10% are unusual and can put buyers off.
+            <FieldError>Enter 0 to {MAX_ROYALTY_PERCENT}, with up to two decimals.</FieldError>
+          ) : (
+            <FieldDescription>
+              <span className="numeric">{nextBps.toLocaleString('en-US')}</span> bps on chain. 0 to{' '}
+              {MAX_ROYALTY_PERCENT}%.
             </FieldDescription>
-          ) : null}
+          )}
         </Field>
         <Field data-invalid={!!receiverError}>
           <FieldLabel htmlFor={`${id}-receiver`}>Recipient</FieldLabel>

@@ -18,7 +18,14 @@ import { Stat, StatGroup } from '@cobweb/ui/components/stat'
 import { StatusBadge } from '@cobweb/ui/components/status-badge'
 import { Tabs, TabsList, TabsTrigger } from '@cobweb/ui/components/tabs'
 import type { Tables } from '@/lib/database.types'
-import type { GroupWhitelist, Hex, MintGroup, SupportedChain } from '@/lib/demo'
+// Seam: the launch chains come from `packages/shared` chain config in Phase 5.
+import {
+  SUPPORTED_CHAINS,
+  type GroupWhitelist,
+  type Hex,
+  type MintGroup,
+  type SupportedChain,
+} from '@/lib/demo'
 import { manageTabHref } from '@/lib/steps'
 import { count, downloadText } from './format'
 import { toCsv } from './recipients'
@@ -241,6 +248,7 @@ function GroupWhitelistView({
         onOpenChange={setAdding}
         group={group}
         existing={new Set(list.entries.map((entry) => entry.address.toLowerCase()))}
+        snapshot={{ chains: SUPPORTED_CHAINS, chainId: chain.id }}
         onAdd={(rows) => {
           // SEAM: the rows are saved to `whitelist_entries` by a server action before the chunk write.
           const result = addEntries(list, rows)

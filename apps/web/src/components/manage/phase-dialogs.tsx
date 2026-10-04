@@ -3,14 +3,10 @@
 import { useId, useState } from 'react'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@cobweb/ui/components/field'
 import { Input } from '@cobweb/ui/components/input'
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-  InputGroupText,
-} from '@cobweb/ui/components/input-group'
 import { formatNative, toWei, type MintGroup, type SupportedChain } from '@/lib/demo'
-import { count, NATIVE_AMOUNT, shortUtc } from './format'
+import { count, shortUtc } from './format'
+import { allocationCheck, priceError, publicCapError } from './phase-rules'
+import { PriceInput } from './price-input'
 import { TransactionDialog } from './transaction-dialog'
 
 /** What every phase dialog needs from the screen. */
@@ -19,17 +15,11 @@ export type PhaseContext = {
   groups: MintGroup[]
   /** The collection's max supply: allocations together may not exceed it. */
   maxSupply: number
+  /** Tokens airdropped (and burned): collection supply no phase can sell. */
+  airdropped: number
   blockTimestamp: number
   open: boolean
   onOpenChange: (open: boolean) => void
-}
-
-/** Room left for allocations if `groupId`'s allocation is replaced. */
-export function allocationRoom(groups: MintGroup[], maxSupply: number, groupId: number | null): number {
-  const others = groups
-    .filter((group) => group.id !== groupId)
-    .reduce((sum, group) => sum + group.maxSupply, 0)
-  return maxSupply - others
 }
 
 /** Open now or Close. Closing also clears the schedule, as the contract does. */
@@ -163,8 +153,8 @@ export function PriceDialog({
 }: PhaseContext & { group: MintGroup; onApply: (patch: Partial<MintGroup>) => void }) {
   const id = useId()
   const [value, setValue] = useState(formatNative(group.priceWei, '', 18).trim().replace(/,/g, ''))
-  const valid = NATIVE_AMOUNT.test(value.trim())
-  const wei = valid ? toWei(value.trim()) : null
+  const error = priceError(value, ctx.chain.nativeSymbol)
+  const wei = error ? null : toWei(value.trim())
   const unchanged = wei === group.priceWei
   return (
     <TransactionDialog
@@ -189,31 +179,14 @@ export function PriceDialog({
       }
       onConfirmed={() => wei && onApply({ priceWei: wei })}
     >
-      <Field data-invalid={!valid}>
-        <FieldLabel htmlFor={`${id}-price`}>Price per token</FieldLabel>
-        <InputGroup>
-          <InputGroupInput
-            id={`${id}-price`}
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            inputMode="decimal"
-            autoComplete="off"
-            className="numeric"
-            aria-invalid={!valid}
-            aria-describedby={`${id}-price-help`}
-          />
-          <InputGroupAddon align="inline-end">
-            <InputGroupText className="numeric">{ctx.chain.nativeSymbol}</InputGroupText>
-          </InputGroupAddon>
-        </InputGroup>
-        {valid ? (
-          <FieldDescription id={`${id}-price-help`}>
-            Now {formatNative(group.priceWei, ctx.chain.nativeSymbol)}. Enter 0 for a free mint.
-          </FieldDescription>
-        ) : (
-          <FieldError id={`${id}-price-help`}>Enter an amount such as 0.0025.</FieldError>
-        )}
-      </Field>
+      <PriceInput
+        id={`${id}-price`}
+        value={value}
+        onChange={setValue}
+        chain={ctx.chain}
+        error={error}
+        hint={<>Now {formatNative(group.priceWei, ctx.chain.nativeSymbol, 18)}. Enter 0 for a free mint.</>}
+      />
     </TransactionDialog>
   )
 }
@@ -226,15 +199,13 @@ export function SupplyDialog({
 }: PhaseContext & { group: MintGroup; onApply: (patch: Partial<MintGroup>) => void }) {
   const id = useId()
   const [value, setValue] = useState(String(group.maxSupply))
-  const room = allocationRoom(ctx.groups, ctx.maxSupply, group.id)
-  const next = Number(value)
-  const error = !/^\d+$/.test(value)
-    ? 'Enter a whole number.'
-    : next < group.minted
-      ? `It cannot go below ${count(group.minted)}, the tokens this phase has already minted.`
-      : next > room
-        ? `Only ${count(room)} fit: the other phases hold ${count(ctx.maxSupply - room)} of ${count(ctx.maxSupply)}.`
-        : null
+  const { error, warning, room, next } = allocationCheck({
+    groups: ctx.groups,
+    maxSupply: ctx.maxSupply,
+    groupId: group.id,
+    value,
+    airdropped: ctx.airdropped,
+  })
   return (
     <TransactionDialog
       open={ctx.open}
@@ -255,11 +226,7 @@ export function SupplyDialog({
                 { name: 'maxSupply', value: String(next) },
               ],
               check: () =>
-                next < group.minted
-                  ? 'MaxSupplyBelowMinted'
-                  : next > room
-                    ? 'AllocationsExceedMaxSupply'
-                    : null,
+                next < group.minted ? 'BelowMinted' : next > room ? 'AllocationsExceedMaxSupply' : null,
             }
       }
       onConfirmed={() => onApply({ maxSupply: next })}
@@ -285,6 +252,7 @@ export function SupplyDialog({
             <span className="numeric">{count(room)}</span> (room left in the collection).
           </FieldDescription>
         )}
+        {warning && <p className="text-warning-foreground text-[0.8125rem]">{warning}</p>}
       </Field>
     </TransactionDialog>
   )
@@ -299,7 +267,10 @@ export function PublicCapDialog({
   const id = useId()
   const [value, setValue] = useState(String(cap))
   const next = Number(value)
-  const error = !/^\d+$/.test(value) || next < 1 ? 'Enter a whole number of 1 or more.' : null
+  const error = publicCapError(value, ctx.maxSupply)
+  const publicAllocation = ctx.groups.find((group) => group.kind === 'public')?.maxSupply
+  // Legacy refused a limit above the public allocation; the contract allows it, so it is a note.
+  const above = !error && publicAllocation !== undefined && next > publicAllocation
   return (
     <TransactionDialog
       open={ctx.open}
@@ -338,6 +309,12 @@ export function PublicCapDialog({
           <FieldDescription id={`${id}-cap-help`}>
             Wallets that already minted more keep their tokens; they just cannot mint again.
           </FieldDescription>
+        )}
+        {above && (
+          <p className="text-warning-foreground text-[0.8125rem]">
+            More than the public phase&apos;s {count(publicAllocation ?? 0)} tokens, so one wallet could take
+            the whole phase.
+          </p>
         )}
       </Field>
     </TransactionDialog>

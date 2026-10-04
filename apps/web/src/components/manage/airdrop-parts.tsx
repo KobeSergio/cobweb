@@ -18,7 +18,41 @@ import {
 } from '@/lib/demo'
 import { Row } from './bits'
 import { count, relativeTo, shortUtc } from './format'
+import { toCsv } from './recipients'
 import { TransactionDialog } from './transaction-dialog'
+
+/** Token ids an airdrop minted, `#41 to #50`, or a dash when the record has none. */
+export function tokenRange(airdrop: AirdropRecord): string {
+  if (!airdrop.firstTokenId) return '-'
+  const last = airdrop.firstTokenId + airdrop.tokens - 1
+  return last === airdrop.firstTokenId ? `#${airdrop.firstTokenId}` : `#${airdrop.firstTokenId} to #${last}`
+}
+
+/** The history as CSV, one row per transaction, as legacy's "Export CSV" (which listed recipients). */
+export function airdropHistoryCsv(airdrops: AirdropRecord[], chain: SupportedChain): string {
+  return toCsv([
+    [
+      'date_utc',
+      'kind',
+      'recipients',
+      'tokens',
+      'token_ids',
+      `fee_${chain.nativeSymbol.toLowerCase()}`,
+      'tx_hash',
+    ],
+    ...[...airdrops]
+      .sort((a, b) => b.at - a.at)
+      .map((airdrop) => [
+        new Date(airdrop.at * 1000).toISOString(),
+        airdrop.burn ? 'burn' : 'airdrop',
+        airdrop.recipients,
+        airdrop.tokens,
+        tokenRange(airdrop),
+        formatNative(airdrop.feePaidWei, '', 18).trim().replace(/,/g, ''),
+        airdrop.txHash,
+      ]),
+  ])
+}
 
 /** Past airdrops and burns, newest first. */
 export function AirdropHistory({
@@ -46,6 +80,7 @@ export function AirdropHistory({
           <TableHead>Kind</TableHead>
           <TableHead className="text-right">Recipients</TableHead>
           <TableHead className="text-right">Tokens</TableHead>
+          <TableHead>Token ids</TableHead>
           <TableHead className="text-right">Fee paid</TableHead>
           <TableHead className="pr-6 text-right">Transaction</TableHead>
         </TableRow>
@@ -71,6 +106,9 @@ export function AirdropHistory({
             </TableCell>
             <TableCell className="numeric text-right">{count(airdrop.recipients)}</TableCell>
             <TableCell className="numeric text-right">{count(airdrop.tokens)}</TableCell>
+            <TableCell className="numeric text-muted-foreground text-[0.8125rem]">
+              {tokenRange(airdrop)}
+            </TableCell>
             <TableCell className="numeric text-right">
               {formatNative(airdrop.feePaidWei, chain.nativeSymbol)}
             </TableCell>
@@ -219,5 +257,31 @@ export function BurnDialog({
         />
       </Field>
     </TransactionDialog>
+  )
+}
+
+/** Left to mint now and after the send; `after` null means the send is more than is left. */
+export function SupplyNote({
+  remaining,
+  after,
+  label,
+}: {
+  remaining: number
+  after: number | null
+  label: string
+}) {
+  return (
+    <div className="bg-well shadow-inset rounded-lg px-3 py-2.5 text-[0.8125rem]">
+      <p className="flex justify-between">
+        <span className="text-muted-foreground">Left to mint</span>
+        <span className="numeric">{count(remaining)}</span>
+      </p>
+      <p className="flex justify-between">
+        <span className="text-muted-foreground">{label}</span>
+        <span className={after === null ? 'numeric text-destructive-foreground' : 'numeric'}>
+          {after === null ? 'Not enough' : count(after)}
+        </span>
+      </p>
+    </div>
   )
 }

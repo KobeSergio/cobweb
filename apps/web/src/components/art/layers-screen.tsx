@@ -22,6 +22,7 @@ import { useCollections } from './collections/use-collections'
 import { ConfirmDialog } from './confirm-dialog'
 import { DeferredArtNotice } from './finish-later'
 import { AddTraitsDialog } from './layers/add-traits-dialog'
+import { BlankMetadataSwitch } from './layers/blank-metadata-switch'
 import { FolderUpload } from './layers/folder-upload/folder-upload'
 import { LayerList } from './layers/layer-list'
 import { LayerPreview } from './layers/layer-preview'
@@ -111,6 +112,17 @@ export function LayersScreen({
     .map((layer) => `${previewNames[layer.id] || 'nothing'} ${layer.name.toLowerCase()}`)
     .join(', ')}`
 
+  /** Shows a trait in the preview, and shows its layer again if it was hidden. */
+  const showInPreview = (layerId: string, traitId: string) => {
+    setPreview((current) => ({ ...current, [layerId]: traitId }))
+    setHidden((current) => {
+      if (!current.has(layerId)) return current
+      const nextSet = new Set(current)
+      nextSet.delete(layerId)
+      return nextSet
+    })
+  }
+
   const toggleHidden = (id: string) =>
     setHidden((current) => {
       const nextSet = new Set(current)
@@ -172,6 +184,9 @@ export function LayersScreen({
                 setPreview((current) => ({ ...current, ...rollPreview(layers, newSeed(), editor.rules) }))
               }
               seed={collection.id}
+              layers={layers}
+              shownDna={shownDna}
+              onPick={(layerId, traitId) => showInPreview(layerId, traitId)}
             />
             <LayerList
               layers={layers}
@@ -186,6 +201,11 @@ export function LayersScreen({
               onDelete={(layer) => editor.askDeleteLayer(layer, () => setSelectedId(null))}
               readOnly={readOnly}
             />
+            <BlankMetadataSwitch
+              on={editor.showBlankTraits}
+              onChange={editor.setShowBlankTraits}
+              readOnly={readOnly}
+            />
           </div>
           {selected && (
             <TraitPanel
@@ -196,15 +216,7 @@ export function LayersScreen({
               counts={editor.counts}
               generated={editor.generated}
               previewTraitId={shownDna[position]}
-              onPreview={(traitId) => {
-                setPreview((current) => ({ ...current, [selected.id]: traitId }))
-                setHidden((current) => {
-                  if (!current.has(selected.id)) return current
-                  const nextSet = new Set(current)
-                  nextSet.delete(selected.id)
-                  return nextSet
-                })
-              }}
+              onPreview={(traitId) => showInPreview(selected.id, traitId)}
               onAddFiles={(files) => setUpload({ layerId: selected.id, files })}
               editor={editor}
               readOnly={readOnly}

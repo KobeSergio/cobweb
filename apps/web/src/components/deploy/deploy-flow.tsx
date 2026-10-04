@@ -1,6 +1,6 @@
 'use client'
 
-import { sampleSupply, DEMO_COLLECTION } from '@/lib/demo'
+import { sampleSupply, toWei, DEMO_COLLECTION } from '@/lib/demo'
 import { RocketIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { isAddress } from 'viem'
@@ -12,6 +12,7 @@ import type { FlowLink } from '@/lib/steps'
 import { StageFooter } from '@/components/shell/stage-footer'
 import { DeployDialog, type FinalCheck } from './deploy-dialog'
 import { DeployForm, royaltyBps, validateDeploy, type DeployFormValues } from './deploy-form'
+import { defaultPhases, DeployPhases, phaseErrors, type DraftPhase } from './deploy-phases'
 import {
   DEPLOY_OUTCOMES,
   deployCollection,
@@ -47,6 +48,7 @@ const FIELD_IDS = {
   royalty: 'deploy-royalty',
   royaltyReceiver: 'deploy-royalty-receiver',
   publicCap: 'deploy-cap',
+  phases: 'deploy-phases',
 }
 
 /** Deploy: the form and live summary, the final check and transaction, then the deployed result. */
@@ -65,6 +67,9 @@ export function DeployFlow(props: DeployFlowProps) {
     publicCap: String(draft.publicMaxMintPerWallet),
   })
   const values: DeployFormValues = { ...form, payout: payout ?? wallet.address }
+  // Supply is set in Art (at Generate, or by the file count); a collection without it cannot deploy.
+  const maxSupply = sampleSupply(collection.max_supply, DEMO_COLLECTION.maxSupply)
+  const [phases, setPhases] = useState<DraftPhase[]>(() => defaultPhases(maxSupply))
   const [touched, setTouched] = useState<Set<string>>(new Set())
   const [showAll, setShowAll] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -86,15 +91,15 @@ export function DeployFlow(props: DeployFlowProps) {
 
   useEffect(() => () => controller.current?.abort(), [])
 
-  // Supply is set in Art (at Generate, or by the file count); a collection without it cannot deploy.
-  const maxSupply = sampleSupply(collection.max_supply, DEMO_COLLECTION.maxSupply)
+  const chain = chains.find((entry) => entry.id === values.chainId) ?? null
+  const phaseCheck = phaseErrors(phases, maxSupply, chain?.nativeSymbol ?? 'ETH')
   const allErrors = validateDeploy(values, maxSupply)
+  if (!phaseCheck.ok) allErrors.phases = phaseCheck.total ?? 'Check the phases.'
   const errors = Object.fromEntries(
     Object.entries(allErrors).filter(([key]) => showAll || touched.has(key)),
   ) as typeof allErrors
   const valid = Object.keys(allErrors).length === 0
 
-  const chain = chains.find((entry) => entry.id === values.chainId) ?? null
   const fees = chain ? factoryFees[chain.id] : undefined
   const bps = royaltyBps(values.royalty)
   const payoutAddress = isAddress(values.payout) ? (values.payout as Address) : null
@@ -104,7 +109,7 @@ export function DeployFlow(props: DeployFlowProps) {
       ? (values.royaltyReceiver as Address)
       : null
   const args =
-    payoutAddress && receiver && bps !== null && !allErrors.publicCap
+    payoutAddress && receiver && bps !== null && !allErrors.publicCap && phaseCheck.ok
       ? {
           name: collection.name,
           symbol: collection.symbol,
@@ -115,6 +120,11 @@ export function DeployFlow(props: DeployFlowProps) {
           royaltyBps: bps,
           owner: wallet.address,
           royaltyReceiver: receiver,
+          mintGroups: phases.map((phase) => ({
+            name: phase.name.trim(),
+            priceWei: toWei(phase.price.trim()),
+            maxSupply: Number(phase.supply),
+          })),
         }
       : null
   const predicted = args ? predictAddress(collection.id, args) : null
@@ -219,6 +229,7 @@ export function DeployFlow(props: DeployFlowProps) {
           royaltyBps: args.royaltyBps,
           royaltyReceiver: args.royaltyReceiver,
           publicCap: args.publicMaxMintPerWallet,
+          phases: args.mintGroups,
           fees,
           deployCostWei: deployCost[chain.id],
         }
@@ -240,18 +251,31 @@ export function DeployFlow(props: DeployFlowProps) {
   return (
     <div className="flex flex-1 flex-col">
       <div className="grid items-start gap-8 pb-10 lg:grid-cols-[minmax(0,1fr)_22rem] xl:grid-cols-[minmax(0,1fr)_25rem]">
-        <DeployForm
-          collection={collection}
-          chains={chains}
-          deployCost={deployCost}
-          walletAddress={wallet.address}
-          walletChainId={wallet.chainId}
-          values={values}
-          errors={errors}
-          readOnly={readOnly}
-          onChange={change}
-          onAddressSaved={setAddress}
-        />
+        <div className="space-y-8">
+          <DeployForm
+            collection={collection}
+            chains={chains}
+            deployCost={deployCost}
+            walletAddress={wallet.address}
+            walletChainId={wallet.chainId}
+            values={values}
+            errors={errors}
+            readOnly={readOnly}
+            onChange={change}
+            onAddressSaved={setAddress}
+          />
+          <DeployPhases
+            phases={phases}
+            onChange={(next) => {
+              setPhases(next)
+              setTouched((current) => new Set([...current, 'phases']))
+            }}
+            maxSupply={maxSupply}
+            chain={chain}
+            readOnly={readOnly}
+            showErrors={showAll || touched.has('phases')}
+          />
+        </div>
         <aside aria-label="Deploy summary" className="lg:sticky lg:top-6">
           <DeploySummary
             collection={current}

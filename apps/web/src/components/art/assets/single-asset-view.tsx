@@ -13,16 +13,21 @@ import { Panel } from '@cobweb/ui/components/panel'
 import { formatBytes } from '../lib/image-checks'
 import { SINGLE_ASSET_MAX_SUPPLY } from '@/lib/collections'
 import { AttributeChips } from './asset-card'
+import { AttributesDialog } from './attributes-dialog'
 import { DropZone, FilePickerButton } from './drop-zone'
 import { QuantityInput } from './quantity-input'
 import { ACCEPT_MEDIA, mediaLabel, MEDIA_RULES_COPY } from './media'
 import { MediaPreview } from './media-preview'
-import type { AssetItem } from './types'
+import type { AssetItem, Attribute } from './types'
 
 /**
  * One artwork shared by every token, and the quantity: how many tokens there are, which is the
  * collection's supply for this type (1 to 4,000; `supplyControl` saves it). Unlike 1/1s it may be a
  * GIF or an MP4 video as well as an image (MASTER_PLAN, Art: media types).
+ *
+ * As legacy's `single_asset { url, id_start: 1, id_end: quantity, layers }`: the attributes
+ * ("layers", starting with Name: <file name>) are shared by every token, ids run 1 to the quantity,
+ * and the contract's `tokenURI` returns one metadata file for all of them (MASTER_PLAN, Contracts).
  */
 export function SingleAssetView({
   item,
@@ -30,6 +35,7 @@ export function SingleAssetView({
   readOnly,
   onReplace,
   onQuantity,
+  onAttributes,
   supplyControl,
 }: {
   item: AssetItem | undefined
@@ -37,6 +43,7 @@ export function SingleAssetView({
   readOnly: boolean
   onReplace: (file: File | undefined) => void
   onQuantity: (quantity: number) => void
+  onAttributes: (attributes: Attribute[]) => void
   /** Saves the quantity as the supply. */
   supplyControl?: React.ReactNode
 }) {
@@ -102,13 +109,23 @@ export function SingleAssetView({
               )}
             </p>
           </div>
-          <AttributeChips attributes={item.attributes} />
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted-foreground">Attributes, shared by every token</p>
+            <AttributeChips attributes={item.attributes} />
+          </div>
           {!readOnly && (
             <>
-              <FilePickerButton multiple={false} accept={ACCEPT_MEDIA} onFiles={pick} variant="secondary">
-                <RefreshCwIcon aria-hidden="true" />
-                Replace file
-              </FilePickerButton>
+              <div className="flex flex-wrap gap-2">
+                <FilePickerButton multiple={false} accept={ACCEPT_MEDIA} onFiles={pick} variant="secondary">
+                  <RefreshCwIcon aria-hidden="true" />
+                  Replace file
+                </FilePickerButton>
+                <AttributesDialog
+                  fileName={item.fileName}
+                  attributes={item.attributes}
+                  onSave={onAttributes}
+                />
+              </div>
               <p className="text-[0.8125rem] text-muted-foreground">{MEDIA_RULES_COPY}</p>
             </>
           )}
@@ -133,7 +150,10 @@ export function SingleAssetView({
           )}
           <p className="text-[0.8125rem] text-muted-foreground">
             From <span className="numeric">1</span> to{' '}
-            <span className="numeric">{SINGLE_ASSET_MAX_SUPPLY.toLocaleString('en-US')}</span> tokens.
+            <span className="numeric">{SINGLE_ASSET_MAX_SUPPLY.toLocaleString('en-US')}</span> tokens. Token
+            ids run from <span className="numeric text-foreground">#1</span> to{' '}
+            <span className="numeric text-foreground">#{quantity.toLocaleString('en-US')}</span>, and every id
+            shares one metadata file.
           </p>
           {supplyControl}
         </Panel>

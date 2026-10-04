@@ -1,10 +1,16 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { checkImageFiles, LAYER_IMAGE_RULES, nameFromFile } from '../../lib/image-checks'
+import { checkImageFiles, LAYER_IMAGE_RULES } from '../../lib/image-checks'
 import { useArtProject } from '../../state/art-store'
 import { queueTotals, useUploadQueue } from '../../uploads/upload-queue'
-import { countTraits, detectProject, type DetectedProject, type PathedFile } from './folder-tree'
+import {
+  countTraits,
+  detectProject,
+  traitNameFromFile,
+  type DetectedProject,
+  type PathedFile,
+} from './folder-tree'
 import { mergeUpload, type UploadedImage } from './to-layers'
 
 /** One image's checks: the preview URL, its pixel size and any reasons it cannot be used. */
@@ -66,7 +72,11 @@ export function useFolderUpload(collectionId: string, projectName: string, activ
         }
         out.forEach((entry, index) => {
           urls.current.push(entry.url)
-          results.set(batch[index]!.key, { url: entry.url, errors: entry.errors })
+          const clash = batch[index]!.clash
+          results.set(batch[index]!.key, {
+            url: entry.url,
+            errors: clash ? [...entry.errors, clash] : entry.errors,
+          })
           if (!size && entry.errors.length === 0 && entry.width && entry.height)
             size = { width: entry.width, height: entry.height }
         })
@@ -108,12 +118,17 @@ export function useFolderUpload(collectionId: string, projectName: string, activ
   /** Hands the uploaded layers to the Art screens; the Layers screen then replaces this upload. */
   const finish = useCallback(() => {
     if (!detected) return
+    const names = new Map(
+      detected.collections.flatMap((c) =>
+        c.layers.flatMap((layer) => layer.traits.map((t) => [t.key, t.name])),
+      ),
+    )
     const images = new Map<string, UploadedImage>()
     for (const item of items) {
       if (item.state !== 'done') continue
       // Seam: `item.url` is the stored object once storage exists; the preview URL stands in for it.
       const url = checks.get(item.id)?.url
-      if (url) images.set(item.id, { url, name: nameFromFile(item.file.name) })
+      if (url) images.set(item.id, { url, name: names.get(item.id) ?? traitNameFromFile(item.file.name) })
     }
     // The previews now belong to the art project, so they are not revoked when this unmounts.
     urls.current = []

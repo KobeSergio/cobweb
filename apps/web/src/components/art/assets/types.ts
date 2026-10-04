@@ -1,7 +1,8 @@
 import type { MediaType } from '@/lib/demo/types'
 import { MB, type ImageRules } from '../lib/image-checks'
+import type { Attribute } from './token-list'
 
-export type Attribute = { traitType: string; value: string }
+export type { Attribute }
 
 /** One uploaded artwork in the list. */
 export type AssetItem = {
@@ -23,7 +24,7 @@ export type AssetItem = {
 export type RejectedFile = { key: string; fileName: string; errors: string[] }
 
 export const ASSET_MAX_BYTES = 20 * MB
-/** Editions one 1/1 file may carry (the legacy cap). */
+/** Editions one 1/1 file may carry (legacy `Add1of1sModal` MAX_QUANTITY). */
 export const MAX_EDITIONS_PER_FILE = 10_000
 
 /**

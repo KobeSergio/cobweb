@@ -22,7 +22,7 @@ import {
   setConstant,
   updateTrait,
 } from '../state/layer-edits'
-import { formatPercent } from '../lib/trait-index'
+import { formatPercent, roundWeight } from '../lib/trait-index'
 
 const STALE_NOTE = 'Rarity changed after this set was generated. Regenerate to apply the new weights.'
 
@@ -192,8 +192,13 @@ export function useLayersEditor(
       })
     },
 
+    /** Project-wide: blank traits written into the metadata (legacy `show_blank_traits`). */
+    showBlankTraits: project.showBlankTraits,
+    setShowBlankTraits: (on: boolean) => apply((p) => ({ ...p, showBlankTraits: on })),
+
+    /** Percent, 0 to 100, kept to two decimals as the legacy tool did. */
     setWeight: (traitId: string, weight: number) =>
-      withLayers((current) => updateTrait(current, traitId, { weight }), true),
+      withLayers((current) => updateTrait(current, traitId, { weight: roundWeight(weight) }), true),
     setConstant: (traitId: string, count: number | null) =>
       withLayers((current) => setConstant(current, traitId, count), true),
     evenOut: (layerId: string) => withLayers((current) => evenOut(current, layerId), true),

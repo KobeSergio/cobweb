@@ -68,18 +68,17 @@ export function FilterSidebar({
           </div>
         )}
         <div className="space-y-2">
-          <Label htmlFor="token-search">Token id</Label>
+          <Label htmlFor="token-search">Search</Label>
           <InputGroup>
             <InputGroupAddon>
               <SearchIcon aria-hidden="true" />
             </InputGroupAddon>
             <InputGroupInput
               id="token-search"
-              inputMode="numeric"
-              placeholder="For example 42"
+              type="search"
+              placeholder="Token id or trait, e.g. 42 or Crown"
               value={search}
-              onChange={(event) => onSearch(event.target.value.replace(/[^0-9]/g, ''))}
-              className="numeric"
+              onChange={(event) => onSearch(event.target.value)}
             />
           </InputGroup>
         </div>

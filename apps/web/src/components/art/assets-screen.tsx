@@ -20,6 +20,8 @@ import { OneOfOneView } from './assets/one-of-one-view'
 import { SingleAssetView } from './assets/single-asset-view'
 import { AssetsSummary } from './assets/summary'
 import { SupplySave } from './assets/supply-save'
+import { TokenDetailsPanel } from './assets/token-details'
+import { TOKEN_DESCRIPTION_MAX, TOKEN_NAME_MAX, type TokenDetails } from './assets/token-list'
 import { useAnnouncer, useAssetItems, type AssetUploads } from './assets/use-assets'
 import { UploadQueuePanel } from './uploads/upload-queue-panel'
 import { queueTotals, useUploadQueue } from './uploads/upload-queue'
@@ -36,7 +38,11 @@ export type AssetsScreenProps = {
  * checked in the browser and then sent through the resumable upload queue (pause, resume, retry),
  * and review the list. The supply comes from here: files times editions for 1/1s, the quantity for
  * a single asset, saved with `setCollectionSupply`. Uploads are simulated until storage exists
- * (the seam is `uploads/resumable-upload.ts`).
+ * (the seam is `uploads/resumable-upload.ts`). The token name and description start from the
+ * collection's and are written into every token (legacy asked for them in the 1/1 and single
+ * asset modals). The legacy parity audit is section 12 of the creator flow spec.
+ *
+ * Seam: `details` and the items are submitted as the token list at lock (Phase 3).
  */
 export function AssetsScreen({ collection, assets, readOnly }: AssetsScreenProps) {
   const type = collection.project_type
@@ -50,6 +56,12 @@ export function AssetsScreen({ collection, assets, readOnly }: AssetsScreenProps
   const [singleQuantity, setSingleQuantity] = useState(
     () => collection.max_supply ?? assets[0]?.quantity ?? 1,
   )
+  const [details, setDetails] = useState<TokenDetails>(() => ({
+    name: collection.name.slice(0, TOKEN_NAME_MAX),
+    description: collection.description.slice(0, TOKEN_DESCRIPTION_MAX),
+    order: 'upload',
+    seed: 0,
+  }))
 
   if (type === 'generative') {
     return (
@@ -116,14 +128,30 @@ export function AssetsScreen({ collection, assets, readOnly }: AssetsScreenProps
       {files.checking > 0 && <CheckingNotice count={files.checking} />}
       {!readOnly && <RejectedList rejected={files.rejected} onDismiss={files.dismissRejected} />}
       {!readOnly && <UploadQueuePanel queue={queue} items={uploads} />}
+      {files.items.length > 0 && (
+        <TokenDetailsPanel
+          details={details}
+          onChange={setDetails}
+          tokens={tokens}
+          numbered={type === 'one_of_one'}
+          readOnly={readOnly}
+        />
+      )}
       {type === 'one_of_one' && (
         <OneOfOneView
           items={files.items}
           readOnly={readOnly}
-          onAdd={files.add}
-          onQuantity={files.setQuantity}
-          onAttributes={files.setAttributes}
-          onRemove={files.remove}
+          details={details}
+          handlers={{
+            onAdd: files.add,
+            onQuantity: files.setQuantity,
+            onQuantityMany: files.setQuantityMany,
+            onAttributes: files.setAttributes,
+            onApplyAttribute: files.applyAttribute,
+            onClearTraitType: files.clearTraitType,
+            onRemove: files.remove,
+            onRemoveMany: files.removeMany,
+          }}
         />
       )}
       {type === 'single_asset' && (
@@ -133,6 +161,7 @@ export function AssetsScreen({ collection, assets, readOnly }: AssetsScreenProps
           readOnly={readOnly}
           onReplace={files.replace}
           onQuantity={setSingleQuantity}
+          onAttributes={(attributes) => single && files.setAttributes(single.key, attributes)}
           supplyControl={single ? supplyControl : undefined}
         />
       )}

@@ -71,6 +71,3 @@ export function downloadText(fileName: string, text: string, type = 'text/csv') 
   link.click()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
-
-/** A decimal native amount the creator typed, e.g. `0.0015`. */
-export const NATIVE_AMOUNT = /^\d{1,12}(\.\d{1,18})?$/

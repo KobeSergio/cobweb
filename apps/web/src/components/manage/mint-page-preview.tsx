@@ -1,4 +1,4 @@
-import { GlobeIcon, LockIcon, MessageCircleIcon } from 'lucide-react'
+import { GlobeIcon, LockIcon, MessageCircleIcon, SendIcon } from 'lucide-react'
 import { Artwork } from '@cobweb/ui/components/artwork'
 import { Progress } from '@cobweb/ui/components/progress'
 import { StatusBadge } from '@cobweb/ui/components/status-badge'
@@ -42,6 +42,11 @@ export function MintPagePreview({
       key: 'discord',
       label: 'Discord',
       icon: <MessageCircleIcon className="size-3" />,
+    },
+    overrides.socials.telegram && {
+      key: 'telegram',
+      label: 'Telegram',
+      icon: <SendIcon className="size-3" />,
     },
   ].filter((item): item is { key: string; label: string; icon: React.ReactElement } => !!item)
 

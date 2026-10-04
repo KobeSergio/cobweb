@@ -9,6 +9,7 @@ import { Button } from '@cobweb/ui/components/button'
 import { Checkbox } from '@cobweb/ui/components/checkbox'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@cobweb/ui/components/field'
 import { Input } from '@cobweb/ui/components/input'
+import { RadioGroup, RadioGroupItem } from '@cobweb/ui/components/radio-group'
 import { StatusBadge } from '@cobweb/ui/components/status-badge'
 import { ChainName } from '@/components/chains/chain-icon'
 import type { Address, Deployment, SupportedChain } from '@/lib/demo'
@@ -32,13 +33,16 @@ export function TradabilitySettings({
   chain: SupportedChain
 }) {
   const [validator, setValidator] = useState<Address>(DEFAULT_VALIDATOR)
-  const [locked, setLocked] = useState(deployment.transfersLocked)
-  const [dialog, setDialog] = useState<{ key: 'lock' | 'validator'; id: number; locked: boolean } | null>(
-    null,
-  )
+  // Seam: read from the validator (`getCollectionSecurityPolicy` or the V5 ruleset) through the freshness server.
+  const [level, setLevel] = useState<TransferLevel>(deployment.transfersLocked ? 'locked' : 'enforced')
+  const [dialog, setDialog] = useState<{
+    key: 'lock' | 'validator'
+    id: number
+    level: TransferLevel
+  } | null>(null)
   const [open, setOpen] = useState(false)
   const show = (key: 'lock' | 'validator') => {
-    setDialog({ key, id: Date.now(), locked })
+    setDialog({ key, id: Date.now(), level })
     setOpen(true)
   }
   const isDefault = validator.toLowerCase() === DEFAULT_VALIDATOR.toLowerCase()
@@ -66,7 +70,7 @@ export function TradabilitySettings({
 
       <Setting
         title="Transfers"
-        description="Locking stops every send, sale and listing until you unlock. Mints and airdrops still work."
+        description="The validator's level for this collection: royalties enforced (the default), royalties not enforced, or locked. Mints and airdrops work at every level."
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
           {!chain.transferLock ? (
@@ -74,52 +78,134 @@ export function TradabilitySettings({
               <ChainName chain={chain} className="text-foreground" iconClassName="size-3.5" /> has no transfer
               validator, so transfers cannot be locked there.
             </p>
-          ) : locked ? (
+          ) : level === 'locked' ? (
             <Badge variant="destructive" className="w-fit">
               <LockIcon aria-hidden="true" />
               Locked. Nobody can send, sell or list
             </Badge>
+          ) : level === 'open' ? (
+            <Badge variant="warning" className="w-fit">
+              <LockOpenIcon aria-hidden="true" />
+              Transferable, royalties not enforced
+            </Badge>
           ) : (
-            <StatusBadge status="draft">Transferable</StatusBadge>
+            <StatusBadge status="draft">Transferable, royalties enforced</StatusBadge>
           )}
           {chain.transferLock && (
-            <Button variant={locked ? 'secondary' : 'destructive'} size="sm" onClick={() => show('lock')}>
-              {locked ? <LockOpenIcon aria-hidden="true" /> : <LockIcon aria-hidden="true" />}
-              {locked ? 'Unlock' : 'Lock'}
+            <Button
+              variant={level === 'enforced' ? 'destructive' : 'secondary'}
+              size="sm"
+              onClick={() => show('lock')}
+            >
+              <ShieldAlertIcon aria-hidden="true" />
+              Change level
             </Button>
           )}
         </div>
       </Setting>
 
       {dialog?.key === 'lock' && (
-        <TransactionDialog
+        <LevelDialog
           key={dialog.id}
           {...base}
-          destructive={!dialog.locked}
-          title={dialog.locked ? 'Unlock transfers' : 'Lock transfers'}
-          description={
-            dialog.locked
-              ? 'Holders can send and sell again, and marketplaces can list the collection.'
-              : 'From the moment this confirms, nobody can send, sell or list these tokens until you unlock them. Open listings stop working. Mints and airdrops still work.'
-          }
-          actionLabel={dialog.locked ? 'Unlock' : 'Lock transfers'}
-          successMessage={dialog.locked ? 'Transfers unlocked' : 'Transfers locked'}
-          request={{
-            // SEAM: the validator's exact function and level per chain are confirmed in Phase 1 (MASTER_PLAN, Contracts: lock).
-            contract: 'Transfer validator',
-            functionName: 'setTransferSecurityLevelOfCollection',
-            args: [
-              { name: 'collection', value: deployment.contractAddress },
-              { name: 'level', value: dialog.locked ? 'Default' : 'Non-transferable' },
-            ],
-          }}
-          onConfirmed={() => setLocked(!dialog.locked)}
+          collection={deployment.contractAddress}
+          current={dialog.level}
+          onApply={setLevel}
         />
       )}
       {dialog?.key === 'validator' && (
         <ValidatorDialog key={dialog.id} {...base} current={validator} onApply={setValidator} />
       )}
     </>
+  )
+}
+
+type TransferLevel = 'enforced' | 'open' | 'locked'
+
+/** Legacy's three levels (OPEN_TO_ALL, FULLY_OPEN, SOULBOUND), in Cobweb's words. */
+const LEVELS: { value: TransferLevel; title: string; description: string; arg: string }[] = [
+  {
+    value: 'enforced',
+    title: 'Royalties enforced',
+    description: 'Holders can send and sell. Sales go through only where your royalty is paid. The default.',
+    arg: 'Royalties enforced',
+  },
+  {
+    value: 'open',
+    title: 'Royalties not enforced',
+    description:
+      'Holders can send and sell anywhere, like a plain ERC-721. Royalties are up to the marketplace.',
+    arg: 'Open',
+  },
+  {
+    value: 'locked',
+    title: 'Locked',
+    description: 'Nobody can send, sell or list until you change it back. Open listings stop working.',
+    arg: 'Non-transferable',
+  },
+]
+
+/** Change the collection's transfer level on the validator. Red for anything but the default. */
+function LevelDialog({
+  collection,
+  current,
+  onApply,
+  ...base
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  chain: SupportedChain
+  collection: Address
+  current: TransferLevel
+  onApply: (level: TransferLevel) => void
+}) {
+  const id = useId()
+  const [next, setNext] = useState<TransferLevel>(current)
+  const choice = LEVELS.find((level) => level.value === next)!
+  return (
+    <TransactionDialog
+      {...base}
+      destructive={next !== 'enforced'}
+      title="Transfer level"
+      description="Applies to every token in the collection as soon as the transaction confirms. Mints and airdrops are not affected."
+      actionLabel={`Set ${choice.title.toLowerCase()}`}
+      successMessage={`Transfers: ${choice.title.toLowerCase()}`}
+      request={
+        next === current
+          ? null
+          : {
+              // Seam: legacy called `setRulesetOfCollection(collection, 0 | 1 | 2, 0x0, 0, 0)` on validator
+              // V5 and `setTransferSecurityLevelOfCollection(collection, 0 | 1 | 9, false, false, false)` on
+              // V4. The exact call per chain is confirmed in Phase 5 (MASTER_PLAN, Contracts: lock).
+              contract: 'Transfer validator',
+              functionName: 'setTransferSecurityLevelOfCollection',
+              args: [
+                { name: 'collection', value: collection },
+                { name: 'level', value: choice.arg },
+              ],
+            }
+      }
+      onConfirmed={() => onApply(next)}
+    >
+      <RadioGroup value={next} onValueChange={(value) => setNext(value as TransferLevel)} className="gap-3">
+        {LEVELS.map((level) => (
+          <label
+            key={level.value}
+            htmlFor={`${id}-${level.value}`}
+            className="flex items-start gap-3 text-sm"
+          >
+            <RadioGroupItem id={`${id}-${level.value}`} value={level.value} className="mt-0.5" />
+            <span>
+              <span className="font-medium">
+                {level.title}
+                {level.value === current && <span className="text-muted-foreground font-normal"> (now)</span>}
+              </span>
+              <span className="text-muted-foreground block text-[0.8125rem]">{level.description}</span>
+            </span>
+          </label>
+        ))}
+      </RadioGroup>
+    </TransactionDialog>
   )
 }
 

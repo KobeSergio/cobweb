@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import type { ArtRule, Collection, GeneratedToken, Layer } from '@/lib/demo'
+import { buildTraitIndex } from '../lib/trait-index'
 import { remapDna } from './layer-edits'
 import { deleteTokens } from './token-logic'
 
@@ -29,6 +30,19 @@ export type ArtProject = {
   seed: number
   /** Why the generated set no longer reflects the layers (weights changed), or null. */
   staleNote: string | null
+  /**
+   * The token name and description chosen at Generate (legacy auto-populate asked for both).
+   * Tokens are named "<token name> #<id>". Undefined until the creator sets them: Generate then
+   * offers the project's name and description.
+   */
+  tokenName?: string
+  tokenDescription?: string
+  /**
+   * Whether blank traits are written into the metadata (legacy `show_blank_traits`, off by
+   * default): on, a token without a hat says "Headwear: None"; off, the attribute is left out.
+   * Seam: stored on the project and read by the render job at lock (Phase 4).
+   */
+  showBlankTraits: boolean
 }
 
 export type ArtSeed = Pick<ArtProject, 'collections' | 'layers' | 'rules' | 'tokens'>
@@ -37,7 +51,7 @@ const projects = new Map<string, ArtProject>()
 const listeners = new Map<string, Set<() => void>>()
 
 function fromSeed(seed: ArtSeed): ArtProject {
-  return { ...seed, canvas: null, seed: 0x0a7115, staleNote: null }
+  return { ...seed, canvas: null, seed: 0x0a7115, staleNote: null, showBlankTraits: false }
 }
 
 /** Fills in the slices this screen knows about that the shared project does not have yet. */
@@ -66,7 +80,10 @@ function ensure(key: string, seed: ArtSeed): ArtProject {
   )
   const seededTokens =
     remapped && orphans.size
-      ? deleteTokens(remapped, orphans, remapped[0]!.name.replace(/ #\d+$/, ''))
+      ? deleteTokens(remapped, orphans, {
+          tokenName: current.tokenName ?? remapped[0]!.name.replace(/ #\d+$/, ''),
+          index: buildTraitIndex(current.layers ?? seed.layers ?? []),
+        })
       : remapped
   const merged: ArtProject = {
     ...current,

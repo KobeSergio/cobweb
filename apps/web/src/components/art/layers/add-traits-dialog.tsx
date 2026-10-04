@@ -19,10 +19,24 @@ import {
   checkImageFiles,
   formatBytes,
   LAYER_IMAGE_RULES,
-  nameFromFile,
   releaseChecked,
   type CheckedFile,
 } from '../lib/image-checks'
+import { traitNameFromFile } from './folder-upload/folder-tree'
+
+/**
+ * Why a name cannot be used: empty, or already a trait of the layer or another file in this batch,
+ * ignoring case (the legacy tool refused duplicate trait names; they would be one attribute).
+ */
+function nameProblem(name: string, taken: string[], batch: string[]): string | null {
+  const clean = name.trim().toLowerCase()
+  if (!clean) return 'Enter a name.'
+  if (taken.some((other) => other.toLowerCase() === clean))
+    return 'This layer already has a trait of this name.'
+  if (batch.filter((other) => other.trim().toLowerCase() === clean).length > 1)
+    return 'Two files here have this name.'
+  return null
+}
 
 type Canvas = { width: number; height: number } | null
 
@@ -132,7 +146,7 @@ export function AddTraitsDialog({
     setChecked((current) => [...current, ...results])
     setNames((current) => ({
       ...current,
-      ...Object.fromEntries(results.map((entry) => [entry.key, nameFromFile(entry.file.name)])),
+      ...Object.fromEntries(results.map((entry) => [entry.key, traitNameFromFile(entry.file.name)])),
     }))
     setChecking(0)
   }
@@ -152,6 +166,9 @@ export function AddTraitsDialog({
 
   const valid = checked.filter((entry) => entry.errors.length === 0)
   const invalid = checked.length - valid.length
+  const taken = layer?.traits.map((trait) => trait.name) ?? []
+  const batchNames = valid.map((entry) => names[entry.key] ?? '')
+  const problemOf = (key: string) => nameProblem(names[key] ?? '', taken, batchNames)
   const remove = (key: string) => {
     const entry = checked.find((candidate) => candidate.key === key)
     if (entry) releaseChecked([entry])
@@ -211,14 +228,23 @@ export function AddTraitsDialog({
                   </div>
                   <div className="min-w-0 flex-1 space-y-1">
                     {ok ? (
-                      <Input
-                        value={names[entry.key] ?? ''}
-                        onChange={(event) =>
-                          setNames((current) => ({ ...current, [entry.key]: event.target.value }))
-                        }
-                        aria-label={`Trait name for ${entry.file.name}`}
-                        className="h-8 text-sm"
-                      />
+                      <>
+                        <Input
+                          value={names[entry.key] ?? ''}
+                          onChange={(event) =>
+                            setNames((current) => ({ ...current, [entry.key]: event.target.value }))
+                          }
+                          aria-label={`Trait name for ${entry.file.name}`}
+                          aria-invalid={!!problemOf(entry.key)}
+                          aria-describedby={problemOf(entry.key) ? `${entry.key}-name-error` : undefined}
+                          className="h-8 text-sm"
+                        />
+                        {problemOf(entry.key) && (
+                          <p id={`${entry.key}-name-error`} className="text-destructive-foreground text-xs">
+                            {problemOf(entry.key)}
+                          </p>
+                        )}
+                      </>
                     ) : (
                       <p className="truncate text-sm font-medium">{entry.file.name}</p>
                     )}
@@ -273,9 +299,7 @@ export function AddTraitsDialog({
               Cancel
             </Button>
             <Button
-              disabled={
-                valid.length === 0 || checking > 0 || valid.some((entry) => !names[entry.key]?.trim())
-              }
+              disabled={valid.length === 0 || checking > 0 || valid.some((entry) => !!problemOf(entry.key))}
               onClick={() => {
                 const first = valid[0]
                 onAdd(

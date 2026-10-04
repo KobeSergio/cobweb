@@ -6,69 +6,46 @@ import { Button } from '@cobweb/ui/components/button'
 import { Calendar } from '@cobweb/ui/components/calendar'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@cobweb/ui/components/field'
 import { Input } from '@cobweb/ui/components/input'
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-  InputGroupText,
-} from '@cobweb/ui/components/input-group'
 import { Popover, PopoverContent, PopoverTrigger } from '@cobweb/ui/components/popover'
 import { Switch } from '@cobweb/ui/components/switch'
 import { formatUtc, toWei, type MintGroup } from '@/lib/demo'
-import { count, NATIVE_AMOUNT, relativeTo, useTimeZone } from './format'
-import { allocationRoom, type PhaseContext } from './phase-dialogs'
+import { count, relativeTo, useTimeZone } from './format'
+import type { PhaseContext } from './phase-dialogs'
+import { PhaseDetailsFields, type PhaseDetails } from './phase-details'
+import { allocationCheck, phaseNameError, priceError } from './phase-rules'
+import { PriceInput } from './price-input'
+import { defaultStart, unixToZoned, zonedToUnix, type ZonedStart } from './schedule'
 import { TransactionDialog } from './transaction-dialog'
 
-type Start = { date: Date | undefined; time: string }
-
-/** A start as the creator's local date and time, from a unix time. */
-function startFrom(seconds: number): Start {
-  const date = new Date(seconds * 1000)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return {
-    date: new Date(date.getFullYear(), date.getMonth(), date.getDate()),
-    time: `${pad(date.getHours())}:${pad(date.getMinutes())}`,
-  }
+/** `YYYY-MM-DD` to a Date for the calendar (a calendar day, not an instant). */
+const toCalendarDay = (date: string) => {
+  const [year, month, day] = date.split('-').map(Number)
+  return year && month && day ? new Date(year, month - 1, day) : undefined
 }
-
-/** The default: a day after the chain's time, on the hour. */
-function defaultStart(blockTimestamp: number): Start {
-  return startFrom(Math.ceil((blockTimestamp + 86_400) / 3600) * 3600)
-}
-
-/** Local date and time to the unix seconds the contract receives, or null if incomplete. */
-function toUnix(start: Start): number | null {
-  const match = /^(\d{2}):(\d{2})$/.exec(start.time)
-  if (!start.date || !match) return null
-  const { date } = start
-  const local = new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-    Number(match[1]),
-    Number(match[2]),
-  )
-  return Math.floor(local.getTime() / 1000)
-}
+const fromCalendarDay = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 
 /**
  * Date and time in the creator's time zone, with what that means in UTC and the exact value
- * the transaction sends. Warns when the time has already passed on chain.
+ * the transaction sends. Warns when the time has already passed on chain, or does not exist in the
+ * zone (skipped by a daylight-saving change).
  */
 function StartPicker({
   value,
   onChange,
   blockTimestamp,
+  timeZone,
 }: {
-  value: Start
-  onChange: (start: Start) => void
+  value: ZonedStart
+  onChange: (start: ZonedStart) => void
   blockTimestamp: number
+  timeZone: string
 }) {
   const id = useId()
-  const timeZone = useTimeZone()
   const [calendarOpen, setCalendarOpen] = useState(false)
-  const unix = toUnix(value)
-  const chainDay = startFrom(blockTimestamp).date
+  const unix = zonedToUnix(value, timeZone)
+  const day = toCalendarDay(value.date)
+  const chainDay = toCalendarDay(unixToZoned(blockTimestamp, timeZone).date)
   return (
     <div className="grid gap-4">
       <div className="grid gap-3 sm:grid-cols-[1fr_9rem]">
@@ -78,8 +55,8 @@ function StartPicker({
             <PopoverTrigger asChild>
               <Button id={`${id}-date`} type="button" variant="outline" className="justify-start font-normal">
                 <CalendarIcon aria-hidden="true" />
-                {value.date
-                  ? value.date.toLocaleDateString('en-US', {
+                {day
+                  ? day.toLocaleDateString('en-US', {
                       weekday: 'short',
                       month: 'short',
                       day: 'numeric',
@@ -91,11 +68,11 @@ function StartPicker({
             <PopoverContent className="w-auto p-0" align="start">
               <Calendar
                 mode="single"
-                selected={value.date}
-                defaultMonth={value.date}
+                selected={day}
+                defaultMonth={day}
                 disabled={chainDay ? { before: chainDay } : undefined}
                 onSelect={(date) => {
-                  onChange({ ...value, date })
+                  if (date) onChange({ ...value, date: fromCalendarDay(date) })
                   setCalendarOpen(false)
                 }}
               />
@@ -117,7 +94,7 @@ function StartPicker({
         In your time zone, <span className="text-foreground">{timeZone}</span>.
       </p>
 
-      {unix !== null && (
+      {unix !== null ? (
         <dl className="bg-well shadow-inset grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-lg border px-4 py-3 text-[0.8125rem]">
           <dt className="text-muted-foreground">UTC</dt>
           <dd className="numeric text-right">{formatUtc(unix)}</dd>
@@ -126,6 +103,13 @@ function StartPicker({
           <dt className="text-muted-foreground">From the chain&apos;s time</dt>
           <dd className="numeric text-right">{relativeTo(unix, blockTimestamp)}</dd>
         </dl>
+      ) : (
+        value.date &&
+        value.time && (
+          <FieldError>
+            {value.time} does not exist on that day in {timeZone}: the clocks skip it. Pick another time.
+          </FieldError>
+        )
       )}
       {unix !== null && unix <= blockTimestamp && (
         <p role="alert" className="bg-warning-soft flex gap-2 rounded-lg px-4 py-3 text-sm">
@@ -143,10 +127,13 @@ export function ScheduleDialog({
   onApply,
   ...ctx
 }: PhaseContext & { group: MintGroup; onApply: (patch: Partial<MintGroup>) => void }) {
-  const [start, setStart] = useState<Start>(() =>
-    group.scheduledStart > 0 ? startFrom(group.scheduledStart) : defaultStart(ctx.blockTimestamp),
+  const timeZone = useTimeZone()
+  const [start, setStart] = useState<ZonedStart>(() =>
+    group.scheduledStart > 0
+      ? unixToZoned(group.scheduledStart, timeZone)
+      : defaultStart(ctx.blockTimestamp, timeZone),
   )
-  const unix = toUnix(start)
+  const unix = zonedToUnix(start, timeZone)
   return (
     <TransactionDialog
       open={ctx.open}
@@ -170,36 +157,51 @@ export function ScheduleDialog({
       }
       onConfirmed={() => unix !== null && onApply({ scheduledStart: unix })}
     >
-      <StartPicker value={start} onChange={setStart} blockTimestamp={ctx.blockTimestamp} />
+      <StartPicker
+        value={start}
+        onChange={setStart}
+        blockTimestamp={ctx.blockTimestamp}
+        timeZone={timeZone}
+      />
     </TransactionDialog>
   )
 }
 
-/** Register a new whitelist phase with its price, allocation and an optional start. */
+/**
+ * Register a new whitelist phase with its price, allocation and an optional start, in one
+ * `registerMintGroup` call (legacy registered an index with an empty `setMintQuota` and set the
+ * rest in later transactions). Name, description and visibility are saved by Cobweb.
+ */
 export function AddPhaseDialog({
   onAdd,
   ...ctx
 }: PhaseContext & { onAdd: (group: Omit<MintGroup, 'active'>) => void }) {
   const id = useId()
+  const timeZone = useTimeZone()
   const nextId = Math.max(0, ...ctx.groups.map((group) => group.id)) + 1
-  const room = allocationRoom(ctx.groups, ctx.maxSupply, null)
-  const [name, setName] = useState('')
+  const [details, setDetails] = useState<PhaseDetails>({ name: '', description: '', visible: true })
   const [price, setPrice] = useState('0')
-  const [supply, setSupply] = useState(String(Math.min(100, Math.max(0, room))))
+  const [supply, setSupply] = useState(() =>
+    String(Math.min(100, Math.max(0, ctx.maxSupply - ctx.groups.reduce((sum, g) => sum + g.maxSupply, 0)))),
+  )
   const [scheduled, setScheduled] = useState(false)
-  const [start, setStart] = useState<Start>(() => defaultStart(ctx.blockTimestamp))
+  const [start, setStart] = useState<ZonedStart>(() => defaultStart(ctx.blockTimestamp, timeZone))
 
-  const nameError = name.trim() ? null : 'Name the phase, for example "Holders".'
-  const priceError = NATIVE_AMOUNT.test(price.trim()) ? null : 'Enter an amount such as 0.002.'
-  const supplyNumber = Number(supply)
-  const supplyError =
-    !/^\d+$/.test(supply) || supplyNumber < 1
-      ? 'Enter a whole number of 1 or more.'
-      : supplyNumber > room
-        ? `Only ${count(room)} tokens are not allocated to a phase.`
-        : null
-  const unix = scheduled ? toUnix(start) : 0
-  const ready = !nameError && !priceError && !supplyError && unix !== null
+  const nameError = phaseNameError(
+    details.name,
+    ctx.groups.map((group) => group.name),
+  )
+  const priceProblem = priceError(price, ctx.chain.nativeSymbol)
+  const allocation = allocationCheck({
+    groups: ctx.groups,
+    maxSupply: ctx.maxSupply,
+    groupId: null,
+    value: supply,
+    airdropped: ctx.airdropped,
+    min: 1,
+  })
+  const unix = scheduled ? zonedToUnix(start, timeZone) : 0
+  const ready = !nameError && !priceProblem && !allocation.error && unix !== null
 
   return (
     <TransactionDialog
@@ -209,7 +211,7 @@ export function AddPhaseDialog({
       title="Add a phase"
       description="A new whitelist phase. It starts closed unless you schedule it; add its addresses on the Whitelist tab."
       actionLabel="Add phase"
-      successMessage={`${name.trim() || 'Phase'} added`}
+      successMessage={`${details.name.trim() || 'Phase'} added`}
       className="sm:max-w-xl"
       request={
         ready
@@ -219,20 +221,23 @@ export function AddPhaseDialog({
               args: [
                 { name: 'mintGroup', value: String(nextId) },
                 { name: 'price', value: `${toWei(price.trim())} wei` },
-                { name: 'maxSupply', value: String(supplyNumber) },
+                { name: 'maxSupply', value: String(allocation.next) },
                 { name: 'startTimestamp', value: String(unix) },
               ],
-              check: () => (supplyNumber > room ? 'AllocationsExceedMaxSupply' : null),
+              check: () => (allocation.next > allocation.room ? 'AllocationsExceedMaxSupply' : null),
             }
           : null
       }
       onConfirmed={() =>
+        // Seam: name, description and visibility are written to `mint_groups` with the group id.
         onAdd({
           id: nextId,
-          name: name.trim(),
+          name: details.name.trim(),
+          description: details.description.trim(),
+          visible: details.visible,
           kind: 'whitelist',
           priceWei: toWei(price.trim()),
-          maxSupply: supplyNumber,
+          maxSupply: allocation.next,
           minted: 0,
           flag: false,
           scheduledStart: unix ?? 0,
@@ -240,51 +245,39 @@ export function AddPhaseDialog({
       }
     >
       <div className="grid gap-5">
-        <Field data-invalid={!!name && !!nameError}>
-          <FieldLabel htmlFor={`${id}-name`}>Name</FieldLabel>
-          <Input
-            id={`${id}-name`}
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            maxLength={40}
-            autoComplete="off"
-          />
-          <FieldDescription>Shown on the mint page. Stored by Cobweb, not on chain.</FieldDescription>
-        </Field>
+        <PhaseDetailsFields
+          value={details}
+          onChange={setDetails}
+          nameError={details.name ? nameError : null}
+        />
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field data-invalid={!!priceError}>
-            <FieldLabel htmlFor={`${id}-price`}>Price per token</FieldLabel>
-            <InputGroup>
-              <InputGroupInput
-                id={`${id}-price`}
-                value={price}
-                onChange={(event) => setPrice(event.target.value)}
-                inputMode="decimal"
-                className="numeric"
-                aria-invalid={!!priceError}
-              />
-              <InputGroupAddon align="inline-end">
-                <InputGroupText className="numeric">{ctx.chain.nativeSymbol}</InputGroupText>
-              </InputGroupAddon>
-            </InputGroup>
-            {priceError && <FieldError>{priceError}</FieldError>}
-          </Field>
-          <Field data-invalid={!!supplyError}>
+          <PriceInput
+            id={`${id}-price`}
+            value={price}
+            onChange={setPrice}
+            chain={ctx.chain}
+            error={priceProblem}
+          />
+          <Field data-invalid={!!allocation.error}>
             <FieldLabel htmlFor={`${id}-supply`}>Max supply</FieldLabel>
             <Input
               id={`${id}-supply`}
               type="number"
               min={1}
-              max={room}
+              max={allocation.room}
               value={supply}
               onChange={(event) => setSupply(event.target.value)}
-              aria-invalid={!!supplyError}
+              aria-invalid={!!allocation.error}
             />
-            {supplyError ? (
-              <FieldError>{supplyError}</FieldError>
+            {allocation.error ? (
+              <FieldError>{allocation.error}</FieldError>
             ) : (
-              <FieldDescription>
-                <span className="numeric">{count(room)}</span> not allocated yet.
+              <FieldDescription className={allocation.warning ? 'text-warning-foreground' : undefined}>
+                {allocation.warning ?? (
+                  <>
+                    <span className="numeric">{count(allocation.room)}</span> not allocated yet.
+                  </>
+                )}
               </FieldDescription>
             )}
           </Field>
@@ -293,7 +286,14 @@ export function AddPhaseDialog({
           <Switch id={`${id}-scheduled`} checked={scheduled} onCheckedChange={setScheduled} />
           <FieldLabel htmlFor={`${id}-scheduled`}>Schedule a start</FieldLabel>
         </Field>
-        {scheduled && <StartPicker value={start} onChange={setStart} blockTimestamp={ctx.blockTimestamp} />}
+        {scheduled && (
+          <StartPicker
+            value={start}
+            onChange={setStart}
+            blockTimestamp={ctx.blockTimestamp}
+            timeZone={timeZone}
+          />
+        )}
       </div>
     </TransactionDialog>
   )

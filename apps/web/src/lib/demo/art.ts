@@ -306,11 +306,23 @@ export function satisfiesRules(traitIds: ReadonlySet<string>, rules: ArtRule[]):
 }
 
 /**
+ * How many rolls one token gets before the generator gives up on it, as in the legacy generator
+ * (10,000 failed attempts in a row). A collection stops at the first token it cannot make, and
+ * the creator is told how many it could make ("can only generate X").
+ */
+export const MAX_ATTEMPTS = 10_000
+
+/**
  * Pairing rules would reject most rolls if left to chance, so a trait that needs a partner gets
  * one: the partner's layer is switched to one of the related traits (and, for "always pairs
  * with", a related trait that appears alone pulls in its source trait).
  */
-function repairPairs(dna: string[], layers: Layer[], rules: ArtRule[], random: () => number): string[] {
+export function repairPairs(
+  dna: string[],
+  layers: Layer[],
+  rules: ArtRule[],
+  random: () => number,
+): string[] {
   const next = [...dna]
   const layerIndex = (traitId: string) =>
     layers.findIndex((layer) => layer.traits.some((t) => t.id === traitId))
@@ -342,6 +354,8 @@ function repairPairs(dna: string[], layers: Layer[], rules: ArtRule[], random: (
  * one is offered to a token up front; when no unique token within the rules can carry it, that
  * token is rolled without it and the trait ends below its cap (`cappedShortfalls` reports it).
  * Rules named in a conflict are skipped, as the generator would refuse them.
+ * When a token cannot be made unique and within the rules in `MAX_ATTEMPTS` rolls, the collection
+ * stops there and returns fewer than `count` tokens, as the legacy generator did.
  */
 export function generateTokens(
   layers: Layer[],
@@ -374,7 +388,7 @@ export function generateTokens(
   const seen = new Set<string>()
   const tokens: Omit<GeneratedToken, 'rank' | 'previewUrl'>[] = []
   const roll = (fixed: Trait[]): string[] | null => {
-    for (let attempt = 0; attempt < 1000; attempt++) {
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       let dna = layers.map(
         (layer) =>
           (fixed.find((trait) => trait.layerId === layer.id) ?? pickWeighted(layer.traits, random)).id,
@@ -387,11 +401,8 @@ export function generateTokens(
   for (let index = 0; index < count; index++) {
     const fixed = forced.get(index) ?? []
     // With its capped traits if possible; else without them, so the trait ends below its cap.
-    // If even that fails the last roll stands, and the set reports it as breaking the rules.
-    let dna = roll(fixed) ?? (fixed.length ? roll([]) : null)
-    if (!dna) {
-      dna = layers.map((layer) => pickWeighted(layer.traits, random).id)
-    }
+    const dna = roll(fixed) ?? (fixed.length ? roll([]) : null)
+    if (!dna) break
     seen.add(dna.join('|'))
     const id = firstId + index
     tokens.push({ id, name: `Night Owls #${id}`, collectionId, dna })
@@ -445,15 +456,33 @@ export function cappedShortfalls(
 }
 
 /**
- * Ranks tokens by rarity, 1 the rarest: the sum over traits of (tokens / tokens with that trait).
- * The legacy formula; blanks count as a trait. Ranked across the whole project, every collection together.
+ * The key a trait is counted under for rarity: its layer name and its own name, as they appear in
+ * the metadata (`trait_type`, `value`). The same pair in two collections is one attribute.
  */
-export function rankTokens(tokens: Omit<GeneratedToken, 'rank' | 'previewUrl'>[]): GeneratedToken[] {
-  const counts = countTraits(tokens)
+export function attributeKey(layerName: string, traitName: string): string {
+  return JSON.stringify([layerName, traitName])
+}
+
+/**
+ * Ranks tokens by rarity, 1 the rarest, with the legacy formula: for each token, the sum over its
+ * traits of (tokens / tokens with that attribute), divided by its layer count. Ranked across the
+ * whole project. Attributes are counted by `keyOf` (layer and trait name), summed across
+ * collections; the legacy generator meant to do the same but an operator precedence slip kept the
+ * first collection's count only. Blanks count as an attribute. Ties go to the lower id.
+ */
+export function rankTokens(
+  tokens: Omit<GeneratedToken, 'rank' | 'previewUrl'>[],
+  keyOf: (traitId: string) => string = demoAttributeKey,
+): GeneratedToken[] {
+  const counts = new Map<string, number>()
+  for (const token of tokens)
+    for (const traitId of token.dna) counts.set(keyOf(traitId), (counts.get(keyOf(traitId)) ?? 0) + 1)
   const total = tokens.length
   const scored = tokens.map((token) => ({
     token,
-    score: token.dna.reduce((sum, traitId) => sum + total / (counts[traitId] ?? 1), 0),
+    score:
+      token.dna.reduce((sum, traitId) => sum + total / (counts.get(keyOf(traitId)) ?? 1), 0) /
+      Math.max(1, token.dna.length),
   }))
   const order = [...scored].sort((a, b) => b.score - a.score || a.token.id - b.token.id)
   const rankById = new Map(order.map((entry, index) => [entry.token.id, index + 1]))
@@ -465,6 +494,13 @@ export function rankTokens(tokens: Omit<GeneratedToken, 'rank' | 'previewUrl'>[]
 }
 
 const TRAITS_BY_ID = new Map(DEMO_LAYERS.flatMap((layer) => layer.traits).map((trait) => [trait.id, trait]))
+const LAYER_NAMES = new Map(DEMO_LAYERS.map((layer) => [layer.id, layer.name]))
+
+/** `attributeKey` for the sample layers; an unknown id counts as an attribute of its own. */
+function demoAttributeKey(traitId: string): string {
+  const trait = TRAITS_BY_ID.get(traitId)
+  return trait ? attributeKey(LAYER_NAMES.get(trait.layerId) ?? '', trait.name) : traitId
+}
 
 export function getTrait(traitId: string): Trait | undefined {
   return TRAITS_BY_ID.get(traitId)

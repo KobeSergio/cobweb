@@ -4,23 +4,23 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { setCollectionSupply } from '@/app/actions/collection-supply'
 import type { ArtRule, Collection, GeneratedToken, Layer } from '@/lib/demo'
-import { buildTraitIndex } from '../lib/trait-index'
+import { attributeCounts, attributeKeyOf, buildTraitIndex } from '../lib/trait-index'
 import { useArtProject } from '../state/art-store'
 import { setCollectionSize, supplyOf } from '../state/collection-edits'
 import { layersOf, pruneRules } from '../state/layer-edits'
 import { activeRules, analyseRules } from '../state/rule-logic'
+import { fillTo, generateSet, newSeed, regenerate, tokenNameProblem } from '../state/generation'
 import {
   changeTrait,
   countByCollection,
   countTraits,
   deleteTokens,
-  fillTo,
-  generateSet,
-  newSeed,
-  regenerate,
+  renameTokens,
+  setDescription,
   shuffleIds,
   swapIds,
   tokensBreakingRules,
+  type SetContext,
 } from '../state/token-logic'
 
 /** Long enough to read as work being done, short enough not to be in the way. */
@@ -37,7 +37,8 @@ const MIN_GENERATE_MS = 900
  */
 export function useGenerator(
   collectionId: string,
-  collectionName: string,
+  /** The project's name and description: what the token name and description start as. */
+  project0: { name: string; description: string },
   seed: { collections: Collection[]; layers: Layer[]; rules: ArtRule[]; tokens: GeneratedToken[] },
 ) {
   const [project, update] = useArtProject(collectionId, seed)
@@ -45,6 +46,11 @@ export function useGenerator(
   const supply = supplyOf(collections)
   const layers = project.layers ?? seed.layers
   const index = useMemo(() => buildTraitIndex(layers), [layers])
+  const tokenName = project.tokenName ?? project0.name
+  const tokenDescription = project.tokenDescription ?? project0.description
+  // Both are required, as in the legacy auto-populate.
+  const nameProblem = tokenNameProblem(tokenName)
+  const ctx: SetContext = { tokenName, index }
   const rules = useMemo(
     () => pruneRules(project.rules ?? seed.rules, new Set(index.keys())),
     [project.rules, seed.rules, index],
@@ -53,6 +59,9 @@ export function useGenerator(
   const active = useMemo(() => activeRules(rules, conflicts), [rules, conflicts])
   const tokens = project.tokens === undefined ? seed.tokens : project.tokens
   const counts = useMemo(() => (tokens ? countTraits(tokens) : {}), [tokens])
+  // By layer and trait name, every collection together: what a marketplace counts (legacy token details).
+  const attributes = useMemo(() => attributeCounts(tokens ?? [], index), [tokens, index])
+  const keyOf = useMemo(() => attributeKeyOf(index), [index])
   const perCollection = useMemo(() => countByCollection(tokens ?? []), [tokens])
   const breaking = useMemo(() => (tokens ? tokensBreakingRules(tokens, active) : []), [tokens, active])
 
@@ -76,6 +85,10 @@ export function useGenerator(
   }
 
   const generate = () => {
+    if (nameProblem) {
+      setProblems([nameProblem])
+      return
+    }
     setGenerating(true)
     setProblems([])
     setProgress(8)
@@ -84,7 +97,7 @@ export function useGenerator(
     timers.current.push(
       window.setTimeout(() => {
         setProgress(35)
-        const outcome = generateSet(layers, active, collections, newSeed(), collectionName)
+        const outcome = generateSet(layers, active, collections, newSeed(), ctx, tokenDescription.trim())
         const wait = Math.max(0, MIN_GENERATE_MS - (performance.now() - started))
         timers.current.push(window.setTimeout(() => setProgress(80), wait / 2))
         timers.current.push(
@@ -117,6 +130,8 @@ export function useGenerator(
     conflicts,
     tokens,
     counts,
+    /** Tokens with the same attribute (layer and trait name) as this trait, every collection together. */
+    attributeCount: (traitId: string) => attributes.get(keyOf(traitId)) ?? 0,
     breaking,
     staleNote: project.staleNote,
     generating,
@@ -125,24 +140,43 @@ export function useGenerator(
     dismissProblems: () => setProblems([]),
     generate,
 
+    /** The token name ("<name> #<id>") and description; a valid new name renames the set at once. */
+    tokenName,
+    tokenDescription,
+    nameProblem,
+    setTokenName: (name: string) =>
+      update((p) => {
+        const next = { ...p, tokenName: name }
+        if (tokenNameProblem(name) || !p.tokens) return next
+        return { ...next, tokens: renameTokens(p.tokens, { tokenName: name, index }) }
+      }),
+    /** The description new tokens get. Tokens already generated keep theirs; regenerate to apply it. */
+    setTokenDescription: (description: string) => update((p) => ({ ...p, tokenDescription: description })),
+    /** Blank traits written into the metadata (legacy `show_blank_traits`). */
+    showBlankTraits: project.showBlankTraits,
+    describe: (tokenId: number, description: string) =>
+      tokens && setTokens(setDescription(tokens, tokenId, description)),
+    describeAll: () =>
+      tokens && setTokens(tokens.map((token) => ({ ...token, description: tokenDescription.trim() }))),
+
     regenerate: (ids: ReadonlySet<number>) => {
       if (!tokens) return false
-      const next = regenerate(tokens, ids, layers, active, collectionName)
+      const next = regenerate(tokens, ids, layers, active, ctx)
       if (next) setTokens(next)
       return !!next
     },
     fill: () => {
       if (!tokens) return false
-      const next = fillTo(tokens, collections, layers, active, collectionName)
+      const next = fillTo(tokens, collections, layers, active, ctx, tokenDescription.trim())
       if (next) setTokens(next)
       return !!next
     },
-    remove: (ids: ReadonlySet<number>) => tokens && setTokens(deleteTokens(tokens, ids, collectionName)),
-    shuffle: (ids: ReadonlySet<number>) => tokens && setTokens(shuffleIds(tokens, ids, collectionName)),
-    swap: (a: number, b: number) => tokens && setTokens(swapIds(tokens, a, b, collectionName)),
+    remove: (ids: ReadonlySet<number>) => tokens && setTokens(deleteTokens(tokens, ids, ctx)),
+    shuffle: (ids: ReadonlySet<number>) => tokens && setTokens(shuffleIds(tokens, ids, ctx)),
+    swap: (a: number, b: number) => tokens && setTokens(swapIds(tokens, a, b, ctx)),
     change: (tokenId: number, layerIndex: number, traitId: string) => {
       if (!tokens) return { ok: false as const, reason: 'Nothing is generated yet.' }
-      const outcome = changeTrait(tokens, tokenId, layerIndex, traitId, active, index, collectionName)
+      const outcome = changeTrait(tokens, tokenId, layerIndex, traitId, active, ctx)
       if (outcome.ok) setTokens(outcome.tokens)
       return outcome
     },

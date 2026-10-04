@@ -15,6 +15,7 @@ import { Input } from '@cobweb/ui/components/input'
 import { Label } from '@cobweb/ui/components/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@cobweb/ui/components/select'
 import { Separator } from '@cobweb/ui/components/separator'
+import { Textarea } from '@cobweb/ui/components/textarea'
 import type { GeneratedToken } from '@/lib/demo'
 import { Composite } from '../composite'
 import { compositeUrls, formatPercent } from '../lib/trait-index'
@@ -48,7 +49,7 @@ export function TokenDetail({
   readOnly,
   Heading,
 }: TokenDetailProps) {
-  const { index, counts, tokens, collections } = generator
+  const { index, tokens, collections } = generator
   const layers = generator.layersOf(token.collectionId)
   const total = tokens?.length ?? 0
   const [refusals, setRefusals] = useState<Record<number, string>>({})
@@ -133,8 +134,9 @@ export function TokenDetail({
         {layers.map((layer, layerIndex) => {
           const traitId = token.dna[layerIndex] ?? ''
           const trait = index.get(traitId)?.trait
-          const share = total ? ((counts[traitId] ?? 0) / total) * 100 : 0
+          const share = total ? (generator.attributeCount(traitId) / total) * 100 : 0
           const id = `token-trait-${layer.id}`
+          const hiddenBlank = !!trait?.blank && !generator.showBlankTraits
           return (
             <div key={layer.id} className="space-y-1.5">
               <div className="flex items-baseline justify-between gap-3">
@@ -143,8 +145,13 @@ export function TokenDetail({
                 </Label>
                 <span
                   className="numeric text-muted-foreground text-xs"
-                  title="Tokens in the set with this trait"
+                  title={
+                    hiddenBlank
+                      ? 'Blank traits are left out of the metadata (Layers, blank traits in metadata)'
+                      : 'Tokens in the set with this trait'
+                  }
                 >
+                  {hiddenBlank ? 'Not in metadata · ' : ''}
                   {formatPercent(Math.round(share * 10) / 10)}
                 </span>
               </div>
@@ -196,6 +203,25 @@ export function TokenDetail({
           )
         })}
       </section>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="token-description-edit" className="text-muted-foreground text-xs font-medium">
+          Description
+        </Label>
+        {readOnly ? (
+          <p id="token-description-edit" className="text-sm">
+            {token.description ?? generator.tokenDescription}
+          </p>
+        ) : (
+          <Textarea
+            id="token-description-edit"
+            rows={3}
+            value={token.description ?? generator.tokenDescription}
+            onChange={(event) => generator.describe(token.id, event.target.value)}
+            className="text-sm"
+          />
+        )}
+      </div>
 
       {!readOnly && (
         <>

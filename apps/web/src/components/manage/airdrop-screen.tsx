@@ -1,6 +1,6 @@
 'use client'
 
-import { FlameIcon, SendIcon } from 'lucide-react'
+import { DownloadIcon, FlameIcon, SendIcon } from 'lucide-react'
 import { useDeferredValue, useMemo, useState } from 'react'
 import { Button } from '@cobweb/ui/components/button'
 import { Panel } from '@cobweb/ui/components/panel'
@@ -18,10 +18,19 @@ import {
   type SupportedChain,
   sampleSupply,
   DEMO_COLLECTION,
+  // Seam: the launch chains come from `packages/shared` chain config in Phase 5.
+  SUPPORTED_CHAINS,
 } from '@/lib/demo'
-import { AirdropHistory, BurnDialog, burnError, BurnQuantity } from './airdrop-parts'
+import {
+  AirdropHistory,
+  airdropHistoryCsv,
+  BurnDialog,
+  burnError,
+  BurnQuantity,
+  SupplyNote,
+} from './airdrop-parts'
 import { Row } from './bits'
-import { count } from './format'
+import { count, downloadText } from './format'
 import { parseRecipients, type ParseOptions, type Recipient } from './recipients'
 import { ParsePreview, RecipientsInput } from './recipients-input'
 import { SAMPLE } from './simulate'
@@ -95,13 +104,22 @@ export function AirdropScreen({
   const burnAmount = burnInvalid ? 0 : Number(burnQuantity)
   const burnLabel = `Burn ${count(burnAmount)} ${burnAmount === 1 ? 'token' : 'tokens'}`
 
-  /** A send landed: count its tokens against supply and add it to the history. */
-  function record(entry: Omit<AirdropRecord, 'at' | 'feePaidWei'>) {
-    setMinted((current) => current + entry.tokens)
+  /**
+   * A send landed: count its tokens against supply and add it to the history. Ids are sequential,
+   * so the batch starts after everything minted so far.
+   * Seam: the ids come from the receipt's `Transfer` logs; nothing else can mint in between here.
+   */
+  function record(entry: Omit<AirdropRecord, 'at' | 'feePaidWei' | 'firstTokenId'>) {
     setHistory((current) => [
       ...current,
-      { ...entry, at: SAMPLE.readAt, feePaidWei: mulWei(feePerToken, entry.tokens) },
+      {
+        ...entry,
+        at: SAMPLE.readAt,
+        feePaidWei: mulWei(feePerToken, entry.tokens),
+        firstTokenId: minted + 1,
+      },
     ])
+    setMinted((current) => current + entry.tokens)
   }
 
   function sendNext() {
@@ -189,7 +207,13 @@ export function AirdropScreen({
             </div>
           ) : (
             <>
-              <RecipientsInput text={text} onTextChange={setText} options={PARSE} template={TEMPLATE} />
+              <RecipientsInput
+                text={text}
+                onTextChange={setText}
+                options={PARSE}
+                template={TEMPLATE}
+                snapshot={{ chains: SUPPORTED_CHAINS, chainId: chain.id }}
+              />
               <ParsePreview result={result} amountName="tokens" />
             </>
           )}
@@ -240,6 +264,10 @@ export function AirdropScreen({
                   {formatNative(mulWei(feePerToken, tokens), symbol)}
                 </Row>
               </dl>
+              <p className="text-muted-foreground text-[0.8125rem]">
+                Exact: the fee is a flat {symbol} amount held by the contract, so nothing is added for price
+                movement. If Cobweb changes it before you send, the check step shows the new fee.
+              </p>
               <SupplyNote
                 remaining={remaining}
                 after={tooMany ? null : remaining - unsentTokens}
@@ -292,7 +320,21 @@ export function AirdropScreen({
         </aside>
       </div>
 
-      <Panel title="History" bodyClassName="p-0 pb-2">
+      <Panel
+        title="History"
+        bodyClassName="p-0 pb-2"
+        action={
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={history.length === 0}
+            onClick={() => downloadText('airdrop-history.csv', airdropHistoryCsv(history, chain))}
+          >
+            <DownloadIcon aria-hidden="true" />
+            Export CSV
+          </Button>
+        }
+      >
         <AirdropHistory airdrops={history} chain={chain} readAt={SAMPLE.readAt} />
       </Panel>
 
@@ -346,24 +388,6 @@ export function AirdropScreen({
           onFailed={(message) => setJob((current) => current && { ...current, failure: message })}
         />
       )}
-    </div>
-  )
-}
-
-/** Left to mint now and after the send; `after` null means the send is more than is left. */
-function SupplyNote({ remaining, after, label }: { remaining: number; after: number | null; label: string }) {
-  return (
-    <div className="bg-well shadow-inset rounded-lg px-3 py-2.5 text-[0.8125rem]">
-      <p className="flex justify-between">
-        <span className="text-muted-foreground">Left to mint</span>
-        <span className="numeric">{count(remaining)}</span>
-      </p>
-      <p className="flex justify-between">
-        <span className="text-muted-foreground">{label}</span>
-        <span className={after === null ? 'numeric text-destructive-foreground' : 'numeric'}>
-          {after === null ? 'Not enough' : count(after)}
-        </span>
-      </p>
     </div>
   )
 }

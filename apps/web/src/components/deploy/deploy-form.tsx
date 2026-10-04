@@ -34,28 +34,36 @@ export type DeployFormValues = {
 }
 
 export type DeployFormErrors = Partial<
-  Record<'chainId' | 'payout' | 'royalty' | 'royaltyReceiver' | 'publicCap', string>
+  Record<'chainId' | 'payout' | 'royalty' | 'royaltyReceiver' | 'publicCap' | 'phases', string>
 >
 
 export const MAX_ROYALTY_PERCENT = 10
 
-/** Percent text to basis points, or null when it is not a number in range. */
+/**
+ * Percent text to basis points, or null when it is not a number in range. At most two decimals:
+ * the contract takes whole basis points, so 2.555% would be silently rounded.
+ */
 export function royaltyBps(royalty: string): number | null {
-  const value = Number(royalty)
-  if (royalty.trim() === '' || !Number.isFinite(value) || value < 0 || value > MAX_ROYALTY_PERCENT)
-    return null
+  const trimmed = royalty.trim()
+  const value = Number(trimmed)
+  if (!/^\d+(\.\d{1,2})?$/.test(trimmed) || value > MAX_ROYALTY_PERCENT) return null
   return Math.round(value * 100)
 }
+
+const ZERO_ADDRESS = /^0x0{40}$/i
 
 export function validateDeploy(values: DeployFormValues, maxSupply: number): DeployFormErrors {
   const errors: DeployFormErrors = {}
   if (values.chainId === null) errors.chainId = 'Choose a chain to deploy on.'
   if (!isAddress(values.payout))
     errors.payout = 'Enter a valid wallet address (0x followed by 40 characters).'
+  else if (ZERO_ADDRESS.test(values.payout)) errors.payout = 'The zero address cannot receive proceeds.'
   if (royaltyBps(values.royalty) === null)
-    errors.royalty = `Enter a royalty from 0 to ${MAX_ROYALTY_PERCENT}%.`
+    errors.royalty = `Enter a royalty from 0 to ${MAX_ROYALTY_PERCENT}%, with up to two decimals.`
   if (!values.sameReceiver && !isAddress(values.royaltyReceiver))
     errors.royaltyReceiver = 'Enter a valid wallet address for royalties.'
+  else if (!values.sameReceiver && ZERO_ADDRESS.test(values.royaltyReceiver))
+    errors.royaltyReceiver = 'The zero address cannot receive royalties.'
   const cap = Number(values.publicCap)
   if (!Number.isInteger(cap) || cap < 1 || cap > maxSupply)
     errors.publicCap = `Enter a whole number from 1 to ${maxSupply.toLocaleString('en-US')}.`

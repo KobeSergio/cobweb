@@ -6,7 +6,7 @@ import { Switch } from '@cobweb/ui/components/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@cobweb/ui/components/tooltip'
 import { cn } from '@cobweb/ui/lib/utils'
 import type { Layer, TraitCounts } from '@/lib/demo'
-import { constantTotal, expectedCount, formatPercent, weightTotal } from '../lib/trait-index'
+import { constantTotal, expectedCount, formatPercent, weightsValid, weightTotal } from '../lib/trait-index'
 import { DropZone, UploadRules } from './add-traits-dialog'
 import { TraitCard } from './trait-card'
 import type { LayersEditor } from './use-layers-editor'
@@ -31,8 +31,9 @@ function WeightTotal({ layer, supply }: { layer: Layer; supply: number }) {
   const weighted = layer.traits.filter((trait) => !trait.constant)
   const fixed = constantTotal(layer)
   const diff = Math.round((100 - total) * 100) / 100
-  const ok = weighted.length === 0 || Math.abs(diff) < 0.01
-  const over = diff < 0
+  // 100.00 to 100.05 counts as 100%, as in the legacy tool.
+  const ok = weightsValid(layer)
+  const over = !ok && diff < 0
 
   return (
     <div className="min-w-0 flex-1 space-y-2">

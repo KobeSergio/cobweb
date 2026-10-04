@@ -143,12 +143,89 @@ export function analyseRules(layers: Layer[], rules: ArtRule[], index: TraitInde
       }
     }
   }
+  conflicts.push(...chainConflicts(rules, index, new Set(conflicts.map(conflictKey))))
   return conflicts
 }
 
-/** The rules generation applies: for each conflict, the first rule is kept and the rest skipped. */
+function conflictKey(conflict: Pick<RuleConflict, 'ruleIds'>): string {
+  return [...new Set(conflict.ruleIds)].sort().join('|')
+}
+
+/**
+ * Conflicts reached through a chain of pairing rules, as the legacy analyser followed them:
+ * "A must pair with B" and "B always pairs with C" mean every token with A also has C, so a rule
+ * keeping A and C apart, or two traits of one layer, shuts A out. A rule forces its partner only
+ * when it names one related trait (with several, any one will do), and "always pairs with" also
+ * forces the source trait from each related trait.
+ */
+function chainConflicts(rules: ArtRule[], index: TraitIndex, known: Set<string>): RuleConflict[] {
+  const name = (id: string) => traitName(index, id)
+  const forces = new Map<string, { to: string; ruleId: string }[]>()
+  const force = (from: string, to: string, ruleId: string) =>
+    forces.set(from, [...(forces.get(from) ?? []), { to, ruleId }])
+  for (const rule of rules) {
+    if (rule.kind === "doesn't mix with") continue
+    if (rule.relatedTraitIds.length === 1) force(rule.traitId, rule.relatedTraitIds[0]!, rule.id)
+    if (rule.kind === 'always pairs with')
+      for (const related of rule.relatedTraitIds) force(related, rule.traitId, rule.id)
+  }
+
+  const found: RuleConflict[] = []
+  const report = (conflict: RuleConflict) => {
+    const key = conflictKey(conflict)
+    if (known.has(key)) return
+    known.add(key)
+    found.push(conflict)
+  }
+  for (const start of forces.keys()) {
+    // Every trait a token with `start` must also have, with the rules that bring it in.
+    const paths = new Map<string, string[]>([[start, []]])
+    const queue = [start]
+    while (queue.length) {
+      const at = queue.shift()!
+      for (const edge of forces.get(at) ?? []) {
+        if (paths.has(edge.to)) continue
+        paths.set(edge.to, [...paths.get(at)!, edge.ruleId])
+        queue.push(edge.to)
+      }
+    }
+    const held = [...paths.keys()]
+    for (let i = 0; i < held.length; i++) {
+      for (let j = i + 1; j < held.length; j++) {
+        const a = held[i]!
+        const b = held[j]!
+        const chain = [...new Set([...paths.get(a)!, ...paths.get(b)!])]
+        if (chain.length < 2) continue
+        const blocker = mixBlocker(a, b, rules)
+        if (blocker) {
+          report({
+            kind: 'mixing',
+            ruleIds: [...chain, blocker.id],
+            skip: [blocker.id],
+            message: `Through a chain of pairing rules, every token with ${name(start)} also has ${name(a === start ? b : a)}${a === start ? '' : ` and ${name(b)}`}, but another rule keeps ${name(a)} and ${name(b)} apart. ${name(start)} can never appear. Remove or change one of these rules.`,
+          })
+          continue
+        }
+        const layerA = index.get(a)?.layer
+        if (layerA && layerA.id === index.get(b)?.layer.id)
+          report({
+            kind: 'circular',
+            ruleIds: chain,
+            skip: chain.slice(-1),
+            message: `Through a chain of pairing rules, every token with ${name(start)} needs both ${name(a)} and ${name(b)}, but a token has only one ${layerA.name} trait. ${name(start)} can never appear.`,
+          })
+      }
+    }
+  }
+  return found
+}
+
+/**
+ * The rules generation applies: for each conflict, the rules it names to skip (`skip`), or every
+ * rule but the first.
+ */
 export function activeRules(rules: ArtRule[], conflicts: RuleConflict[]): ArtRule[] {
-  const skipped = new Set(conflicts.flatMap((conflict) => conflict.ruleIds.slice(1)))
+  const skipped = new Set(conflicts.flatMap((conflict) => conflict.skip ?? conflict.ruleIds.slice(1)))
   return rules.filter((rule) => !skipped.has(rule.id))
 }
 

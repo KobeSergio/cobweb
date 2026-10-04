@@ -3,6 +3,7 @@
 import { sampleSupply, DEMO_COLLECTION } from '@/lib/demo'
 import { InfoIcon, LayersIcon, PlusIcon } from 'lucide-react'
 import { useState } from 'react'
+import { toast } from 'sonner'
 import { Button } from '@cobweb/ui/components/button'
 import {
   Empty,
@@ -25,9 +26,10 @@ import {
   SupplyDialog,
   type PhaseContext,
 } from './phase-dialogs'
+import { PhaseDetailsDialog } from './phase-details'
 import { PHASE_COLUMNS, PhaseRow, type PhaseAction } from './phase-row'
 import { AddPhaseDialog, ScheduleDialog } from './phase-schedule'
-import { chainReadGroup, SAMPLE } from './simulate'
+import { chainReadGroup, SAMPLE, saveOffChain } from './simulate'
 import { SupplyMap } from './supply-map'
 
 export type PhasesScreenProps = {
@@ -62,11 +64,36 @@ export function PhasesScreen({
   const [open, setOpen] = useState(false)
 
   const live = groups.filter((group) => group.active)
-  const ordered = [...groups].sort((a, b) => Number(b.active) - Number(a.active) || a.id - b.id)
+  // The list keeps the creator's order, which is also the order on the mint page (legacy's
+  // "Arrange groups"). Seam: the order is `mint_groups.position`; the chain has no order.
+  const ordered = groups
+  const airdropped = Math.max(0, SAMPLE.totalMinted - groups.reduce((sum, group) => sum + group.minted, 0))
 
   function act(action: DialogAction, groupId = -1) {
+    if (action === 'up' || action === 'down') {
+      void move(groupId, action === 'up' ? -1 : 1)
+      return
+    }
     setDialog({ action, groupId, key: Date.now() })
     setOpen(true)
+  }
+
+  /** Moves a phase one place; saved by Cobweb, no transaction. */
+  async function move(groupId: number, delta: -1 | 1) {
+    const from = groups.findIndex((group) => group.id === groupId)
+    const to = from + delta
+    if (from < 0 || to < 0 || to >= groups.length) return
+    const next = [...groups]
+    next.splice(to, 0, next.splice(from, 1)[0]!)
+    setGroups(next)
+    try {
+      // Seam: a server action that checks ownership and writes each group's position.
+      await saveOffChain()
+      toast.success('Order saved. The mint page lists the phases in this order.')
+    } catch {
+      setGroups(groups)
+      toast.error('The order could not be saved. Try again.')
+    }
   }
 
   /** A write landed: apply it, then take liveness from the (simulated) chain re-read. */
@@ -83,6 +110,7 @@ export function PhasesScreen({
     groups,
     // A deployed collection always has its supply; it is fixed at deploy.
     maxSupply: sampleSupply(collection.max_supply, DEMO_COLLECTION.maxSupply),
+    airdropped,
     blockTimestamp,
     open,
     onOpenChange: setOpen,
@@ -163,13 +191,15 @@ export function PhasesScreen({
               <span />
             </div>
             <ul className="divide-y" aria-label="Phases">
-              {ordered.map((group) => (
+              {ordered.map((group, index) => (
                 <PhaseRow
                   key={group.id}
                   group={group}
                   chain={chain}
                   blockTimestamp={blockTimestamp}
                   publicCap={publicCap}
+                  first={index === 0}
+                  last={index === ordered.length - 1}
                   onAction={(action) => act(action, group.id)}
                 />
               ))}
@@ -243,5 +273,17 @@ function PhaseDialog({
       return <SupplyDialog {...ctx} group={target} onApply={onApply} />
     case 'cap':
       return <PublicCapDialog {...ctx} cap={publicCap} onApply={onCap} />
+    case 'details':
+      return (
+        <PhaseDetailsDialog
+          open={ctx.open}
+          onOpenChange={ctx.onOpenChange}
+          group={target}
+          others={ctx.groups.filter((group) => group.id !== target.id).map((group) => group.name)}
+          onSaved={onApply}
+        />
+      )
+    default:
+      return null
   }
 }

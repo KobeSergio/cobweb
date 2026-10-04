@@ -12,23 +12,28 @@ import { cn } from '@cobweb/ui/lib/utils'
 import { shortAddress } from '@/lib/demo'
 import { count, downloadText } from './format'
 import { parseRecipients, readCsvFile, type ParseOptions, type ParseResult } from './recipients'
+import { SnapshotTab, type SnapshotSource } from './snapshot-tab'
 
 /**
- * Where a list of recipients comes from: an uploaded CSV, pasted text, or one at a time. All
- * three edit the same text, which the parent parses with `parseRecipients` and previews with
- * `ParsePreview`.
+ * Where a list of recipients comes from: an uploaded CSV, pasted text, one at a time, or (with
+ * `snapshot`) the holders of another collection. All of them edit the same text, which the parent
+ * parses with `parseRecipients` and previews with `ParsePreview`.
  */
 export function RecipientsInput({
   text,
   onTextChange,
   options,
   template,
+  snapshot,
 }: {
   text: string
   onTextChange: (text: string) => void
   options: ParseOptions
   template: { fileName: string; text: string }
+  /** The chains a holder snapshot can read, and the one selected first. */
+  snapshot?: SnapshotSource
 }) {
+  const [snapshotNote, setSnapshotNote] = useState<string | null>(null)
   const id = useId()
   const [fileName, setFileName] = useState<string | null>(null)
   const [reading, setReading] = useState(false)
@@ -71,6 +76,7 @@ export function RecipientsInput({
         <TabsTrigger value="upload">Upload CSV</TabsTrigger>
         <TabsTrigger value="paste">Paste</TabsTrigger>
         <TabsTrigger value="manual">Add one</TabsTrigger>
+        {snapshot && <TabsTrigger value="snapshot">Snapshot</TabsTrigger>}
       </TabsList>
 
       <TabsContent value="upload" className="grid gap-3">
@@ -183,6 +189,25 @@ export function RecipientsInput({
         </div>
         {manualError && <FieldError className="mt-2">{manualError}</FieldError>}
       </TabsContent>
+
+      {snapshot && (
+        <TabsContent value="snapshot" className="grid gap-3">
+          <SnapshotTab
+            source={snapshot}
+            amountName={options.amountName}
+            maxAmount={options.maxAmount}
+            onLoaded={(lines, summary) => {
+              onTextChange(text.trim() ? `${text.trimEnd()}\n${lines}` : lines)
+              setSnapshotNote(`Added ${summary}. Review them below before you continue.`)
+            }}
+          />
+          {snapshotNote && (
+            <p className="text-success-foreground text-[0.8125rem]" aria-live="polite">
+              {snapshotNote}
+            </p>
+          )}
+        </TabsContent>
+      )}
     </Tabs>
   )
 }

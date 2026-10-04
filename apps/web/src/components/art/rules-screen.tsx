@@ -1,8 +1,10 @@
 'use client'
 
-import { GitMergeIcon, PlusIcon } from 'lucide-react'
+import { GitMergeIcon, PlusIcon, TriangleAlertIcon } from 'lucide-react'
+import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { Alert, AlertDescription, AlertTitle } from '@cobweb/ui/components/alert'
 import { Button } from '@cobweb/ui/components/button'
 import {
   Empty,
@@ -15,7 +17,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from '@cobweb/ui/components/toggle-group'
 import type { Tables } from '@/lib/database.types'
 import type { ArtRule, Collection, Layer, RuleConflict, RuleKind } from '@/lib/demo'
-import { flowNeighbours } from '@/lib/steps'
+import { artSubStepHref, flowNeighbours } from '@/lib/steps'
 import { StageFooter } from '@/components/shell/stage-footer'
 import { CollectionSwitcher } from './collections/collection-switcher'
 import { useCollections } from './collections/use-collections'
@@ -101,6 +103,17 @@ export function RulesScreen({
   }
   useEffect(() => () => window.clearTimeout(timer.current), [])
 
+  /** Confirms a save, and says when generated tokens now break the rules (legacy never re-checked them). */
+  const saved = (done: string, broken: number) =>
+    toast(
+      done,
+      broken
+        ? {
+            description: `${broken.toLocaleString('en-US')} generated ${broken === 1 ? 'token breaks' : 'tokens break'} the rules now. They are marked on Generate, where you can regenerate them.`,
+          }
+        : undefined,
+    )
+
   const askDelete = (rule: ArtRule) =>
     setConfirm({
       title: 'Delete this rule?',
@@ -112,10 +125,7 @@ export function RulesScreen({
       ],
       confirmLabel: 'Delete rule',
       destructive: true,
-      onConfirm: () => {
-        editor.remove(rule.id)
-        toast('Rule deleted')
-      },
+      onConfirm: () => saved('Rule deleted', editor.remove(rule.id)),
     })
 
   return (
@@ -123,6 +133,27 @@ export function RulesScreen({
       {readOnly && <ReadOnlyNotice what="the rules" />}
       {artDeferred && <DeferredArtNotice collectionId={collection.id} />}
       <CollectionSwitcher control={collections} readOnly={readOnly} />
+      {!readOnly && editor.breaking.length > 0 && (
+        <Alert variant="warning">
+          <TriangleAlertIcon aria-hidden="true" />
+          <AlertTitle>
+            <span className="numeric">{editor.breaking.length.toLocaleString('en-US')}</span> generated{' '}
+            {editor.breaking.length === 1 ? 'token breaks' : 'tokens break'} these rules
+          </AlertTitle>
+          <AlertDescription>
+            <p>
+              The rules changed after the set was generated. Regenerate those tokens, or the whole set, before
+              locking.{' '}
+              <Link
+                className="text-foreground underline underline-offset-2"
+                href={artSubStepHref(collection.id, 'generate')}
+              >
+                Go to Generate
+              </Link>
+            </p>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {rules.length === 0 ? (
         <Empty className="bg-card border py-14">
@@ -222,12 +253,12 @@ export function RulesScreen({
         rules={editor.rules}
         onSave={(draft, id) => {
           if (id) {
-            editor.edit(id, draft)
-            toast('Rule saved')
+            saved('Rule saved', editor.edit(id, draft))
             highlight([id])
           } else {
-            highlight([editor.add(draft)])
-            toast('Rule added')
+            const added = editor.add(draft)
+            highlight([added.id])
+            saved('Rule added', added.broken)
           }
         }}
       />

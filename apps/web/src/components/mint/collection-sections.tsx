@@ -1,4 +1,4 @@
-import { ExternalLinkIcon, GlobeIcon, MessageCircleIcon, AtSignIcon } from 'lucide-react'
+import { ExternalLinkIcon, GlobeIcon, MessageCircleIcon, AtSignIcon, SendIcon } from 'lucide-react'
 import { Button } from '@cobweb/ui/components/button'
 import { cn } from '@cobweb/ui/lib/utils'
 import type { MintPageData } from '@/lib/demo'
@@ -60,6 +60,7 @@ const SOCIALS = [
   { key: 'website', label: 'Website', Icon: GlobeIcon },
   { key: 'x', label: 'X', Icon: AtSignIcon },
   { key: 'discord', label: 'Discord', Icon: MessageCircleIcon },
+  { key: 'telegram', label: 'Telegram', Icon: SendIcon },
 ] as const
 
 export function About({ data }: { data: MintPageData }) {

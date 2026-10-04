@@ -1,4 +1,5 @@
 import type { ArtRule, Collection, Layer } from '@/lib/demo'
+import { MAX_COLLECTION_SIZE } from './generation'
 import { layersOf, slug, uniqueId } from './layer-edits'
 
 /**
@@ -28,8 +29,9 @@ export function renameCollection(collections: Collection[], id: string, name: st
   return collections.map((collection) => (collection.id === id ? { ...collection, name } : collection))
 }
 
+/** Sets a collection's size: a whole number from 0 to 10,000 (the legacy limit per collection). */
 export function setCollectionSize(collections: Collection[], id: string, size: number): Collection[] {
-  const clean = Math.max(0, Math.min(100_000, Math.round(size) || 0))
+  const clean = Math.max(0, Math.min(MAX_COLLECTION_SIZE, Math.round(size) || 0))
   return collections.map((collection) => (collection.id === id ? { ...collection, size: clean } : collection))
 }
 

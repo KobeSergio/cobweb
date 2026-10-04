@@ -180,7 +180,7 @@ export function TraitCard({
               <NumberField
                 value={trait.constant}
                 min={1}
-                max={supply}
+                max={Math.max(1, supply)}
                 step={1}
                 label={`${trait.name} maximum count, in tokens`}
                 disabled={readOnly}
@@ -207,7 +207,7 @@ export function TraitCard({
                 value={trait.weight}
                 min={0}
                 max={100}
-                step={0.5}
+                step={0.01}
                 label={weightLabel}
                 disabled={readOnly}
                 onCommit={onWeight}

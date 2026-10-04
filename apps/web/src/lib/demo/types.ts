@@ -78,13 +78,18 @@ export type RuleConflict = {
   kind: 'isolated' | 'mixing' | 'circular'
   ruleIds: string[]
   message: string
+  /** The rules generation skips to get round the conflict. Unset: every rule but the first. */
+  skip?: string[]
 }
 
 /** One generated token. Replaced by: the token list the browser submits at lock (MASTER_PLAN, Art: lock check). */
 export type GeneratedToken = {
   /** Token id, starting at 1 and running on across collections. Also the number in the name. */
   id: number
+  /** "<token name> #<id>", the token name chosen at Generate (legacy auto-populate). */
   name: string
+  /** The metadata description: the one chosen at Generate, or this token's own after an edit. */
+  description?: string
   /** The collection the token belongs to; its DNA follows that collection's layers. */
   collectionId: string
   /** The chosen trait id for each of its collection's layers, in layer order (`dna[i]` belongs to `layers[i]`). */
@@ -271,6 +276,10 @@ export type MintGroup = {
   scheduledStart: number
   /** Live right now, as the contract's `mintGroupActive` view reports it. Never computed in the browser. */
   active: boolean
+  /** Who the phase is for, shown on the mint page. Off chain: `mint_groups.description`. */
+  description?: string
+  /** False hides the phase from the mint page; it still mints if open. Off chain: `mint_groups.visible`. */
+  visible?: boolean
 }
 
 /** One wallet on a group's whitelist. Replaced by: `whitelist_entries` joined with `walletState` usage. */
@@ -305,7 +314,7 @@ export type GroupWhitelist = {
 // Mint page (Phase 6)
 // ---------------------------------------------------------------------------------------------
 
-export type Socials = { website?: string; x?: string; discord?: string }
+export type Socials = { website?: string; x?: string; discord?: string; telegram?: string }
 
 /** The creator's mint page customisation. Replaced by: a mint page settings table (Phase 6). */
 export type MintPageSettings = {
@@ -317,6 +326,36 @@ export type MintPageSettings = {
   /** Token ids shown in the page's gallery strip. */
   featuredTokenIds: number[]
   published: boolean
+}
+
+/** A team member on the mint page (Phase 6). Limits are legacy's: see the spec, section 13. */
+export type TeamMember = {
+  id: string
+  name: string
+  role: string
+  bio: string
+  imageUrl: string
+  x?: string
+  discord?: string
+  telegram?: string
+}
+export type RoadmapItem = { id: string; date: string; title: string; description: string }
+export type FaqItem = { id: string; question: string; answer: string }
+/** A carousel slide: an uploaded image or MP4, or one of the collection's tokens. */
+export type CarouselItem =
+  | { id: string; kind: 'upload'; url: string; fileName: string; mediaType: 'image' | 'video' }
+  | { id: string; kind: 'token'; tokenId: number }
+
+/**
+ * The mint page sections that return in Phase 6, each with its own on/off switch, as legacy had
+ * them. Replaced by: the mint page section tables (Phase 6).
+ */
+export type MintPageSections = {
+  team: { enabled: boolean; members: TeamMember[] }
+  roadmap: { enabled: boolean; items: RoadmapItem[] }
+  faq: { enabled: boolean; items: FaqItem[] }
+  music: { enabled: boolean; fileName: string | null; url: string | null }
+  carousel: { enabled: boolean; items: CarouselItem[] }
 }
 
 /** What a connected wallet may mint. Replaced by: `walletState(wallet)` through the freshness server. */
@@ -398,4 +437,9 @@ export type AirdropRecord = {
   feePaidWei: string
   /** An airdrop to the dead address is a burn (MASTER_PLAN, Contracts: burn). */
   burn: boolean
+  /**
+   * The first token id it minted; ids run on from there, one per token. Seam: read from the
+   * `Transfer` logs of the receipt (legacy parsed `topics[3]`), or from the indexer.
+   */
+  firstTokenId?: number
 }
