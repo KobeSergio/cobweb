@@ -12,7 +12,7 @@ export const STAGES = [
   {
     slug: 'details',
     name: 'Details',
-    summary: 'The name, symbol and kind of collection, and the description collectors will read.',
+    summary: 'The name and symbol, and the description collectors will read.',
   },
   {
     slug: 'art',

@@ -1,24 +1,16 @@
 'use client'
 
-import { ArrowRightIcon, ClockIcon, LockIcon } from 'lucide-react'
+import { ArrowRightIcon, LockIcon } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useActionState, useEffect, useState } from 'react'
 import { Button } from '@cobweb/ui/components/button'
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-  FieldTitle,
-} from '@cobweb/ui/components/field'
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@cobweb/ui/components/field'
 import { Input } from '@cobweb/ui/components/input'
 import { Spinner } from '@cobweb/ui/components/spinner'
 import { Textarea } from '@cobweb/ui/components/textarea'
 import { updateCollectionDetails, type UpdateDetailsState } from '@/app/actions/collection-details'
 import { StageFooter } from '@/components/shell/stage-footer'
 import type { Tables } from '@/lib/database.types'
-import { formatReservedUntil, PROJECT_TYPES, slugState, SUPPLY_SOURCE, supplyLimit } from '@/lib/collections'
 import { frozenDetailFields, type FlowLink } from '@/lib/steps'
 
 const INITIAL_STATE: UpdateDetailsState = {}
@@ -55,42 +47,10 @@ function FrozenNote({ id, children }: { id: string; children: React.ReactNode })
   )
 }
 
-/** Where the mint page link stands. It is reserved in Deploy, not edited here. */
-function AddressLine({ collection }: { collection: Props['collection'] }) {
-  const state = slugState(collection)
-  return (
-    <Field>
-      <FieldTitle>Mint page link</FieldTitle>
-      <p className="text-muted-foreground flex items-center gap-1.5 text-sm">
-        {state.kind === 'permanent' ? (
-          <>
-            <LockIcon aria-hidden="true" className="size-3.5 shrink-0" />
-            <span className="numeric text-foreground">cobweb.app/{state.slug}</span>
-          </>
-        ) : state.kind === 'reserved' ? (
-          <>
-            <ClockIcon aria-hidden="true" className="size-3.5 shrink-0" />
-            <span>
-              <span className="numeric text-foreground">cobweb.app/{state.slug}</span>, reserved until{' '}
-              <span className="numeric">{formatReservedUntil(state.until)}</span>.
-            </span>
-          </>
-        ) : state.kind === 'lapsed' ? (
-          'Reservation lapsed. Reserve it again in Deploy.'
-        ) : collection.status === 'deployed' ? (
-          'Not set yet. Set it in Manage drop, Mint page.'
-        ) : (
-          'Not reserved yet. Reserve it in Deploy.'
-        )}
-      </p>
-    </Field>
-  )
-}
-
 /**
- * The Details screen: edit the collection's name, symbol and description; the supply and type are
- * shown read-only (the supply is set at Generate or from the uploads). "Save and
- * continue" saves, then goes on to Art; a failed save stays here with its errors.
+ * The Details screen: the collection's name, symbol and description. Type was chosen at creation,
+ * supply comes from the art and the mint page link is reserved in Deploy, so none of them appear
+ * here. "Save and continue" saves, then goes on to Art; a failed save stays here with its errors.
  */
 export function DetailsForm({ collection, next, readOnly = false }: Props) {
   const router = useRouter()
@@ -105,7 +65,6 @@ export function DetailsForm({ collection, next, readOnly = false }: Props) {
 
   const frozen = frozenDetailFields(collection.status)
   const errors = state.fieldErrors ?? {}
-  const type = PROJECT_TYPES.find((entry) => entry.value === collection.project_type)
   const deployedNote = 'Fixed at deployment.'
 
   return (
@@ -152,8 +111,6 @@ export function DetailsForm({ collection, next, readOnly = false }: Props) {
           </Field>
         </div>
 
-        <AddressLine collection={collection} />
-
         <Field data-invalid={!!errors.description} data-disabled={readOnly}>
           <FieldLabel htmlFor="details-description">Description</FieldLabel>
           <Textarea
@@ -177,34 +134,6 @@ export function DetailsForm({ collection, next, readOnly = false }: Props) {
             </FieldDescription>
           )}
         </Field>
-
-        <div className="grid gap-4 sm:grid-cols-[14rem_1fr]">
-          {/* Read-only: set at Generate or from the uploads (`setCollectionSupply`), never typed here. */}
-          <Field data-disabled>
-            <FieldLabel htmlFor="details-supply">Supply</FieldLabel>
-            <Input
-              id="details-supply"
-              value={
-                collection.max_supply === null ? 'Not set yet' : collection.max_supply.toLocaleString('en-US')
-              }
-              className={collection.max_supply === null ? undefined : 'numeric'}
-              readOnly
-              aria-describedby="details-supply-help"
-            />
-            <FrozenNote id="details-supply-help">
-              {frozen.has('maxSupply')
-                ? 'Fixed when the art was locked.'
-                : `${SUPPLY_SOURCE[collection.project_type]}. Up to ${supplyLimit(collection.project_type).toLocaleString('en-US')}.`}
-            </FrozenNote>
-          </Field>
-          <Field data-disabled>
-            <FieldLabel htmlFor="details-type">Type</FieldLabel>
-            <Input id="details-type" value={type?.name ?? ''} readOnly aria-describedby="details-type-help" />
-            <FrozenNote id="details-type-help">
-              Set when the collection was created. {type?.description}
-            </FrozenNote>
-          </Field>
-        </div>
       </FieldGroup>
 
       {state.formError && (
