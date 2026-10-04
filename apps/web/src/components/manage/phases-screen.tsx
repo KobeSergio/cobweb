@@ -93,13 +93,14 @@ export function PhasesScreen({
     <div className="grid gap-8">
       <Panel
         title="Supply"
-        description="How the collection's supply is split between phases."
+        description="How the collection's supply is split between phases. Select a phase to change its allocation."
         bodyClassName="p-5 lg:p-6"
       >
         <SupplyMap
           groups={ordered}
           maxSupply={sampleSupply(collection.max_supply, DEMO_COLLECTION.maxSupply)}
           totalMinted={SAMPLE.totalMinted}
+          onEdit={(groupId) => act('supply', groupId)}
         />
       </Panel>
 

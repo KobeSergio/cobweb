@@ -3,8 +3,9 @@
  * stands in for one real action and reports the same states the real one will. Replace them
  * one by one when Phase 4 lands:
  *
- *  - `lockArt`      → a server action that submits the token list, runs the checks (MASTER_PLAN, Art: lock check),
- *                     stores and hashes it, and returns the job with its quote.
+ *  - `lockArt`      → a server action that submits the token list and the lock options, validates the list
+ *                     (MASTER_PLAN, Art: assignment integrity at lock), stores and hashes it, and returns the
+ *                     job with its quote.
  *  - `payArtFee`    → wagmi: `simulateContract(payForArt(jobId), value: quote.totalWei)`, then
  *                     `writeContract(request)`, `waitForTransactionReceipt`, then poll the job
  *                     until the server has verified the `ArtPaid` event against the quote.
@@ -12,7 +13,8 @@
  *  - `retryBatch`   → a server action that re-queues one failed batch.
  *
  * Failures are driven by `?outcome=` in sample mode, on the first attempt only, so every
- * failure state can be reviewed and "Try again" then succeeds.
+ * failure state can be reviewed and "Try again" then succeeds. `check-failed` instead gives the
+ * sample set two identical tokens, so the duplicates list on the Review step can be reviewed.
  */
 import type { Hex } from '@/lib/demo/types'
 import { sampleTxHash } from '@/lib/demo/helpers'
@@ -47,35 +49,37 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 // Lock
 // ---------------------------------------------------------------------------------------------
 
-export type LockCheck = 'supply' | 'duplicates' | 'rules' | 'constants'
-export type CheckState = 'waiting' | 'running' | 'passed' | 'failed'
+/** The creator's choices under "Lock options", stored with the job (`RenderJob['lockOptions']`). */
+export type LockOptions = {
+  /**
+   * Accept identical trait combinations. Seam: the server honours it when it validates the
+   * submitted token list (decision C1; MASTER_PLAN, Art: assignment integrity at lock).
+   */
+  allowDuplicates: boolean
+}
 
-export type LockResult = { ok: true; lockedAt: number } | { ok: false; check: LockCheck; message: string }
-
-const CHECK_ORDER: LockCheck[] = ['supply', 'duplicates', 'rules', 'constants']
+export type LockResult = { ok: true; lockedAt: number } | { ok: false; message: string }
 
 /**
- * Submits the token list and runs the server's checks, reporting each as it runs. With deferred
- * art only the placeholder is locked, so `checks` is empty and nothing about the set is checked.
+ * Submits the token list with the lock options. The server validates it (supply, rules, maximum
+ * counts, and duplicates unless `allowDuplicates`), stores it and hashes it. The screen already
+ * blocks a set that would fail, so a rejection here means the list changed since it was shown.
+ * `duplicates` stands in for what the server finds in the submitted list. With deferred art only
+ * the placeholder is locked and nothing about the set is validated.
  */
-export async function lockArt(
-  onCheck: (check: LockCheck, state: CheckState) => void,
-  options: { outcome?: UploadOutcome; signal: AbortSignal; checks?: LockCheck[] },
-): Promise<LockResult> {
-  for (const check of options.checks ?? CHECK_ORDER) {
-    onCheck(check, 'running')
-    await sleep(450, options.signal)
-    if (check === 'duplicates' && options.outcome === 'check-failed') {
-      onCheck(check, 'failed')
-      return {
-        ok: false,
-        check,
-        message: 'Tokens 118 and 540 have the same traits. Regenerate or edit one of them, then lock again.',
-      }
+export async function lockArt(options: {
+  lockOptions: LockOptions
+  duplicates: number[][]
+  signal: AbortSignal
+}): Promise<LockResult> {
+  await sleep(1200, options.signal)
+  const first = options.duplicates[0]
+  if (!options.lockOptions.allowDuplicates && first) {
+    return {
+      ok: false,
+      message: `Tokens ${first.join(' and ')} have the same traits. Change one of them in Generate, or allow identical tokens, then lock again.`,
     }
-    onCheck(check, 'passed')
   }
-  await sleep(300, options.signal)
   return { ok: true, lockedAt: Math.floor(Date.now() / 1000) }
 }
 
@@ -150,6 +154,7 @@ export async function payArtFee(
 // Render
 // ---------------------------------------------------------------------------------------------
 
+/** Coarse render progress: whole batches, then the metadata. Nothing is reported per image. */
 export type RenderProgress = {
   phase: 'images' | 'metadata' | 'done'
   total: number

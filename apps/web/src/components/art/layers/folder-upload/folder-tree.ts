@@ -40,10 +40,16 @@ function listExamples(paths: string[], limit = 3): string {
 }
 
 /**
- * Groups files into collections and layers. Layers and traits are ordered by folder and file name
- * with numbers read as numbers, so `2_Body` comes before `10_Hat`; the first layer is the bottom.
+ * Groups files into collections and layers. The collections come from the folder structure:
+ *   - `project/collection/layer/trait.png`: one collection per folder inside the project folder;
+ *   - `collection/layer/trait.png`: one collection per top folder (choosing one folder gives one
+ *     collection named after it);
+ *   - `layer/trait.png` (layer folders dropped on their own): one collection named `fallbackName`,
+ *     the project's name.
+ * Layers and traits are ordered by folder and file name with numbers read as numbers, so `2_Body`
+ * comes before `10_Hat`; the first layer is the bottom.
  */
-export function detectProject(files: PathedFile[]): DetectedProject {
+export function detectProject(files: PathedFile[], fallbackName = 'Collection'): DetectedProject {
   let skipped = 0
   const kept: { parts: string[]; entry: PathedFile }[] = []
   for (const entry of files) {
@@ -62,10 +68,10 @@ export function detectProject(files: PathedFile[]): DetectedProject {
   }
 
   const depths = new Set(kept.map((item) => item.parts.length))
-  const wrong = kept.filter((item) => item.parts.length < 3 || item.parts.length > 4)
+  const wrong = kept.filter((item) => item.parts.length < 2 || item.parts.length > 4)
   if (wrong.length > 0) {
     structureErrors.push(
-      `Some files are not inside a collection and a layer folder: ${listExamples(wrong.map((item) => item.parts.join('/')))}.`,
+      `Some files are not inside a layer folder: ${listExamples(wrong.map((item) => item.parts.join('/')))}.`,
     )
   } else if (depths.size > 1) {
     structureErrors.push(
@@ -83,9 +89,14 @@ export function detectProject(files: PathedFile[]): DetectedProject {
     return { projectName: null, collections: [], structureErrors, skipped }
   }
 
+  const loose = depths.has(2)
   const byCollection = new Map<string, Map<string, PathedFile[]>>()
   for (const { parts, entry } of kept) {
-    const [collection, layer] = nested ? [parts[1]!, parts[2]!] : [parts[0]!, parts[1]!]
+    const [collection, layer] = nested
+      ? [parts[1]!, parts[2]!]
+      : loose
+        ? [fallbackName, parts[0]!]
+        : [parts[0]!, parts[1]!]
     const layers = byCollection.get(collection) ?? new Map<string, PathedFile[]>()
     layers.set(layer, [...(layers.get(layer) ?? []), entry])
     byCollection.set(collection, layers)

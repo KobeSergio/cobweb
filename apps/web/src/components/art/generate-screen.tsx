@@ -61,7 +61,7 @@ export function GenerateScreen({
     rules,
     tokens: seedTokens,
   })
-  const { tokens, generating, progress, problems, conflicts, supply } = generator
+  const { tokens, generating, progress, problems, supply } = generator
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
   const { previous, next } = flowNeighbours(collection.id, collection.project_type, 'art/generate')
   const skipped = generator.rules.length - generator.active.length
@@ -171,12 +171,15 @@ export function GenerateScreen({
         </Alert>
       )}
 
-      {conflicts.length > 0 && !readOnly && (
-        <p className="text-muted-foreground flex items-center gap-2 text-sm">
-          <TriangleAlertIcon aria-hidden="true" className="text-warning size-4" />
-          {skipped === 1 ? '1 rule is' : `${n(skipped)} rules are`} skipped because of a conflict.{' '}
+      {skipped > 0 && !readOnly && (
+        // One line: the sentence and its link are separate items that never wrap apart.
+        <p className="text-muted-foreground flex min-w-0 items-center gap-2 text-sm whitespace-nowrap">
+          <TriangleAlertIcon aria-hidden="true" className="text-warning size-4 shrink-0" />
+          <span className="min-w-0 truncate">
+            {skipped === 1 ? '1 rule is' : `${n(skipped)} rules are`} skipped because of a conflict
+          </span>
           <Link
-            className="text-foreground underline underline-offset-2"
+            className="text-foreground shrink-0 underline underline-offset-2"
             href={artSubStepHref(collection.id, 'rules')}
           >
             Review on Rules

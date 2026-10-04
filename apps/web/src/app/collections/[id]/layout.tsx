@@ -2,7 +2,6 @@ import type { Metadata } from 'next'
 import { cn } from '@cobweb/ui/lib/utils'
 import { SessionGuard } from '@/components/auth/session-guard'
 import { CollectionTopbar } from '@/components/shell/collection-topbar'
-import { SetupMenu } from '@/components/shell/setup-menu'
 import { SmallScreen } from '@/components/shell/small-screen'
 import { WorkspaceNav } from '@/components/shell/workspace-nav'
 import { requireOwnedCollection, requireUser } from '@/lib/auth'
@@ -19,7 +18,7 @@ export async function generateMetadata({ params }: Pick<Props, 'params'>): Promi
 
 /**
  * Working on one collection: its top bar, then the stepper of the four build stages (or, once
- * deployed, the Manage tabs or the Setup notice), then the screen. `--workspace-header` is the
+ * deployed, the Manage tabs), then the screen. `--workspace-header` is the
  * height of the sticky header, for things that stick below it (the Art rail).
  */
 export default async function CollectionLayout({ children, params }: Props) {
@@ -36,7 +35,7 @@ export default async function CollectionLayout({ children, params }: Props) {
       <div
         className={cn(
           'hidden min-h-svh flex-col sm:flex',
-          // Top bar (4.57rem) plus the stepper (3.5rem), or plus the Manage tabs / Setup notice (2.75rem).
+          // Top bar (4.57rem) plus the stepper (3.5rem), or plus the Manage tabs (2.75rem).
           deployed ? '[--workspace-header:7.32rem]' : '[--workspace-header:8.07rem]',
         )}
       >
@@ -45,15 +44,6 @@ export default async function CollectionLayout({ children, params }: Props) {
             name={collection.name}
             status={collection.status}
             walletAddress={user.walletAddress}
-            demo={demo}
-            nav={
-              <SetupMenu
-                collectionId={collection.id}
-                status={collection.status}
-                projectType={collection.project_type}
-                demo={demo}
-              />
-            }
           />
           <WorkspaceNav
             collectionId={collection.id}

@@ -20,7 +20,7 @@ const CHECK_BATCH = 40
  * against the layer rules, upload the good ones through the resumable queue, then hand the result
  * to the Art screens (the shared art project, keyed by `collectionId`).
  */
-export function useFolderUpload(collectionId: string, activeCollectionId?: string) {
+export function useFolderUpload(collectionId: string, projectName: string, activeCollectionId?: string) {
   const [, update] = useArtProject(collectionId, {})
   const { queue, items } = useUploadQueue(4)
   const [phase, setPhase] = useState<FolderPhase>('pick')
@@ -41,7 +41,7 @@ export function useFolderUpload(collectionId: string, activeCollectionId?: strin
     async (files: PathedFile[]) => {
       const id = ++run.current
       release()
-      const project = detectProject(files)
+      const project = detectProject(files, projectName)
       setDetected(project)
       setChecks(new Map())
       setChecked(0)
@@ -76,7 +76,7 @@ export function useFolderUpload(collectionId: string, activeCollectionId?: strin
       setCanvas(size)
       setPhase('review')
     },
-    [release],
+    [release, projectName],
   )
 
   const valid = useMemo(() => {

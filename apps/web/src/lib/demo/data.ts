@@ -199,6 +199,7 @@ const jobBase = {
   lockedAt,
   tokenListHash: sampleHex(8, 32),
   quote,
+  lockOptions: { allowDuplicates: false },
 }
 const payment = { txHash: sampleTxHash(1), paidAt: lockedAt + 20 * 60, amountWei: quote.totalWei }
 const BATCH_SIZE = 50

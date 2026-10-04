@@ -1,23 +1,19 @@
 'use client'
 
 import { CheckIcon, InfoIcon, RotateCwIcon, XIcon } from 'lucide-react'
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, AlertDescription, AlertTitle } from '@cobweb/ui/components/alert'
-import { Artwork } from '@cobweb/ui/components/artwork'
 import { Button } from '@cobweb/ui/components/button'
 import { Progress } from '@cobweb/ui/components/progress'
 import { Spinner } from '@cobweb/ui/components/spinner'
-import { transition } from '@cobweb/ui/lib/motion'
 import { cn } from '@cobweb/ui/lib/utils'
 import { followRender, SECONDS_PER_BATCH, type RenderProgress, type UploadOutcome } from './upload-sim'
-import { formatDuration, tokenPreview } from './upload-shared'
-
-const RECENT = 12
+import { formatDuration } from './upload-shared'
 
 /**
- * Rendering: batch progress, the latest tokens, then the metadata upload. With "Reveal later" the
- * placeholder is its own small phase, pinned first; with deferred art it is the only one.
+ * Rendering: coarse progress only, batches done of total, then the metadata upload. There is no
+ * per-image status and no thumbnails of the latest tokens. With "Reveal later" the placeholder is
+ * its own small phase, pinned first; with deferred art it is the only one.
  */
 export function RenderStep({
   tokenCount,
@@ -38,7 +34,6 @@ export function RenderStep({
   placeholderOnly?: boolean
   onDone: () => void
 }) {
-  const reduce = useReducedMotion()
   const [progress, setProgress] = useState(start)
   const [retrying, setRetrying] = useState(false)
   const controller = useRef<AbortController | null>(null)
@@ -76,12 +71,9 @@ export function RenderStep({
     run({ ...progress, failedBatch: undefined })
   }
 
-  const rendered = Math.min(progress.done * progress.size, tokenCount)
   const imagesDone = progress.done >= progress.total
   const failed = progress.failedBatch !== undefined
   const remaining = (progress.total - progress.done) * SECONDS_PER_BATCH + (imagesDone ? 0 : 60)
-  const recent = Array.from({ length: Math.min(RECENT, rendered) }, (_, index) => rendered - index)
-  const failedFrom = failed ? (progress.failedBatch! - 1) * progress.size + 1 : 0
   // The placeholder is one file, pinned before the first batch of the real set finishes.
   const placeholderState = progress.phase === 'done' || progress.done > 0 ? 'done' : 'running'
   const placeholderRow = (
@@ -115,11 +107,9 @@ export function RenderStep({
         <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
           <p className="flex items-baseline gap-2">
             <span className="numeric text-[2rem] leading-none font-medium tracking-tight">
-              {rendered.toLocaleString('en-US')}
+              {progress.done}
             </span>
-            <span className="numeric text-muted-foreground text-sm">
-              of {tokenCount.toLocaleString('en-US')} images
-            </span>
+            <span className="numeric text-muted-foreground text-sm">of {progress.total} batches done</span>
           </p>
           <p className="text-muted-foreground text-[0.8125rem]" aria-live="polite">
             {failed ? (
@@ -128,18 +118,17 @@ export function RenderStep({
               'Images finished'
             ) : (
               <>
-                Batch <span className="numeric text-foreground/85">{progress.done + 1}</span> of{' '}
-                <span className="numeric text-foreground/85">{progress.total}</span>,{' '}
-                <span className="numeric">{progress.size}</span> tokens each
+                <span className="numeric">{tokenCount.toLocaleString('en-US')}</span> tokens in batches of{' '}
+                <span className="numeric">{progress.size}</span>
               </>
             )}
           </p>
         </div>
         <Progress
           size="lg"
-          value={(rendered / tokenCount) * 100}
-          aria-label="Images rendered"
-          aria-valuetext={`${rendered} of ${tokenCount} images`}
+          value={(progress.done / progress.total) * 100}
+          aria-label="Batches rendered"
+          aria-valuetext={`${progress.done} of ${progress.total} batches`}
         />
 
         <ol className={cn('grid gap-3', placeholder ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
@@ -157,9 +146,7 @@ export function RenderStep({
           <PhaseRow
             label="Upload metadata to IPFS"
             state={progress.phase === 'done' ? 'done' : progress.phase === 'metadata' ? 'running' : 'waiting'}
-            detail={
-              progress.phase === 'metadata' ? 'Writing and pinning one file per token' : 'After the images'
-            }
+            detail={progress.phase === 'metadata' ? 'Writing and pinning the metadata' : 'After the images'}
           />
         </ol>
 
@@ -169,50 +156,13 @@ export function RenderStep({
             <AlertTitle>Batch {progress.failedBatch} did not render</AlertTitle>
             <AlertDescription>
               <p>
-                Tokens{' '}
-                <span className="numeric">
-                  {failedFrom} to {Math.min(failedFrom + progress.size - 1, tokenCount)}
-                </span>{' '}
-                failed on the render server. The finished batches are kept; retrying renders only this one.
+                The batch failed on the render server. The finished batches are kept; retrying renders only
+                this one.
               </p>
             </AlertDescription>
           </Alert>
         )}
       </div>
-
-      {recent.length > 0 && (
-        <div className="space-y-3 p-6">
-          <h4 className="text-sm font-medium">Latest rendered</h4>
-          <ul className="grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-12">
-            <AnimatePresence initial={false}>
-              {recent.map((id, index) => (
-                <motion.li
-                  key={id}
-                  initial={reduce ? false : { opacity: 0, scale: 0.94 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={transition.base}
-                  className={cn(
-                    index >= 8 && 'hidden lg:block',
-                    index >= 4 && index < 8 && 'hidden sm:block',
-                  )}
-                >
-                  <Artwork
-                    src={tokenPreview(id)}
-                    alt={`Token ${id}`}
-                    seed={`token-${id}`}
-                    className="border-border-strong rounded-lg border"
-                  >
-                    <span className="numeric bg-background/75 absolute bottom-1 left-1 rounded-sm px-1 text-[0.625rem] backdrop-blur-sm">
-                      #{id}
-                    </span>
-                  </Artwork>
-                </motion.li>
-              ))}
-            </AnimatePresence>
-          </ul>
-        </div>
-      )}
 
       <div className="flex flex-wrap items-center justify-between gap-4 p-6">
         <div className="text-muted-foreground max-w-lg space-y-1 text-[0.8125rem] leading-snug">

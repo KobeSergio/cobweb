@@ -157,13 +157,22 @@ type RenderJobBase = {
   tokenListHash: Hex
   quote: ArtFeeQuote
   /**
+   * What the creator chose under "Lock options". `allowDuplicates`: identical trait combinations are
+   * accepted. Seam: the server honours it when it validates the submitted token list at lock
+   * (decision C1; MASTER_PLAN, Art: assignment integrity at lock).
+   */
+  lockOptions: { allowDuplicates: boolean }
+  /**
    * Set when the creator chose "Reveal later": the contract starts on this placeholder and reveals
    * to the real metadata from Settings. Null when the contract starts on the real art.
    */
   placeholder: RenderPlaceholder | null
 }
 
-/** A render job in one of its states. Replaced by: `render_jobs` rows and the render Lambda's progress (Phase 4). */
+/**
+ * A render job in one of its states. Replaced by: `render_jobs` rows and the render Lambda's progress (Phase 4).
+ * Progress is coarse on purpose: batches done of total, then metadata. There is no per-image status.
+ */
 export type RenderJob =
   | (RenderJobBase & { state: 'locked' })
   | (RenderJobBase & { state: 'payment_due' })

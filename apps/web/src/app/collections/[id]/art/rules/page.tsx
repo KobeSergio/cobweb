@@ -1,5 +1,4 @@
 import { redirect } from 'next/navigation'
-import { FinishLaterAction } from '@/components/art/finish-later'
 import { RulesScreen } from '@/components/art/rules-screen'
 import { StagePage } from '@/components/shell/stage-page'
 import { requireOwnedCollection } from '@/lib/auth'
@@ -32,11 +31,6 @@ export default async function Page({
       title="Rules"
       description={subs[index]!.summary}
       sampleNotice={ctx.sampleNotice}
-      actions={
-        ctx.demo && !ctx.readOnly && !ctx.artDeferred ? (
-          <FinishLaterAction collectionId={collection.id} />
-        ) : undefined
-      }
       width="wide"
       bodyHasFooter
     >

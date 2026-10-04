@@ -36,7 +36,8 @@ export const STAGES = [
 
 /**
  * Manage drop: not a stage of the stepper. A deployed collection opens here, with its tabs under
- * the top bar; the build stages stay reachable from the top bar's Setup menu, read-only.
+ * the top bar and no stepper; the setup is done. Only deferred art stays reachable, from a
+ * "Finish the art" entry beside the tabs.
  */
 export const MANAGE_STAGE = {
   slug: 'manage',
@@ -190,7 +191,7 @@ export function nextStage(status: CollectionStatus): Stage {
   return STAGES[NEXT_STAGE_INDEX[status]] ?? MANAGE_STAGE
 }
 
-/** Whether the collection lives in Manage drop: the stepper is gone and Setup is read-only history. */
+/** Whether the collection lives in Manage drop: the stepper is gone and the Manage tabs replace it. */
 export function isDeployed(status: CollectionStatus): boolean {
   return status === 'deployed'
 }

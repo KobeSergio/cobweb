@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { Progress } from '@cobweb/ui/components/progress'
 import { StatusBadge } from '@cobweb/ui/components/status-badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@cobweb/ui/components/table'
-import { cn } from '@cobweb/ui/lib/utils'
 import {
   explorerTxUrl,
   formatNative,
@@ -15,79 +14,6 @@ import {
   type SupportedChain,
 } from '@/lib/demo'
 import { count, localDateTime, percent, relativeTo, shortUtc, useTimeZone } from './format'
-
-/** Minted of supply, split by where the tokens went. The one big number on the screen. */
-export function SupplyMeter({
-  groups,
-  totalMinted,
-  maxSupply,
-}: {
-  groups: MintGroup[]
-  totalMinted: number
-  maxSupply: number
-}) {
-  const fromPhases = groups.reduce((sum, group) => sum + group.minted, 0)
-  const airdropped = Math.max(0, totalMinted - fromPhases)
-  const remaining = Math.max(0, maxSupply - totalMinted)
-  const parts = [
-    ...groups
-      .filter((group) => group.minted > 0)
-      .map((group) => ({ key: `g${group.id}`, label: group.name, value: group.minted })),
-    ...(airdropped > 0 ? [{ key: 'airdrop', label: 'Airdrops', value: airdropped }] : []),
-  ]
-  // Shades of the one accent, darkest last, so each source reads apart without a second hue.
-  const shades = ['bg-primary', 'bg-primary/70', 'bg-primary/45', 'bg-primary/30']
-  const share = percent(totalMinted, maxSupply)
-
-  return (
-    <div className="grid gap-5">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <p className="flex items-baseline gap-2">
-          <span className="numeric text-[3.5rem] leading-none font-medium tracking-tight">
-            {count(totalMinted)}
-          </span>
-          <span className="numeric text-muted-foreground text-xl">/ {count(maxSupply)}</span>
-          <span className="sr-only">tokens minted</span>
-        </p>
-        <p className="text-muted-foreground text-sm">
-          <span className="numeric text-foreground">{share.toFixed(1)}%</span> minted,{' '}
-          <span className="numeric text-foreground">{count(remaining)}</span> left
-        </p>
-      </div>
-      <div
-        role="meter"
-        aria-label="Minted of supply"
-        aria-valuemin={0}
-        aria-valuemax={maxSupply}
-        aria-valuenow={totalMinted}
-        aria-valuetext={`${count(totalMinted)} of ${count(maxSupply)} minted`}
-        className="bg-well shadow-inset flex h-3.5 gap-px overflow-hidden rounded-full"
-      >
-        {parts.map((part, index) => (
-          <span
-            key={part.key}
-            className={cn('h-full first:rounded-l-full', shades[index % shades.length])}
-            style={{ width: `${percent(part.value, maxSupply)}%` }}
-          />
-        ))}
-      </div>
-      <ul className="flex flex-wrap gap-x-6 gap-y-2 text-[0.8125rem]">
-        {parts.map((part, index) => (
-          <li key={part.key} className="flex items-center gap-2">
-            <span aria-hidden="true" className={cn('size-2 rounded-full', shades[index % shades.length])} />
-            <span className="text-muted-foreground">{part.label}</span>
-            <span className="numeric">{count(part.value)}</span>
-          </li>
-        ))}
-        <li className="flex items-center gap-2">
-          <span aria-hidden="true" className="bg-well size-2 rounded-full border border-border-strong" />
-          <span className="text-muted-foreground">Not minted</span>
-          <span className="numeric">{count(remaining)}</span>
-        </li>
-      </ul>
-    </div>
-  )
-}
 
 /**
  * The phases the chain reports as live, and the next one scheduled. Live comes from each

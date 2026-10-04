@@ -65,9 +65,11 @@ function rollPreview(layers: Layer[], seed: number, rules: Parameters<typeof sat
 }
 
 /**
- * Art, step 1 (generative): the stack. The collection switcher on top; a layer panel on the left
- * with a live preview, the selected layer's traits on the right: rarity, constants, the blank
- * trait, adding and removing traits. Everything below the switcher is the shown collection's.
+ * Art, step 1 (generative): the stack. A project with no layers opens as the folder upload, which
+ * finds the collections in the folder structure; after that the collection dropdown sits on top
+ * (with "Add collection"), a layer panel on the left with a live preview, and the selected layer's
+ * traits on the right: rarity, constants, the blank trait, adding and removing traits. Everything
+ * below the dropdown is the shown collection's.
  */
 export function LayersScreen({
   collection,
@@ -133,8 +135,9 @@ export function LayersScreen({
       {layers.length === 0 && !readOnly ? (
         <FolderUpload
           collectionId={collection.id}
-          activeCollectionId={collections.activeId}
-          onAddLayer={() => editor.askAddLayer(setSelectedId)}
+          projectName={collection.name}
+          activeCollectionId={collections.hasLayers ? collections.activeId : undefined}
+          onAddLayer={() => editor.askAddLayer(setSelectedId, collections.ensureOne(collection.name))}
         />
       ) : layers.length === 0 ? (
         <Empty className="bg-card border py-16">

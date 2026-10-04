@@ -114,7 +114,8 @@ export function useLayersEditor(
         return { ...p, layers: after, tokens: p.tokens ? remapDna(p.tokens, before, after) : p.tokens }
       }),
 
-    askAddLayer: (onAdded: (id: string) => void) =>
+    /** `into` names the collection when it was only just created (the first layer of a project). */
+    askAddLayer: (onAdded: (id: string) => void, into: string = activeCollectionId) =>
       setNaming({
         title: 'Add a layer',
         description: 'New layers go on top of the stack. Drag them to change the order.',
@@ -126,7 +127,7 @@ export function useLayersEditor(
         onSubmit: (name) => {
           let id = ''
           structural((current) => {
-            const result = addLayer(current, activeCollectionId, name)
+            const result = addLayer(current, into, name)
             id = result.id
             return result.layers
           }, generated > 0)

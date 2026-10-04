@@ -1,13 +1,9 @@
 'use client'
 
-import { ArrowRightIcon } from 'lucide-react'
-import Link from 'next/link'
 import { useState } from 'react'
 import { Button } from '@cobweb/ui/components/button'
 import { StatusBadge } from '@cobweb/ui/components/status-badge'
 import { Switch } from '@cobweb/ui/components/switch'
-import { cn } from '@cobweb/ui/lib/utils'
-import { ChainName } from '@/components/chains/chain-icon'
 import type { Tables } from '@/lib/database.types'
 import {
   formatBps,
@@ -17,10 +13,11 @@ import {
   type DropActivity,
   type SupportedChain,
 } from '@/lib/demo'
-import { manageTabHref } from '@/lib/steps'
 import { AddressLine, Row } from './bits'
 import { PayoutDialog, RevealDialog, RoyaltyDialog } from './settings-dialogs'
+import { Setting, SettingsGroup as Group } from './settings-parts'
 import { SAMPLE } from './simulate'
+import { TradabilitySettings } from './tradability'
 import { TransactionDialog } from './transaction-dialog'
 
 export type SettingsScreenProps = {
@@ -39,8 +36,8 @@ export type SettingsScreenProps = {
 type DialogKey = 'withdraw' | 'payout' | 'royalty' | 'reveal' | 'onBehalf'
 
 /**
- * Manage drop, settings: withdraw, payout address, royalties, reveal, mint on behalf. The transfer
- * validator and the lock live in the Tradability card on Overview; Transfers here points to it.
+ * Manage drop, settings: Money (withdraw, payout address, royalties), Metadata (reveal), and
+ * Advanced at the bottom (the transfer validator, the transfer lock, mint on behalf).
  */
 export function SettingsScreen({
   collection,
@@ -164,7 +161,8 @@ export function SettingsScreen({
         </Setting>
       </Group>
 
-      <Group title="Minting">
+      <Group title="Advanced" id="advanced">
+        <TradabilitySettings deployment={deployment} chain={chain} />
         <Setting
           title="Mint on behalf"
           description="Lets anyone pay to mint for another wallet, using that wallet's limit or quota; the tokens go to that wallet. Useful for card checkouts. Leave it off otherwise."
@@ -179,25 +177,6 @@ export function SettingsScreen({
               checked={state.onBehalf}
               onCheckedChange={() => show('onBehalf')}
             />
-          </div>
-        </Setting>
-      </Group>
-
-      <Group title="Transfers">
-        <Setting
-          title="Tradability"
-          description="The transfer validator, which governs whether and where tokens can be traded and enforces royalties, and the transfer lock are on Overview."
-        >
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-muted-foreground flex flex-wrap items-center gap-1.5 text-sm">
-              Contract on <ChainName chain={chain} className="text-foreground" />
-            </p>
-            <Button variant="secondary" size="sm" asChild>
-              <Link href={`${manageTabHref(collection.id, 'overview')}#tradability`}>
-                Open Tradability
-                <ArrowRightIcon aria-hidden="true" />
-              </Link>
-            </Button>
           </div>
         </Setting>
       </Group>
@@ -276,43 +255,6 @@ export function SettingsScreen({
           onConfirmed={() => patch({ onBehalf: !dialog.at.onBehalf })}
         />
       )}
-    </div>
-  )
-}
-
-function Group({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section aria-label={title} className="grid gap-3">
-      <h2 className="text-muted-foreground text-sm font-medium">{title}</h2>
-      <div className="bg-card shadow-raised divide-y rounded-xl border">{children}</div>
-    </section>
-  )
-}
-
-/** One setting: what it is on the left, its state and one action on the right. */
-function Setting({
-  title,
-  description,
-  danger,
-  children,
-}: {
-  title: string
-  description: string
-  danger?: boolean
-  children: React.ReactNode
-}) {
-  return (
-    <div
-      className={cn(
-        'grid gap-4 p-5 md:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] md:gap-10 lg:p-6',
-        danger && 'bg-destructive-soft/30 rounded-xl',
-      )}
-    >
-      <div className="space-y-1">
-        <h3 className={cn('text-heading', danger && 'text-destructive-foreground')}>{title}</h3>
-        <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">{description}</p>
-      </div>
-      <div className="min-w-0 self-center">{children}</div>
     </div>
   )
 }

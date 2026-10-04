@@ -107,6 +107,28 @@ export function TokenGallery({ generator, readOnly }: { generator: Generator; re
       },
     })
 
+  /** Legacy "shuffle": the ids move among the chosen tokens at random; every token keeps its traits. */
+  const askShuffle = (ids: Set<number>, everything: boolean, after?: () => void) =>
+    setConfirm({
+      title: everything
+        ? `Shuffle the order of all ${plural(ids.size, 'token')}?`
+        : `Shuffle the order of ${plural(ids.size, 'selected token')}?`,
+      body: [
+        everything
+          ? collections.length > 1
+            ? 'Every token gets a new id at random, across all collections, so collections no longer sit in one block of ids.'
+            : 'Every token gets a new id at random.'
+          : 'The selected tokens trade ids among themselves at random. Other tokens keep theirs.',
+        'Ids move, traits do not: each token keeps its art and attributes, only its number changes. You can shuffle again or swap two ids by hand.',
+      ],
+      confirmLabel: 'Shuffle order',
+      onConfirm: () => {
+        generator.shuffle(ids)
+        toast(`Shuffled the order of ${plural(ids.size, 'token')}`)
+        after?.()
+      },
+    })
+
   return (
     <div
       className={cn(
@@ -171,15 +193,28 @@ export function TokenGallery({ generator, readOnly }: { generator: Generator; re
             <TierLegend />
           </div>
           {!readOnly && (
-            <Button
-              variant={selectMode ? 'secondary' : 'outline'}
-              size="sm"
-              aria-pressed={selectMode}
-              onClick={() => (selectMode ? finishBulk() : setSelectMode(true))}
-            >
-              {selectMode ? <XIcon /> : <ListChecksIcon />}
-              {selectMode ? 'Done selecting' : 'Select'}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              {!selectMode && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={tokens.length < 2}
+                  onClick={() => askShuffle(new Set(tokens.map((token) => token.id)), true)}
+                >
+                  <ShuffleIcon />
+                  Shuffle order
+                </Button>
+              )}
+              <Button
+                variant={selectMode ? 'secondary' : 'outline'}
+                size="sm"
+                aria-pressed={selectMode}
+                onClick={() => (selectMode ? finishBulk() : setSelectMode(true))}
+              >
+                {selectMode ? <XIcon /> : <ListChecksIcon />}
+                {selectMode ? 'Done selecting' : 'Select'}
+              </Button>
+            </div>
           )}
         </div>
 
@@ -242,11 +277,7 @@ export function TokenGallery({ generator, readOnly }: { generator: Generator; re
                 variant="secondary"
                 size="sm"
                 disabled={selected.size < 2}
-                onClick={() => {
-                  generator.shuffle(selected)
-                  toast(`Shuffled the order of ${plural(selected.size, 'token')}`)
-                  finishBulk()
-                }}
+                onClick={() => askShuffle(new Set(selected), false, finishBulk)}
               >
                 <ShuffleIcon />
                 Shuffle order

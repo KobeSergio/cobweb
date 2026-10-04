@@ -6,8 +6,10 @@ import { useSearchParams, useSelectedLayoutSegments } from 'next/navigation'
 import { Fragment, useEffect, useRef } from 'react'
 import { Step, StepSeparator, type StepState } from '@cobweb/ui/components/step'
 import { cn } from '@cobweb/ui/lib/utils'
+import { FinishLaterAction } from '@/components/art/finish-later'
 import {
   isStageDone,
+  isStageReadOnly,
   nextStage,
   stageAccess,
   stageHref,
@@ -36,7 +38,8 @@ const focusRing = 'outline-none focus-visible:ring-ring/50 focus-visible:ring-[3
  * are ticked, the stage to work on is outlined, the stage being viewed is filled, and stages that
  * cannot be opened yet carry a lock. The Art sub-steps are a rail inside the Art stage
  * (`ArtRail`), not a second row here; Manage drop is not a stage. A deployed collection has no
- * stepper at all (see the collection layout).
+ * stepper at all (see `WorkspaceNav`). While the Art stage is shown and the art is not deferred,
+ * "Finish the art later" sits at the right end of the row.
  */
 export function StageNav({ collectionId, status, projectType, demo, artDeferred = false }: Props) {
   const segments = useSelectedLayoutSegments()
@@ -48,6 +51,13 @@ export function StageNav({ collectionId, status, projectType, demo, artDeferred 
   const deferred = artDeferred || sampleDeferred
   const withScenario = (href: string) => (sampleDeferred ? `${href}?art=deferred` : href)
   const currentRef = useRef<HTMLAnchorElement>(null)
+  // Seam: confirming only sets the sample scenario until Phase 3 adds the collection's column, so the
+  // button shows in sample mode only, as it did in the Art screens' headers.
+  const finishLater =
+    demo &&
+    selectedStage === 'art' &&
+    !deferred &&
+    !isStageReadOnly(status, 'art', { demo, artDeferred: deferred })
 
   // On narrow screens the row scrolls; keep the stage being viewed in sight.
   useEffect(() => {
@@ -55,54 +65,61 @@ export function StageNav({ collectionId, status, projectType, demo, artDeferred 
   }, [selectedStage])
 
   return (
-    <nav
-      aria-label="Launch stages"
-      className="scrollbar-hide flex h-14 items-center gap-1 overflow-x-auto border-b px-6"
-    >
-      {STAGES.map((stage, index) => {
-        const artDeferredHere = deferred && stage.slug === 'art'
-        // Deferred art is not done, whatever the status says, until the real set is locked.
-        const done = isStageDone(stage.slug, status) && !artDeferredHere
-        const current = stage.slug === selectedStage
-        const locked = stageAccess(status, stage.slug, { demo, artDeferred: deferred }) === 'locked'
-        const state: StepState = current
-          ? 'current'
-          : done
-            ? 'done'
-            : stage.slug === upNext
-              ? 'next'
-              : 'pending'
-        return (
-          <Fragment key={stage.slug}>
-            <Link
-              ref={current ? currentRef : undefined}
-              href={withScenario(stageHref(collectionId, stage.slug, projectType))}
-              aria-current={current ? 'step' : undefined}
-              className={cn(
-                'hover:bg-accent shrink-0 rounded-lg',
-                focusRing,
-                current && 'bg-accent',
-                locked && !current && 'opacity-70',
-              )}
-            >
-              <Step state={state} completed={done}>
-                {stage.name}
-                {artDeferredHere && (
-                  <span className="text-muted-foreground border-border-strong rounded-full border px-1.5 text-[0.6875rem] leading-4 font-normal">
-                    deferred
-                  </span>
+    <div className="flex h-14 items-center gap-4 border-b px-6">
+      <nav
+        aria-label="Launch stages"
+        className="scrollbar-hide flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+      >
+        {STAGES.map((stage, index) => {
+          const artDeferredHere = deferred && stage.slug === 'art'
+          // Deferred art is not done, whatever the status says, until the real set is locked.
+          const done = isStageDone(stage.slug, status) && !artDeferredHere
+          const current = stage.slug === selectedStage
+          const locked = stageAccess(status, stage.slug, { demo, artDeferred: deferred }) === 'locked'
+          const state: StepState = current
+            ? 'current'
+            : done
+              ? 'done'
+              : stage.slug === upNext
+                ? 'next'
+                : 'pending'
+          return (
+            <Fragment key={stage.slug}>
+              <Link
+                ref={current ? currentRef : undefined}
+                href={withScenario(stageHref(collectionId, stage.slug, projectType))}
+                aria-current={current ? 'step' : undefined}
+                className={cn(
+                  'hover:bg-accent shrink-0 rounded-lg',
+                  focusRing,
+                  current && 'bg-accent',
+                  locked && !current && 'opacity-70',
                 )}
-                {locked && <LockIcon aria-hidden="true" className="text-muted-foreground size-3.5" />}
-                {done && <span className="sr-only"> (done)</span>}
-                {state === 'next' && <span className="sr-only"> (next)</span>}
-                {locked && <span className="sr-only"> (locked)</span>}
-              </Step>
-            </Link>
-            {index < STAGES.length - 1 && <StepSeparator done={done} />}
-          </Fragment>
-        )
-      })}
-    </nav>
+              >
+                <Step state={state} completed={done}>
+                  {stage.name}
+                  {artDeferredHere && (
+                    <span className="text-muted-foreground border-border-strong rounded-full border px-1.5 text-[0.6875rem] leading-4 font-normal">
+                      deferred
+                    </span>
+                  )}
+                  {locked && <LockIcon aria-hidden="true" className="text-muted-foreground size-3.5" />}
+                  {done && <span className="sr-only"> (done)</span>}
+                  {state === 'next' && <span className="sr-only"> (next)</span>}
+                  {locked && <span className="sr-only"> (locked)</span>}
+                </Step>
+              </Link>
+              {index < STAGES.length - 1 && <StepSeparator done={done} />}
+            </Fragment>
+          )
+        })}
+      </nav>
+      {finishLater && (
+        <div className="shrink-0">
+          <FinishLaterAction collectionId={collectionId} />
+        </div>
+      )}
+    </div>
   )
 }
 

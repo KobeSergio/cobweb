@@ -1,10 +1,10 @@
 'use client'
 
-import { CircleAlertIcon, RefreshCwIcon, Trash2Icon } from 'lucide-react'
+import { CircleAlertIcon, EyeIcon, EyeOffIcon, RefreshCwIcon, Trash2Icon } from 'lucide-react'
 import { useId, useState } from 'react'
 import { Button } from '@cobweb/ui/components/button'
+import { ChoiceCard, ChoiceCards } from '@cobweb/ui/components/choice-cards'
 import { Spinner } from '@cobweb/ui/components/spinner'
-import { Switch } from '@cobweb/ui/components/switch'
 import { Textarea } from '@cobweb/ui/components/textarea'
 import type { MediaType } from '@/lib/demo/types'
 import { DropZone, FilePickerButton } from '@/components/art/assets/drop-zone'
@@ -24,6 +24,7 @@ export type PlaceholderFile = {
 }
 
 export type RevealLaterState = {
+  /** "Reveal later" is chosen; false is "Reveal at mint". */
   on: boolean
   /** Forced on: the art is deferred, so the contract can only start on a placeholder. */
   forced: boolean
@@ -34,11 +35,13 @@ export type RevealLaterState = {
 const DESCRIPTION_MAX = 1000
 
 /**
- * "Reveal later" (MASTER_PLAN, Flow: pre-reveal): the contract starts on one placeholder file and its description,
- * and Settings reveals it to the real art in one transaction. Seam: the file goes to storage and
- * is pinned to its own CID by the render pipeline (Phase 4).
+ * The reveal choice at the top of the Review step: "Reveal at mint" or "Reveal later" (MASTER_PLAN,
+ * Flow: pre-reveal). Reveal later shows the placeholder file and its description right below; the
+ * contract starts on them and Settings reveals to the real art in one transaction. Deferred art
+ * forces Reveal later. Seam: the file goes to storage and is pinned to its own CID by the render
+ * pipeline (Phase 4).
  */
-export function RevealLater({
+export function RevealChoice({
   state,
   onChange,
   readOnly,
@@ -86,23 +89,36 @@ export function RevealLater({
 
   return (
     <div className="space-y-5 p-6">
-      <div className="flex items-start justify-between gap-6">
-        <div className="space-y-1">
-          <label htmlFor={`${id}-switch`} className="text-sm font-medium">
-            Reveal later
-          </label>
-          <p className="text-muted-foreground max-w-xl text-[0.8125rem] leading-snug">
-            {state.forced
-              ? 'On because you are finishing the art later. The contract can only start on a placeholder.'
-              : 'Show a placeholder on every token until you reveal. Turn it off to start the contract on the real art.'}
+      <div className="space-y-3">
+        <h4 id={`${id}-choice`} className="text-sm font-medium">
+          When do tokens show their art?
+        </h4>
+        <ChoiceCards
+          aria-labelledby={`${id}-choice`}
+          value={state.on ? 'later' : 'mint'}
+          onValueChange={(value) => onChange({ ...state, on: value === 'later' })}
+          disabled={readOnly}
+          className="sm:grid-cols-2"
+        >
+          <ChoiceCard
+            value="mint"
+            disabled={state.forced}
+            icon={<EyeIcon />}
+            title="Reveal at mint"
+            description="Every token shows its art as soon as it is minted."
+          />
+          <ChoiceCard
+            value="later"
+            icon={<EyeOffIcon />}
+            title="Reveal later"
+            description="Tokens show a placeholder until you reveal from Settings."
+          />
+        </ChoiceCards>
+        {state.forced && (
+          <p className="text-muted-foreground text-[0.8125rem] leading-snug">
+            You are finishing the art later, so the contract can only start on a placeholder.
           </p>
-        </div>
-        <Switch
-          id={`${id}-switch`}
-          checked={state.on}
-          disabled={readOnly || state.forced}
-          onCheckedChange={(on) => onChange({ ...state, on })}
-        />
+        )}
       </div>
 
       {state.on && (

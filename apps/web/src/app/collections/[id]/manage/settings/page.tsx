@@ -30,7 +30,7 @@ export default async function Page({
   return (
     <StagePage
       title="Settings"
-      description="Withdraw proceeds, the payout address, royalties, reveal and mint on behalf."
+      description="Withdraw proceeds, the payout address, royalties and reveal. Advanced holds tradability and mint on behalf."
       sampleNotice={ctx.sampleNotice}
       width="default"
     >

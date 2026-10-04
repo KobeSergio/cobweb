@@ -30,7 +30,11 @@ export function TreePreview({
     <div className="space-y-5">
       <Panel
         title={project.projectName ?? 'Your folder'}
-        description={`${plural(project.collections.length, 'collection')}. Layers stack in folder order, the first at the bottom; you can reorder them next.`}
+        description={`${
+          project.collections.length === 1
+            ? `One collection, ${project.collections[0]!.name}`
+            : `${plural(project.collections.length, 'collection')}, one per folder`
+        }. Layers stack in folder order, the first at the bottom; you can reorder them next.`}
         bodyClassName="p-0"
       >
         <ul className="divide-y">

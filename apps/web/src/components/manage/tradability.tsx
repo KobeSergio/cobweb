@@ -9,28 +9,26 @@ import { Button } from '@cobweb/ui/components/button'
 import { Checkbox } from '@cobweb/ui/components/checkbox'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@cobweb/ui/components/field'
 import { Input } from '@cobweb/ui/components/input'
-import { Panel } from '@cobweb/ui/components/panel'
 import { StatusBadge } from '@cobweb/ui/components/status-badge'
-import { cn } from '@cobweb/ui/lib/utils'
 import type { Address, Deployment, SupportedChain } from '@/lib/demo'
 import { AddressLine } from './bits'
+import { Setting } from './settings-parts'
 import { SAMPLE } from './simulate'
 import { TransactionDialog } from './transaction-dialog'
 
 const DEFAULT_VALIDATOR = SAMPLE.transferValidator
 
 /**
- * Tradability: the collection's transfer validator and its lock. The validator decides whether
- * and where tokens can be traded, and it is what enforces royalties on secondary sales.
+ * Tradability, as two rows of Settings, Advanced: the collection's transfer validator and its
+ * lock. The validator decides whether and where tokens can be traded, and it is what enforces
+ * royalties on secondary sales.
  */
-export function TradabilityCard({
+export function TradabilitySettings({
   deployment,
   chain,
-  className,
 }: {
   deployment: Deployment
   chain: SupportedChain
-  className?: string
 }) {
   const [validator, setValidator] = useState<Address>(DEFAULT_VALIDATOR)
   const [locked, setLocked] = useState(deployment.transfersLocked)
@@ -46,32 +44,30 @@ export function TradabilityCard({
   const base = { open, onOpenChange: setOpen, chain }
 
   return (
-    <Panel
-      id="tradability"
-      title="Tradability"
-      description="The transfer validator governs whether and where these tokens can be traded. Royalties are enforced on secondary sales through it."
-      className={cn('scroll-mt-6', className)}
-      bodyClassName="divide-y px-5 py-0 lg:px-6"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-3 py-4">
-        <div className="grid min-w-0 gap-1">
-          <p className="text-muted-foreground text-xs font-medium">Transfer validator</p>
+    <>
+      <Setting
+        title="Transfer validator"
+        description="Governs whether and where these tokens can be traded. Royalties are enforced on secondary sales through it."
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <AddressLine address={validator} chain={chain} />
             <Badge variant={isDefault ? 'secondary' : 'warning'}>
               {isDefault ? 'Limit Break default' : 'Custom'}
             </Badge>
           </div>
+          <Button variant="destructive" size="sm" onClick={() => show('validator')}>
+            <ShieldAlertIcon aria-hidden="true" />
+            Change validator
+          </Button>
         </div>
-        <Button variant="destructive" size="sm" onClick={() => show('validator')}>
-          <ShieldAlertIcon aria-hidden="true" />
-          Change validator
-        </Button>
-      </div>
+      </Setting>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 py-4">
-        <div className="grid gap-1">
-          <p className="text-muted-foreground text-xs font-medium">Transfers</p>
+      <Setting
+        title="Transfers"
+        description="Locking stops every send, sale and listing until you unlock. Mints and airdrops still work."
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
           {!chain.transferLock ? (
             <p className="text-muted-foreground text-sm">
               {chain.name} has no transfer validator, so transfers cannot be locked there.
@@ -84,14 +80,14 @@ export function TradabilityCard({
           ) : (
             <StatusBadge status="draft">Transferable</StatusBadge>
           )}
+          {chain.transferLock && (
+            <Button variant={locked ? 'secondary' : 'destructive'} size="sm" onClick={() => show('lock')}>
+              {locked ? <LockOpenIcon aria-hidden="true" /> : <LockIcon aria-hidden="true" />}
+              {locked ? 'Unlock' : 'Lock'}
+            </Button>
+          )}
         </div>
-        {chain.transferLock && (
-          <Button variant={locked ? 'secondary' : 'destructive'} size="sm" onClick={() => show('lock')}>
-            {locked ? <LockOpenIcon aria-hidden="true" /> : <LockIcon aria-hidden="true" />}
-            {locked ? 'Unlock' : 'Lock'}
-          </Button>
-        )}
-      </div>
+      </Setting>
 
       {dialog?.key === 'lock' && (
         <TransactionDialog
@@ -121,7 +117,7 @@ export function TradabilityCard({
       {dialog?.key === 'validator' && (
         <ValidatorDialog key={dialog.id} {...base} current={validator} onApply={setValidator} />
       )}
-    </Panel>
+    </>
   )
 }
 

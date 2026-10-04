@@ -3,6 +3,7 @@
 import { CheckIcon, ImageUpIcon, ScaleIcon, TriangleAlertIcon } from 'lucide-react'
 import { Button } from '@cobweb/ui/components/button'
 import { Switch } from '@cobweb/ui/components/switch'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@cobweb/ui/components/tooltip'
 import { cn } from '@cobweb/ui/lib/utils'
 import type { Layer, TraitCounts } from '@/lib/demo'
 import { constantTotal, expectedCount, formatPercent, weightTotal } from '../lib/trait-index'
@@ -61,7 +62,8 @@ function WeightTotal({ layer, supply }: { layer: Layer; supply: number }) {
                 : `${formatPercent(diff)} left to assign`}
         </p>
       </div>
-      {/* Each trait's share as a segment, so the split reads at a glance. */}
+      {/* Each trait's share as one segment of a single colour, split by hairlines; hover names it.
+          The bar repeats what the trait cards say, so it stays out of the accessibility tree. */}
       <div
         aria-hidden="true"
         className={cn(
@@ -69,12 +71,18 @@ function WeightTotal({ layer, supply }: { layer: Layer; supply: number }) {
           over && 'ring-destructive/60 ring-1',
         )}
       >
-        {weighted.map((trait, i) => (
-          <span
-            key={trait.id}
-            style={{ width: `${(trait.weight / Math.max(100, total)) * 100}%` }}
-            className={cn('h-full transition-[width] duration-300', i % 2 ? 'bg-primary/70' : 'bg-primary')}
-          />
+        {weighted.map((trait) => (
+          <Tooltip key={trait.id}>
+            <TooltipTrigger asChild>
+              <span
+                style={{ width: `${(trait.weight / Math.max(100, total)) * 100}%` }}
+                className="bg-primary hover:bg-primary-hover border-background h-full border-l transition-[width] duration-300 first:border-l-0"
+              />
+            </TooltipTrigger>
+            <TooltipContent>
+              {trait.name}, <span className="numeric">{formatPercent(trait.weight)}</span>
+            </TooltipContent>
+          </Tooltip>
         ))}
       </div>
       {fixed > 0 && (

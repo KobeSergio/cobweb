@@ -27,16 +27,32 @@ export function useCollections(projectKey: string, tokenName: string, seed: ArtS
     ? project.activeCollectionId!
     : (collections[0]?.id ?? '')
   const active = collections.find((c) => c.id === activeId) ?? null
+  // Until the project has layers, the folder upload decides its collections; no switcher yet.
+  const hasLayers = (project.layers ?? seed.layers ?? []).length > 0
   const [naming, setNaming] = useState<NameRequest | null>(null)
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
 
   const select = (id: string) => update((p) => ({ ...p, activeCollectionId: id }))
 
+  /** The shown collection's id, creating one named after the project when there is none yet. */
+  const ensureOne = (name: string): string => {
+    if (activeId) return activeId
+    let id = ''
+    update((p) => {
+      const result = addCollection(p.collections ?? collections, name)
+      id = result.id
+      return { ...p, collections: result.collections, activeCollectionId: result.id }
+    })
+    return id
+  }
+
   return {
     collections,
     activeId,
     active,
+    hasLayers,
     select,
+    ensureOne,
     naming,
     closeNaming: () => setNaming(null),
     confirm,

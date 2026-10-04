@@ -34,15 +34,19 @@ const RULES = [
  */
 export function FolderUpload({
   collectionId,
+  projectName,
   activeCollectionId,
   onAddLayer,
 }: {
   collectionId: string
+  /** Names the collection when layer folders are dropped on their own. */
+  projectName: string
+  /** Set when the project already has collections: one uploaded collection fills this one. */
   activeCollectionId?: string
   /** Start with an empty layer instead, adding traits one layer at a time. */
   onAddLayer?: () => void
 }) {
-  const upload = useFolderUpload(collectionId, activeCollectionId)
+  const upload = useFolderUpload(collectionId, projectName, activeCollectionId)
   const { detected, phase } = upload
 
   if (phase === 'pick')
@@ -51,24 +55,32 @@ export function FolderUpload({
         <div className="space-y-3">
           <FolderDropZone onFiles={upload.pick} />
           {onAddLayer && (
-            <p className="text-muted-foreground text-[0.8125rem]">
-              No folder yet?{' '}
+            <p className="text-muted-foreground flex flex-wrap items-center gap-x-1.5 text-[0.8125rem]">
+              No folder yet?
               <Button
                 variant="link"
-                className="text-foreground text-[0.8125rem] underline"
+                className="text-foreground h-auto p-0 text-[0.8125rem] underline"
                 onClick={onAddLayer}
               >
                 Add layers one at a time
               </Button>
-              .
             </p>
           )}
         </div>
         <Panel title="What to upload" bodyClassName="space-y-4">
           <p className="text-muted-foreground text-[0.8125rem]">
-            One folder per layer, one image per trait. A project can hold several collections, for example
-            male and female, each with its own layers.
+            One folder per layer, one image per trait. The folders decide the collections:
           </p>
+          <ul className="text-muted-foreground space-y-1.5 text-[0.8125rem]">
+            <li>
+              <span className="numeric text-foreground text-xs">collection/layer/trait.png</span> gives one
+              collection, named after the folder.
+            </li>
+            <li>
+              <span className="numeric text-foreground text-xs">project/collection/layer/trait.png</span>{' '}
+              gives one collection per folder, for example male and female.
+            </li>
+          </ul>
           <pre className="numeric bg-well text-muted-foreground shadow-inset overflow-x-auto rounded-lg px-3.5 py-3 text-xs leading-relaxed">
             {
               'my-project/\n  male/\n    1_background/\n      blue.png\n    2_body/\n      gold.png\n  female/\n    ...'
@@ -79,6 +91,9 @@ export function FolderUpload({
               <li key={rule}>{rule}</li>
             ))}
           </ul>
+          <p className="text-muted-foreground text-[0.8125rem]">
+            You can add more collections from Layers after the upload.
+          </p>
         </Panel>
       </div>
     )
@@ -115,8 +130,8 @@ export function FolderUpload({
               <p key={error}>{error}</p>
             ))}
             <p>
-              Put each image in a layer folder inside a collection folder:{' '}
-              <span className="numeric">collection/layer/trait.png</span>.
+              Put each image in a layer folder inside a collection folder, as in{' '}
+              <span className="numeric">collection/layer/trait.png</span>
             </p>
           </AlertDescription>
         </Alert>

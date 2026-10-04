@@ -409,3 +409,51 @@ above; where they conflict, this section wins.
   link" with a warning that changing it breaks shared links.
 - Airdrop: no separate burn section. A "Burn instead of sending" switch turns the airdrop into a
   burn to the dead address with a quantity.
+
+## 10. Review round 2 (4 October 2026)
+
+Nineteen further comments on the round 1 preview. These amend sections 4 and 9.
+
+### Navigation
+
+- The workspace nav is dynamic per stage. Before deploy: the four-stage stepper and nothing about
+  Manage drop (no link, no tabs). After deploy: no stepper for Details, Lock and upload or Deploy;
+  the Manage tabs sit under the top bar, and Art stays reachable as a single quiet "Art" entry
+  beside the tabs only while the art is deferred (unfinished art launched early). Setup history is
+  not shown as a stepper.
+- "Finish the art later" sits in the stepper row, right-aligned, only while the Art stage is shown.
+- The "Sample data" chip is removed from the top bar; sample mode stays an environment flag only.
+
+### Art
+
+- Layers, first visit: no collection switcher on an empty project. Collections come from the
+  uploaded folder structure (`project/collection/layer/trait.png`), as in the legacy app, and can
+  be added later from Layers.
+- The collection switcher is a dropdown (select), not a segmented control, so ten collections fit.
+- The weights bar is one colour with hairline dividers between traits; hovering a segment names the
+  trait and its share. No unexplained shades.
+- Shuffle is a visible action on Generate ("Shuffle order", all or selected), and token ids can
+  be randomised across collections after generation, as legacy allowed; numbering is continuous by
+  default.
+- Generate's conflict notice is one line, no stray punctuation.
+- The Add rule dialog and the Statistics tab are shown in the preview.
+
+### Lock and upload
+
+- Review step: a prominent choice at the top, "Reveal at mint" or "Reveal later (placeholder)",
+  instead of a switch below the fold.
+- The fixed "checks the server runs" list is replaced by a summary of what will be locked plus
+  options that vary per project: "Allow identical tokens" (off by default) and the maximum-count
+  rule. Supply and rule checks stay implicit. No "one per id" wording.
+- Rendering: no "latest rendered" thumbnails and no per-image status. Progress is coarse: batches
+  done of total, then metadata upload, then done.
+
+### Manage drop
+
+- Overview header is compact: artwork, minted of supply, chain and contract, what the contract
+  currently points at (placeholder or revealed CID), and the mint page link as a plain input with
+  a check/save button, no "Set link" button.
+- Tradability (transfer validator, lock) lives in Settings under an "Advanced" section, not on
+  Overview.
+- Phases: the per-phase supply allocation is editable in place (an "Edit supply" control on each
+  row, with the minted floor), not hidden in a menu.

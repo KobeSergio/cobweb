@@ -5,16 +5,19 @@ import { count, percent } from './format'
 /**
  * The collection's supply as one strip: each phase's allocation is a segment, filled as far as
  * it has minted; what no phase holds is left empty. Airdrops use collection supply outside any
- * phase, so they can leave less mintable than the allocations add up to.
+ * phase, so they can leave less mintable than the allocations add up to. With `onEdit`, each
+ * phase's label opens its allocation (max supply) dialog.
  */
 export function SupplyMap({
   groups,
   maxSupply,
   totalMinted,
+  onEdit,
 }: {
   groups: MintGroup[]
   maxSupply: number
   totalMinted: number
+  onEdit?: (groupId: number) => void
 }) {
   const allocated = groups.reduce((sum, group) => sum + group.maxSupply, 0)
   const phaseMinted = groups.reduce((sum, group) => sum + group.minted, 0)
@@ -59,12 +62,17 @@ export function SupplyMap({
               style={{ flexGrow: Math.max(1, group.maxSupply), flexBasis: 0 }}
               title={`${group.name}: ${count(group.minted)} of ${count(group.maxSupply)} minted`}
             >
-              <p className="truncate text-[0.8125rem] font-medium">{group.name}</p>
-              <p className="numeric text-muted-foreground truncate text-xs">
-                <span className={cn(group.active && 'text-primary')}>{count(group.minted)}</span> /{' '}
-                {count(group.maxSupply)}
-                <span className="sr-only"> minted</span>
-              </p>
+              {onEdit ? (
+                <button
+                  type="button"
+                  onClick={() => onEdit(group.id)}
+                  className="group/label focus-visible:ring-ring/50 block w-full min-w-0 rounded-sm text-left outline-none focus-visible:ring-[3px]"
+                >
+                  <SupplyLabel group={group} editable />
+                </button>
+              ) : (
+                <SupplyLabel group={group} />
+              )}
             </li>
           ))}
           {unallocated > 0 && (
@@ -108,5 +116,27 @@ export function SupplyMap({
         </p>
       )}
     </div>
+  )
+}
+
+/** A phase's name and minted of allocation under its segment; underlined when it opens the dialog. */
+function SupplyLabel({ group, editable }: { group: MintGroup; editable?: boolean }) {
+  return (
+    <>
+      <span
+        className={cn(
+          'block truncate text-[0.8125rem] font-medium',
+          editable &&
+            'decoration-border-strong underline underline-offset-4 group-hover/label:decoration-current',
+        )}
+      >
+        {group.name}
+      </span>
+      <span className="numeric text-muted-foreground block truncate text-xs">
+        <span className={cn(group.active && 'text-primary')}>{count(group.minted)}</span> /{' '}
+        {count(group.maxSupply)}
+        <span className="sr-only"> minted{editable && ', change allocation'}</span>
+      </span>
+    </>
   )
 }

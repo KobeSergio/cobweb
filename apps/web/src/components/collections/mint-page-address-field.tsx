@@ -35,11 +35,15 @@ export type AddressCollection = Pick<
  * The mint page link. Before deploy the creator reserves it here (it lapses after
  * `RESERVATION_DAYS` days unless the contract is deployed); a deployed collection sets one when it
  * has none, or changes it after a warning that links already shared stop working.
+ *
+ * `inline` (the Manage overview): always the input with a check/save button beside it, no read
+ * view and no Cancel. Save turns on once the draft differs; a change still asks to confirm.
  */
 export function MintPageAddressField({
   collection,
   readOnly = false,
   changing = false,
+  inline = false,
   onSaved,
   onCancel,
 }: {
@@ -47,6 +51,8 @@ export function MintPageAddressField({
   readOnly?: boolean
   /** Deployed with a link: open straight into changing it. */
   changing?: boolean
+  /** Always the input and a save button, for a compact row. */
+  inline?: boolean
   /** After a successful reserve or set, with the stored values. */
   onSaved?: (value: { slug: string; slug_reserved_at: string | null }) => void
   /** Leaving a change without saving. Without it, the field falls back to showing the link. */
@@ -67,7 +73,8 @@ export function MintPageAddressField({
 
   // A deployed collection that already has a link: changing it breaks links collectors hold.
   const isChange = deployed && state.kind === 'permanent'
-  const action = isChange ? 'Change link' : deployed ? 'Set link' : 'Reserve link'
+  const unchanged = isChange && draft === state.slug
+  const action = inline ? 'Save' : isChange ? 'Change link' : deployed ? 'Set link' : 'Reserve link'
 
   function submit() {
     setError(null)
@@ -80,7 +87,7 @@ export function MintPageAddressField({
       const next = { slug: result.slug, slug_reserved_at: result.reservedAt }
       setStored(next)
       setDraft(result.slug)
-      setEditing(false)
+      if (!inline) setEditing(false)
       onSaved?.(next)
     })
   }
@@ -103,7 +110,7 @@ export function MintPageAddressField({
     else setEditing(false)
   }
 
-  if (!editing && state.kind !== 'none' && state.kind !== 'lapsed') {
+  if (!inline && !editing && state.kind !== 'none' && state.kind !== 'lapsed') {
     return (
       <Field>
         <FieldTitle>Mint page link</FieldTitle>
@@ -130,7 +137,7 @@ export function MintPageAddressField({
   return (
     <Field data-invalid={!!error}>
       <FieldLabel htmlFor={inputId}>Mint page link</FieldLabel>
-      {isChange && (
+      {isChange && !inline && (
         <Alert variant="destructive" className="mb-1">
           <TriangleAlertIcon aria-hidden="true" />
           <AlertTitle>Shared links will break</AlertTitle>
@@ -166,16 +173,16 @@ export function MintPageAddressField({
         </InputGroup>
         {!readOnly && (
           <div className="flex gap-2">
-            {(state.kind === 'reserved' || isChange) && (
+            {!inline && (state.kind === 'reserved' || isChange) && (
               <Button type="button" variant="ghost" onClick={cancel} disabled={pending}>
                 Cancel
               </Button>
             )}
             <Button
               type="button"
-              variant={isChange ? 'destructive' : 'secondary'}
+              variant={isChange && !inline ? 'destructive' : 'secondary'}
               onClick={request}
-              disabled={pending || !draft}
+              disabled={pending || !draft || (inline && unchanged)}
             >
               {pending ? <Spinner /> : <CheckIcon />}
               {action}
@@ -189,6 +196,11 @@ export function MintPageAddressField({
         <FieldDescription id={`${id}-help`} className="flex items-center gap-1.5">
           <TriangleAlertIcon aria-hidden="true" className="size-3.5 shrink-0" />
           Reservation lapsed. Anyone can take this link now. Reserve it again or choose another.
+        </FieldDescription>
+      ) : inline && isChange && !unchanged ? (
+        <FieldDescription id={`${id}-help`} className="flex items-center gap-1.5">
+          <TriangleAlertIcon aria-hidden="true" className="size-3.5 shrink-0" />
+          Saving moves the page. Links to cobweb.app/{state.slug} you have shared stop working.
         </FieldDescription>
       ) : (
         <FieldDescription id={`${id}-help`}>

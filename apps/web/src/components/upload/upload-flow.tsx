@@ -13,7 +13,7 @@ import { Dot, ProgressionItem, type ProgressionState } from './progression'
 import { RenderStep } from './render-step'
 import type { RevealLaterState } from './reveal-later'
 import { ReviewStep } from './review-step'
-import { RENDER_BATCH_SIZE, type RenderProgress, type UploadOutcome } from './upload-sim'
+import { RENDER_BATCH_SIZE, type LockOptions, type RenderProgress, type UploadOutcome } from './upload-sim'
 import type { ArtSummary, RenderResult } from './upload-shared'
 
 type Stage = 'review' | 'pay' | 'render' | 'done'
@@ -76,6 +76,7 @@ export function UploadFlow({
     description: job.placeholder ? placeholderDescription : '',
   }))
   const placeholderOn = reveal.on && reveal.file !== null
+  const [lockOptions, setLockOptions] = useState<LockOptions>(job.lockOptions)
   const [lockedAt, setLockedAt] = useState(job.lockedAt)
   const [paymentTx, setPaymentTx] = useState<Hex | null>('payment' in job ? job.payment.txHash : null)
   const [renderStart] = useState<RenderProgress>(() =>
@@ -134,24 +135,30 @@ export function UploadFlow({
                   </span>
                 </>
               )}
-              {!deferred && placeholderOn && (
+              {!deferred && (
                 <>
                   <Dot />
-                  Reveal later
+                  {placeholderOn ? 'Reveal later' : 'Reveal at mint'}
+                </>
+              )}
+              {!deferred && lockOptions.allowDuplicates && (
+                <>
+                  <Dot />
+                  Identical tokens allowed
                 </>
               )}
             </>
           }
         >
           <ReviewStep
-            tokenCount={job.tokenCount}
             art={art}
             readOnly={readOnly}
             previous={previous}
-            outcome={outcome}
             deferred={deferred}
             reveal={reveal}
             onReveal={setReveal}
+            lockOptions={lockOptions}
+            onLockOptions={setLockOptions}
             onLocked={(at) => {
               setLockedAt(at)
               setStage('pay')

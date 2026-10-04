@@ -26,7 +26,7 @@ Build order and product decisions for Cobweb. [PLAN.md](PLAN.md) is the original
 
 ### Art
 
-- **Assignment integrity at lock.** The browser submits the final token list; the server validates it against the project's rules (supply, rules, duplicates, maximum counts), stores it and hashes it. That stored list is what gets rendered. The engine is not re-run at lock, because creators edit tokens by hand after generating. Generation uses a seeded PRNG so it is testable.
+- **Assignment integrity at lock.** The browser submits the final token list; the server validates it against the project's rules (supply, rules, maximum counts, and duplicates unless the creator chose "Allow identical tokens" at lock), stores it and hashes it. That stored list is what gets rendered. The engine is not re-run at lock, because creators edit tokens by hand after generating. Generation uses a seeded PRNG so it is testable.
 - **Layer images.** Originals are uploaded and kept. Every image is square (1:1), at most 2048 x 2048, the same size across a project, and at most 10 MB per file. The browser makes a separate small thumbnail for preview screens.
 - **Maximum counts.** A trait's fixed quantity is a cap, as in the legacy app: the trait appears at most N times, since rules and other traits can prevent reaching it. The copy says "up to N".
 - **Changing a token's trait** is checked against the rules, uniqueness and maximum counts.

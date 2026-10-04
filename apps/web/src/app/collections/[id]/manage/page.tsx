@@ -37,7 +37,7 @@ export default async function Page({
   return (
     <StagePage
       title="Overview"
-      description="How the drop is doing: supply minted, the mint page, live phases, tradability and proceeds."
+      description="How the drop is doing: supply minted, the contract, the mint page, live phases and proceeds."
       sampleNotice={ctx.sampleNotice}
       width="wide"
     >

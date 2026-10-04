@@ -2,6 +2,15 @@ import type { RenderPlaceholder } from '@/lib/demo/types'
 
 /** Counts of the art being locked, worked out on the server from the project's art. */
 export type ArtSummary = {
+  /** The supply: how many tokens the set must have. */
+  supply: number
+  /** How many tokens the generated set has. Lock is blocked while it is short of `supply`. */
+  tokens: number
+  collections: number
+  /** Tokens that break a pairing rule. Lock is blocked while any do. */
+  breaking: number
+  /** Groups of token ids with identical traits, each sorted. Empty when every token is unique. */
+  duplicates: number[][]
   layers: number
   traits: number
   rules: number

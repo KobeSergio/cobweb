@@ -1,6 +1,6 @@
 'use client'
 
-import { MoreHorizontalIcon } from 'lucide-react'
+import { MoreHorizontalIcon, PencilIcon } from 'lucide-react'
 import { Badge } from '@cobweb/ui/components/badge'
 import { Button } from '@cobweb/ui/components/button'
 import {
@@ -71,15 +71,27 @@ export function PhaseRow({
 
       <Cell label="Minted of allocation">
         <div className="grid gap-1.5">
-          <p className="numeric text-sm">
-            <span className={cn(group.active && 'text-primary')}>{count(group.minted)}</span>
-            <span className="text-muted-foreground"> / {count(group.maxSupply)}</span>
+          <div className="flex items-center gap-2">
+            <p className="numeric text-sm">
+              <span className={cn(group.active && 'text-primary')}>{count(group.minted)}</span>
+              <span className="text-muted-foreground"> / {count(group.maxSupply)}</span>
+            </p>
             {full && (
-              <Badge variant="success" className="ml-2 h-5 align-middle">
+              <Badge variant="success" className="h-5">
                 Full
               </Badge>
             )}
-          </p>
+            <Button
+              variant="ghost"
+              size="xs"
+              className="text-muted-foreground -my-1 ml-auto"
+              onClick={() => onAction('supply')}
+              aria-label={`Edit supply for ${group.name}`}
+            >
+              <PencilIcon aria-hidden="true" />
+              Edit
+            </Button>
+          </div>
           <Progress
             size="sm"
             value={percent(group.minted, group.maxSupply)}
