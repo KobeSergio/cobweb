@@ -16,7 +16,6 @@ export default async function Page({ params }: { params: CollectionParams }) {
     <StagePage
       title="Whitelist"
       description="Wallet addresses and how many each may mint, per phase. Lists are written on-chain in batches."
-      sampleNotice={ctx.sampleNotice}
       width="wide"
     >
       <WhitelistScreen

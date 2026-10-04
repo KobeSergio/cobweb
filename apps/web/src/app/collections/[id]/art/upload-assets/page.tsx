@@ -32,7 +32,6 @@ export default async function Page({ params }: { params: CollectionParams }) {
       eyebrow={subs.length > 1 ? `Art · Step ${index + 1} of ${subs.length}` : 'Art'}
       title={collection.project_type === 'single_asset' ? 'Asset' : 'Assets'}
       description={DESCRIPTION[collection.project_type]}
-      sampleNotice={false}
       width="wide"
       footer={<StageFooter previous={ctx.previous} next={ctx.next} />}
     >

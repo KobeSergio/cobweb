@@ -40,10 +40,14 @@ export default async function DeployPage({
 
   return (
     <StagePage
-      eyebrow={ctx.eyebrow}
+      // Once deployed there is no stepper, so no "Stage 4 of 4" either: this is the receipt.
+      eyebrow={deployed ? undefined : ctx.eyebrow}
       title="Deploy"
-      description="Choose a chain, set royalties and the payout address, and deploy the contract from your wallet."
-      sampleNotice={ctx.sampleNotice}
+      description={
+        deployed
+          ? 'The contract is live. Its receipt, and where to go next.'
+          : 'Choose a chain, set royalties and the payout address, and deploy the contract from your wallet.'
+      }
       width="wide"
       bodyHasFooter
     >

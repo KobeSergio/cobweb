@@ -3,8 +3,9 @@ import type { MintGroup } from '@/lib/demo'
 import { count, percent } from './format'
 
 /**
- * The collection's supply as one strip: each phase's allocation is a segment, filled as far as
- * it has minted; what no phase holds is left empty. Airdrops use collection supply outside any
+ * The collection's supply as one strip: each phase's allocation is a segment in one neutral
+ * colour, filled with the accent as far as it has minted; what no phase holds is a dashed outline.
+ * Every segment is labelled underneath, and a live phase says so in its label. No other shades. Airdrops use collection supply outside any
  * phase, so they can leave less mintable than the allocations add up to. With `onEdit`, each
  * phase's label opens its allocation (max supply) dialog.
  */
@@ -35,14 +36,11 @@ export function SupplyMap({
           {groups.map((group) => (
             <div
               key={group.id}
-              className={cn(
-                'bg-well shadow-inset relative min-w-2 overflow-hidden rounded-md border',
-                group.active ? 'border-primary-line' : 'border-border-strong',
-              )}
+              className="bg-surface-3 relative min-w-2 overflow-hidden rounded-md"
               style={{ flexGrow: Math.max(1, group.maxSupply), flexBasis: 0 }}
             >
               <span
-                className={cn('absolute inset-y-0 left-0', group.active ? 'bg-primary' : 'bg-primary/45')}
+                className="bg-primary absolute inset-y-0 left-0"
                 style={{ width: `${percent(group.minted, group.maxSupply)}%` }}
               />
             </div>
@@ -88,6 +86,23 @@ export function SupplyMap({
         </ul>
       </div>
 
+      <ul aria-hidden="true" className="text-muted-foreground flex flex-wrap gap-x-5 gap-y-1 text-xs">
+        <li className="flex items-center gap-1.5">
+          <span className="bg-primary size-2.5 rounded-xs" />
+          Minted
+        </li>
+        <li className="flex items-center gap-1.5">
+          <span className="bg-surface-3 size-2.5 rounded-xs" />
+          Allocated, not minted yet
+        </li>
+        {unallocated > 0 && (
+          <li className="flex items-center gap-1.5">
+            <span className="size-2.5 rounded-xs border border-dashed" />
+            Not allocated
+          </li>
+        )}
+      </ul>
+
       <dl className="flex flex-wrap gap-x-8 gap-y-3 text-[0.8125rem]">
         <div>
           <dt className="text-muted-foreground">Allocated to phases</dt>
@@ -132,9 +147,14 @@ function SupplyLabel({ group, editable }: { group: MintGroup; editable?: boolean
       >
         {group.name}
       </span>
+      {group.active && (
+        <span className="text-muted-foreground flex items-center gap-1 text-xs">
+          <span aria-hidden="true" className="bg-primary size-1.5 rounded-full" />
+          Live
+        </span>
+      )}
       <span className="numeric text-muted-foreground block truncate text-xs">
-        <span className={cn(group.active && 'text-primary')}>{count(group.minted)}</span> /{' '}
-        {count(group.maxSupply)}
+        {count(group.minted)} / {count(group.maxSupply)}
         <span className="sr-only"> minted{editable && ', change allocation'}</span>
       </span>
     </>

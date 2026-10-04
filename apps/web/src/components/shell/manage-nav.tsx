@@ -59,7 +59,12 @@ export function ManageNav({ collectionId, projectType, artDeferred = false, samp
           className={cn('shrink-0 rounded-full', onArt && 'bg-surface-2 text-foreground')}
         >
           <Link
-            href={withScenario(stageHref(collectionId, 'art', projectType))}
+            // The deferred art of a live drop: sample mode marks the Art route as deployed too.
+            href={
+              sampleDeferred
+                ? `${stageHref(collectionId, 'art', projectType)}?art=deferred&state=deployed`
+                : stageHref(collectionId, 'art', projectType)
+            }
             aria-current={onArt ? 'page' : undefined}
           >
             <PaintbrushIcon aria-hidden="true" />

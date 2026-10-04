@@ -10,6 +10,7 @@ import { Checkbox } from '@cobweb/ui/components/checkbox'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@cobweb/ui/components/field'
 import { Input } from '@cobweb/ui/components/input'
 import { StatusBadge } from '@cobweb/ui/components/status-badge'
+import { ChainName } from '@/components/chains/chain-icon'
 import type { Address, Deployment, SupportedChain } from '@/lib/demo'
 import { AddressLine } from './bits'
 import { Setting } from './settings-parts'
@@ -70,7 +71,8 @@ export function TradabilitySettings({
         <div className="flex flex-wrap items-center justify-between gap-3">
           {!chain.transferLock ? (
             <p className="text-muted-foreground text-sm">
-              {chain.name} has no transfer validator, so transfers cannot be locked there.
+              <ChainName chain={chain} className="text-foreground" iconClassName="size-3.5" /> has no transfer
+              validator, so transfers cannot be locked there.
             </p>
           ) : locked ? (
             <Badge variant="destructive" className="w-fit">

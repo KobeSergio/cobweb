@@ -51,7 +51,11 @@ export function ArtRail({ collectionId, status, projectType, demo, artDeferred =
   const selected = useSelectedLayoutSegment()
   const searchParams = useSearchParams()
   const sampleDeferred = demo && searchParams.get('art') === 'deferred'
-  const withScenario = (href: string) => (sampleDeferred ? `${href}?art=deferred` : href)
+  const sampleDeployed = demo && searchParams.get('state') === 'deployed'
+  const scenario = [sampleDeferred && 'art=deferred', sampleDeployed && 'state=deployed']
+    .filter(Boolean)
+    .join('&')
+  const withScenario = (href: string) => (scenario ? `${href}?${scenario}` : href)
 
   const subs = artSubSteps(projectType)
   if (subs.length < 2) return null

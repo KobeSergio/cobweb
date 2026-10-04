@@ -38,11 +38,12 @@ export default async function Page({
     <StagePage
       title="Overview"
       description="How the drop is doing: supply minted, the contract, the mint page, live phases and proceeds."
-      sampleNotice={ctx.sampleNotice}
       width="wide"
     >
       <OverviewScreen
-        collection={collection}
+        // Manage drop is the deployed collection's home; sample mode opens it before deploy, so the
+        // mint page link reads as a deployed one there too (no reservation wording).
+        collection={{ ...collection, status: 'deployed' }}
         deployment={DEMO_DEPLOYMENT}
         chain={chain}
         groups={DEMO_MINT_GROUPS}

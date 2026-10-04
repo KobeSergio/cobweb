@@ -18,14 +18,17 @@ type Props = {
  * What sits under the collection's top bar, depending on the stage. Before deploy: the stepper of
  * the four build stages and nothing about Manage drop. After deploy the setup is done: no stepper,
  * the Manage tabs instead, with a quiet "Finish the art" entry while the art is deferred. A Manage
- * route opened by URL before deploy (sample mode) renders as if deployed: tabs, no stepper.
+ * route opened by URL before deploy (sample mode) renders as if deployed: tabs, no stepper; so
+ * does any route with `?state=deployed` in sample mode.
  */
 export function WorkspaceNav({ collectionId, status, projectType, demo, artDeferred = false }: Props) {
   const [segment] = useSelectedLayoutSegments()
   const searchParams = useSearchParams()
   const sampleDeferred = demo && searchParams.get('art') === 'deferred'
+  // Sample mode shows the deployed scenario with `?state=deployed` on any route.
+  const sampleDeployed = demo && searchParams.get('state') === 'deployed'
 
-  if (isDeployed(status) || segment === 'manage') {
+  if (isDeployed(status) || sampleDeployed || segment === 'manage') {
     return (
       <ManageNav
         collectionId={collectionId}

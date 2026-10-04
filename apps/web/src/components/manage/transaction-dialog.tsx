@@ -14,6 +14,7 @@ import {
 } from '@cobweb/ui/components/dialog'
 import { Spinner } from '@cobweb/ui/components/spinner'
 import { cn } from '@cobweb/ui/lib/utils'
+import { ChainName } from '@/components/chains/chain-icon'
 import { explorerTxUrl, formatNative, shortAddress, type Hex, type SupportedChain } from '@/lib/demo'
 import type { TxRequest } from './simulate'
 import { TX_STEPS, useTransaction, type TxState, type TxStep } from './use-transaction'
@@ -146,8 +147,9 @@ export function TransactionDialog({
 export function CallReview({ request, chain }: { request: TxRequest; chain: SupportedChain }) {
   return (
     <div className="bg-well shadow-inset rounded-lg border px-4 py-3">
-      <p className="text-muted-foreground mb-2 text-xs font-medium">
-        Sends to the {request.contract.toLowerCase()}
+      <p className="text-muted-foreground mb-2 flex flex-wrap items-center gap-x-1 text-xs font-medium">
+        Sends to the {request.contract.toLowerCase()} on
+        <ChainName chain={chain} className="text-foreground" iconClassName="size-3.5" />
       </p>
       <p className="numeric text-sm break-all">{request.functionName}</p>
       <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[0.8125rem]">

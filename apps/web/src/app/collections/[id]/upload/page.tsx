@@ -62,7 +62,6 @@ export default async function UploadPage({
           ? 'You are finishing the art later. Lock a placeholder now, render it to IPFS, and deploy on it.'
           : getStage('upload')!.summary
       }
-      sampleNotice={ctx.sampleNotice}
       bodyHasFooter
     >
       {/* The screen renders the footer: Continue unlocks when the upload finishes in client state. */}

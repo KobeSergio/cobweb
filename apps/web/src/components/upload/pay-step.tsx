@@ -4,6 +4,7 @@ import { WalletIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@cobweb/ui/components/button'
 import { Spinner } from '@cobweb/ui/components/spinner'
+import { ChainName } from '@/components/chains/chain-icon'
 import { explorerTxUrl, formatNative, shortAddress } from '@/lib/demo/helpers'
 import type { ArtFeeQuote, Hex, SupportedChain } from '@/lib/demo/types'
 import { SummaryRow } from '@/components/deploy/copy-value'
@@ -85,7 +86,9 @@ export function PayStep({
           </p>
         </div>
         <dl className="divide-y">
-          <SummaryRow label="Network">{chain.name}</SummaryRow>
+          <SummaryRow label="Network">
+            <ChainName chain={chain} iconClassName="size-3.5" />
+          </SummaryRow>
           <SummaryRow label="Paid to">Cobweb factory</SummaryRow>
           <SummaryRow label="From your wallet">
             <span className="numeric text-[0.8125rem]" title={quote.payer}>

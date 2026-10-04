@@ -3,6 +3,7 @@
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { ChevronDownIcon, TriangleAlertIcon } from 'lucide-react'
 import { Button } from '@cobweb/ui/components/button'
+import { ChainIcon } from '@/components/chains/chain-icon'
 import { shortAddress } from '@/lib/demo/helpers'
 import { useMint } from './mint-context'
 
@@ -11,7 +12,7 @@ const pill =
 
 /**
  * The wallet in the top bar. RainbowKit's modals, in the page's own controls. A forced sample
- * wallet shows as a plain pill marked as a sample.
+ * wallet shows as the same pill, without a menu. The chain's mark sits beside the address.
  */
 export function WalletButton() {
   const { wallet, sampleWallet, wrongChain, data } = useMint()
@@ -19,10 +20,11 @@ export function WalletButton() {
   if (sampleWallet && wallet) {
     return (
       <div className={pill + ' cursor-default hover:bg-surface-2'}>
-        <span aria-hidden="true" className="size-2 rounded-full bg-success ring-3 ring-success-soft" />
+        <ChainIcon chainId={data.collection.chain.id} className="size-4 text-muted-foreground" />
+        <span className="sr-only">
+          {wrongChain ? 'On another network, ' : `On ${data.collection.chain.name}, `}
+        </span>
         <span className="numeric text-[0.8125rem]">{shortAddress(wallet.address)}</span>
-        <span className="rounded-full bg-surface-3 px-2 py-0.5 text-xs text-muted-foreground">Sample</span>
-        {wrongChain && <span className="sr-only">Connected to another network</span>}
       </div>
     )
   }
@@ -49,7 +51,8 @@ export function WalletButton() {
         }
         return (
           <button type="button" onClick={openAccountModal} className={pill}>
-            <span aria-hidden="true" className="size-2 rounded-full bg-success ring-3 ring-success-soft" />
+            <ChainIcon chainId={data.collection.chain.id} className="size-4 text-muted-foreground" />
+            <span className="sr-only">On {data.collection.chain.name}, </span>
             <span className="numeric text-[0.8125rem]">{shortAddress(account.address)}</span>
             <ChevronDownIcon aria-hidden="true" className="size-4 text-muted-foreground" />
           </button>

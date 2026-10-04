@@ -20,7 +20,7 @@ import type { MintFailureKind, MintPageProps } from '@/components/mint/types'
  *
  *   ?state=upcoming | allowlist-live | public-live | sold-out | closed   (default allowlist-live)
  *   ?wallet=connected     a sample wallet, connected without a real wallet
- *   ?wallet=not-listed    connected, but on no allowlist and with no vaults
+ *   ?wallet=not-listed    connected, but on no whitelist and with no vaults
  *   ?wallet=limit         connected, every allowance used
  *   ?wallet=wrong-chain   connected on another network
  *   ?fail=rejected | phase-closed | quota-exceeded | insufficient-balance | reverted

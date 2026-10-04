@@ -2,7 +2,7 @@
 
 import { ClockIcon } from 'lucide-react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useState } from 'react'
 import { Alert, AlertDescription, AlertTitle } from '@cobweb/ui/components/alert'
 import { Button } from '@cobweb/ui/components/button'
@@ -27,7 +27,7 @@ const STEPS = [
   },
   {
     title: 'Lock and upload the real set later',
-    text: 'When the art is done, lock it and pay the generation fee. It is rendered to its own CID.',
+    text: 'When the art is done, lock it and render it. It is stored under its own CID.',
   },
   {
     title: 'Then reveal',
@@ -36,9 +36,9 @@ const STEPS = [
 ]
 
 /**
- * "Finish the art later" (MASTER_PLAN, Flow: pre-reveal): a visible secondary button in the header of every Art
- * screen (Layers, Rules, Generate), passed as the page's `actions`. Confirming marks the art as deferred and opens
- * Lock and upload with "Reveal later" on and the real set's lock off.
+ * "Finish the art later" (MASTER_PLAN, Flow: pre-reveal): a secondary button at the right end of the stepper row
+ * (`StageNav`), only while the Art stage is shown and the art is not deferred; nowhere else. Confirming marks the
+ * art as deferred and opens Lock and upload with "Reveal later" on and the real set's lock off.
  *
  * Seam: the deferred flag is the sample scenario in the URL (`?art=deferred`) until Phase 3 adds
  * the collection's column; then confirming calls a server action that sets it.
@@ -98,8 +98,16 @@ export function FinishLaterAction({ collectionId }: { collectionId: string }) {
   )
 }
 
-/** At the top of an Art screen while the art is deferred: what is left to do, and where. */
+/**
+ * At the top of an Art screen while the art is deferred and the contract is not deployed yet: what
+ * is left to do, and where. Once deployed the Art layout's one-line `ArtLiveNotice` says it instead,
+ * so this stays away (sample mode: `?state=deployed`).
+ *
+ * Seam: a deployed row with deferred art also hides it once Phase 3 adds the deferred-art column.
+ */
 export function DeferredArtNotice({ collectionId }: { collectionId: string }) {
+  const searchParams = useSearchParams()
+  if (searchParams.get('state') === 'deployed') return null
   return (
     <Alert>
       <ClockIcon aria-hidden="true" />

@@ -15,11 +15,12 @@ export default async function Page({ params }: { params: CollectionParams }) {
     <StagePage
       title="Mint page"
       description="The public page where collectors mint: its look, its links and the tokens it features."
-      sampleNotice={ctx.sampleNotice}
       width="wide"
     >
       <MintPageScreen
-        collection={collection}
+        // Manage drop is the deployed collection's home; sample mode opens it before deploy, so the
+        // mint page link reads as a deployed one there too (no reservation wording).
+        collection={{ ...collection, status: 'deployed' }}
         settings={DEMO_MINT_PAGE_SETTINGS}
         featuredCandidates={DEMO_TOKENS.filter((token) => token.previewUrl)}
         preview={getMintPageData(collection.slug ?? '', 'allowlist-live')}

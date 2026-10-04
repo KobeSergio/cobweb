@@ -82,7 +82,7 @@ export function DeployedView({
     ...(artDeferred
       ? [
           {
-            href: `/collections/${collection.id}/art/generate?art=deferred`,
+            href: `/collections/${collection.id}/art/generate?art=deferred&state=deployed`,
             icon: <ImageIcon />,
             title: 'Finish the art, then reveal',
             text: 'Art stays open. Lock and upload the real set, then reveal it from Settings.',

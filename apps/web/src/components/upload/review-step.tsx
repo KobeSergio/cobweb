@@ -260,7 +260,7 @@ export function ReviewStep({
             <AlertDialogDescription>
               {deferred
                 ? 'Cobweb stores the placeholder and its description, and the contract starts on it. The art stays open; you lock the real set later from Art.'
-                : `Cobweb checks and stores these ${fmt(art.tokens)} tokens exactly as they are now. You cannot edit the layers, traits, rules or tokens afterwards, and the generation fee is quoted from this supply.`}
+                : `Cobweb checks and stores these ${fmt(art.tokens)} tokens exactly as they are now. You cannot edit the layers, traits, rules or tokens afterwards, and the fee to pay is quoted from this supply.`}
               {!deferred && lockOptions.allowDuplicates && ' Identical tokens are allowed.'}
               {!deferred && reveal.on && ' The contract will start on the placeholder.'}
             </AlertDialogDescription>

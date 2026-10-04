@@ -87,7 +87,7 @@ function PhaseRow({ phase, selected }: { phase: Phase; selected: boolean }) {
         <p className="min-w-0 truncate text-sm font-semibold">
           {group.name}
           <span className="ml-2 font-normal text-muted-foreground">
-            {group.kind === 'public' ? 'Public' : 'Whitelist'}
+            {group.kind === 'public' ? 'Public sale' : 'Whitelist'}
           </span>
         </p>
         <StatusBadge status={badge.status}>{badge.label}</StatusBadge>

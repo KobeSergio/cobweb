@@ -5,8 +5,10 @@ import { Artwork } from '@cobweb/ui/components/artwork'
 import { RiseIn } from '@cobweb/ui/components/motion'
 import { cn } from '@cobweb/ui/lib/utils'
 import { SignInButton } from '@/components/auth/sign-in-button'
+import { ChainName } from '@/components/chains/chain-icon'
 import { Logo } from '@/components/shell/logo'
 import { getSessionUser } from '@/lib/auth'
+import { SUPPORTED_CHAINS } from '@/lib/demo'
 import { STEPS } from '@/lib/steps'
 
 /** Sample token previews, if the sample art set is present. The wall falls back to empty frames. */
@@ -59,9 +61,16 @@ export default async function SignInPage() {
           </p>
         </RiseIn>
 
-        <p className="text-xs text-muted-foreground">
-          Launch on Ethereum, Arbitrum, Base, Berachain, Monad and Robinhood Chain.
-        </p>
+        <div className="text-xs text-muted-foreground">
+          <p>Launch on</p>
+          <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
+            {SUPPORTED_CHAINS.map((chain) => (
+              <li key={chain.id}>
+                <ChainName chain={chain} iconClassName="size-3.5" />
+              </li>
+            ))}
+          </ul>
+        </div>
       </section>
 
       <section

@@ -5,6 +5,7 @@ import { Button } from '@cobweb/ui/components/button'
 import { Progress } from '@cobweb/ui/components/progress'
 import { StatusBadge } from '@cobweb/ui/components/status-badge'
 import { explorerAddressUrl, formatNative, shortAddress } from '@/lib/demo/helpers'
+import { ChainName } from '@/components/chains/chain-icon'
 import { Countdown } from './countdown'
 import { MintButton, MintHint } from './mint-action'
 import { useMint } from './mint-context'
@@ -18,6 +19,7 @@ export function MintPanel() {
   const max = data.supply.max
   const percent = Math.floor((minted / max) * 100)
   const chain = data.collection.chain
+  const picking = live.length > 1 && phase?.status === 'live'
 
   const overall = soldOut
     ? ({ status: 'soldout', label: 'Sold out' } as const)
@@ -37,7 +39,11 @@ export function MintPanel() {
     >
       <div className="flex items-center justify-between gap-3">
         <StatusBadge status={overall.status}>{overall.label}</StatusBadge>
-        <span className="text-[0.8125rem] text-muted-foreground">{chain.name}</span>
+        <ChainName
+          chain={chain}
+          className="text-[0.8125rem] text-muted-foreground"
+          iconClassName="size-3.5"
+        />
       </div>
 
       <h1
@@ -83,10 +89,11 @@ export function MintPanel() {
           <Paused />
         ) : (
           <>
-            {live.length > 1 && phase.status === 'live' && <PhasePicker live={live} />}
+            {picking && <PhasePicker live={live} />}
             {(phase.status === 'scheduled' || phase.status === 'starting') && <Upcoming />}
             <PhasePrice />
-            {wallet && <Eligibility phase={phase} />}
+            {/* The picker's cards already say where this wallet stands in each open phase. */}
+            {wallet && !picking && <Eligibility phase={phase} />}
             {wallet && <VaultPicker phase={phase} />}
             {phase.status === 'live' && wallet && maxQuantity > 0 && <QuantityStepper />}
             {((phase.status === 'live' && (!wallet || maxQuantity > 0)) ||

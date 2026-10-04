@@ -16,7 +16,6 @@ export default async function Page({ params }: { params: CollectionParams }) {
     <StagePage
       title="Phases"
       description="The public sale and whitelist phases: price, supply and when each opens. A phase stays open until you close it."
-      sampleNotice={ctx.sampleNotice}
       width="wide"
     >
       <PhasesScreen

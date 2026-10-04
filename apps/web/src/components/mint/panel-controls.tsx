@@ -11,48 +11,90 @@ import { quote, type Phase } from './model'
 /** Compact cards: two side by side inside the panel. */
 const card = 'rounded-lg px-3.5 py-3 [&>span:first-child]:top-3.5 [&>span:first-child]:right-3.5'
 
-/** When phases overlap, the visitor picks which one to mint from. */
+/** What a phase means for this wallet, in a few words, and whether the wallet can mint from it. */
+export function phaseStanding(phase: Phase, publicLimit: number): { text: string; usable: boolean | null } {
+  const own = phase.wallet
+  const isPublic = phase.group.kind === 'public'
+  if (!own) {
+    return { text: isPublic ? `Anyone, up to ${publicLimit}` : 'Whitelist, connect to check', usable: null }
+  }
+  const vaultLeft = phase.vaults.reduce((sum, entry) => sum + entry.remaining, 0)
+  if (isPublic) {
+    if (own.remaining > 0) return { text: `Anyone, up to ${own.remaining}`, usable: true }
+    return vaultLeft > 0
+      ? { text: `Wallet limit reached, ${vaultLeft} left through a vault`, usable: true }
+      : { text: 'Wallet limit reached', usable: false }
+  }
+  if (own.eligible) {
+    if (own.remaining > 0) return { text: `You are on this list, ${own.remaining} left`, usable: true }
+    return vaultLeft > 0
+      ? { text: `Your limit is used, ${vaultLeft} left through a vault`, usable: true }
+      : { text: 'You are on this list, limit reached', usable: false }
+  }
+  if (vaultLeft > 0) return { text: `Through a vault, ${vaultLeft} left`, usable: true }
+  return { text: 'Not on this list', usable: false }
+}
+
+/**
+ * When phases overlap, the visitor picks which one to mint from: one card per open phase with its
+ * price and what it means for this wallet. Phases the wallet cannot use stay visible, disabled,
+ * with the reason. The panel opens on the cheapest phase the wallet can use (`defaultPhaseId`).
+ */
 export function PhasePicker({ live }: { live: Phase[] }) {
   const { phase, selectPhase, data } = useMint()
   const symbol = data.collection.chain.nativeSymbol
   return (
-    <div>
-      <p id="phase-picker-label" className="mb-2.5 text-[0.8125rem] text-muted-foreground">
-        {live.length} phases are open at once. Mint from:
+    <fieldset>
+      <legend className="text-sm font-semibold">Choose your phase</legend>
+      <p id="phase-picker-help" className="mt-1 mb-3 text-[0.8125rem] text-muted-foreground">
+        {live.length} phases are open at once. Mint from the one you belong to.
       </p>
       <ChoiceCards
-        aria-labelledby="phase-picker-label"
+        aria-describedby="phase-picker-help"
         value={phase ? String(phase.group.id) : undefined}
         onValueChange={(value: string) => selectPhase(Number(value))}
-        className="grid-cols-2 gap-2.5"
+        className="gap-2"
       >
         {live.map((entry) => {
-          const canMint = entry.wallet ? entry.wallet.eligible && entry.wallet.remaining > 0 : null
+          const standing = phaseStanding(entry, data.publicMaxMintPerWallet)
+          const Icon = standing.usable === false ? CircleMinusIcon : CircleCheckIcon
+          const kind = entry.group.kind === 'public' ? 'Public sale' : 'Whitelist'
           return (
             <ChoiceCard
               key={entry.group.id}
               value={String(entry.group.id)}
+              disabled={standing.usable === false}
               className={card}
-              title={entry.group.name}
+              title={
+                <span className="flex items-baseline justify-between gap-3">
+                  <span className="min-w-0 truncate">
+                    {entry.group.name}
+                    <span className="ml-2 text-xs font-normal text-muted-foreground">{kind}</span>
+                  </span>
+                  <span className="numeric shrink-0 font-medium">
+                    {entry.group.priceWei === '0' ? 'Free' : formatNative(entry.group.priceWei, symbol)}
+                  </span>
+                </span>
+              }
               description={
-                <>
-                  <span className="numeric block">{formatNative(entry.group.priceWei, symbol)}</span>
-                  {canMint !== null && (
-                    <span className="mt-0.5 block text-xs">
-                      {canMint
-                        ? `${entry.wallet!.remaining} left for you`
-                        : entry.wallet!.eligible
-                          ? 'Limit reached'
-                          : 'Not on the list'}
-                    </span>
+                <span className="flex items-center gap-1.5">
+                  {standing.usable !== null && (
+                    <Icon
+                      aria-hidden="true"
+                      className={cn(
+                        'size-3.5 shrink-0',
+                        standing.usable ? 'text-success-foreground' : 'text-muted-foreground',
+                      )}
+                    />
                   )}
-                </>
+                  {standing.text}
+                </span>
               }
             />
           )
         })}
       </ChoiceCards>
-    </div>
+    </fieldset>
   )
 }
 

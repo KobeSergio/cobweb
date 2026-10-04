@@ -1,4 +1,3 @@
-import { FlaskConicalIcon } from 'lucide-react'
 import { cn } from '@cobweb/ui/lib/utils'
 
 export type StagePageProps = {
@@ -8,11 +7,6 @@ export type StagePageProps = {
   description?: React.ReactNode
   /** Controls on the right of the header (filters, a secondary action). */
   actions?: React.ReactNode
-  /**
-   * The screen renders sample data although sample-data mode is off, because its backend is not
-   * built yet. Shows a notice so it is not mistaken for this collection's real state.
-   */
-  sampleNotice?: boolean
   /** `wide` for editors and tables, `narrow` for forms. */
   width?: 'narrow' | 'default' | 'wide'
   /** Usually a `StageFooter`. */
@@ -30,7 +24,6 @@ export function StagePage({
   title,
   description,
   actions,
-  sampleNotice,
   width = 'default',
   footer,
   bodyHasFooter,
@@ -54,15 +47,6 @@ export function StagePage({
         </div>
         {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
       </header>
-      {sampleNotice && (
-        <p className="bg-card text-muted-foreground flex items-start gap-2 rounded-lg border border-dashed px-4 py-3 text-sm">
-          <FlaskConicalIcon aria-hidden="true" className="text-primary mt-0.5 size-4 shrink-0" />
-          <span>
-            Preview with sample data. This step is not connected to your collection yet, so nothing here is
-            saved.
-          </span>
-        </p>
-      )}
       <div className="flex flex-1 flex-col">{children}</div>
       {footer}
     </div>

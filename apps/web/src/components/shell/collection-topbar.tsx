@@ -1,9 +1,8 @@
 import { ChevronLeftIcon } from 'lucide-react'
 import Link from 'next/link'
-import { Badge } from '@cobweb/ui/components/badge'
 import { WalletMenu } from '@/components/auth/wallet-menu'
+import { CollectionStatusChip } from '@/components/shell/collection-status-chip'
 import { LogoMark } from '@/components/shell/logo'
-import { STATUS_LABELS } from '@/components/collections/collection-card'
 import type { CollectionStatus } from '@/lib/steps'
 
 /**
@@ -13,10 +12,13 @@ import type { CollectionStatus } from '@/lib/steps'
 export function CollectionTopbar({
   name,
   status,
+  demo = false,
   walletAddress,
 }: {
   name: string
   status: CollectionStatus
+  /** Sample-data mode: the chip follows the deployed scenario. */
+  demo?: boolean
   walletAddress: string
 }) {
   return (
@@ -32,9 +34,7 @@ export function CollectionTopbar({
         </Link>
         <div className="flex min-w-0 items-center gap-3 border-l pl-4">
           <h1 className="truncate text-base font-medium">{name}</h1>
-          <Badge variant="secondary" className="shrink-0">
-            {STATUS_LABELS[status]}
-          </Badge>
+          <CollectionStatusChip status={status} demo={demo} />
         </div>
       </div>
       <WalletMenu address={walletAddress} />

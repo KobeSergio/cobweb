@@ -3,6 +3,7 @@ import { Button } from '@cobweb/ui/components/button'
 import { cn } from '@cobweb/ui/lib/utils'
 import type { MintPageData } from '@/lib/demo'
 import { explorerAddressUrl, formatBps, shortAddress } from '@/lib/demo/helpers'
+import { ChainName } from '@/components/chains/chain-icon'
 import { LogoMark } from '@/components/shell/logo'
 import { CopyButton } from './copy-button'
 import { TokenImage } from './token-image'
@@ -95,10 +96,18 @@ export function Details({ data, extras }: { data: MintPageData; extras: MintPage
   const { collection } = data
   const chain = collection.chain
   const rows: { label: string; value: React.ReactNode }[] = [
-    { label: 'Chain', value: chain.name },
+    { label: 'Chain', value: <ChainName chain={chain} /> },
     { label: 'Token standard', value: 'ERC-721C' },
     { label: 'Supply', value: <span className="numeric">{data.supply.max.toLocaleString('en-US')}</span> },
-    { label: 'Royalties', value: <span className="numeric">{formatBps(extras.royaltyBps)}</span> },
+    {
+      label: 'Royalties',
+      value: (
+        <>
+          <span className="numeric">{formatBps(extras.royaltyBps)}</span>, enforced on secondary sales through
+          the transfer validator
+        </>
+      ),
+    },
     { label: 'Transfers', value: collection.transfersLocked ? 'Locked by the creator' : 'Open' },
     { label: 'Art', value: collection.revealed ? 'Revealed' : 'Reveals after the mint' },
   ]

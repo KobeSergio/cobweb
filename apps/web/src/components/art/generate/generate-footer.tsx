@@ -21,7 +21,7 @@ export function GenerateFooter({
   blockedReason: string | null
   /** The art is already locked. */
   locked?: boolean
-  /** A secondary action beside Continue, such as "Finish the art later". */
+  /** A secondary action beside Continue. */
   extra?: React.ReactNode
   /** Replaces the standing line about locking. */
   lockNote?: string

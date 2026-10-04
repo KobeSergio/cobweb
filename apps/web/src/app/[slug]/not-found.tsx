@@ -3,7 +3,7 @@ import { CornerWeb } from '@cobweb/ui/components/artwork'
 import { Button } from '@cobweb/ui/components/button'
 import { Logo } from '@/components/shell/logo'
 
-/** A mint page address with no collection behind it (or one that is not published). */
+/** A mint page link with no collection behind it (or one that is not published). */
 export default function MintPageNotFound() {
   return (
     <main className="relative isolate flex min-h-svh flex-col items-center justify-center overflow-hidden p-6 text-center sm:p-8">

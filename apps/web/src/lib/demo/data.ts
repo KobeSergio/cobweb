@@ -82,7 +82,7 @@ export const DEMO_TRAIT_COUNTS: TraitCounts = countTraits(DEMO_TOKENS)
 
 export { tokenLayerUrls }
 
-/** Sample uploads for the non-generative project types (1/1s, metadata, single asset). */
+/** Sample uploads for the non-generative project types (1/1s and single asset). */
 export const DEMO_ASSETS: UploadedAsset[] = DEMO_TOKENS.slice(0, 12).map((token, index) => ({
   id: token.id,
   fileName: `night-owl-${token.id}.svg`,

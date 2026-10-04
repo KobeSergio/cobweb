@@ -63,7 +63,7 @@ export function DeployDialog({
       >
         <DialogHeader>
           <DialogTitle>
-            Deploy {check.name} on {chain.name}
+            Deploy {check.name} on <ChainName chain={chain} iconClassName="size-5" />
           </DialogTitle>
           <DialogDescription>
             {phase.step === 'idle'
@@ -158,7 +158,7 @@ export function DeployDialog({
         {needsSwitch && phase.step === 'idle' && (
           <p className="text-muted-foreground text-[0.8125rem]">
             Your wallet is on {check.walletChain?.name ?? 'another network'}. It asks to switch to{' '}
-            {chain.name} first.
+            <ChainName chain={chain} className="text-foreground" iconClassName="size-3.5" /> first.
           </p>
         )}
 

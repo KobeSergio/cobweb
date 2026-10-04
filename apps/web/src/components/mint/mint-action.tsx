@@ -4,6 +4,7 @@ import { ArrowRightLeftIcon, WalletIcon } from 'lucide-react'
 import { Button } from '@cobweb/ui/components/button'
 import { Spinner } from '@cobweb/ui/components/spinner'
 import { cn } from '@cobweb/ui/lib/utils'
+import { ChainName } from '@/components/chains/chain-icon'
 import { formatDistance } from './format'
 import { useMint } from './mint-context'
 import { allowanceFor, maxQuantity } from './model'
@@ -59,11 +60,20 @@ export function MintHint({ className }: { className?: string }) {
   const phaseTime = useLocalTime(phase?.group.scheduledStart ?? 0)
   const hydrated = useHydrated()
 
+  const lineClass = cn('text-center text-[0.8125rem] leading-snug text-muted-foreground', className)
+  if (action.kind === 'switch') {
+    return (
+      <p aria-live="polite" className={lineClass}>
+        This collection is on{' '}
+        <ChainName chain={data.collection.chain} className="text-foreground" iconClassName="size-3.5" />. Your
+        wallet will ask you to switch.
+      </p>
+    )
+  }
+
   let text: string | null = null
   if (action.kind === 'connect') {
     text = 'Connect to see what you can mint in each phase.'
-  } else if (action.kind === 'switch') {
-    text = `This collection is on ${data.collection.chain.name}. Your wallet will ask you to switch.`
   } else if (action.kind === 'mint' && phase) {
     const left = maxQuantity(phase, vault)
     text = vault
@@ -97,10 +107,7 @@ export function MintHint({ className }: { className?: string }) {
 
   if (!text) return null
   return (
-    <p
-      aria-live="polite"
-      className={cn('text-center text-[0.8125rem] leading-snug text-muted-foreground', className)}
-    >
+    <p aria-live="polite" className={lineClass}>
       {text}
     </p>
   )

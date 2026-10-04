@@ -3,6 +3,7 @@
 import { ExternalLinkIcon } from 'lucide-react'
 import { useState } from 'react'
 import { StatusBadge } from '@cobweb/ui/components/status-badge'
+import { ChainName } from '@/components/chains/chain-icon'
 import { explorerTxUrl, formatNative, formatUtc, shortAddress } from '@/lib/demo/helpers'
 import type { Hex, RenderJob, SupportedChain } from '@/lib/demo/types'
 import type { FlowLink } from '@/lib/steps'
@@ -173,7 +174,8 @@ export function UploadFlow({
           status={<StatusBadge status="draft">Payment due</StatusBadge>}
           receipt={
             <>
-              Paid <span className="numeric text-foreground/85">{total}</span> on {chain.name}
+              Paid <span className="numeric text-foreground/85">{total}</span> on{' '}
+              <ChainName chain={chain} iconClassName="size-3.5" />
               {paymentTx && (
                 <>
                   <Dot />

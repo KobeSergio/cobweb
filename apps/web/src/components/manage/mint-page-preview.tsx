@@ -3,6 +3,7 @@ import { Artwork } from '@cobweb/ui/components/artwork'
 import { Progress } from '@cobweb/ui/components/progress'
 import { StatusBadge } from '@cobweb/ui/components/status-badge'
 import { cn } from '@cobweb/ui/lib/utils'
+import { ChainName } from '@/components/chains/chain-icon'
 import { formatNative, type MintPageData, type Socials } from '@/lib/demo'
 import { count, percent } from './format'
 
@@ -83,7 +84,7 @@ export function MintPagePreview({
               <p className="text-muted-foreground flex items-center gap-1.5 text-[0.6875rem]">
                 <span className="numeric">{collection.symbol}</span>
                 <span aria-hidden="true" className="bg-faint size-0.5 rounded-full" />
-                {collection.chain.name}
+                <ChainName chain={collection.chain} iconClassName="size-3" className="gap-1" />
               </p>
             </div>
             {socials.length > 0 && (

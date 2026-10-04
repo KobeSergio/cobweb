@@ -9,6 +9,7 @@ import { Spinner } from '@cobweb/ui/components/spinner'
 import { useIsMobile } from '@cobweb/ui/hooks/use-mobile'
 import { transition } from '@cobweb/ui/lib/motion'
 import { cn } from '@cobweb/ui/lib/utils'
+import { ChainName } from '@/components/chains/chain-icon'
 import { explorerTxUrl, formatNative, shortAddress } from '@/lib/demo/helpers'
 import { useMint } from './mint-context'
 import { MintSuccess } from './mint-success'
@@ -143,7 +144,7 @@ function FlowBody() {
         )}
         {flow.step === 'error' && flow.kind === 'insufficient-balance' && (
           <p className="mt-1 text-[0.8125rem] text-muted-foreground">
-            Add {chain.nativeSymbol} on {chain.name} to{' '}
+            Add {chain.nativeSymbol} on <ChainName chain={chain} iconClassName="size-3.5" /> to{' '}
             <span className="numeric">{shortAddress(params.account)}</span>, or mint fewer.
           </p>
         )}

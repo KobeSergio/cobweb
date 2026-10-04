@@ -17,7 +17,7 @@ import {
 import { Panel } from '@cobweb/ui/components/panel'
 import { Slider } from '@cobweb/ui/components/slider'
 import { Switch } from '@cobweb/ui/components/switch'
-import { ChainIcon } from '@/components/chains/chain-icon'
+import { ChainIcon, ChainName } from '@/components/chains/chain-icon'
 import { MintPageAddressField } from '@/components/collections/mint-page-address-field'
 import type { Tables } from '@/lib/database.types'
 import { formatNative } from '@/lib/demo/helpers'
@@ -94,9 +94,15 @@ export function DeployForm({
       <Panel
         title="Chain"
         description={
-          walletChain
-            ? `Your wallet is on ${walletChain.name}. If you pick another chain, it asks to switch when you deploy.`
-            : 'Your wallet asks to switch to the chain you pick when you deploy.'
+          walletChain ? (
+            <>
+              Your wallet is on{' '}
+              <ChainName chain={walletChain} className="text-foreground" iconClassName="size-3.5" />. If you
+              pick another chain, it asks to switch when you deploy.
+            </>
+          ) : (
+            'Your wallet asks to switch to the chain you pick when you deploy.'
+          )
         }
       >
         <ChoiceCards

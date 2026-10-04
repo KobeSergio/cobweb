@@ -242,7 +242,7 @@ export function MintPageLinkBar({
         {slug && (
           <Button variant="ghost" size="sm" asChild>
             <a href={`/${slug}`} target="_blank" rel="noreferrer">
-              Open
+              Open mint page
               <ArrowUpRightIcon aria-hidden="true" />
             </a>
           </Button>

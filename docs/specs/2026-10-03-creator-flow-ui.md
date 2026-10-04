@@ -457,3 +457,11 @@ Nineteen further comments on the round 1 preview. These amend sections 4 and 9.
   Overview.
 - Phases: the per-phase supply allocation is editable in place (an "Edit supply" control on each
   row, with the minted floor), not hidden in a menu.
+
+### Mint page
+
+- Overlapping phases are easy to choose between. When more than one phase is open, the mint panel
+  leads with a "Choose your phase" selector: one card per open phase with its name, price and this
+  wallet's standing ("You are on this list, 2 left", "Not on this list", "Anyone, up to 3"). It
+  opens on the cheapest phase the wallet can use, phases the wallet cannot use are shown disabled
+  with the reason, and the mint button follows the selected phase.

@@ -43,6 +43,7 @@ export default async function CollectionLayout({ children, params }: Props) {
           <CollectionTopbar
             name={collection.name}
             status={collection.status}
+            demo={demo}
             walletAddress={user.walletAddress}
           />
           <WorkspaceNav

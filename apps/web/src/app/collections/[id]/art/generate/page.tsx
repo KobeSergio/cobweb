@@ -30,7 +30,6 @@ export default async function Page({
       eyebrow={subs.length > 1 ? `Art · Step ${index + 1} of ${subs.length}` : 'Art'}
       title="Generate"
       description={subs[index]!.summary}
-      sampleNotice={ctx.sampleNotice}
       width="wide"
       bodyHasFooter
     >

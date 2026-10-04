@@ -8,7 +8,7 @@ import { manageTabHref } from '@/lib/steps'
 /**
  * Above the Art screens of a deployed collection whose art is deferred: the drop is already live
  * on the placeholder, and the art is finished here and revealed from Settings. One line, no
- * stepper. Renders nothing otherwise. Sample mode reads the `?art=deferred` scenario.
+ * stepper. Renders nothing otherwise. Sample mode reads `?art=deferred&state=deployed`.
  */
 export function ArtLiveNotice({
   collectionId,
@@ -23,7 +23,8 @@ export function ArtLiveNotice({
 }) {
   const searchParams = useSearchParams()
   const sampleDeferred = demo && searchParams.get('art') === 'deferred'
-  if (!deployed || !(artDeferred || sampleDeferred)) return null
+  const sampleDeployed = demo && searchParams.get('state') === 'deployed'
+  if (!(deployed || sampleDeployed) || !(artDeferred || sampleDeferred)) return null
   const settings = manageTabHref(collectionId, 'settings')
 
   return (

@@ -1,6 +1,6 @@
 'use client'
 
-import { CheckIcon, ExternalLinkIcon } from 'lucide-react'
+import { ArrowUpRightIcon, CheckIcon } from 'lucide-react'
 import { useId, useState, useSyncExternalStore } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@cobweb/ui/components/button'
@@ -83,7 +83,8 @@ export function MintPageScreen({ collection, settings, featuredCandidates, previ
     () => '',
   )
   const publicUrl = `${origin}${mintPageHref ?? ''}`
-  const displayUrl = `${origin.replace(/^https?:\/\//, '') || 'cobweb.app'}/${slug ?? 'your-link'}`
+  // Shown as cobweb.app/<link>, as on Deploy and the Overview; copy and open use the real origin.
+  const displayUrl = `cobweb.app/${slug ?? 'your-link'}`
 
   const errors = Object.fromEntries(
     SOCIALS.map((social) => [social.key, socialError(draft.socials[social.key], social.hosts)]),
@@ -123,8 +124,8 @@ export function MintPageScreen({ collection, settings, featuredCandidates, previ
               <CopyButton value={publicUrl} label="Copy link" size="icon-sm" />
               <Button variant="ghost" size="sm" asChild>
                 <a href={mintPageHref} target="_blank" rel="noreferrer">
-                  Open
-                  <ExternalLinkIcon aria-hidden="true" />
+                  Open mint page
+                  <ArrowUpRightIcon aria-hidden="true" />
                 </a>
               </Button>
               <Button type="button" variant="ghost" size="sm" onClick={() => setChanging(true)}>
