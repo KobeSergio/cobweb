@@ -1,12 +1,13 @@
 'use client'
 
-import { LockIcon, LockOpenIcon } from 'lucide-react'
+import { ArrowRightIcon } from 'lucide-react'
+import Link from 'next/link'
 import { useState } from 'react'
-import { Badge } from '@cobweb/ui/components/badge'
 import { Button } from '@cobweb/ui/components/button'
 import { StatusBadge } from '@cobweb/ui/components/status-badge'
 import { Switch } from '@cobweb/ui/components/switch'
 import { cn } from '@cobweb/ui/lib/utils'
+import { ChainName } from '@/components/chains/chain-icon'
 import type { Tables } from '@/lib/database.types'
 import {
   formatBps,
@@ -16,6 +17,7 @@ import {
   type DropActivity,
   type SupportedChain,
 } from '@/lib/demo'
+import { manageTabHref } from '@/lib/steps'
 import { AddressLine, Row } from './bits'
 import { PayoutDialog, RevealDialog, RoyaltyDialog } from './settings-dialogs'
 import { SAMPLE } from './simulate'
@@ -34,9 +36,12 @@ export type SettingsScreenProps = {
   realArtRendered?: boolean
 }
 
-type DialogKey = 'withdraw' | 'payout' | 'royalty' | 'reveal' | 'onBehalf' | 'lock'
+type DialogKey = 'withdraw' | 'payout' | 'royalty' | 'reveal' | 'onBehalf'
 
-/** Manage drop, settings: reveal, withdraw, royalties, payout address, lock transfers, mint on behalf. */
+/**
+ * Manage drop, settings: withdraw, payout address, royalties, reveal, mint on behalf. The transfer
+ * validator and the lock live in the Tradability card on Overview; Transfers here points to it.
+ */
 export function SettingsScreen({
   collection,
   deployment,
@@ -53,7 +58,6 @@ export function SettingsScreen({
     baseUri: deployment.baseUri,
     revealed: deployment.revealed,
     onBehalf: deployment.mintOnBehalfActive,
-    locked: deployment.transfersLocked,
   })
   // One dialog at a time; it stays mounted after closing so a confirming transaction can finish.
   const [dialog, setDialog] = useState<{ key: DialogKey; id: number; at: typeof state } | null>(null)
@@ -110,7 +114,7 @@ export function SettingsScreen({
 
         <Setting
           title="Royalties"
-          description="Paid on resales by marketplaces that honour ERC-2981 royalties."
+          description="Enforced on secondary sales through the transfer validator: a resale goes through only where the royalty is paid to the recipient."
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="grid gap-1">
@@ -181,34 +185,20 @@ export function SettingsScreen({
 
       <Group title="Transfers">
         <Setting
-          title="Lock transfers"
-          danger
-          description="Makes every token non-transferable until you unlock it. While locked, holders cannot send or sell, and marketplaces cannot list or trade the collection. Mints and airdrops still work."
+          title="Tradability"
+          description="The transfer validator, which governs whether and where tokens can be traded and enforces royalties, and the transfer lock are on Overview."
         >
-          {chain.transferLock ? (
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              {state.locked ? (
-                <Badge variant="destructive">
-                  <LockIcon aria-hidden="true" />
-                  Locked
-                </Badge>
-              ) : (
-                <StatusBadge status="draft">Transferable</StatusBadge>
-              )}
-              <Button
-                variant={state.locked ? 'secondary' : 'destructive'}
-                size="sm"
-                onClick={() => show('lock')}
-              >
-                {state.locked ? <LockOpenIcon aria-hidden="true" /> : <LockIcon aria-hidden="true" />}
-                {state.locked ? 'Unlock transfers' : 'Lock transfers'}
-              </Button>
-            </div>
-          ) : (
-            <p className="text-muted-foreground text-sm">
-              {chain.name} has no transfer validator, so transfers cannot be locked there.
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-muted-foreground flex flex-wrap items-center gap-1.5 text-sm">
+              Contract on <ChainName chain={chain} className="text-foreground" />
             </p>
-          )}
+            <Button variant="secondary" size="sm" asChild>
+              <Link href={`${manageTabHref(collection.id, 'overview')}#tradability`}>
+                Open Tradability
+                <ArrowRightIcon aria-hidden="true" />
+              </Link>
+            </Button>
+          </div>
         </Setting>
       </Group>
 
@@ -284,31 +274,6 @@ export function SettingsScreen({
             args: [{ name: 'status', value: String(!dialog.at.onBehalf) }],
           }}
           onConfirmed={() => patch({ onBehalf: !dialog.at.onBehalf })}
-        />
-      )}
-      {dialog?.key === 'lock' && (
-        <TransactionDialog
-          key={dialog.id}
-          {...base}
-          destructive={!dialog.at.locked}
-          title={dialog.at.locked ? 'Unlock transfers' : 'Lock transfers'}
-          description={
-            dialog.at.locked
-              ? 'Holders can send and sell again, and marketplaces can list the collection.'
-              : 'From the moment this confirms, nobody can send, sell or list these tokens until you unlock them. Open listings stop working.'
-          }
-          actionLabel={dialog.at.locked ? 'Unlock' : 'Lock transfers'}
-          successMessage={dialog.at.locked ? 'Transfers unlocked' : 'Transfers locked'}
-          request={{
-            // SEAM: the validator's exact function and level per chain are confirmed in Phase 1 (MASTER_PLAN, Contracts: lock).
-            contract: 'Transfer validator',
-            functionName: 'setTransferSecurityLevelOfCollection',
-            args: [
-              { name: 'collection', value: deployment.contractAddress },
-              { name: 'level', value: dialog.at.locked ? 'Default' : 'Non-transferable' },
-            ],
-          }}
-          onConfirmed={() => patch({ locked: !dialog.at.locked })}
         />
       )}
     </div>

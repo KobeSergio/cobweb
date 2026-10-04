@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowRightIcon, CalendarClockIcon, CheckIcon, CircleIcon, ExternalLinkIcon } from 'lucide-react'
+import { ArrowRightIcon, CalendarClockIcon, ExternalLinkIcon } from 'lucide-react'
 import Link from 'next/link'
 import { Progress } from '@cobweb/ui/components/progress'
 import { StatusBadge } from '@cobweb/ui/components/status-badge'
@@ -236,57 +236,5 @@ export function RecentMints({
         ))}
       </TableBody>
     </Table>
-  )
-}
-
-export type ChecklistItem = {
-  key: string
-  done: boolean
-  title: string
-  detail: string
-  href: string
-  action: string
-}
-
-/** What still needs doing before the drop runs on its own. */
-export function SetupChecklist({ items }: { items: ChecklistItem[] }) {
-  const open = items.filter((item) => !item.done).length
-  return (
-    <div className="grid gap-1">
-      <p className="text-muted-foreground mb-2 text-sm">
-        {open === 0 ? 'Everything is set up.' : `${open} of ${items.length} still to do.`}
-      </p>
-      <ul className="grid gap-1">
-        {items.map((item) => (
-          <li key={item.key} className="flex gap-3 rounded-lg py-2">
-            <span
-              className={cn(
-                'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full',
-                item.done ? 'bg-success-soft text-success-foreground' : 'text-faint',
-              )}
-            >
-              {item.done ? (
-                <CheckIcon aria-hidden="true" className="size-3" strokeWidth={3} />
-              ) : (
-                <CircleIcon aria-hidden="true" className="size-4" />
-              )}
-              <span className="sr-only">{item.done ? 'Done:' : 'To do:'}</span>
-            </span>
-            <div className="min-w-0 flex-1 text-sm">
-              <p className={cn('font-medium', item.done && 'text-muted-foreground')}>{item.title}</p>
-              <p className="text-muted-foreground text-[0.8125rem]">{item.detail}</p>
-              {!item.done && (
-                <Link
-                  href={item.href}
-                  className="focus-visible:ring-ring mt-1 inline-flex items-center gap-1 rounded-sm text-[0.8125rem] font-medium underline underline-offset-4 outline-none focus-visible:ring-2"
-                >
-                  {item.action}
-                </Link>
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
   )
 }

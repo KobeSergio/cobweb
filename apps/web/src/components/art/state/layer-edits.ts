@@ -9,7 +9,7 @@ import type { ArtRule, GeneratedToken, Layer, Trait } from '@/lib/demo'
  * screens keep calling them through `useArtProject().update`.
  */
 
-function slug(name: string): string {
+export function slug(name: string): string {
   return (
     name
       .toLowerCase()
@@ -18,44 +18,84 @@ function slug(name: string): string {
   )
 }
 
-function uniqueId(base: string, taken: ReadonlySet<string>): string {
+export function uniqueId(base: string, taken: ReadonlySet<string>): string {
   if (!taken.has(base)) return base
   for (let n = 2; ; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`
 }
 
+/** Numbers each collection's layers 0 up, in array order. */
 function positioned(layers: Layer[]): Layer[] {
-  return layers.map((layer, position) => (layer.position === position ? layer : { ...layer, position }))
+  const next = new Map<string, number>()
+  return layers.map((layer) => {
+    const position = next.get(layer.collectionId) ?? 0
+    next.set(layer.collectionId, position + 1)
+    return layer.position === position ? layer : { ...layer, position }
+  })
+}
+
+/** One collection's layers, bottom first. */
+export function layersOf(layers: Layer[], collectionId: string): Layer[] {
+  return layers.filter((layer) => layer.collectionId === collectionId)
 }
 
 function mapLayer(layers: Layer[], layerId: string, change: (layer: Layer) => Layer): Layer[] {
   return layers.map((layer) => (layer.id === layerId ? change(layer) : layer))
 }
 
-/** Moves a layer within the stack (index 0 is the bottom). */
-export function moveLayer(layers: Layer[], from: number, to: number): Layer[] {
-  const next = [...layers]
-  const [moved] = next.splice(from, 1)
+/** Moves a layer within one collection's stack (index 0 is the bottom). Other collections keep their order. */
+export function moveLayer(layers: Layer[], collectionId: string, from: number, to: number): Layer[] {
+  const own = layersOf(layers, collectionId)
+  const [moved] = own.splice(from, 1)
   if (!moved) return layers
-  next.splice(to, 0, moved)
-  return positioned(next)
+  own.splice(to, 0, moved)
+  let i = 0
+  return positioned(layers.map((layer) => (layer.collectionId === collectionId ? own[i++]! : layer)))
 }
 
-/** Reorders each token's DNA to follow a new layer order, so a reorder keeps the generated set. */
+/**
+ * Reorders each token's DNA to follow a new layer order, so a reorder keeps the generated set.
+ * A token's DNA follows its own collection's layers.
+ */
 export function remapDna(tokens: GeneratedToken[], before: Layer[], after: Layer[]): GeneratedToken[] {
-  const oldIndex = new Map(before.map((layer, index) => [layer.id, index]))
-  return tokens.map((token) => ({
-    ...token,
-    dna: after.map((layer) => token.dna[oldIndex.get(layer.id) ?? -1] ?? ''),
-  }))
+  const plans = new Map<string, { after: Layer[]; oldIndex: Map<string, number> }>()
+  const plan = (collectionId: string) => {
+    let entry = plans.get(collectionId)
+    if (!entry) {
+      const old = layersOf(before, collectionId)
+      entry = {
+        after: layersOf(after, collectionId),
+        oldIndex: new Map(old.map((layer, index) => [layer.id, index])),
+      }
+      plans.set(collectionId, entry)
+    }
+    return entry
+  }
+  return tokens.map((token) => {
+    const { after: own, oldIndex } = plan(token.collectionId)
+    return { ...token, dna: own.map((layer) => token.dna[oldIndex.get(layer.id) ?? -1] ?? '') }
+  })
 }
 
 export function renameLayer(layers: Layer[], layerId: string, name: string): Layer[] {
   return mapLayer(layers, layerId, (layer) => ({ ...layer, name }))
 }
 
-export function addLayer(layers: Layer[], name: string): { layers: Layer[]; id: string } {
+/** Adds a layer on top of one collection's stack. Its id is unique in the project. */
+export function addLayer(
+  layers: Layer[],
+  collectionId: string,
+  name: string,
+): { layers: Layer[]; id: string } {
   const id = uniqueId(slug(name), new Set(layers.map((layer) => layer.id)))
-  return { layers: positioned([...layers, { id, name, position: layers.length, traits: [] }]), id }
+  const layer: Layer = { id, collectionId, name, position: 0, traits: [] }
+  // Keep the collection's layers together: insert after its last layer.
+  let last = -1
+  layers.forEach((other, i) => {
+    if (other.collectionId === collectionId) last = i
+  })
+  const next = [...layers]
+  next.splice(last === -1 ? layers.length : last + 1, 0, layer)
+  return { layers: positioned(next), id }
 }
 
 export function deleteLayer(layers: Layer[], layerId: string): Layer[] {

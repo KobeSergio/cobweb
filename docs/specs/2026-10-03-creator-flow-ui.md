@@ -353,3 +353,59 @@ A creator may deploy before the real art is finished:
 - [ ] `pnpm --filter @cobweb/web verify:local` passes with the Details action in place.
 - [ ] Creator screens hold up between 640 and 1023 px.
 - [ ] Upload assets screen (1/1s, metadata, single asset) checked in a browser.
+
+## 9. Review round 1 (4 October 2026)
+
+The owner reviewed the published preview and left 24 comments. The rules below amend the sections
+above; where they conflict, this section wins.
+
+### Navigation and shell
+
+- One stepper only. The Art sub-steps (Layers, Rules, Generate) are not a second header row; they
+  live in a left rail inside the Art stage.
+- After deploy the stepper is gone. A deployed collection opens on Manage drop with its tabs, and
+  the four build stages (Details, Art, Lock and upload, Deploy) are reachable from a "Setup" link as
+  read-only history. Manage drop is no longer a step.
+- Details has the same Back / Save and continue footer as the other stages.
+- The dashboard has search and a filter by project type.
+- Sign-in poster: "Generate art", never "pay the generation fee".
+
+### Creating a collection and the art flow (as in the legacy app)
+
+- New collection asks for type, then name and symbol. No supply, no mint page link.
+- Project types are Generative, 1/1s and Single asset. The Metadata type is removed (schema enum,
+  dialog, assets screen, sample data).
+- Generative goes straight to Layers, which starts as a resumable folder upload
+  (`collection/layer/trait.png` or `project/collection/layer/trait.png`). 1/1s goes straight to a
+  resumable file upload. Single asset goes to a screen with the one file and the quantity, which is
+  where supply is set for that type.
+- Supply for Generative is the sum of the per-collection sizes chosen at Generate; for 1/1s it is
+  the number of files (times editions). `collections.max_supply` is set then, not at creation.
+- A project can hold several collections (for example male and female), as in the legacy app: a
+  collection switcher on Layers and Rules, one size per collection at Generate, token numbering
+  continuous across collections, uniqueness checked per collection.
+- "Finish the art later" is a visible secondary button on every Art screen, not only the footer.
+- The rules conflict warning is a red indicator beside "Continue to Generate" that opens a small
+  dialog; clicking Continue while a conflict exists opens that dialog first. No large panel.
+- Token detail opens in a side panel next to the gallery, not a centred modal.
+
+### Deploy
+
+- The mint page link is reserved in the Deploy form and is required before deploying. The word is
+  "mint page link", not "address", everywhere.
+- Chain cards and chain labels show the chain's icon.
+- The deployed view has "Open mint page" as its primary action.
+- The deployed view and Settings state that royalties are enforced on secondary sales through the
+  transfer validator.
+
+### Manage drop
+
+- Overview: no mints-over-time chart, no platform fees line, no Setup checklist. Recent mints stays.
+  Added: a Reveal action, a public/private switch for the mint page, and the tradability control
+  (transfer validator and lock) moved up from Settings.
+- Settings keeps the custom base URI with an explicit red warning that a wrong IPFS link breaks the
+  art and metadata of tokens already minted.
+- Mint page tab: once deployed there is no reservation wording; the tab shows "Set link" or "Change
+  link" with a warning that changing it breaks shared links.
+- Airdrop: no separate burn section. A "Burn instead of sending" switch turns the airdrop into a
+  burn to the dead address with a quantity.

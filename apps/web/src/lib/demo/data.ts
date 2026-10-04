@@ -7,12 +7,13 @@
  * the public sale is scheduled, and the team allocation was minted and closed.
  */
 import {
+  DEMO_COLLECTIONS,
   DEMO_LAYERS,
   DEMO_RULE_CONFLICTS,
   DEMO_RULES,
   DEMO_TOKEN_COUNT,
   countTraits,
-  generateTokens,
+  generateCollections,
   rankTokens,
   seededRandom,
   tokenLayerUrls,
@@ -42,7 +43,7 @@ import type {
   WhitelistEntry,
 } from './types'
 
-export { DEMO_LAYERS, DEMO_RULES, DEMO_RULE_CONFLICTS, DEMO_TOKEN_COUNT }
+export { DEMO_COLLECTIONS, DEMO_LAYERS, DEMO_RULES, DEMO_RULE_CONFLICTS, DEMO_TOKEN_COUNT }
 
 /** "Now" for the sample: 2026-10-03 15:00 UTC. Never `Date.now()`. */
 export const DEMO_NOW = 1_791_039_600
@@ -68,9 +69,12 @@ export const DEMO_COLLECTION = {
 // Art
 // ---------------------------------------------------------------------------------------------
 
-/** The generated set, ranked. Tokens 1 to 24 have a `previewUrl`; stack `tokenLayerUrls(dna)` for the rest. */
+/**
+ * The generated set, ranked: the owls are 1 to 600, the owlets 601 to 777. Tokens 1 to 24 have a
+ * `previewUrl`; stack `tokenLayerUrls(dna)` for the rest.
+ */
 export const DEMO_TOKENS: GeneratedToken[] = rankTokens(
-  generateTokens(DEMO_LAYERS, DEMO_RULES, DEMO_TOKEN_COUNT),
+  generateCollections(DEMO_LAYERS, DEMO_RULES, DEMO_COLLECTIONS),
 )
 
 /** How many tokens carry each trait. */

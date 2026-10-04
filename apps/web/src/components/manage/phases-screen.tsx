@@ -1,5 +1,6 @@
 'use client'
 
+import { sampleSupply, DEMO_COLLECTION } from '@/lib/demo'
 import { InfoIcon, LayersIcon, PlusIcon } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@cobweb/ui/components/button'
@@ -80,7 +81,8 @@ export function PhasesScreen({
   const ctx: PhaseContext = {
     chain,
     groups,
-    maxSupply: collection.max_supply,
+    // A deployed collection always has its supply; it is fixed at deploy.
+    maxSupply: sampleSupply(collection.max_supply, DEMO_COLLECTION.maxSupply),
     blockTimestamp,
     open,
     onOpenChange: setOpen,
@@ -94,7 +96,11 @@ export function PhasesScreen({
         description="How the collection's supply is split between phases."
         bodyClassName="p-5 lg:p-6"
       >
-        <SupplyMap groups={ordered} maxSupply={collection.max_supply} totalMinted={SAMPLE.totalMinted} />
+        <SupplyMap
+          groups={ordered}
+          maxSupply={sampleSupply(collection.max_supply, DEMO_COLLECTION.maxSupply)}
+          totalMinted={SAMPLE.totalMinted}
+        />
       </Panel>
 
       <section aria-labelledby="phases-heading" className="grid gap-4">

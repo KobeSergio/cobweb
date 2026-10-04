@@ -1,7 +1,8 @@
 'use client'
 
-import { CheckIcon, ClockIcon, LockIcon } from 'lucide-react'
-import { useActionState, useState } from 'react'
+import { ArrowRightIcon, ClockIcon, LockIcon } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { useActionState, useEffect, useState } from 'react'
 import { Button } from '@cobweb/ui/components/button'
 import {
   Field,
@@ -17,13 +18,7 @@ import { Textarea } from '@cobweb/ui/components/textarea'
 import { updateCollectionDetails, type UpdateDetailsState } from '@/app/actions/collection-details'
 import { StageFooter } from '@/components/shell/stage-footer'
 import type { Tables } from '@/lib/database.types'
-import {
-  formatReservedUntil,
-  MAX_SUPPLY,
-  PROJECT_TYPES,
-  SINGLE_ASSET_MAX_SUPPLY,
-  slugState,
-} from '@/lib/collections'
+import { formatReservedUntil, PROJECT_TYPES, slugState, SUPPLY_SOURCE, supplyLimit } from '@/lib/collections'
 import { frozenDetailFields, type FlowLink } from '@/lib/steps'
 
 const INITIAL_STATE: UpdateDetailsState = {}
@@ -41,8 +36,14 @@ type Props = {
     | 'project_type'
     | 'status'
   >
+  /** Where "Save and continue" leads once the details are saved (Art). */
   next?: FlowLink
+  /** A deployed collection: Setup is history, so nothing is editable and there is nothing to save. */
+  readOnly?: boolean
 }
+
+/** Back from Details leads out of the collection. */
+const BACK_TO_COLLECTIONS: FlowLink = { href: '/collections', name: 'Collections' }
 
 /** Why a field is read-only, shown under it. */
 function FrozenNote({ id, children }: { id: string; children: React.ReactNode }) {
@@ -54,12 +55,12 @@ function FrozenNote({ id, children }: { id: string; children: React.ReactNode })
   )
 }
 
-/** Where the mint page address stands. It is reserved in Deploy, not edited here. */
+/** Where the mint page link stands. It is reserved in Deploy, not edited here. */
 function AddressLine({ collection }: { collection: Props['collection'] }) {
   const state = slugState(collection)
   return (
     <Field>
-      <FieldTitle>Mint page address</FieldTitle>
+      <FieldTitle>Mint page link</FieldTitle>
       <p className="text-muted-foreground flex items-center gap-1.5 text-sm">
         {state.kind === 'permanent' ? (
           <>
@@ -86,17 +87,25 @@ function AddressLine({ collection }: { collection: Props['collection'] }) {
   )
 }
 
-/** The Details screen: edit the collection's name, symbol, description and supply. */
-export function DetailsForm({ collection, next }: Props) {
+/**
+ * The Details screen: edit the collection's name, symbol and description; the supply and type are
+ * shown read-only (the supply is set at Generate or from the uploads). "Save and
+ * continue" saves, then goes on to Art; a failed save stays here with its errors.
+ */
+export function DetailsForm({ collection, next, readOnly = false }: Props) {
+  const router = useRouter()
   const action = updateCollectionDetails.bind(null, collection.id)
   const [state, formAction, pending] = useActionState(action, INITIAL_STATE)
+  // Each submit returns a new state object, so this runs once per successful save.
+  useEffect(() => {
+    if (state.saved && next) router.push(next.href)
+  }, [state, next, router])
   const [symbol, setSymbol] = useState(collection.symbol)
   const [description, setDescription] = useState(collection.description)
 
   const frozen = frozenDetailFields(collection.status)
   const errors = state.fieldErrors ?? {}
   const type = PROJECT_TYPES.find((entry) => entry.value === collection.project_type)
-  const supplyLimit = collection.project_type === 'single_asset' ? SINGLE_ASSET_MAX_SUPPLY : MAX_SUPPLY
   const deployedNote = 'Fixed at deployment.'
 
   return (
@@ -145,7 +154,7 @@ export function DetailsForm({ collection, next }: Props) {
 
         <AddressLine collection={collection} />
 
-        <Field data-invalid={!!errors.description}>
+        <Field data-invalid={!!errors.description} data-disabled={readOnly}>
           <FieldLabel htmlFor="details-description">Description</FieldLabel>
           <Textarea
             id="details-description"
@@ -154,11 +163,14 @@ export function DetailsForm({ collection, next }: Props) {
             onChange={(event) => setDescription(event.target.value)}
             maxLength={2000}
             rows={5}
+            readOnly={readOnly}
             aria-invalid={!!errors.description}
             aria-describedby={errors.description ? 'details-description-error' : 'details-description-help'}
           />
           {errors.description ? (
             <FieldError id="details-description-error">{errors.description}</FieldError>
+          ) : readOnly ? (
+            <FrozenNote id="details-description-help">Edit it in Manage drop, Mint page.</FrozenNote>
           ) : (
             <FieldDescription id="details-description-help">
               Shown on the mint page. {description.length.toLocaleString('en-US')} of 2,000 characters.
@@ -167,30 +179,23 @@ export function DetailsForm({ collection, next }: Props) {
         </Field>
 
         <div className="grid gap-4 sm:grid-cols-[14rem_1fr]">
-          <Field data-invalid={!!errors.maxSupply} data-disabled={frozen.has('maxSupply')}>
+          {/* Read-only: set at Generate or from the uploads (`setCollectionSupply`), never typed here. */}
+          <Field data-disabled>
             <FieldLabel htmlFor="details-supply">Supply</FieldLabel>
             <Input
               id="details-supply"
-              name="maxSupply"
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={supplyLimit}
-              defaultValue={collection.max_supply}
-              readOnly={frozen.has('maxSupply')}
-              aria-invalid={!!errors.maxSupply}
-              aria-describedby={errors.maxSupply ? 'details-supply-error' : 'details-supply-help'}
-              required
+              value={
+                collection.max_supply === null ? 'Not set yet' : collection.max_supply.toLocaleString('en-US')
+              }
+              className={collection.max_supply === null ? undefined : 'numeric'}
+              readOnly
+              aria-describedby="details-supply-help"
             />
-            {errors.maxSupply ? (
-              <FieldError id="details-supply-error">{errors.maxSupply}</FieldError>
-            ) : frozen.has('maxSupply') ? (
-              <FrozenNote id="details-supply-help">Fixed when the art was locked.</FrozenNote>
-            ) : (
-              <FieldDescription id="details-supply-help">
-                Total tokens. Up to {supplyLimit.toLocaleString('en-US')}.
-              </FieldDescription>
-            )}
+            <FrozenNote id="details-supply-help">
+              {frozen.has('maxSupply')
+                ? 'Fixed when the art was locked.'
+                : `${SUPPLY_SOURCE[collection.project_type]}. Up to ${supplyLimit(collection.project_type).toLocaleString('en-US')}.`}
+            </FrozenNote>
           </Field>
           <Field data-disabled>
             <FieldLabel htmlFor="details-type">Type</FieldLabel>
@@ -211,20 +216,17 @@ export function DetailsForm({ collection, next }: Props) {
         </p>
       )}
 
-      <StageFooter next={next}>
-        <p aria-live="polite" className="text-muted-foreground flex items-center gap-1.5 text-sm">
-          {state.saved && !pending && (
-            <>
-              <CheckIcon aria-hidden="true" className="text-success size-4" />
-              Saved
-            </>
-          )}
-        </p>
-        <Button type="submit" disabled={pending}>
-          {pending && <Spinner />}
-          Save details
-        </Button>
-      </StageFooter>
+      {readOnly ? (
+        <StageFooter previous={BACK_TO_COLLECTIONS} next={next} />
+      ) : (
+        <StageFooter previous={BACK_TO_COLLECTIONS}>
+          <Button type="submit" disabled={pending || (state.saved && !!next)}>
+            {pending && <Spinner />}
+            Save and continue
+            {!pending && <ArrowRightIcon />}
+          </Button>
+        </StageFooter>
+      )}
     </form>
   )
 }

@@ -11,6 +11,7 @@ import {
 } from '@cobweb/ui/components/dialog'
 import { Button } from '@cobweb/ui/components/button'
 import { Spinner } from '@cobweb/ui/components/spinner'
+import { ChainName } from '@/components/chains/chain-icon'
 import { explorerTxUrl, formatBps, formatNative, shortAddress } from '@/lib/demo/helpers'
 import type { Address, FeeSnapshot, SupportedChain } from '@/lib/demo/types'
 import { SummaryRow } from './copy-value'
@@ -19,6 +20,8 @@ import { isTxRunning, TxProgress, type TxPhase } from './tx-progress'
 
 export type FinalCheck = {
   name: string
+  /** The reserved mint page link, e.g. `cobweb.app/night-owls`. */
+  mintPageLink: string
   symbol: string
   maxSupply: number
   chain: SupportedChain
@@ -76,6 +79,9 @@ export function DeployDialog({
                 {check.name} <span className="numeric text-muted-foreground">{check.symbol}</span>
               </span>
             </SummaryRow>
+            <SummaryRow label="Chain">
+              <ChainName chain={chain} className="text-[0.8125rem]" />
+            </SummaryRow>
             <SummaryRow label="Supply">
               <span className="numeric">{check.maxSupply.toLocaleString('en-US')}</span>
             </SummaryRow>
@@ -83,6 +89,9 @@ export function DeployDialog({
               <span className="numeric text-[0.8125rem]" title={check.predicted}>
                 {shortAddress(check.predicted, 6)}
               </span>
+            </SummaryRow>
+            <SummaryRow label="Mint page link">
+              <span className="numeric text-[0.8125rem]">{check.mintPageLink}</span>
             </SummaryRow>
             <SummaryRow label="Payout">
               <span className="numeric text-[0.8125rem]" title={check.payout}>

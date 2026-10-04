@@ -6,18 +6,24 @@ import { LogoMark } from '@/components/shell/logo'
 import { STATUS_LABELS } from '@/components/collections/collection-card'
 import type { CollectionStatus } from '@/lib/steps'
 
-/** Top bar while working on one collection: the way back, the collection, the wallet. */
+/**
+ * Top bar while working on one collection: the way back, the collection, the workspace switch
+ * (`nav`, the Setup menu of a deployed collection) and the wallet.
+ */
 export function CollectionTopbar({
   name,
   status,
   walletAddress,
   demo = false,
+  nav,
 }: {
   name: string
   status: CollectionStatus
   walletAddress: string
   /** Sample-data mode: shows a chip so sample screens are not mistaken for real state. */
   demo?: boolean
+  /** Placed before the wallet: the Setup menu, or a link to Manage drop in sample mode. */
+  nav?: React.ReactNode
 }) {
   return (
     <header className="bg-background flex h-[4.57rem] shrink-0 items-center justify-between gap-4 border-b px-6">
@@ -47,7 +53,10 @@ export function CollectionTopbar({
           )}
         </div>
       </div>
-      <WalletMenu address={walletAddress} />
+      <div className="flex shrink-0 items-center gap-3">
+        {nav}
+        <WalletMenu address={walletAddress} />
+      </div>
     </header>
   )
 }

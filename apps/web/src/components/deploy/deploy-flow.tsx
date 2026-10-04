@@ -1,9 +1,11 @@
 'use client'
 
+import { sampleSupply, DEMO_COLLECTION } from '@/lib/demo'
 import { RocketIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { isAddress } from 'viem'
 import { Button } from '@cobweb/ui/components/button'
+import { slugState } from '@/lib/collections'
 import type { Tables } from '@/lib/database.types'
 import type { Address, DeployDraft, Deployment, FeeSnapshot, SupportedChain } from '@/lib/demo/types'
 import type { FlowLink } from '@/lib/steps'
@@ -19,7 +21,7 @@ import {
   type DeployOutcome,
 } from './deploy-sim'
 import { DeploySummary } from './deploy-summary'
-import { DeployedView } from './deployed-view'
+import { DeployedView, OpenMintPageButton } from './deployed-view'
 import { TX_IDLE, type TxPhase } from './tx-progress'
 
 export type DeployFlowProps = {
@@ -70,18 +72,23 @@ export function DeployFlow(props: DeployFlowProps) {
   const [attempt, setAttempt] = useState(0)
   const [deployment, setDeployment] = useState<Deployment | null>(props.deployment)
   const [justDeployed, setJustDeployed] = useState(false)
-  // The mint page address as last reserved on this screen, for the summary.
+  // The mint page link as last reserved on this screen, for the summary and the deploy gate.
   const [address, setAddress] = useState({
     slug: collection.slug,
     slug_reserved_at: collection.slug_reserved_at,
   })
   const current = { ...collection, ...address }
+  const link = slugState(current)
+  // Required before deploying: a live reservation (or, for a deployed collection, its link).
+  const linkSlug = link.kind === 'reserved' || link.kind === 'permanent' ? link.slug : null
   const controller = useRef<AbortController | null>(null)
   const factory = useFactoryRead(values.chainId, outcome)
 
   useEffect(() => () => controller.current?.abort(), [])
 
-  const allErrors = validateDeploy(values, collection.max_supply)
+  // Supply is set in Art (at Generate, or by the file count); a collection without it cannot deploy.
+  const maxSupply = sampleSupply(collection.max_supply, DEMO_COLLECTION.maxSupply)
+  const allErrors = validateDeploy(values, maxSupply)
   const errors = Object.fromEntries(
     Object.entries(allErrors).filter(([key]) => showAll || touched.has(key)),
   ) as typeof allErrors
@@ -101,7 +108,7 @@ export function DeployFlow(props: DeployFlowProps) {
       ? {
           name: collection.name,
           symbol: collection.symbol,
-          maxSupply: collection.max_supply,
+          maxSupply,
           payout: payoutAddress,
           initialBaseUri: draft.initialBaseUri,
           publicMaxMintPerWallet: Number(values.publicCap),
@@ -111,7 +118,15 @@ export function DeployFlow(props: DeployFlowProps) {
         }
       : null
   const predicted = args ? predictAddress(collection.id, args) : null
-  const ready = valid && !!args && !!predicted && !!chain && !!fees && factory.status === 'ready'
+  const ready =
+    valid &&
+    maxSupply > 0 &&
+    !!linkSlug &&
+    !!args &&
+    !!predicted &&
+    !!chain &&
+    !!fees &&
+    factory.status === 'ready'
 
   function change(patch: Partial<DeployFormValues>) {
     const { payout: nextPayout, ...rest } = patch
@@ -183,17 +198,20 @@ export function DeployFlow(props: DeployFlowProps) {
             focusOnMount={justDeployed}
           />
         </div>
-        <StageFooter previous={previous} next={next} />
+        <StageFooter previous={previous} next={next}>
+          <OpenMintPageButton collection={current} />
+        </StageFooter>
       </div>
     )
   }
 
   const check: FinalCheck | null =
-    ready && args && predicted && chain && fees
+    ready && args && predicted && chain && fees && linkSlug
       ? {
           name: collection.name,
+          mintPageLink: `cobweb.app/${linkSlug}`,
           symbol: collection.symbol,
-          maxSupply: collection.max_supply,
+          maxSupply,
           chain,
           walletChain: chains.find((entry) => entry.id === wallet.chainId),
           predicted,
@@ -206,13 +224,18 @@ export function DeployFlow(props: DeployFlowProps) {
         }
       : null
 
-  const hint = !chain
-    ? 'Choose a chain to deploy on.'
-    : factory.status === 'loading'
-      ? 'Reading fees from the factory.'
-      : factory.status === 'error'
-        ? 'Fees could not be read.'
-        : null
+  const hint =
+    maxSupply === 0
+      ? 'Set the supply in Art first.'
+      : !linkSlug
+        ? 'Reserve your mint page link first.'
+        : !chain
+          ? 'Choose a chain to deploy on.'
+          : factory.status === 'loading'
+            ? 'Reading fees from the factory.'
+            : factory.status === 'error'
+              ? 'Fees could not be read.'
+              : null
 
   return (
     <div className="flex flex-1 flex-col">
@@ -250,7 +273,10 @@ export function DeployFlow(props: DeployFlowProps) {
       <StageFooter previous={previous}>
         {hint && <p className="text-muted-foreground text-sm">{hint}</p>}
         {!readOnly && (
-          <Button onClick={openFinalCheck} disabled={!!chain && (factory.status !== 'ready' || !fees)}>
+          <Button
+            onClick={openFinalCheck}
+            disabled={maxSupply === 0 || !linkSlug || (!!chain && (factory.status !== 'ready' || !fees))}
+          >
             <RocketIcon />
             Deploy contract
           </Button>

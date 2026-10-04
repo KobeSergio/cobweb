@@ -1,7 +1,9 @@
 'use client'
 
+import { TriangleAlertIcon } from 'lucide-react'
 import { useId, useState } from 'react'
 import { getAddress, isAddress } from 'viem'
+import { Alert, AlertDescription, AlertTitle } from '@cobweb/ui/components/alert'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@cobweb/ui/components/field'
 import { Input } from '@cobweb/ui/components/input'
 import {
@@ -84,7 +86,7 @@ export function PayoutDialog({
   )
 }
 
-/** The default royalty marketplaces read through ERC-2981. */
+/** The default royalty (ERC-2981), enforced on secondary sales through the transfer validator. */
 export function RoyaltyDialog({
   receiver,
   bps,
@@ -102,7 +104,7 @@ export function RoyaltyDialog({
     <TransactionDialog
       {...base}
       title="Royalties"
-      description="The share of each resale that marketplaces pay to the recipient, where they honour royalties."
+      description="The share of each resale paid to the recipient. Enforced on secondary sales through the transfer validator."
       actionLabel="Save royalties"
       successMessage="Royalties updated"
       request={
@@ -139,7 +141,7 @@ export function RoyaltyDialog({
             <FieldError>Enter 0 to 100, with up to two decimals.</FieldError>
           ) : Number(percentValue) > 10 ? (
             <FieldDescription className="text-warning-foreground">
-              Many marketplaces ignore royalties above 10%.
+              Royalties above 10% are unusual and can put buyers off.
             </FieldDescription>
           ) : null}
         </Field>
@@ -189,6 +191,7 @@ export function RevealDialog({
     <TransactionDialog
       {...base}
       className="sm:max-w-xl"
+      destructive={source === 'custom'}
       title="Reveal the art"
       description="Holders and marketplaces see the real tokens once this confirms. Marketplaces refresh on the metadata update event, which can take a few minutes."
       actionLabel="Reveal"
@@ -225,6 +228,16 @@ export function RevealDialog({
             </span>
           </label>
         </RadioGroup>
+        {source === 'custom' && (
+          <Alert variant="destructive">
+            <TriangleAlertIcon aria-hidden="true" />
+            <AlertTitle>Check the link before you confirm</AlertTitle>
+            <AlertDescription>
+              Pointing the collection at the wrong IPFS link breaks the art and metadata of every token
+              already minted. Check the CID before you confirm.
+            </AlertDescription>
+          </Alert>
+        )}
         {source === 'custom' && (
           <Field data-invalid={!!custom && !customValid}>
             <FieldLabel htmlFor={`${id}-cid`}>Metadata CID</FieldLabel>

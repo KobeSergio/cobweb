@@ -11,7 +11,7 @@ import {
   DEMO_TOTAL_MINTED,
   DEMO_WHITELISTS,
 } from '@/lib/demo'
-import type { Hex, MintGroup } from '@/lib/demo'
+import type { Address, Hex, MintGroup } from '@/lib/demo'
 
 /** A contract call as the creator reviews it before signing. */
 export type TxRequest = {
@@ -84,10 +84,15 @@ export function chainReadGroup(group: Omit<MintGroup, 'active'>, blockTimestamp:
 export const SAMPLE = {
   /** SEAM: the freshness server's `readAt` / block timestamp for the collection. */
   readAt: DEMO_NOW,
-  /** SEAM: whitelist entries and the chunk table, for the overview's checklist. */
+  /** SEAM: whitelist entries and the chunk table. */
   whitelists: DEMO_WHITELISTS,
-  /** SEAM: the mint page settings row, for the overview's checklist. */
+  /** SEAM: the mint page settings row (avatar and the public switch on the overview). */
   mintPage: DEMO_MINT_PAGE_SETTINGS,
+  /**
+   * SEAM: the collection's `getTransferValidator()`. Limit Break's default validator, the
+   * `DEFAULT_TRANSFER_VALIDATOR` constant of creator-token-standards, same address on every chain.
+   */
+  transferValidator: '0x721C008fdff27BF06E7E123956E2Fe03B63342e3' as Address,
   /** SEAM: `render_jobs.metadata_cid` of the finished render job, the reveal target. */
   metadataCid: DEMO_RENDER_JOBS.done.metadataCid,
   /** SEAM: `totalMinted()` from `collectionState()`, phases plus airdrops. */

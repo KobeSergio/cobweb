@@ -1,5 +1,6 @@
 'use client'
 
+import { sampleSupply, DEMO_COLLECTION } from '@/lib/demo'
 import { LockIcon, WalletIcon } from 'lucide-react'
 import { isAddress } from 'viem'
 import { Badge } from '@cobweb/ui/components/badge'
@@ -16,6 +17,7 @@ import {
 import { Panel } from '@cobweb/ui/components/panel'
 import { Slider } from '@cobweb/ui/components/slider'
 import { Switch } from '@cobweb/ui/components/switch'
+import { ChainIcon } from '@/components/chains/chain-icon'
 import { MintPageAddressField } from '@/components/collections/mint-page-address-field'
 import type { Tables } from '@/lib/database.types'
 import { formatNative } from '@/lib/demo/helpers'
@@ -110,6 +112,7 @@ export function DeployForm({
             <ChoiceCard
               key={chain.id}
               value={String(chain.id)}
+              icon={<ChainIcon chainId={chain.id} className="size-5" />}
               title={
                 <span className="flex flex-wrap items-center gap-2">
                   {chain.name}
@@ -149,7 +152,7 @@ export function DeployForm({
             <ReadOnlyField
               id="deploy-supply"
               label="Max supply"
-              value={collection.max_supply.toLocaleString('en-US')}
+              value={sampleSupply(collection.max_supply, DEMO_COLLECTION.maxSupply).toLocaleString('en-US')}
               mono
             />
           </div>
@@ -204,7 +207,8 @@ export function DeployForm({
               <FieldError id="deploy-royalty-error">{errors.royalty}</FieldError>
             ) : (
               <FieldDescription id="deploy-royalty-help">
-                Of each resale, on marketplaces that pay royalties. 0 to {MAX_ROYALTY_PERCENT}%. That is{' '}
+                Of each resale, enforced on secondary sales through the transfer validator. 0 to{' '}
+                {MAX_ROYALTY_PERCENT}%. That is{' '}
                 <span className="numeric text-foreground/85">
                   {(royaltyBps(values.royalty) ?? 0).toLocaleString('en-US')} bps
                 </span>{' '}
@@ -247,7 +251,7 @@ export function DeployForm({
               type="number"
               inputMode="numeric"
               min={1}
-              max={collection.max_supply}
+              max={sampleSupply(collection.max_supply, DEMO_COLLECTION.maxSupply) || undefined}
               value={values.publicCap}
               onChange={(event) => onChange({ publicCap: event.target.value })}
               readOnly={readOnly}
@@ -266,8 +270,8 @@ export function DeployForm({
       </Panel>
 
       <Panel
-        title="Mint page"
-        description="Optional. Reserve the address now, or set it after deploying in Manage drop."
+        title="Mint page link"
+        description="Required. Collectors mint at this link. Reserve it before you deploy."
       >
         <MintPageAddressField collection={collection} readOnly={readOnly} onSaved={onAddressSaved} />
       </Panel>

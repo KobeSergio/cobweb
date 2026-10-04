@@ -14,12 +14,15 @@ import {
 } from '@cobweb/ui/components/empty'
 import type { Tables } from '@/lib/database.types'
 import { satisfiesRules, seededRandom } from '@/lib/demo/art'
-import type { Layer, TraitCounts } from '@/lib/demo'
+import type { Collection, Layer, TraitCounts } from '@/lib/demo'
 import { flowNeighbours } from '@/lib/steps'
 import { StageFooter } from '@/components/shell/stage-footer'
+import { CollectionSwitcher } from './collections/collection-switcher'
+import { useCollections } from './collections/use-collections'
 import { ConfirmDialog } from './confirm-dialog'
-import { DeferredArtNotice, FinishLaterAction } from './finish-later'
+import { DeferredArtNotice } from './finish-later'
 import { AddTraitsDialog } from './layers/add-traits-dialog'
+import { FolderUpload } from './layers/folder-upload/folder-upload'
 import { LayerList } from './layers/layer-list'
 import { LayerPreview } from './layers/layer-preview'
 import { TraitPanel } from './layers/trait-panel'
@@ -31,7 +34,9 @@ import { newSeed } from './state/token-logic'
 
 export type LayersScreenProps = {
   collection: Tables<'collections'>
-  /** Layers bottom first, each with its traits, weights, constants and blank. */
+  /** The project's collections (for example male and female), each with its own layers and size. */
+  collections: Collection[]
+  /** Every collection's layers, bottom first, each with its traits, weights, constants and blank. */
   layers: Layer[]
   /** How many generated tokens carry each trait, for "expected vs actual". */
   traitCounts: TraitCounts
@@ -39,8 +44,6 @@ export type LayersScreenProps = {
   readOnly: boolean
   /** "Finish the art later" is on (MASTER_PLAN, Flow: pre-reveal): the contract starts on a placeholder. */
   artDeferred?: boolean
-  /** Offer "Finish the art later". Sample mode only until Phase 3 stores the deferred flag. */
-  canDefer?: boolean
 }
 
 /** One weighted pick per layer. Seeded, so the first preview is the same on the server and in the browser. */
@@ -62,20 +65,26 @@ function rollPreview(layers: Layer[], seed: number, rules: Parameters<typeof sat
 }
 
 /**
- * Art, step 1 (generative): the stack. A layer panel on the left with a live preview, the selected
- * layer's traits on the right: rarity, constants, the blank trait, adding and removing traits.
+ * Art, step 1 (generative): the stack. The collection switcher on top; a layer panel on the left
+ * with a live preview, the selected layer's traits on the right: rarity, constants, the blank
+ * trait, adding and removing traits. Everything below the switcher is the shown collection's.
  */
 export function LayersScreen({
   collection,
+  collections: seedCollections,
   layers: seedLayers,
   traitCounts,
   readOnly,
   artDeferred = false,
-  canDefer = false,
 }: LayersScreenProps) {
-  const editor = useLayersEditor(collection.id, seedLayers, traitCounts)
+  const collections = useCollections(collection.id, collection.name, {
+    collections: seedCollections,
+    layers: seedLayers,
+  })
+  const editor = useLayersEditor(collection.id, seedLayers, traitCounts, collections.activeId)
   const { layers } = editor
   const [selectedId, setSelectedId] = useState<string | null>(layers[layers.length - 1]?.id ?? null)
+  // Every collection's preview at once, so switching collection keeps each one's picks.
   const [preview, setPreview] = useState<Record<string, string>>(() => rollPreview(seedLayers, 7, []))
   const [hidden, setHidden] = useState<Set<string>>(new Set())
   const [upload, setUpload] = useState<{ layerId: string; files: File[] } | null>(null)
@@ -111,6 +120,7 @@ export function LayersScreen({
   return (
     <div className="flex flex-1 flex-col gap-6">
       {readOnly && <ReadOnlyNotice what="the layers and their rarity" />}
+      <CollectionSwitcher control={collections} readOnly={readOnly} />
       {artDeferred && <DeferredArtNotice collectionId={collection.id} />}
       {!readOnly && editor.staleNote && (
         <Alert variant="warning">
@@ -120,7 +130,13 @@ export function LayersScreen({
         </Alert>
       )}
 
-      {layers.length === 0 ? (
+      {layers.length === 0 && !readOnly ? (
+        <FolderUpload
+          collectionId={collection.id}
+          activeCollectionId={collections.activeId}
+          onAddLayer={() => editor.askAddLayer(setSelectedId)}
+        />
+      ) : layers.length === 0 ? (
         <Empty className="bg-card border py-16">
           <EmptyHeader>
             <EmptyMedia variant="icon">
@@ -149,7 +165,9 @@ export function LayersScreen({
               description={description}
               hiddenCount={hidden.size}
               onShowAll={() => setHidden(new Set())}
-              onRandomise={() => setPreview(rollPreview(layers, newSeed(), editor.rules))}
+              onRandomise={() =>
+                setPreview((current) => ({ ...current, ...rollPreview(layers, newSeed(), editor.rules) }))
+              }
               seed={collection.id}
             />
             <LayerList
@@ -171,7 +189,7 @@ export function LayersScreen({
               layer={selected}
               position={position}
               layerCount={layers.length}
-              supply={collection.max_supply}
+              supply={collections.active?.size ?? 0}
               counts={editor.counts}
               generated={editor.generated}
               previewTraitId={shownDna[position]}
@@ -205,11 +223,6 @@ export function LayersScreen({
       <StageFooter
         previous={previous}
         next={artDeferred && next ? { ...next, href: `${next.href}?art=deferred` } : next}
-        extra={
-          canDefer && !readOnly && !artDeferred ? (
-            <FinishLaterAction collectionId={collection.id} />
-          ) : undefined
-        }
       />
     </div>
   )

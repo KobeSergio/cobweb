@@ -1,20 +1,30 @@
 /**
- * The "Night Owls" sample project: its layers, rules and a seeded generator.
+ * The "Night Owls" sample project: its two collections, their layers and rules, and a seeded generator.
  *
  * This file has no runtime imports (type imports only), so `scripts/make-demo-art.mjs` can load it
  * with plain node and draw exactly the tokens the app lists. Keep it that way.
  */
-import type { ArtRule, GeneratedToken, Layer, RuleConflict, Trait, TraitCounts } from './types'
+import type { ArtRule, Collection, GeneratedToken, Layer, RuleConflict, Trait, TraitCounts } from './types'
 
-export const DEMO_TOKEN_COUNT = 777
+/**
+ * The project holds two collections, as a legacy project could (for example male and female):
+ * grown owls and a smaller set of owlets drawn from a subset of the same art. Token ids run on
+ * across them, 1 to 600 then 601 to 777.
+ */
+export const DEMO_COLLECTIONS: Collection[] = [
+  { id: 'owls', name: 'Owls', size: 600 },
+  { id: 'owlets', name: 'Owlets', size: 177 },
+]
+export const DEMO_TOKEN_COUNT = DEMO_COLLECTIONS.reduce((sum, collection) => sum + collection.size, 0)
 /** Tokens 1 to this have a pre-rendered composite at `/demo/tokens/<id>.svg`. */
 export const DEMO_PREVIEW_COUNT = 24
 const SEED = 0x0a7115
 
 type TraitSpec = { name: string; weight: number; constant?: number; blank?: boolean }
+type LayerSpec = { name: string; traits: TraitSpec[] }
 
 /** Layers bottom first. Weights of the non-constant traits sum to 100 in each layer. */
-const LAYER_SPEC: { name: string; traits: TraitSpec[] }[] = [
+const OWLS_SPEC: LayerSpec[] = [
   {
     name: 'Background',
     traits: [
@@ -98,6 +108,64 @@ const LAYER_SPEC: { name: string; traits: TraitSpec[] }[] = [
   },
 ]
 
+/** The owlets: the same seven layers with fewer traits, so they read as a set of their own. */
+const OWLETS_SPEC: LayerSpec[] = [
+  {
+    name: 'Background',
+    traits: [
+      { name: 'Dusk', weight: 40 },
+      { name: 'Moss', weight: 35 },
+      { name: 'Sand', weight: 25 },
+    ],
+  },
+  {
+    name: 'Body',
+    traits: [
+      { name: 'Snowy', weight: 40 },
+      { name: 'Ash', weight: 35 },
+      { name: 'Tawny', weight: 25 },
+    ],
+  },
+  {
+    name: 'Belly',
+    traits: [
+      { name: 'Plain', weight: 60 },
+      { name: 'Speckled', weight: 40 },
+    ],
+  },
+  {
+    name: 'Eyes',
+    traits: [
+      { name: 'Wide', weight: 45 },
+      { name: 'Sleepy', weight: 35 },
+      { name: 'Wink', weight: 20 },
+    ],
+  },
+  {
+    name: 'Beak',
+    traits: [
+      { name: 'Tiny', weight: 60 },
+      { name: 'Rose', weight: 40 },
+    ],
+  },
+  {
+    name: 'Headwear',
+    traits: [
+      { name: 'None', weight: 50, blank: true },
+      { name: 'Beanie', weight: 25 },
+      { name: 'Sprout', weight: 25 },
+    ],
+  },
+  {
+    name: 'Accessory',
+    traits: [
+      { name: 'None', weight: 55, blank: true },
+      { name: 'Scarf', weight: 25 },
+      { name: 'Bow Tie', weight: 20 },
+    ],
+  },
+]
+
 export function slugify(name: string): string {
   return name
     .toLowerCase()
@@ -105,25 +173,42 @@ export function slugify(name: string): string {
     .replace(/^-+|-+$/g, '')
 }
 
-export const DEMO_LAYERS: Layer[] = LAYER_SPEC.map((layer, position) => {
-  const layerId = slugify(layer.name)
-  return {
-    id: layerId,
-    name: layer.name,
-    position,
-    traits: layer.traits.map((trait): Trait => ({
-      id: `${layerId}-${slugify(trait.name)}`,
-      layerId,
-      name: trait.name,
-      weight: trait.weight,
-      ...(trait.constant ? { constant: trait.constant } : {}),
-      blank: trait.blank ?? false,
-      imageUrl: trait.blank ? null : `/demo/layers/${layerId}/${slugify(trait.name)}.svg`,
-    })),
-  }
-})
+/**
+ * Builds a collection's layers. Ids carry the collection's prefix so trait ids stay unique in the
+ * project (the first collection has none, so its ids read `eyes-starry`); images are shared by name.
+ */
+function buildLayers(collectionId: string, prefix: string, spec: LayerSpec[]): Layer[] {
+  return spec.map((layer, position) => {
+    const art = slugify(layer.name)
+    const layerId = `${prefix}${art}`
+    return {
+      id: layerId,
+      collectionId,
+      name: layer.name,
+      position,
+      traits: layer.traits.map((trait): Trait => ({
+        id: `${layerId}-${slugify(trait.name)}`,
+        layerId,
+        name: trait.name,
+        weight: trait.weight,
+        ...(trait.constant ? { constant: trait.constant } : {}),
+        blank: trait.blank ?? false,
+        imageUrl: trait.blank ? null : `/demo/layers/${art}/${slugify(trait.name)}.svg`,
+      })),
+    }
+  })
+}
 
-/** Rules of all three kinds. `rule-starry-wizard` deliberately contradicts `rule-wizard-starry`. */
+/** Every layer of the project, grouped by collection in collection order, each group bottom first. */
+export const DEMO_LAYERS: Layer[] = [
+  ...buildLayers('owls', '', OWLS_SPEC),
+  ...buildLayers('owlets', 'owlets-', OWLETS_SPEC),
+]
+
+/**
+ * Rules of all three kinds. `rule-starry-wizard` deliberately contradicts `rule-wizard-starry`. The
+ * last one belongs to the owlets: a rule applies within the collection of the traits it names.
+ */
 export const DEMO_RULES: ArtRule[] = [
   {
     id: 'rule-monocle-eyes',
@@ -166,6 +251,13 @@ export const DEMO_RULES: ArtRule[] = [
     traitId: 'eyes-starry',
     relatedTraitIds: ['headwear-wizard-hat'],
     bidirectional: true,
+  },
+  {
+    id: 'rule-owlets-sprout-moss',
+    kind: 'must pair with',
+    traitId: 'owlets-headwear-sprout',
+    relatedTraitIds: ['owlets-background-moss'],
+    bidirectional: false,
   },
 ]
 
@@ -244,7 +336,8 @@ function repairPairs(dna: string[], layers: Layer[], rules: ArtRule[], random: (
 }
 
 /**
- * Generates `count` unique tokens that satisfy the rules, deterministically from the seed.
+ * Generates `count` unique tokens of one collection that satisfy the rules, deterministically from
+ * the seed. `layers` are that collection's layers; ids start at `firstId`.
  * A fixed quantity is a cap (MASTER_PLAN, Art: maximum counts): the trait lands on at most its count of tokens. Each
  * one is offered to a token up front; when no unique token within the rules can carry it, that
  * token is rolled without it and the trait ends below its cap (`cappedShortfalls` reports it).
@@ -255,8 +348,10 @@ export function generateTokens(
   rules: ArtRule[],
   count: number,
   seed: number = SEED,
+  firstId = 1,
 ): Omit<GeneratedToken, 'rank' | 'previewUrl'>[] {
   const random = seededRandom(seed)
+  const collectionId = layers[0]?.collectionId ?? ''
   const conflicted = new Set(DEMO_RULE_CONFLICTS.flatMap((conflict) => conflict.ruleIds.slice(1)))
   const activeRules = rules.filter((rule) => !conflicted.has(rule.id))
 
@@ -298,9 +393,35 @@ export function generateTokens(
       dna = layers.map((layer) => pickWeighted(layer.traits, random).id)
     }
     seen.add(dna.join('|'))
-    const id = index + 1
-    tokens.push({ id, name: `Night Owls #${id}`, dna })
+    const id = firstId + index
+    tokens.push({ id, name: `Night Owls #${id}`, collectionId, dna })
   }
+  return tokens
+}
+
+/** The seed for the collection at `position`. The first collection uses the project seed itself. */
+export function collectionSeed(seed: number, position: number): number {
+  return (seed + position * 0x9e3779b9) >>> 0
+}
+
+/**
+ * Generates every collection in order, each to its size. Token ids run on across collections (the
+ * second starts after the last id of the first), uniqueness is checked within each collection, and
+ * a rule only ever touches the collection its traits belong to.
+ */
+export function generateCollections(
+  layers: Layer[],
+  rules: ArtRule[],
+  collections: Pick<Collection, 'id' | 'size'>[],
+  seed: number = SEED,
+): Omit<GeneratedToken, 'rank' | 'previewUrl'>[] {
+  const tokens: Omit<GeneratedToken, 'rank' | 'previewUrl'>[] = []
+  collections.forEach((collection, position) => {
+    const own = layers.filter((layer) => layer.collectionId === collection.id)
+    tokens.push(
+      ...generateTokens(own, rules, collection.size, collectionSeed(seed, position), tokens.length + 1),
+    )
+  })
   return tokens
 }
 
@@ -325,7 +446,7 @@ export function cappedShortfalls(
 
 /**
  * Ranks tokens by rarity, 1 the rarest: the sum over traits of (tokens / tokens with that trait).
- * The legacy formula; blanks count as a trait.
+ * The legacy formula; blanks count as a trait. Ranked across the whole project, every collection together.
  */
 export function rankTokens(tokens: Omit<GeneratedToken, 'rank' | 'previewUrl'>[]): GeneratedToken[] {
   const counts = countTraits(tokens)

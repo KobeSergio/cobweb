@@ -1,13 +1,24 @@
 'use client'
 
-import { ArrowRightIcon, CheckIcon, ImageIcon, LayersIcon, ListChecksIcon, Share2Icon } from 'lucide-react'
+import {
+  ArrowRightIcon,
+  ArrowUpRightIcon,
+  CheckIcon,
+  ImageIcon,
+  LayersIcon,
+  ListChecksIcon,
+  Share2Icon,
+  ShieldCheckIcon,
+} from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
 import Link from 'next/link'
 import { useEffect, useRef } from 'react'
 import { Artwork } from '@cobweb/ui/components/artwork'
+import { Button } from '@cobweb/ui/components/button'
 import { Stagger, StaggerItem } from '@cobweb/ui/components/motion'
 import { Panel } from '@cobweb/ui/components/panel'
 import { EASE_OUT, transition } from '@cobweb/ui/lib/motion'
+import { ChainIcon, ChainName } from '@/components/chains/chain-icon'
 import { slugState } from '@/lib/collections'
 import type { Tables } from '@/lib/database.types'
 import { explorerAddressUrl, explorerTxUrl, formatBps, formatUtc, shortAddress } from '@/lib/demo/helpers'
@@ -15,6 +26,29 @@ import type { Deployment, SupportedChain } from '@/lib/demo/types'
 import { useArtDeferred } from './art-deferred'
 import { CopyValue, SummaryRow } from './copy-value'
 import { mintFeeText } from './deploy-summary'
+
+/**
+ * The deployed view's primary action, for the footer: open the public page, or set its link when
+ * the collection has none (the reservation lapsed before the deploy).
+ */
+export function OpenMintPageButton({ collection }: { collection: Tables<'collections'> }) {
+  const state = slugState(collection)
+  const slug = state.kind === 'permanent' || state.kind === 'reserved' ? state.slug : null
+  if (!slug)
+    return (
+      <Button asChild>
+        <Link href={`/collections/${collection.id}/manage/mint-page`}>Set your mint page link</Link>
+      </Button>
+    )
+  return (
+    <Button asChild>
+      <a href={`/${slug}`} target="_blank" rel="noreferrer">
+        Open mint page
+        <ArrowUpRightIcon aria-hidden="true" />
+      </a>
+    </Button>
+  )
+}
 
 /** The deployed contract: where it is, the receipt, and what to do next in Manage drop. */
 export function DeployedView({
@@ -72,8 +106,8 @@ export function DeployedView({
       icon: <Share2Icon />,
       title: 'Share the mint page',
       text: slug
-        ? 'Add a banner and links, publish it, and send collectors the address.'
-        : 'Choose its address, add a banner and links, and publish it.',
+        ? 'Add a banner and links, publish it, and send collectors the link.'
+        : 'Choose its link, add a banner and links, and publish it.',
     },
   ]
 
@@ -113,9 +147,13 @@ export function DeployedView({
             />
           )}
         </div>
-        <div className="min-w-0 space-y-1.5">
+        <div className="min-w-0 flex-1 space-y-1.5">
           <h3 ref={headingRef} className="text-title outline-none" tabIndex={-1}>
-            {collection.name} is deployed on {chain.name}
+            {collection.name} is deployed on{' '}
+            <span className="inline-flex items-center gap-2 align-bottom">
+              <ChainIcon chainId={chain.id} className="text-muted-foreground" />
+              {chain.name}
+            </span>
           </h3>
           <p className="text-muted-foreground text-[0.9375rem] leading-relaxed">
             The contract is deployed and every phase starts closed. Nothing can be minted until you open a
@@ -127,6 +165,9 @@ export function DeployedView({
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <Panel title="Contract" bodyClassName="px-6 py-2">
           <dl className="divide-y">
+            <SummaryRow label="Chain">
+              <ChainName chain={chain} className="text-[0.8125rem]" />
+            </SummaryRow>
             <SummaryRow label="Address">
               <CopyValue
                 value={deployment.contractAddress}
@@ -148,7 +189,7 @@ export function DeployedView({
             <SummaryRow label="Deployed">
               <span className="numeric text-[0.8125rem]">{formatUtc(deployment.deployedAt)}</span>
             </SummaryRow>
-            <SummaryRow label="Mint page">
+            <SummaryRow label="Mint page link">
               {slug ? (
                 <span className="numeric text-[0.8125rem]">cobweb.app/{slug}</span>
               ) : (
@@ -173,6 +214,19 @@ export function DeployedView({
               </span>
             </SummaryRow>
           </dl>
+          <div className="bg-surface-2/40 -mx-6 mt-2 -mb-2 flex gap-3 rounded-b-xl border-t px-6 py-4">
+            <ShieldCheckIcon aria-hidden="true" className="text-muted-foreground mt-0.5 size-4 shrink-0" />
+            <div className="space-y-1 text-[0.8125rem] leading-snug">
+              <p className="font-medium">
+                Royalties <span className="numeric">{formatBps(deployment.royaltyBps)}</span>, enforced on
+                secondary sales through the transfer validator
+              </p>
+              <p className="text-muted-foreground">
+                Collectors can resell only where the royalty is paid; marketplaces that skip it cannot move
+                the tokens.
+              </p>
+            </div>
+          </div>
         </Panel>
 
         <Panel

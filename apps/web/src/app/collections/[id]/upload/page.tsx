@@ -2,7 +2,7 @@ import { StagePage } from '@/components/shell/stage-page'
 import { UploadScreen } from '@/components/upload/upload-screen'
 import { requireOwnedCollection } from '@/lib/auth'
 import { getChain, getRenderJob, type RenderJobState } from '@/lib/demo'
-import type { CollectionStatus, FlowLink } from '@/lib/steps'
+import { getStage, type CollectionStatus, type FlowLink } from '@/lib/steps'
 import {
   LockedStagePage,
   searchParam,
@@ -60,7 +60,7 @@ export default async function UploadPage({
       description={
         ctx.artDeferred
           ? 'You are finishing the art later. Lock a placeholder now, render it to IPFS, and deploy on it.'
-          : 'Lock the art, pay the generation fee, and the final images and metadata are rendered and stored on IPFS.'
+          : getStage('upload')!.summary
       }
       sampleNotice={ctx.sampleNotice}
       bodyHasFooter

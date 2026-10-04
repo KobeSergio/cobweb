@@ -12,12 +12,13 @@ import {
 import { useCallback, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@cobweb/ui/components/button'
+import { cn } from '@cobweb/ui/lib/utils'
 import type { GeneratedToken } from '@/lib/demo'
 import { ConfirmDialog, type ConfirmRequest } from '../confirm-dialog'
 import { FilterSidebar, type Sort } from './filter-sidebar'
 import { TierLegend } from './rarity'
 import { TokenCard } from './token-card'
-import { TokenDialog } from './token-dialog'
+import { TokenPanel } from './token-panel'
 import type { Generator } from './use-generator'
 
 const PAGE_SIZE = 48
@@ -26,10 +27,16 @@ function plural(n: number, one: string, many = `${one}s`) {
   return `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`
 }
 
-/** The set as a paged grid with search, sort, trait filters, select mode and the token detail. */
+/**
+ * The set as a paged grid with search, sort, a collection filter, trait filters, select mode and
+ * the token detail, docked beside the grid while a token is open.
+ */
 export function TokenGallery({ generator, readOnly }: { generator: Generator; readOnly: boolean }) {
   const tokens = generator.tokens ?? []
-  const { layers, counts, index } = generator
+  const { counts, index, collections } = generator
+  const [collectionFilter, setCollectionFilter] = useState<string>('all')
+  const filteredCollection = collections.some((c) => c.id === collectionFilter) ? collectionFilter : 'all'
+  const layers = filteredCollection === 'all' ? generator.layers : generator.layersOf(filteredCollection)
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<Sort>('id')
   const [filters, setFilters] = useState<Set<string>>(new Set())
@@ -41,23 +48,22 @@ export function TokenGallery({ generator, readOnly }: { generator: Generator; re
   const breaking = useMemo(() => new Set(generator.breaking), [generator.breaking])
 
   const shown = useMemo(() => {
-    // Within a layer any ticked trait matches; every layer with ticks must match.
+    // Within a layer any ticked trait matches; every layer with ticks must match. Trait ids are
+    // unique in the project, so a ticked trait only ever matches tokens of its own collection.
     const byLayer = layers
-      .map((layer, i) => ({
-        i,
-        ids: layer.traits.filter((trait) => filters.has(trait.id)).map((trait) => trait.id),
-      }))
-      .filter((entry) => entry.ids.length > 0)
+      .map((layer) => layer.traits.filter((trait) => filters.has(trait.id)).map((trait) => trait.id))
+      .filter((ids) => ids.length > 0)
     const list = tokens.filter(
       (token) =>
+        (filteredCollection === 'all' || token.collectionId === filteredCollection) &&
         (!search || String(token.id).startsWith(search)) &&
-        byLayer.every((entry) => entry.ids.includes(token.dna[entry.i] ?? '')),
+        byLayer.every((ids) => ids.some((id) => token.dna.includes(id))),
     )
     if (sort === 'rank') list.sort((a, b) => a.rank - b.rank)
     else if (sort === 'rank-desc') list.sort((a, b) => b.rank - a.rank)
     else list.sort((a, b) => a.id - b.id)
     return list
-  }, [tokens, layers, filters, search, sort])
+  }, [tokens, layers, filters, search, sort, filteredCollection])
 
   const pageCount = Math.max(1, Math.ceil(shown.length / PAGE_SIZE))
   const current = Math.min(page, pageCount - 1)
@@ -102,8 +108,23 @@ export function TokenGallery({ generator, readOnly }: { generator: Generator; re
     })
 
   return (
-    <div className="grid items-start gap-6 lg:grid-cols-[15rem_minmax(0,1fr)] xl:grid-cols-[16.5rem_minmax(0,1fr)]">
+    <div
+      className={cn(
+        'grid items-start gap-6',
+        // The open token docks in a third column from 1024px (`DOCKED_QUERY`); below it is a bottom sheet.
+        openToken
+          ? 'lg:grid-cols-[13rem_minmax(0,1fr)_20rem] xl:grid-cols-[15rem_minmax(0,1fr)_23rem]'
+          : 'lg:grid-cols-[15rem_minmax(0,1fr)] xl:grid-cols-[16.5rem_minmax(0,1fr)]',
+      )}
+    >
       <FilterSidebar
+        collections={collections}
+        collectionFilter={filteredCollection}
+        onCollectionFilter={(value) => {
+          setCollectionFilter(value)
+          setFilters(new Set())
+          resetView()
+        }}
         layers={layers}
         counts={counts}
         search={search}
@@ -271,6 +292,7 @@ export function TokenGallery({ generator, readOnly }: { generator: Generator; re
                 index={index}
                 selectMode={selectMode}
                 selected={selected.has(token.id)}
+                current={token.id === openId}
                 breaksRule={breaking.has(token.id)}
                 onOpen={open}
                 onToggle={toggle}
@@ -302,7 +324,7 @@ export function TokenGallery({ generator, readOnly }: { generator: Generator; re
         )}
       </div>
 
-      <TokenDialog
+      <TokenPanel
         token={openToken}
         order={order}
         onOpen={setOpenId}

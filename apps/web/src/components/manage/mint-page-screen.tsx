@@ -62,8 +62,9 @@ const noopSubscribe = () => () => {}
 /** Manage drop, mint page: description, banner, avatar, socials, featured tokens, preview and the link to share. */
 export function MintPageScreen({ collection, settings, featuredCandidates, preview }: MintPageScreenProps) {
   const id = useId()
-  // The address can be set here once, when the collection has none (it is then permanent).
+  // The link is set here when the collection has none, or changed after a warning.
   const [slug, setSlug] = useState(collection.slug)
+  const [changing, setChanging] = useState(false)
   const mintPageHref = slug ? `/${slug}` : null
   const initial: Draft = {
     description: settings.description,
@@ -82,7 +83,7 @@ export function MintPageScreen({ collection, settings, featuredCandidates, previ
     () => '',
   )
   const publicUrl = `${origin}${mintPageHref ?? ''}`
-  const displayUrl = `${origin.replace(/^https?:\/\//, '') || 'cobweb.app'}/${slug ?? 'your-address'}`
+  const displayUrl = `${origin.replace(/^https?:\/\//, '') || 'cobweb.app'}/${slug ?? 'your-link'}`
 
   const errors = Object.fromEntries(
     SOCIALS.map((social) => [social.key, socialError(draft.socials[social.key], social.hosts)]),
@@ -115,8 +116,8 @@ export function MintPageScreen({ collection, settings, featuredCandidates, previ
   return (
     <form onSubmit={save} className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,26rem)]">
       <div className="grid gap-6">
-        <Panel title="Public link" bodyClassName="grid gap-4 p-5 lg:p-6">
-          {mintPageHref ? (
+        <Panel title="Mint page link" bodyClassName="grid gap-4 p-5 lg:p-6">
+          {mintPageHref && !changing ? (
             <div className="bg-well shadow-inset flex min-w-0 items-center gap-2 rounded-md border py-1.5 pr-1.5 pl-3">
               <span className="numeric min-w-0 flex-1 truncate text-sm">{displayUrl}</span>
               <CopyButton value={publicUrl} label="Copy link" size="icon-sm" />
@@ -126,9 +127,21 @@ export function MintPageScreen({ collection, settings, featuredCandidates, previ
                   <ExternalLinkIcon aria-hidden="true" />
                 </a>
               </Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setChanging(true)}>
+                Change link
+              </Button>
             </div>
           ) : (
-            <MintPageAddressField collection={collection} onSaved={(value) => setSlug(value.slug)} />
+            <MintPageAddressField
+              key={slug ?? 'none'}
+              collection={{ ...collection, slug }}
+              changing={changing}
+              onCancel={() => setChanging(false)}
+              onSaved={(value) => {
+                setSlug(value.slug)
+                setChanging(false)
+              }}
+            />
           )}
           <Field orientation="horizontal" data-disabled={!mintPageHref}>
             <Switch
@@ -142,7 +155,7 @@ export function MintPageScreen({ collection, settings, featuredCandidates, previ
               <FieldLabel htmlFor={`${id}-published`}>Page is public</FieldLabel>
               <FieldDescription id={`${id}-published-help`}>
                 {!mintPageHref
-                  ? 'Set an address first. The page can go public once it has one.'
+                  ? 'Set a link first. The page can go public once it has one.'
                   : draft.published
                     ? 'Anyone with the link can see it and mint.'
                     : 'Hidden. Visitors see that the page is not available.'}

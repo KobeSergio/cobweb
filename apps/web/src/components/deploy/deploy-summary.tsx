@@ -1,11 +1,13 @@
 'use client'
 
+import { sampleSupply, DEMO_COLLECTION } from '@/lib/demo'
 import { RotateCwIcon, TriangleAlertIcon } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@cobweb/ui/components/alert'
 import { Artwork } from '@cobweb/ui/components/artwork'
 import { Button } from '@cobweb/ui/components/button'
 import { Panel } from '@cobweb/ui/components/panel'
 import { Skeleton } from '@cobweb/ui/components/skeleton'
+import { ChainName } from '@/components/chains/chain-icon'
 import { slugState } from '@/lib/collections'
 import type { Tables } from '@/lib/database.types'
 import { formatBps, formatNative, shortAddress } from '@/lib/demo/helpers'
@@ -53,8 +55,10 @@ export function DeploySummary(props: SummaryProps) {
           <p className="truncate font-semibold">{collection.name}</p>
           <p className="text-muted-foreground text-[0.8125rem]">
             <span className="numeric text-foreground/85">{collection.symbol}</span> ·{' '}
-            <span className="numeric">{collection.max_supply.toLocaleString('en-US')}</span> tokens ·{' '}
-            {chain ? chain.name : 'No chain yet'}
+            <span className="numeric">
+              {sampleSupply(collection.max_supply, DEMO_COLLECTION.maxSupply).toLocaleString('en-US')}
+            </span>{' '}
+            tokens · {chain ? <ChainName chain={chain} iconClassName="size-3.5" /> : 'No chain yet'}
           </p>
         </div>
       </div>
@@ -85,7 +89,7 @@ export function DeploySummary(props: SummaryProps) {
             <Missing />
           )}
         </SummaryRow>
-        <SummaryRow label="Mint page">
+        <SummaryRow label="Mint page link">
           <MintPageAddress collection={collection} />
         </SummaryRow>
         <SummaryRow label="Starts on">
@@ -173,8 +177,8 @@ function MintPageAddress({ collection }: { collection: Tables<'collections'> }) 
       </span>
     )
   return (
-    <span className="text-muted-foreground text-[0.8125rem]">
-      {state.kind === 'lapsed' ? 'Lapsed, none yet' : 'None yet'}
+    <span className="text-destructive-foreground text-[0.8125rem]">
+      {state.kind === 'lapsed' ? 'Lapsed. Reserve it again' : 'Reserve one to deploy'}
     </span>
   )
 }

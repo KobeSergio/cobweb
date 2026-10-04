@@ -15,10 +15,10 @@ const inputSchema = z.object({
 })
 
 /**
- * Reserves a mint page address for a collection the signed-in creator owns. Before deploy the
- * reservation lasts 3 days; on a deployed collection without an address it is permanent at once.
+ * Reserves a mint page link for a collection the signed-in creator owns. Before deploy the
+ * reservation lasts 3 days; on a deployed collection without a link it is kept at once.
  * The database function `reserve_slug` checks ownership again, takes over a lapsed reservation and
- * refuses to change the address of a deployed collection.
+ * (until a migration allows it) refuses to change the link of a deployed collection.
  */
 export async function reserveSlug(collectionId: string, slug: string): Promise<ReserveSlugResult> {
   const user = await getVerifiedUser()
@@ -47,11 +47,12 @@ export async function reserveSlug(collectionId: string, slug: string): Promise<R
     p_slug: parsed.data.slug,
   })
   if (error) {
-    // 23505: a live reservation or a deployed collection holds it. P0001: the address is fixed.
-    if (error.code === '23505') return { ok: false, error: 'That address is taken. Choose another.' }
-    if (error.code === 'P0001') return { ok: false, error: capitalise(error.message) }
-    if (error.code === '23514') return { ok: false, error: 'That address cannot be used. Choose another.' }
-    return { ok: false, error: 'The address could not be reserved. Try again.' }
+    // 23505: a live reservation or a deployed collection holds it. P0001: the link is fixed.
+    if (error.code === '23505') return { ok: false, error: 'That link is taken. Choose another.' }
+    if (error.code === 'P0001')
+      return { ok: false, error: 'The link of a deployed collection cannot be changed yet.' }
+    if (error.code === '23514') return { ok: false, error: 'That link cannot be used. Choose another.' }
+    return { ok: false, error: 'The link could not be saved. Try again.' }
   }
 
   const { data: saved } = await supabase
@@ -62,9 +63,4 @@ export async function reserveSlug(collectionId: string, slug: string): Promise<R
 
   revalidatePath('/collections/[id]', 'layout')
   return { ok: true, slug: saved?.slug ?? parsed.data.slug, reservedAt: saved?.slug_reserved_at ?? null }
-}
-
-function capitalise(message: string): string {
-  const text = message.charAt(0).toUpperCase() + message.slice(1)
-  return text.endsWith('.') ? text : `${text}.`
 }

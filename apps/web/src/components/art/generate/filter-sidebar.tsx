@@ -7,12 +7,18 @@ import { Checkbox } from '@cobweb/ui/components/checkbox'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@cobweb/ui/components/input-group'
 import { Label } from '@cobweb/ui/components/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@cobweb/ui/components/select'
-import type { Layer, TraitCounts } from '@/lib/demo'
+import type { Collection, Layer, TraitCounts } from '@/lib/demo'
 
 export type Sort = 'id' | 'rank' | 'rank-desc'
 
-/** Search by id, sort, and filter by trait: any of the ticked traits within a layer, all layers at once. */
+/**
+ * Search by id, sort, filter by collection (when the project has several), and filter by trait:
+ * any of the ticked traits within a layer, all layers at once.
+ */
 export function FilterSidebar({
+  collections,
+  collectionFilter,
+  onCollectionFilter,
   layers,
   counts,
   search,
@@ -23,6 +29,11 @@ export function FilterSidebar({
   onToggleFilter,
   onClear,
 }: {
+  collections: Collection[]
+  /** A collection id, or 'all'. */
+  collectionFilter: string
+  onCollectionFilter: (value: string) => void
+  /** The layers to filter by: the filtered collection's, or every collection's. */
   layers: Layer[]
   counts: TraitCounts
   search: string
@@ -33,9 +44,29 @@ export function FilterSidebar({
   onToggleFilter: (traitId: string) => void
   onClear: () => void
 }) {
+  const several = collections.length > 1
+  const nameOf = (id: string) => collections.find((c) => c.id === id)?.name
   return (
     <aside aria-label="Find tokens" className="bg-card rounded-xl border shadow-raised">
       <div className="space-y-4 border-b p-4">
+        {several && (
+          <div className="space-y-2">
+            <Label htmlFor="token-collection">Collection</Label>
+            <Select value={collectionFilter} onValueChange={onCollectionFilter}>
+              <SelectTrigger id="token-collection" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All collections</SelectItem>
+                {collections.map((collection) => (
+                  <SelectItem key={collection.id} value={collection.id}>
+                    {collection.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         <div className="space-y-2">
           <Label htmlFor="token-search">Token id</Label>
           <InputGroup>
@@ -83,6 +114,11 @@ export function FilterSidebar({
               <AccordionTrigger className="py-3 text-sm">
                 <span className="flex items-center gap-2">
                   {layer.name}
+                  {several && collectionFilter === 'all' && (
+                    <span className="text-muted-foreground text-xs font-normal">
+                      {nameOf(layer.collectionId)}
+                    </span>
+                  )}
                   {active > 0 && (
                     <span className="bg-primary-soft text-primary numeric rounded-full px-1.5 text-xs">
                       {active}

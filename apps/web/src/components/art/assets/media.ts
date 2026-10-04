@@ -1,7 +1,7 @@
 /**
  * Browser-side checks for a single-asset file or a pre-reveal placeholder (MASTER_PLAN, Art: media types): an
- * image (PNG, JPG, WebP), a GIF or an MP4 video, each with its own size limit. 1/1s and metadata
- * projects take images only and use `ASSET_IMAGE_RULES` instead.
+ * image (PNG, JPG, WebP), a GIF or an MP4 video, each with its own size limit. 1/1s take images
+ * only and use `ASSET_IMAGE_RULES` instead.
  *
  * Seam: when uploads go to storage (Phase 3), the server repeats these checks on the stored
  * object, and the render pipeline passes a video or GIF through without compositing (Phase 4).

@@ -96,6 +96,8 @@ export function analyseRules(layers: Layer[], rules: ArtRule[], index: TraitInde
 
   for (const [traitId, entry] of index) {
     for (const layer of layers) {
+      // Rules apply within a collection: only the trait's own collection's layers can shut it out.
+      if (layer.collectionId !== entry.layer.collectionId) continue
       if (layer.id === entry.layer.id || layer.traits.length === 0) continue
       const usable = layer.traits.filter((trait) => trait.constant || trait.weight > 0)
       if (usable.length === 0) continue

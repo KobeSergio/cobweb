@@ -1,8 +1,9 @@
 import { redirect } from 'next/navigation'
+import { FinishLaterAction } from '@/components/art/finish-later'
 import { GenerateScreen } from '@/components/art/generate-screen'
 import { StagePage } from '@/components/shell/stage-page'
 import { requireOwnedCollection } from '@/lib/auth'
-import { DEMO_LAYERS, DEMO_RULES, DEMO_TOKENS, DEMO_TRAIT_COUNTS } from '@/lib/demo'
+import { DEMO_COLLECTIONS, DEMO_LAYERS, DEMO_RULES, DEMO_TOKENS, DEMO_TRAIT_COUNTS } from '@/lib/demo'
 import { artSubSteps, hasArtSubStep, stageHref } from '@/lib/steps'
 import { searchParam, stageContext, type CollectionParams, type SearchParams } from '../../_lib/stage'
 
@@ -31,18 +32,23 @@ export default async function Page({
       title="Generate"
       description={subs[index]!.summary}
       sampleNotice={ctx.sampleNotice}
+      actions={
+        ctx.demo && !ctx.readOnly && !ctx.artDeferred ? (
+          <FinishLaterAction collectionId={collection.id} />
+        ) : undefined
+      }
       width="wide"
       bodyHasFooter
     >
       <GenerateScreen
         collection={collection}
+        collections={DEMO_COLLECTIONS}
         layers={DEMO_LAYERS}
         rules={DEMO_RULES}
         tokens={DEMO_TOKENS}
         traitCounts={DEMO_TRAIT_COUNTS}
         readOnly={ctx.readOnly}
         artDeferred={ctx.artDeferred}
-        canDefer={ctx.demo}
       />
     </StagePage>
   )

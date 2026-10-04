@@ -10,11 +10,12 @@ import { Progress } from '@cobweb/ui/components/progress'
 import { Stat, StatGroup } from '@cobweb/ui/components/stat'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@cobweb/ui/components/tabs'
 import type { Tables } from '@/lib/database.types'
-import type { ArtRule, GeneratedToken, Layer, TraitCounts } from '@/lib/demo'
+import type { ArtRule, Collection, GeneratedToken, Layer, TraitCounts } from '@/lib/demo'
 import { artSubStepHref, flowNeighbours } from '@/lib/steps'
 import { ConfirmDialog, type ConfirmRequest } from './confirm-dialog'
-import { DeferredArtNotice, FinishLaterAction } from './finish-later'
+import { DeferredArtNotice } from './finish-later'
 import { Composite } from './composite'
+import { CollectionSizes } from './generate/collection-sizes'
 import { GenerateFooter } from './generate/generate-footer'
 import { StatsView } from './generate/stats-view'
 import { TokenGallery } from './generate/token-gallery'
@@ -24,6 +25,9 @@ import { compositeUrls } from './lib/trait-index'
 
 export type GenerateScreenProps = {
   collection: Tables<'collections'>
+  /** The project's collections, in order. Each gets a size here; the supply is their sum. */
+  collections: Collection[]
+  /** Every collection's layers. */
   layers: Layer[]
   rules: ArtRule[]
   /** The generated set, ranked (1 is rarest). Tokens 1 to 24 have `previewUrl`; stack `tokenLayerUrls(dna)` for others. */
@@ -32,37 +36,46 @@ export type GenerateScreenProps = {
   readOnly: boolean
   /** "Finish the art later" is on (MASTER_PLAN, Flow: pre-reveal): the contract starts on a placeholder. */
   artDeferred?: boolean
-  /** Offer "Finish the art later". Sample mode only until Phase 3 stores the deferred flag. */
-  canDefer?: boolean
 }
 
 const n = (value: number) => value.toLocaleString('en-US')
 
 /**
- * Art, step 3 (generative): generate the set, then review and curate it: a paged gallery with
- * rarity rank, trait filters, token detail with trait changes checked against the rules, select
- * mode for regenerate, shuffle and delete, and a statistics view.
+ * Art, step 3 (generative): set a size per collection, generate the set, then review and curate
+ * it: a paged gallery with rarity rank, collection and trait filters, a token detail panel with
+ * trait changes checked against the rules, select mode for regenerate, shuffle and delete, and a
+ * statistics view.
  */
 export function GenerateScreen({
   collection,
+  collections,
   layers,
   rules,
   tokens: seedTokens,
   readOnly,
   artDeferred = false,
-  canDefer = false,
 }: GenerateScreenProps) {
-  const supply = collection.max_supply
-  const generator = useGenerator(collection.id, collection.name, supply, {
+  const generator = useGenerator(collection.id, collection.name, {
+    collections,
     layers,
     rules,
     tokens: seedTokens,
   })
-  const { tokens, generating, progress, problems, conflicts } = generator
+  const { tokens, generating, progress, problems, conflicts, supply } = generator
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
   const { previous, next } = flowNeighbours(collection.id, collection.project_type, 'art/generate')
   const skipped = generator.rules.length - generator.active.length
   const count = tokens?.length ?? 0
+  // Each collection must have exactly its size. Those that do not, worded for the creator.
+  const offSize = generator.collections
+    .map((c) => ({ collection: c, have: generator.perCollection.get(c.id) ?? 0 }))
+    .filter(({ collection: c, have }) => have !== c.size)
+  const several = generator.collections.length > 1
+  const sizeLine = ({ collection: c, have }: (typeof offSize)[number]) =>
+    several
+      ? `${c.name} has ${n(have)} of ${n(c.size)} tokens.`
+      : `The set has ${n(have)} tokens; the supply is ${n(c.size)}.`
+  const canFill = offSize.some(({ collection: c, have }) => have < c.size)
 
   const askRegenerate = () =>
     setConfirm({
@@ -75,8 +88,8 @@ export function GenerateScreen({
   const blockedReason =
     !tokens || count === 0
       ? 'Generate the collection before locking it.'
-      : count !== supply
-        ? `The set has ${n(count)} of ${n(supply)} tokens. Fill it to the supply first.`
+      : offSize.length > 0
+        ? `${sizeLine(offSize[0]!)} Fill it or change the size first.`
         : generator.breaking.length > 0
           ? 'Some tokens break the rules. Regenerate them first.'
           : null
@@ -113,6 +126,9 @@ export function GenerateScreen({
               Regenerate all
             </Button>
           )}
+        </div>
+        <div className="border-t px-5 py-4 sm:px-6">
+          <CollectionSizes generator={generator} readOnly={readOnly || generating} />
         </div>
         {generating && (
           <div className="space-y-2 border-t px-6 py-4" role="status">
@@ -156,28 +172,22 @@ export function GenerateScreen({
       )}
 
       {conflicts.length > 0 && !readOnly && (
-        <Alert variant="warning">
-          <TriangleAlertIcon aria-hidden="true" />
-          <AlertTitle>
-            {skipped === 1 ? '1 rule is' : `${n(skipped)} rules are`} skipped because of a conflict
-          </AlertTitle>
-          <AlertDescription>
-            Generation keeps the first rule of each conflict.{' '}
-            <Link
-              className="text-foreground underline underline-offset-2"
-              href={artSubStepHref(collection.id, 'rules')}
-            >
-              Review the conflicts on Rules
-            </Link>
-            .
-          </AlertDescription>
-        </Alert>
+        <p className="text-muted-foreground flex items-center gap-2 text-sm">
+          <TriangleAlertIcon aria-hidden="true" className="text-warning size-4" />
+          {skipped === 1 ? '1 rule is' : `${n(skipped)} rules are`} skipped because of a conflict.{' '}
+          <Link
+            className="text-foreground underline underline-offset-2"
+            href={artSubStepHref(collection.id, 'rules')}
+          >
+            Review on Rules
+          </Link>
+        </p>
       )}
 
       {!readOnly &&
         tokens &&
         count > 0 &&
-        (generator.staleNote || generator.breaking.length > 0 || count !== supply) && (
+        (generator.staleNote || generator.breaking.length > 0 || offSize.length > 0) && (
           <Alert variant="warning">
             <RefreshCwIcon aria-hidden="true" />
             <AlertTitle>The set needs attention</AlertTitle>
@@ -190,12 +200,9 @@ export function GenerateScreen({
                     rules. They are marked in the grid.
                   </li>
                 )}
-                {count !== supply && (
-                  <li>
-                    The set has <span className="numeric">{n(count)}</span> tokens; the supply is{' '}
-                    <span className="numeric">{n(supply)}</span>.
-                  </li>
-                )}
+                {offSize.map((entry) => (
+                  <li key={entry.collection.id}>{sizeLine(entry)}</li>
+                ))}
               </ul>
               <div className="flex flex-wrap gap-2">
                 {generator.breaking.length > 0 && (
@@ -214,19 +221,19 @@ export function GenerateScreen({
                     Regenerate those tokens
                   </Button>
                 )}
-                {count < supply && (
+                {canFill && (
                   <Button
                     variant="secondary"
                     size="sm"
                     onClick={() =>
                       toast(
                         generator.fill()
-                          ? `The set is back to ${n(supply)} tokens`
+                          ? 'Every collection is filled to its size'
                           : 'Not enough unique combinations are left. Add traits or loosen a rule.',
                       )
                     }
                   >
-                    Fill to {n(supply)}
+                    {several ? 'Fill to the sizes' : `Fill to ${n(supply)}`}
                   </Button>
                 )}
                 {generator.staleNote && (
@@ -269,6 +276,8 @@ export function GenerateScreen({
           </TabsContent>
           <TabsContent value="stats">
             <StatsView
+              collections={generator.collections}
+              perCollection={generator.perCollection}
               layers={generator.layers}
               tokens={tokens}
               counts={generator.counts}
@@ -290,11 +299,6 @@ export function GenerateScreen({
           artDeferred
             ? 'When the set is complete, lock and upload it. The contract stays on the placeholder until you reveal.'
             : undefined
-        }
-        extra={
-          canDefer && !readOnly && !artDeferred ? (
-            <FinishLaterAction collectionId={collection.id} />
-          ) : undefined
         }
       />
     </div>

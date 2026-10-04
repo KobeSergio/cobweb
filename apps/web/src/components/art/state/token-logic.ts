@@ -1,11 +1,13 @@
-import { countTraits, generateTokens, rankTokens, satisfiesRules, seededRandom } from '@/lib/demo/art'
-import type { ArtRule, GeneratedToken, Layer, Trait } from '@/lib/demo'
+import { countTraits, generateCollections, rankTokens, satisfiesRules, seededRandom } from '@/lib/demo/art'
+import type { ArtRule, Collection, GeneratedToken, Layer, Trait } from '@/lib/demo'
+import { layersOf } from './layer-edits'
 import { brokenRule } from './rule-logic'
 import { constantTotal, weightedTraits, weightsValid, type TraitIndex } from '../lib/trait-index'
 
 /**
  * Generation and curation of the token set, on top of the seeded sample generator in
- * `lib/demo/art.ts`.
+ * `lib/demo/art.ts`. A project can hold several collections: token ids run on across them (1 to N),
+ * a token's DNA follows its own collection's layers, and uniqueness is checked within a collection.
  *
  * Seam: replaced by the trait engine in `packages/dna` (Phase 3). The browser still curates; at
  * lock the final list is validated and hashed on the server (MASTER_PLAN, Art: lock check).
@@ -25,23 +27,37 @@ export function finalise(tokens: Draft[], collectionName: string): GeneratedToke
 }
 
 /** Problems that stop a full generation, worded for the creator. */
-export function generationProblems(layers: Layer[], supply: number): string[] {
+export function generationProblems(layers: Layer[], collections: Collection[]): string[] {
   const problems: string[] = []
-  if (layers.length === 0) problems.push('Add at least one layer on the Layers step.')
-  for (const layer of layers) {
-    if (layer.traits.length === 0) problems.push(`${layer.name} has no traits yet.`)
-    else if (!weightsValid(layer)) problems.push(`The weights in ${layer.name} do not add up to 100%.`)
-    if (constantTotal(layer) > supply)
-      problems.push(`The fixed quantities in ${layer.name} add up to more than the supply.`)
-  }
-  if (problems.length === 0) {
-    const combinations = layers.reduce(
+  const several = collections.length > 1
+  if (collections.length === 0) problems.push('Add a collection on the Layers step.')
+  for (const collection of collections) {
+    const own = layersOf(layers, collection.id)
+    const where = several ? ` in ${collection.name}` : ''
+    if (collection.size < 1) {
+      problems.push(`Set a size for ${collection.name}.`)
+      continue
+    }
+    if (own.length === 0) {
+      problems.push(`Add at least one layer${where} on the Layers step.`)
+      continue
+    }
+    const before = problems.length
+    for (const layer of own) {
+      if (layer.traits.length === 0) problems.push(`${layer.name}${where} has no traits yet.`)
+      else if (!weightsValid(layer))
+        problems.push(`The weights in ${layer.name}${where} do not add up to 100%.`)
+      if (constantTotal(layer) > collection.size)
+        problems.push(`The fixed quantities in ${layer.name}${where} add up to more than its size.`)
+    }
+    if (problems.length > before) continue
+    const combinations = own.reduce(
       (product, layer) => product * layer.traits.filter((t) => t.constant || t.weight > 0).length,
       1,
     )
-    if (combinations < supply)
+    if (combinations < collection.size)
       problems.push(
-        `These layers make at most ${combinations.toLocaleString('en-US')} different tokens, fewer than the supply of ${supply.toLocaleString('en-US')}. Add traits or lower the supply.`,
+        `The layers${where} make at most ${combinations.toLocaleString('en-US')} different tokens, fewer than the size of ${collection.size.toLocaleString('en-US')}. Add traits or lower the size.`,
       )
   }
   return problems
@@ -49,23 +65,30 @@ export function generationProblems(layers: Layer[], supply: number): string[] {
 
 export type GenerateOutcome = { ok: true; tokens: GeneratedToken[] } | { ok: false; problems: string[] }
 
+/** The key a token's DNA is unique under: unique within its collection. */
+function dnaKey(token: Pick<GeneratedToken, 'collectionId' | 'dna'>): string {
+  return `${token.collectionId}:${token.dna.join('|')}`
+}
+
+/** Generates every collection to its size, ids running on from one collection to the next. */
 export function generateSet(
   layers: Layer[],
   rules: ArtRule[],
-  supply: number,
+  collections: Collection[],
   seed: number,
   collectionName: string,
 ): GenerateOutcome {
-  const problems = generationProblems(layers, supply)
+  const problems = generationProblems(layers, collections)
   if (problems.length) return { ok: false, problems }
-  const drafts = generateTokens(layers, rules, supply, seed)
-  const unique = new Set(drafts.map((token) => token.dna.join('|'))).size
+  const drafts = generateCollections(layers, rules, collections, seed)
+  const supply = drafts.length
+  const unique = new Set(drafts.map(dnaKey)).size
   const breaking = drafts.filter((token) => !satisfiesRules(new Set(token.dna), rules)).length
   if (unique < supply || breaking > 0) {
     return {
       ok: false,
       problems: [
-        `With these rules only ${(unique - breaking).toLocaleString('en-US')} of ${supply.toLocaleString('en-US')} tokens could be made unique and within the rules. Loosen a rule, add traits, or lower the supply.`,
+        `With these rules only ${(unique - breaking).toLocaleString('en-US')} of ${supply.toLocaleString('en-US')} tokens could be made unique and within the rules. Loosen a rule, add traits, or lower a size.`,
       ],
     }
   }
@@ -87,7 +110,7 @@ function roll(
   current: string[] | null,
   layers: Layer[],
   rules: ArtRule[],
-  taken: ReadonlySet<string>,
+  isTaken: (dna: string) => boolean,
   random: () => number,
 ): string[] | null {
   for (let attempt = 0; attempt < 2000; attempt++) {
@@ -96,7 +119,7 @@ function roll(
       return (kept ?? pick(weightedTraits(layer), random))?.id ?? ''
     })
     if (dna.includes('')) return null
-    if (!taken.has(dna.join('|')) && satisfiesRules(new Set(dna), rules)) return dna
+    if (!isTaken(dna.join('|')) && satisfiesRules(new Set(dna), rules)) return dna
   }
   return null
 }
@@ -105,7 +128,7 @@ export function newSeed(): number {
   return Math.floor(Math.random() * 0xffffffff)
 }
 
-/** Re-rolls the chosen tokens, keeping their ids. All or nothing, like the legacy tool. */
+/** Re-rolls the chosen tokens, keeping their ids and collections. All or nothing, like the legacy tool. */
 export function regenerate(
   tokens: GeneratedToken[],
   ids: ReadonlySet<number>,
@@ -114,44 +137,65 @@ export function regenerate(
   collectionName: string,
 ): GeneratedToken[] | null {
   const random = seededRandom(newSeed())
-  const taken = new Set(tokens.filter((t) => !ids.has(t.id)).map((t) => t.dna.join('|')))
+  const taken = new Set(tokens.filter((t) => !ids.has(t.id)).map(dnaKey))
   const next: Draft[] = []
   for (const token of tokens) {
     if (!ids.has(token.id)) {
       next.push(token)
       continue
     }
-    const dna = roll(token.dna, layers, rules, taken, random)
+    const keyed = keyedTaken(taken, token.collectionId)
+    const dna = roll(token.dna, layersOf(layers, token.collectionId), rules, keyed, random)
     if (!dna) return null
-    taken.add(dna.join('|'))
-    next.push({ id: token.id, name: token.name, dna })
+    taken.add(`${token.collectionId}:${dna.join('|')}`)
+    next.push({ id: token.id, name: token.name, collectionId: token.collectionId, dna })
   }
   return finalise(next, collectionName)
 }
 
-/** Adds new tokens after the last id until the set reaches `supply`. */
+/** Whether a DNA is taken within one collection, from the project-wide set of `dnaKey`s. */
+function keyedTaken(taken: ReadonlySet<string>, collectionId: string) {
+  return (dna: string) => taken.has(`${collectionId}:${dna}`)
+}
+
+/**
+ * Brings every collection up to its size. New tokens go after the last id, so ids stay 1 to N; a
+ * collection over its size is left as it is (delete tokens to bring it down).
+ */
 export function fillTo(
   tokens: GeneratedToken[],
-  supply: number,
+  collections: Collection[],
   layers: Layer[],
   rules: ArtRule[],
   collectionName: string,
 ): GeneratedToken[] | null {
   const random = seededRandom(newSeed())
-  const taken = new Set(tokens.map((t) => t.dna.join('|')))
+  const taken = new Set(tokens.map(dnaKey))
   const next: Draft[] = [...tokens]
-  for (let id = tokens.length + 1; id <= supply; id++) {
-    const dna = roll(null, layers, rules, taken, random)
-    if (!dna) return null
-    taken.add(dna.join('|'))
-    next.push({ id, name: '', dna })
+  let id = tokens.reduce((max, t) => Math.max(max, t.id), 0)
+  for (const collection of collections) {
+    const own = layersOf(layers, collection.id)
+    const have = tokens.filter((t) => t.collectionId === collection.id).length
+    for (let i = have; i < collection.size; i++) {
+      const dna = roll(null, own, rules, keyedTaken(taken, collection.id), random)
+      if (!dna) return null
+      taken.add(`${collection.id}:${dna.join('|')}`)
+      next.push({ id: ++id, name: '', collectionId: collection.id, dna })
+    }
   }
   return finalise(next, collectionName)
 }
 
+/** How many tokens each collection has, by collection id. */
+export function countByCollection(tokens: GeneratedToken[]): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const token of tokens) counts.set(token.collectionId, (counts.get(token.collectionId) ?? 0) + 1)
+  return counts
+}
+
 export type ChangeOutcome = { ok: true; tokens: GeneratedToken[] } | { ok: false; reason: string }
 
-/** Sets one layer of one token to another trait, if the result is allowed. */
+/** Sets one layer of one token to another trait, if the result is allowed. `layerIndex` is in the token's collection. */
 export function changeTrait(
   tokens: GeneratedToken[],
   tokenId: number,
@@ -168,7 +212,7 @@ export function changeTrait(
   if (!to) return { ok: false, reason: 'That trait no longer exists.' }
   // A maximum count is a cap (MASTER_PLAN, Art: maximum counts): moving a token off it is fine, adding past it is not.
   if (to.constant && from?.id !== to.id) {
-    const carrying = tokens.filter((t) => t.dna[layerIndex] === to.id).length
+    const carrying = tokens.filter((t) => t.dna.includes(to.id)).length
     if (carrying >= to.constant)
       return {
         ok: false,
@@ -178,7 +222,10 @@ export function changeTrait(
   const dna = token.dna.map((id, i) => (i === layerIndex ? traitId : id))
   const broken = brokenRule(dna, rules, index)
   if (broken) return { ok: false, reason: `That breaks a rule: ${broken}` }
-  const twin = tokens.find((t) => t.id !== tokenId && t.dna.join('|') === dna.join('|'))
+  // Unique within the collection: another collection may hold the same combination of names.
+  const twin = tokens.find(
+    (t) => t.id !== tokenId && t.collectionId === token.collectionId && t.dna.join('|') === dna.join('|'),
+  )
   if (twin)
     return {
       ok: false,

@@ -15,7 +15,7 @@ export default async function Page({ params }: { params: CollectionParams }) {
   return (
     <StagePage
       title="Airdrop"
-      description="Send tokens straight to wallets. Each token costs the airdrop fee and uses collection supply."
+      description="Send tokens straight to wallets, or burn some. Each token costs the airdrop fee and uses collection supply."
       sampleNotice={ctx.sampleNotice}
       width="default"
     >

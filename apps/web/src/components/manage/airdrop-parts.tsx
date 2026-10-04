@@ -3,7 +3,6 @@
 import { ExternalLinkIcon, FlameIcon } from 'lucide-react'
 import { useId, useState } from 'react'
 import { Badge } from '@cobweb/ui/components/badge'
-import { Button } from '@cobweb/ui/components/button'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@cobweb/ui/components/field'
 import { Input } from '@cobweb/ui/components/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@cobweb/ui/components/table'
@@ -14,7 +13,6 @@ import {
   mulWei,
   shortAddress,
   type AirdropRecord,
-  type Deployment,
   type Hex,
   type SupportedChain,
 } from '@/lib/demo'
@@ -95,133 +93,131 @@ export function AirdropHistory({
   )
 }
 
+/** Why a burn quantity cannot be sent, or null. */
+export function burnError(quantity: string, remaining: number): string | null {
+  const amount = Number(quantity)
+  if (!/^\d+$/.test(quantity) || amount < 1) return 'Enter a whole number of 1 or more.'
+  if (amount > remaining) return `Only ${count(remaining)} tokens are left to mint.`
+  return null
+}
+
 /**
- * Burn: an airdrop to the dead address (MASTER_PLAN, Contracts: burn). It mints new tokens straight to an
- * address nobody controls, so it uses supply for good. Kept apart from the airdrop and confirmed
- * by typing.
+ * Burn mode's input, in place of the recipients: how many tokens to mint straight to the dead
+ * address (MASTER_PLAN, Contracts: burn), where nobody can ever use them.
  */
-export function BurnSection({
-  chain,
-  deployment,
+export function BurnQuantity({
+  quantity,
+  onChange,
+  error,
   remaining,
-  onBurned,
 }: {
-  chain: SupportedChain
-  deployment: Deployment
+  quantity: string
+  onChange: (value: string) => void
+  error: string | null
   remaining: number
-  onBurned: (record: AirdropRecord) => void
 }) {
   const id = useId()
-  const [quantity, setQuantity] = useState('1')
-  const [open, setOpen] = useState(false)
+  return (
+    <div className="grid gap-4">
+      <p className="text-muted-foreground text-sm">
+        Burning mints tokens to the dead address,{' '}
+        <span className="numeric">{shortAddress(DEAD_ADDRESS, 6)}</span>, where nobody can ever use them. Use
+        it to shrink a drop that will not sell out. It cannot be undone, and it costs the airdrop fee per
+        token.
+      </p>
+      <Field data-invalid={!!error} className="max-w-56">
+        <FieldLabel htmlFor={`${id}-quantity`}>Tokens to burn</FieldLabel>
+        <Input
+          id={`${id}-quantity`}
+          type="number"
+          min={1}
+          max={remaining}
+          value={quantity}
+          onChange={(event) => onChange(event.target.value)}
+          aria-invalid={!!error}
+          aria-describedby={`${id}-quantity-help`}
+        />
+        {error ? (
+          <FieldError id={`${id}-quantity-help`}>{error}</FieldError>
+        ) : (
+          <FieldDescription id={`${id}-quantity-help`}>
+            Up to <span className="numeric">{count(remaining)}</span>, the tokens left to mint.
+          </FieldDescription>
+        )}
+      </Field>
+    </div>
+  )
+}
+
+/** The burn's confirmation: what it leaves, its fee, and typing "burn N" to enable the send. */
+export function BurnDialog({
+  open,
+  onOpenChange,
+  chain,
+  amount,
+  remaining,
+  feePerTokenWei,
+  onBurned,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  chain: SupportedChain
+  amount: number
+  remaining: number
+  feePerTokenWei: string
+  onBurned: (hash: Hex) => void
+}) {
+  const id = useId()
   const [typed, setTyped] = useState('')
-  const amount = Number(quantity)
-  const error =
-    !/^\d+$/.test(quantity) || amount < 1
-      ? 'Enter a whole number of 1 or more.'
-      : amount > remaining
-        ? `Only ${count(remaining)} tokens are left to mint.`
-        : null
-  const fee = error ? '0' : mulWei(deployment.fees.airdropFeePerTokenWei, amount)
+  const fee = mulWei(feePerTokenWei, amount)
   const phrase = `burn ${amount}`
   const confirmed = typed.trim().toLowerCase() === phrase
+  const noun = amount === 1 ? 'token' : 'tokens'
 
   return (
-    <section
-      aria-labelledby={`${id}-heading`}
-      className="border-destructive/40 bg-destructive-soft/40 grid gap-5 rounded-xl border p-5 lg:grid-cols-[1fr_auto] lg:items-end lg:p-6"
+    <TransactionDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      chain={chain}
+      destructive
+      title={`Burn ${count(amount)} ${noun}`}
+      description="The tokens are minted to the dead address and counted against supply for good. This cannot be undone."
+      actionLabel={`Burn ${count(amount)} ${noun}`}
+      successMessage={`${count(amount)} ${noun} burned`}
+      request={
+        confirmed
+          ? {
+              contract: 'Collection',
+              functionName: 'airdropNFTs',
+              args: [
+                { name: 'recipients', value: `[${shortAddress(DEAD_ADDRESS, 6)}]` },
+                { name: 'amounts', value: `[${amount}]` },
+              ],
+              valueWei: fee,
+              check: () => (amount > remaining ? 'ExceedsMaxSupply' : null),
+            }
+          : null
+      }
+      onConfirmed={onBurned}
     >
-      <div className="grid gap-4">
-        <div className="space-y-1">
-          <h2 id={`${id}-heading`} className="text-heading flex items-center gap-2">
-            <FlameIcon aria-hidden="true" className="text-destructive-foreground size-4" />
-            Burn supply
-          </h2>
-          <p className="text-muted-foreground max-w-2xl text-sm">
-            Mints tokens straight to the dead address,{' '}
-            <span className="numeric">{shortAddress(DEAD_ADDRESS, 6)}</span>, where nobody can ever use them.
-            Use it to shrink a drop that will not sell out. It cannot be undone, and it costs the airdrop fee
-            per token.
-          </p>
-        </div>
-        <Field data-invalid={!!error} className="max-w-56">
-          <FieldLabel htmlFor={`${id}-quantity`}>Tokens to burn</FieldLabel>
-          <Input
-            id={`${id}-quantity`}
-            type="number"
-            min={1}
-            max={remaining}
-            value={quantity}
-            onChange={(event) => setQuantity(event.target.value)}
-            aria-invalid={!!error}
-            aria-describedby={`${id}-quantity-help`}
-          />
-          {error ? (
-            <FieldError id={`${id}-quantity-help`}>{error}</FieldError>
-          ) : (
-            <FieldDescription id={`${id}-quantity-help`}>
-              Fee <span className="numeric">{formatNative(fee, chain.nativeSymbol)}</span>
-            </FieldDescription>
-          )}
-        </Field>
-      </div>
-      <Button
-        variant="destructive"
-        disabled={!!error}
-        onClick={() => {
-          setTyped('')
-          setOpen(true)
-        }}
-      >
-        Burn tokens
-      </Button>
-
-      <TransactionDialog
-        open={open}
-        onOpenChange={setOpen}
-        chain={chain}
-        destructive
-        title={`Burn ${count(amount)} ${amount === 1 ? 'token' : 'tokens'}`}
-        description="The tokens are minted to the dead address and counted against supply for good. This cannot be undone."
-        actionLabel="Burn tokens"
-        successMessage={`${count(amount)} ${amount === 1 ? 'token' : 'tokens'} burned`}
-        request={
-          error || !confirmed
-            ? null
-            : {
-                contract: 'Collection',
-                functionName: 'airdropNFTs',
-                args: [
-                  { name: 'recipients', value: `[${shortAddress(DEAD_ADDRESS, 6)}]` },
-                  { name: 'amounts', value: `[${amount}]` },
-                ],
-                valueWei: fee,
-                check: () => (amount > remaining ? 'ExceedsMaxSupply' : null),
-              }
-        }
-        onConfirmed={(hash: Hex) =>
-          onBurned({ txHash: hash, at: 0, recipients: 1, tokens: amount, feePaidWei: fee, burn: true })
-        }
-      >
-        <dl className="divide-y rounded-lg border px-4">
-          <Row label="Left to mint now">{count(remaining)}</Row>
-          <Row label="Left after the burn">{count(remaining - amount)}</Row>
-          <Row label="Fee">{formatNative(fee, chain.nativeSymbol)}</Row>
-        </dl>
-        <Field>
-          <FieldLabel htmlFor={`${id}-confirm`}>
-            Type <span className="numeric bg-surface-3 rounded-sm px-1.5">{phrase}</span> to confirm
-          </FieldLabel>
-          <Input
-            id={`${id}-confirm`}
-            value={typed}
-            onChange={(event) => setTyped(event.target.value)}
-            autoComplete="off"
-            spellCheck={false}
-            className="numeric"
-          />
-        </Field>
-      </TransactionDialog>
-    </section>
+      <dl className="divide-y rounded-lg border px-4">
+        <Row label="Left to mint now">{count(remaining)}</Row>
+        <Row label="Left after the burn">{count(remaining - amount)}</Row>
+        <Row label="Fee">{formatNative(fee, chain.nativeSymbol)}</Row>
+      </dl>
+      <Field>
+        <FieldLabel htmlFor={`${id}-confirm`}>
+          Type <span className="numeric bg-surface-3 rounded-sm px-1.5">{phrase}</span> to confirm
+        </FieldLabel>
+        <Input
+          id={`${id}-confirm`}
+          value={typed}
+          onChange={(event) => setTyped(event.target.value)}
+          autoComplete="off"
+          spellCheck={false}
+          className="numeric"
+        />
+      </Field>
+    </TransactionDialog>
   )
 }

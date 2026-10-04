@@ -10,6 +10,7 @@ import {
   isDemoMode,
   isStageReadOnly,
   stageAccess,
+  stageIndex,
   STAGES,
   UNLOCK_REQUIREMENTS,
   type StageSlug,
@@ -43,7 +44,8 @@ export function stageContext(
     readOnly: isStageReadOnly(collection.status, stage, { demo, artDeferred }),
     /** The screen renders `lib/demo` sample data while sample-data mode is off: say so on the page. */
     sampleNotice: !demo,
-    eyebrow: `Stage ${STAGES.findIndex((entry) => entry.slug === stage) + 1} of ${STAGES.length}`,
+    /** "Stage 2 of 4" for a build stage; none for Manage drop, which is not a stage. */
+    eyebrow: stageIndex(stage) === -1 ? undefined : `Stage ${stageIndex(stage) + 1} of ${STAGES.length}`,
     ...flowNeighbours(collection.id, collection.project_type, path),
   }
 }

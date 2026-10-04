@@ -4,14 +4,13 @@ import { RiseIn } from '@cobweb/ui/components/motion'
 import { PageHeader } from '@cobweb/ui/components/page-header'
 import { DashboardTopbar } from '@/components/shell/dashboard-topbar'
 import { requireUser } from '@/lib/auth'
-import { artSubSteps, MANAGE_TABS, STEPS } from '@/lib/steps'
+import { artSubSteps, MANAGE_STAGE, MANAGE_TABS, STEPS } from '@/lib/steps'
 
 export const metadata: Metadata = { title: 'Help' }
 
 /** What each stage contains, where it has a second level. */
 const DETAIL: Partial<Record<(typeof STEPS)[number]['slug'], readonly string[]>> = {
   art: artSubSteps('generative').map((sub) => sub.name),
-  manage: MANAGE_TABS.map((tab) => tab.name),
 }
 
 /** A short guide to the launch flow. Fuller documentation comes as each stage is built. */
@@ -24,7 +23,7 @@ export default async function HelpPage() {
       <div className="mx-auto w-full max-w-4xl space-y-10 px-8 pt-10 pb-16">
         <PageHeader
           title="How a launch works"
-          description="Every collection moves through the same five stages, in this order. You can leave at any point and pick up where you stopped."
+          description="Every collection moves through the same four stages, in this order, then you manage your drop. You can leave at any point and pick up where you stopped."
         />
         <RiseIn>
           <ol className="overflow-hidden rounded-xl border bg-card shadow-raised">
@@ -51,6 +50,24 @@ export default async function HelpPage() {
               </li>
             ))}
           </ol>
+        </RiseIn>
+        <RiseIn>
+          <section aria-labelledby="manage-heading" className="rounded-xl border bg-card p-6 shadow-raised">
+            <h2 id="manage-heading" className="text-heading">
+              Then manage your drop
+            </h2>
+            <p className="mt-1.5 max-w-[60ch] text-sm leading-relaxed text-muted-foreground">
+              {MANAGE_STAGE.summary} Once deployed, a collection opens here, and the four stages above stay
+              available from Setup for reference.
+            </p>
+            <ul className="mt-4 flex flex-wrap gap-2" aria-label={`${MANAGE_STAGE.name} sections`}>
+              {MANAGE_TABS.map((tab) => (
+                <li key={tab.key}>
+                  <Badge variant="outline">{tab.name}</Badge>
+                </li>
+              ))}
+            </ul>
+          </section>
         </RiseIn>
       </div>
     </>

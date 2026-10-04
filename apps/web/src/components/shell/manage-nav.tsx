@@ -7,7 +7,7 @@ import { MANAGE_TABS, manageTabHref } from '@/lib/steps'
 
 /**
  * The tabs of Manage drop. Not a sequence: after deploy the creator moves between them freely.
- * Rendered by `StageNav` as its second row while a Manage route is open.
+ * Rendered by the collection layout directly under the top bar while a Manage route is open.
  */
 export function ManageNav({ collectionId }: { collectionId: string }) {
   const segments = useSelectedLayoutSegments()
@@ -17,7 +17,7 @@ export function ManageNav({ collectionId }: { collectionId: string }) {
   return (
     <nav
       aria-label="Manage drop"
-      className="bg-card/40 flex h-11 items-end gap-1 overflow-x-auto border-t px-6"
+      className="bg-card/40 flex h-11 items-end gap-1 overflow-x-auto border-b px-6"
     >
       {MANAGE_TABS.map((tab) => {
         const current = tab.slug === selected

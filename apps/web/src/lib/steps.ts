@@ -4,15 +4,15 @@ export type CollectionStatus = Enums<'collection_status'>
 export type ProjectType = Enums<'project_type'>
 
 /**
- * The five stages of a launch, in the order a creator moves through them. Each stage is a route
- * segment under `/collections/[id]/`. Art and Manage have their own second level (sub-steps and
- * tabs, below).
+ * The four build stages of a launch, in the order a creator moves through them. Each stage is a
+ * route segment under `/collections/[id]/`. Art has its own second level (sub-steps, below).
+ * Manage drop is not a stage: it is where a deployed collection lives (`MANAGE_STAGE`).
  */
 export const STAGES = [
   {
     slug: 'details',
     name: 'Details',
-    summary: 'The name, symbol, supply and kind of collection, and the description collectors will read.',
+    summary: 'The name, symbol and kind of collection, and the description collectors will read.',
   },
   {
     slug: 'art',
@@ -24,7 +24,7 @@ export const STAGES = [
     slug: 'upload',
     name: 'Lock and upload',
     summary:
-      'Lock the art, pay the generation fee, and the final images and metadata are rendered and stored on IPFS.',
+      'Lock the art and generate it to IPFS. The final images and metadata are rendered and stored there.',
   },
   {
     slug: 'deploy',
@@ -32,18 +32,27 @@ export const STAGES = [
     summary:
       'Choose a chain, set royalties and the payout address, and deploy the contract from your wallet.',
   },
-  {
-    slug: 'manage',
-    name: 'Manage drop',
-    summary:
-      'Set up phases and whitelists, customise the mint page, then reveal, airdrop and withdraw once it is live.',
-  },
 ] as const
+
+/**
+ * Manage drop: not a stage of the stepper. A deployed collection opens here, with its tabs under
+ * the top bar; the build stages stay reachable from the top bar's Setup menu, read-only.
+ */
+export const MANAGE_STAGE = {
+  slug: 'manage',
+  name: 'Manage drop',
+  summary:
+    'Set up phases and whitelists, customise the mint page, then reveal, airdrop and withdraw once it is live.',
+} as const
 
 /** Kept for the sign-in and help pages, which list the flow. Same list as `STAGES`. */
 export const STEPS = STAGES
 
-export type Stage = (typeof STAGES)[number]
+/** One of the four build stages in the stepper. */
+export type BuildStage = (typeof STAGES)[number]
+export type BuildStageSlug = BuildStage['slug']
+/** A build stage or Manage drop: every first-level route of the collection workspace. */
+export type Stage = BuildStage | typeof MANAGE_STAGE
 export type StageSlug = Stage['slug']
 /** Display state in the stage navigation. */
 export type StageState = 'done' | 'current' | 'next' | 'pending'
@@ -56,7 +65,13 @@ export type Step = Stage
 export type StepSlug = StageSlug
 
 export function getStage(slug: string): Stage | undefined {
+  if (slug === MANAGE_STAGE.slug) return MANAGE_STAGE
   return STAGES.find((stage) => stage.slug === slug)
+}
+
+/** Position of a build stage in `STAGES`, or -1 for Manage drop. */
+export function stageIndex(stage: StageSlug): number {
+  return STAGES.findIndex((entry) => entry.slug === stage)
 }
 
 /** @deprecated Use `getStage`. */
@@ -78,7 +93,7 @@ export const ART_SUBSTEPS = {
   'upload-assets': {
     slug: 'upload-assets',
     name: 'Assets',
-    summary: 'Upload your finished images and metadata.',
+    summary: 'Upload your finished artwork.',
   },
 } as const
 
@@ -143,29 +158,41 @@ export function manageTabHref(collectionId: string, tab: ManageTabKey): string {
 // Progress from the collection's status
 // ---------------------------------------------------------------------------------------------
 
-/** Index in `STAGES` of the stage to work on next, for each status. */
+/**
+ * Index in `STAGES` of the stage to work on next, for each status. `STAGES.length` means every
+ * build stage is done and the collection lives in Manage drop.
+ */
 const NEXT_STAGE_INDEX: Record<CollectionStatus, number> = {
   draft: 1, // details exist; art is next
-  art_locked: 2, // art is locked; pay, render and pin
+  art_locked: 2, // art is locked; generate it to IPFS
   rendering: 2,
   rendered: 3, // on IPFS; deploy is next
-  deployed: 4, // deployed; manage the drop
+  deployed: STAGES.length, // deployed; manage the drop
 }
 
 /**
- * Whether a stage is finished. Manage is never finished: it is where a deployed collection lives.
+ * Whether a build stage is finished. A deployed collection has finished all four. Manage drop is
+ * never finished: it is where a deployed collection lives.
  */
 export function isStageDone(stage: StageSlug, status: CollectionStatus): boolean {
-  if (stage === 'manage') return false
-  return STAGES.findIndex((entry) => entry.slug === stage) < NEXT_STAGE_INDEX[status]
+  if (stage === MANAGE_STAGE.slug) return false
+  return stageIndex(stage) < NEXT_STAGE_INDEX[status]
 }
 
 /** @deprecated Use `isStageDone`. */
 export const isStepDone = isStageDone
 
-/** The stage a creator should be working on for a collection in the given status. */
+/**
+ * Where a collection in the given status opens: the build stage to work on next, or Manage drop
+ * once it is deployed.
+ */
 export function nextStage(status: CollectionStatus): Stage {
-  return STAGES[NEXT_STAGE_INDEX[status]]!
+  return STAGES[NEXT_STAGE_INDEX[status]] ?? MANAGE_STAGE
+}
+
+/** Whether the collection lives in Manage drop: the stepper is gone and Setup is read-only history. */
+export function isDeployed(status: CollectionStatus): boolean {
+  return status === 'deployed'
 }
 
 /** @deprecated Use `nextStage`. Returns the stage, which has `slug` and `name`. */
@@ -183,9 +210,10 @@ export function isDemoMode(): boolean {
 export type StageOptions = { demo?: boolean; artDeferred?: boolean }
 
 /**
- * Whether a stage can be opened. A stage is locked until the one before it is done; done stages
- * stay open. With deferred art, Lock and upload opens without finished art, for the placeholder.
- * In sample-data mode everything is open.
+ * Whether a stage can be opened. A build stage is locked until the one before it is done; done
+ * stages stay open. With deferred art, Lock and upload opens without finished art, for the
+ * placeholder. Manage drop opens once the contract is deployed. In sample-data mode everything
+ * is open.
  */
 export function stageAccess(
   status: CollectionStatus,
@@ -193,17 +221,20 @@ export function stageAccess(
   options: StageOptions = {},
 ): StageAccess {
   if (options.demo ?? isDemoMode()) return 'open'
+  if (stage === MANAGE_STAGE.slug) return isDeployed(status) ? 'open' : 'locked'
   if (stage === 'upload' && options.artDeferred) return 'open'
-  const index = STAGES.findIndex((entry) => entry.slug === stage)
+  const index = stageIndex(stage)
   if (index === 0) return 'open'
   return isStageDone(STAGES[index - 1]!.slug, status) ? 'open' : 'locked'
 }
 
 /**
- * Whether a stage's screens are read-only: the stage is done and its result is frozen. Details is
- * never wholly read-only; individual fields freeze instead (see `frozenDetailFields`). Deferred art
- * is the one exception for a done stage: Art stays editable after lock, render and deploy until
- * the real set is locked. Not read-only in sample-data mode, so every control can be tried.
+ * Whether a stage's screens are read-only: the stage is done and its result is frozen. Before
+ * deploy, Details is never wholly read-only; individual fields freeze instead (see
+ * `frozenDetailFields`). Once deployed, all four build stages are read-only history (the mint
+ * page's description is edited in Manage drop). Deferred art is the one exception for a done
+ * stage: Art stays editable after lock, render and deploy until the real set is locked. Not
+ * read-only in sample-data mode, so every control can be tried.
  */
 export function isStageReadOnly(
   status: CollectionStatus,
@@ -211,8 +242,9 @@ export function isStageReadOnly(
   options: StageOptions = {},
 ): boolean {
   if (options.demo ?? isDemoMode()) return false
-  if (stage === 'details' || stage === 'manage') return false
+  if (stage === MANAGE_STAGE.slug) return false
   if (stage === 'art' && options.artDeferred) return false
+  if (stage === 'details') return isDeployed(status)
   return isStageDone(stage, status)
 }
 
@@ -260,7 +292,10 @@ export const UNLOCK_REQUIREMENTS: Record<
 
 export type FlowLink = { href: string; name: string }
 
-/** Every screen of the linear flow, in order, as `[path under the collection, name]`. */
+/**
+ * Every screen of the linear flow, in order, as `[path under the collection, name]`. Manage drop
+ * closes the list: it is not a stage, but it is where Deploy's Continue leads.
+ */
 export function flowScreens(projectType: ProjectType): { path: string; name: string }[] {
   return [
     { path: 'details', name: 'Details' },

@@ -3,21 +3,29 @@ import { Alert, AlertDescription, AlertTitle } from '@cobweb/ui/components/alert
 import { Stat, StatGroup } from '@cobweb/ui/components/stat'
 import { cn } from '@cobweb/ui/lib/utils'
 import { cappedShortfalls } from '@/lib/demo/art'
-import type { GeneratedToken, Layer, TraitCounts } from '@/lib/demo'
+import type { Collection, GeneratedToken, Layer, TraitCounts } from '@/lib/demo'
 import { Composite } from '../composite'
 import { expectedCount, formatCount } from '../lib/trait-index'
 
 /** Off by more than this share of the expected count, and by at least 3 tokens, reads as a deviation. */
 const TOLERANCE = 0.25
 
-/** The metadata view: how each layer's traits came out against what the weights asked for. */
+/**
+ * The metadata view: how each layer's traits came out against what the weights asked for. Each
+ * layer is measured against its own collection's tokens.
+ */
 export function StatsView({
+  collections,
+  perCollection,
   layers,
   tokens,
   counts,
   ruleCount,
   skippedRules,
 }: {
+  collections: Collection[]
+  /** Tokens per collection id. */
+  perCollection: ReadonlyMap<string, number>
   layers: Layer[]
   tokens: GeneratedToken[]
   counts: TraitCounts
@@ -33,6 +41,8 @@ export function StatsView({
   // A maximum count is a cap (MASTER_PLAN, Art: maximum counts); say so when a capped trait came out below it.
   const short = total > 0 ? cappedShortfalls(layers, counts) : []
   const shortIds = new Set(short.map((entry) => entry.trait.id))
+  const several = collections.length > 1
+  const nameOf = (id: string) => collections.find((c) => c.id === id)?.name ?? ''
 
   return (
     <div className="space-y-6">
@@ -81,9 +91,11 @@ export function StatsView({
 
       <div className="grid gap-6 xl:grid-cols-2">
         {layers.map((layer) => {
+          const own = perCollection.get(layer.collectionId) ?? 0
+          const title = several ? `${nameOf(layer.collectionId)}: ${layer.name}` : layer.name
           const rows = layer.traits.map((trait) => ({
             trait,
-            expected: expectedCount(layer, trait, total),
+            expected: expectedCount(layer, trait, own),
             actual: counts[trait.id] ?? 0,
           }))
           const scale = Math.max(1, ...rows.map((row) => Math.max(row.expected, row.actual)))
@@ -94,12 +106,10 @@ export function StatsView({
               className="bg-card rounded-xl border shadow-raised"
             >
               <h3 id={`stats-${layer.id}`} className="text-heading border-b px-5 py-3.5">
-                {layer.name}
+                {title}
               </h3>
               <table className="w-full text-sm">
-                <caption className="sr-only">
-                  {layer.name}: expected and generated count of each trait
-                </caption>
+                <caption className="sr-only">{title}: expected and generated count of each trait</caption>
                 <thead>
                   <tr className="text-muted-foreground text-xs">
                     <th scope="col" className="py-2 pl-5 text-left font-medium">

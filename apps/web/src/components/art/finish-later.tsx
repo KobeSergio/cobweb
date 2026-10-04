@@ -36,8 +36,9 @@ const STEPS = [
 ]
 
 /**
- * "Finish the art later" (MASTER_PLAN, Flow: pre-reveal): a secondary action in the Art footer. Confirming marks the
- * art as deferred and opens Lock and upload with "Reveal later" on and the real set's lock off.
+ * "Finish the art later" (MASTER_PLAN, Flow: pre-reveal): a visible secondary button in the header of every Art
+ * screen (Layers, Rules, Generate), passed as the page's `actions`. Confirming marks the art as deferred and opens
+ * Lock and upload with "Reveal later" on and the real set's lock off.
  *
  * Seam: the deferred flag is the sample scenario in the URL (`?art=deferred`) until Phase 3 adds
  * the collection's column; then confirming calls a server action that sets it.
@@ -48,7 +49,7 @@ export function FinishLaterAction({ collectionId }: { collectionId: string }) {
 
   return (
     <>
-      <Button variant="ghost" onClick={() => setOpen(true)}>
+      <Button variant="secondary" onClick={() => setOpen(true)}>
         <ClockIcon />
         Finish the art later
       </Button>

@@ -30,11 +30,25 @@ export type Trait = {
   imageUrl: string | null
 }
 
+/**
+ * One collection of a generative project, as in the legacy app (for example male and female). Each
+ * has its own layers and rules and its own size; token ids run on across collections (1 to N) and
+ * uniqueness is checked within a collection. Replaced by: the project's collection rows (Phase 3).
+ */
+export type Collection = {
+  id: string
+  name: string
+  /** Tokens to generate for this collection. The supply is the sum of the sizes. */
+  size: number
+}
+
 /** A layer, bottom first. Replaced by: the project's layer rows (Phase 3), ordered by position. */
 export type Layer = {
   id: string
+  /** The collection this layer belongs to. Each collection has its own stack. */
+  collectionId: string
   name: string
-  /** 0 is the bottom of the stack. */
+  /** 0 is the bottom of the collection's stack. */
   position: number
   traits: Trait[]
 }
@@ -56,7 +70,10 @@ export type ArtRule = {
   bidirectional: boolean
 }
 
-/** A contradiction the Rules screen surfaces. Replaced by: the rule analyser in `packages/dna`. */
+/**
+ * A contradiction the Rules screen surfaces. Rules name traits, and trait ids are unique in the
+ * project, so a rule applies within its traits' collection. Replaced by: the rule analyser in `packages/dna`.
+ */
 export type RuleConflict = {
   kind: 'isolated' | 'mixing' | 'circular'
   ruleIds: string[]
@@ -65,10 +82,12 @@ export type RuleConflict = {
 
 /** One generated token. Replaced by: the token list the browser submits at lock (MASTER_PLAN, Art: lock check). */
 export type GeneratedToken = {
-  /** Token id, starting at 1. Also the number in the name. */
+  /** Token id, starting at 1 and running on across collections. Also the number in the name. */
   id: number
   name: string
-  /** The chosen trait id for each layer, in layer order (`dna[i]` belongs to `layers[i]`). */
+  /** The collection the token belongs to; its DNA follows that collection's layers. */
+  collectionId: string
+  /** The chosen trait id for each of its collection's layers, in layer order (`dna[i]` belongs to `layers[i]`). */
   dna: string[]
   /** 1 is the rarest. */
   rank: number
@@ -80,12 +99,12 @@ export type GeneratedToken = {
 export type TraitCounts = Record<string, number>
 
 /**
- * What an uploaded file is (MASTER_PLAN, Art: media types). 1/1s and metadata projects take images only (PNG, JPG,
+ * What an uploaded file is (MASTER_PLAN, Art: media types). 1/1s take images only (PNG, JPG,
  * WebP); a single asset may also be a GIF or an MP4 video, and so may a pre-reveal placeholder.
  */
 export type MediaType = 'image' | 'gif' | 'video'
 
-/** The art for a non-generative project (1/1s, metadata, single asset). Replaced by: the uploads table (Phase 3). */
+/** The art for a 1/1s or single asset project. Replaced by: the uploads table (Phase 3). */
 export type UploadedAsset = {
   id: number
   fileName: string

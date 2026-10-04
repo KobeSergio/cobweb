@@ -1,11 +1,13 @@
 import type { Metadata } from 'next'
+import { cn } from '@cobweb/ui/lib/utils'
 import { SessionGuard } from '@/components/auth/session-guard'
 import { CollectionTopbar } from '@/components/shell/collection-topbar'
+import { SetupMenu } from '@/components/shell/setup-menu'
 import { SmallScreen } from '@/components/shell/small-screen'
-import { StageNav } from '@/components/shell/step-nav'
+import { WorkspaceNav } from '@/components/shell/workspace-nav'
 import { requireOwnedCollection, requireUser } from '@/lib/auth'
 import { sampleArtDeferred } from '@/lib/demo'
-import { isDemoMode } from '@/lib/steps'
+import { isDemoMode, isDeployed } from '@/lib/steps'
 
 type Props = { children: React.ReactNode; params: Promise<{ id: string }> }
 
@@ -15,26 +17,45 @@ export async function generateMetadata({ params }: Pick<Props, 'params'>): Promi
   return { title: collection.name }
 }
 
-/** Working on one collection: its top bar, the launch stages (with Art steps or Manage tabs), then the screen. */
+/**
+ * Working on one collection: its top bar, then the stepper of the four build stages (or, once
+ * deployed, the Manage tabs or the Setup notice), then the screen. `--workspace-header` is the
+ * height of the sticky header, for things that stick below it (the Art rail).
+ */
 export default async function CollectionLayout({ children, params }: Props) {
   const { id } = await params
   const user = await requireUser()
   const collection = await requireOwnedCollection(id)
   const demo = isDemoMode()
+  const deployed = isDeployed(collection.status)
 
   return (
     <>
       <SessionGuard sessionAddress={user.walletAddress} />
       <SmallScreen />
-      <div className="hidden min-h-svh flex-col sm:flex">
+      <div
+        className={cn(
+          'hidden min-h-svh flex-col sm:flex',
+          // Top bar (4.57rem) plus the stepper (3.5rem), or plus the Manage tabs / Setup notice (2.75rem).
+          deployed ? '[--workspace-header:7.32rem]' : '[--workspace-header:8.07rem]',
+        )}
+      >
         <div className="bg-background sticky top-0 z-40">
           <CollectionTopbar
             name={collection.name}
             status={collection.status}
             walletAddress={user.walletAddress}
             demo={demo}
+            nav={
+              <SetupMenu
+                collectionId={collection.id}
+                status={collection.status}
+                projectType={collection.project_type}
+                demo={demo}
+              />
+            }
           />
-          <StageNav
+          <WorkspaceNav
             collectionId={collection.id}
             status={collection.status}
             projectType={collection.project_type}

@@ -20,8 +20,9 @@ import { MediaPreview } from './media-preview'
 import type { AssetItem } from './types'
 
 /**
- * One artwork shared by every token, and how many tokens there are. Unlike 1/1s it may be a GIF
- * or an MP4 video as well as an image (MASTER_PLAN, Art: media types).
+ * One artwork shared by every token, and the quantity: how many tokens there are, which is the
+ * collection's supply for this type (1 to 4,000; `supplyControl` saves it). Unlike 1/1s it may be a
+ * GIF or an MP4 video as well as an image (MASTER_PLAN, Art: media types).
  */
 export function SingleAssetView({
   item,
@@ -29,12 +30,15 @@ export function SingleAssetView({
   readOnly,
   onReplace,
   onQuantity,
+  supplyControl,
 }: {
   item: AssetItem | undefined
   quantity: number
   readOnly: boolean
   onReplace: (file: File | undefined) => void
   onQuantity: (quantity: number) => void
+  /** Saves the quantity as the supply. */
+  supplyControl?: React.ReactNode
 }) {
   const pick = (files: File[]) => onReplace(files[0])
 
@@ -110,8 +114,8 @@ export function SingleAssetView({
           )}
         </Panel>
         <Panel
-          title="Token count"
-          description="Every token shows this same artwork."
+          title="Quantity"
+          description="How many tokens share this artwork. This is the collection's supply."
           bodyClassName="space-y-3"
         >
           {readOnly ? (
@@ -123,13 +127,15 @@ export function SingleAssetView({
             <QuantityInput
               value={quantity}
               max={SINGLE_ASSET_MAX_SUPPLY}
-              label="Number of tokens"
+              label="Quantity"
               onCommit={onQuantity}
             />
           )}
           <p className="text-[0.8125rem] text-muted-foreground">
-            Up to <span className="numeric">{SINGLE_ASSET_MAX_SUPPLY.toLocaleString('en-US')}</span> tokens.
+            From <span className="numeric">1</span> to{' '}
+            <span className="numeric">{SINGLE_ASSET_MAX_SUPPLY.toLocaleString('en-US')}</span> tokens.
           </p>
+          {supplyControl}
         </Panel>
       </div>
     </div>

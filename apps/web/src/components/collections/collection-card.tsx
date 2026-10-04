@@ -5,7 +5,15 @@ import { StatusBadge, type Status } from '@cobweb/ui/components/status-badge'
 import { cn } from '@cobweb/ui/lib/utils'
 import type { Tables } from '@/lib/database.types'
 import { PROJECT_TYPES } from '@/lib/collections'
-import { isDemoMode, isStepDone, nextStep, stageHref, STEPS, type CollectionStatus } from '@/lib/steps'
+import {
+  isDemoMode,
+  isDeployed,
+  isStageDone,
+  nextStage,
+  stageHref,
+  STAGES,
+  type CollectionStatus,
+} from '@/lib/steps'
 
 export const STATUS_LABELS: Record<CollectionStatus, string> = {
   draft: 'Draft',
@@ -33,7 +41,8 @@ function demoCover(id: string) {
 
 /**
  * A collection on the dashboard, led by its artwork. Without art yet, the frame is empty and lit,
- * with a cobweb drawn from the collection id. The whole card opens the stage to work on next.
+ * with a cobweb drawn from the collection id. The whole card opens the stage to work on next, or
+ * Manage drop once the collection is deployed.
  */
 export function CollectionCard({
   collection,
@@ -43,9 +52,10 @@ export function CollectionCard({
   /** The collection's cover or first token preview, when it has one. */
   coverSrc?: string | null
 }) {
-  const next = nextStep(collection.status)
+  const next = nextStage(collection.status)
+  const deployed = isDeployed(collection.status)
   const type = PROJECT_TYPES.find((entry) => entry.value === collection.project_type)
-  const doneCount = STEPS.filter((step) => isStepDone(step.slug, collection.status)).length
+  const doneCount = STAGES.filter((stage) => isStageDone(stage.slug, collection.status)).length
   const cover = coverSrc ?? (isDemoMode() ? demoCover(collection.id) : null)
 
   return (
@@ -82,22 +92,22 @@ export function CollectionCard({
             <span aria-hidden="true" className="size-0.5 rounded-full bg-faint" />
             <span>{type?.name}</span>
             <span aria-hidden="true" className="size-0.5 rounded-full bg-faint" />
-            <span>
-              <span className="numeric">{collection.max_supply.toLocaleString('en-US')}</span> tokens
-            </span>
+            {collection.max_supply === null ? (
+              <span>Supply not set</span>
+            ) : (
+              <span>
+                <span className="numeric">{collection.max_supply.toLocaleString('en-US')}</span> tokens
+              </span>
+            )}
           </p>
         </div>
 
         <div className="mt-auto space-y-3">
-          {/* Progress through the launch: one segment per stage. */}
-          <div
-            role="img"
-            aria-label={`${doneCount} of ${STEPS.length} stages done`}
-            className="flex gap-1"
-          >
-            {STEPS.map((step, index) => (
+          {/* Progress through the four build stages: one segment per stage. */}
+          <div role="img" aria-label={`${doneCount} of ${STAGES.length} stages done`} className="flex gap-1">
+            {STAGES.map((stage, index) => (
               <span
-                key={step.slug}
+                key={stage.slug}
                 className={cn(
                   'h-1 flex-1 rounded-full',
                   index < doneCount ? 'bg-primary' : index === doneCount ? 'bg-primary-line' : 'bg-surface-3',
@@ -106,9 +116,13 @@ export function CollectionCard({
             ))}
           </div>
           <p className="flex items-center justify-between gap-3 text-sm">
-            <span className="text-muted-foreground">
-              Next <span className="font-medium text-foreground">{next.name}</span>
-            </span>
+            {deployed ? (
+              <span className="font-medium text-foreground">{next.name}</span>
+            ) : (
+              <span className="text-muted-foreground">
+                Next <span className="font-medium text-foreground">{next.name}</span>
+              </span>
+            )}
             <ArrowRightIcon
               aria-hidden="true"
               className="size-4 text-faint transition-[transform,color] duration-300 ease-out-expo group-hover:translate-x-0.5 group-hover:text-primary"

@@ -3,28 +3,34 @@ import type { Enums } from '@/lib/database.types'
 
 export type ProjectType = Enums<'project_type'>
 
+/**
+ * The three kinds of project, as in the legacy app. Each lands on its own Art screen after creation
+ * (`stageHref(id, 'art', type)`), and each sets its supply in a different place (`SUPPLY_SOURCE`).
+ */
 export const PROJECT_TYPES: { value: ProjectType; name: string; description: string }[] = [
   {
     value: 'generative',
     name: 'Generative',
-    description: 'Upload trait layers and generate thousands of unique combinations.',
+    description: 'Upload a folder of trait layers and generate unique combinations from them.',
   },
   {
     value: 'one_of_one',
     name: '1/1s',
-    description: 'Upload finished artworks. Each becomes its own token, or an edition if you set a quantity.',
-  },
-  {
-    value: 'metadata',
-    name: 'Metadata',
-    description: 'You already have the images and metadata files. Upload them as they are.',
+    description: 'Upload finished artworks. Each becomes its own token, or several editions.',
   },
   {
     value: 'single_asset',
     name: 'Single asset',
-    description: 'Every token shares one image and one set of metadata. Up to 4,000 tokens.',
+    description: 'One image, GIF or video shared by every token. Up to 4,000 tokens.',
   },
 ]
+
+/** Where the supply of each project type is set, as the Details screen explains it. */
+export const SUPPLY_SOURCE: Record<ProjectType, string> = {
+  generative: 'Set when you generate',
+  one_of_one: 'Set from your uploads',
+  single_asset: 'Set from your uploads',
+}
 
 export const SINGLE_ASSET_MAX_SUPPLY = 4000
 export const MAX_SUPPLY = 100_000
@@ -53,15 +59,15 @@ export function slugify(name: string): string {
     .slice(0, 48)
 }
 
-/** A mint page address: the same rules the database enforces in `reserve_slug`. */
+/** A mint page link: the same rules the database enforces in `reserve_slug`. */
 export const slugSchema = z
   .string()
   .trim()
   .toLowerCase()
   .regex(/^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$/, 'Use 3 to 48 lowercase letters, numbers or hyphens.')
-  .refine((slug) => !RESERVED_SLUGS.includes(slug), 'That address is reserved. Choose another.')
+  .refine((slug) => !RESERVED_SLUGS.includes(slug), 'That link is reserved. Choose another.')
 
-/** How long a mint page address stays reserved before the contract must be deployed. */
+/** How long a mint page link stays reserved before the contract must be deployed. */
 export const RESERVATION_DAYS = 3
 
 export type SlugState =
@@ -71,7 +77,7 @@ export type SlugState =
   | { kind: 'permanent'; slug: string }
 
 /**
- * Where a collection's mint page address stands. A deployed collection's address is permanent;
+ * Where a collection's mint page link stands. A deployed collection's link is permanent;
  * before that it is a reservation that lapses `RESERVATION_DAYS` after it was made.
  */
 export function slugState(
@@ -100,27 +106,42 @@ export function formatReservedUntil(until: Date): string {
   })} UTC`
 }
 
-/** The same rules the database enforces, checked first so the creator gets a clear message. */
-export const createCollectionSchema = z
-  .object({
-    name: z.string().trim().min(1, 'Enter a name.').max(64, 'Keep the name under 64 characters.'),
-    symbol: z
-      .string()
-      .trim()
-      .toUpperCase()
-      .regex(/^[A-Z0-9]{1,12}$/, 'Use 1 to 12 letters or numbers.'),
-    projectType: z.enum(['generative', 'one_of_one', 'metadata', 'single_asset'], {
-      error: 'Choose a collection type.',
-    }),
-    maxSupply: z.coerce
-      .number({ error: 'Enter the supply.' })
-      .int('Use a whole number.')
-      .min(1, 'A collection needs at least 1 token.')
-      .max(MAX_SUPPLY, `The most a collection can have is ${MAX_SUPPLY.toLocaleString('en-US')}.`),
-  })
-  .refine((value) => value.projectType !== 'single_asset' || value.maxSupply <= SINGLE_ASSET_MAX_SUPPLY, {
-    path: ['maxSupply'],
-    message: `Single asset collections can have at most ${SINGLE_ASSET_MAX_SUPPLY.toLocaleString('en-US')} tokens.`,
-  })
+/** The highest supply a project type allows (the database's `single_asset_supply_cap` and range check). */
+export function supplyLimit(projectType: ProjectType): number {
+  return projectType === 'single_asset' ? SINGLE_ASSET_MAX_SUPPLY : MAX_SUPPLY
+}
+
+/**
+ * Creating a collection: the type, then the name and symbol. No supply: it is set later, at Generate
+ * or from the uploads (`supplySchema`). The same rules the database enforces, checked first so the
+ * creator gets a clear message.
+ */
+export const createCollectionSchema = z.object({
+  name: z.string().trim().min(1, 'Enter a name.').max(64, 'Keep the name under 64 characters.'),
+  symbol: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z0-9]{1,12}$/, 'Use 1 to 12 letters or numbers.'),
+  projectType: z.enum(['generative', 'one_of_one', 'single_asset'], {
+    error: 'Choose a collection type.',
+  }),
+})
 
 export type CreateCollectionInput = z.infer<typeof createCollectionSchema>
+
+/** A supply, before the project type's own limit is applied (`supplyLimit`). */
+export const supplySchema = z
+  .number({ error: 'Enter the supply.' })
+  .int('Use a whole number.')
+  .min(1, 'A collection needs at least 1 token.')
+  .max(MAX_SUPPLY, `The most a collection can have is ${MAX_SUPPLY.toLocaleString('en-US')}.`)
+
+/** The message for a supply over the project type's limit, or null when it fits. */
+export function supplyLimitError(projectType: ProjectType, supply: number): string | null {
+  const limit = supplyLimit(projectType)
+  if (supply <= limit) return null
+  return projectType === 'single_asset'
+    ? `Single asset collections can have at most ${limit.toLocaleString('en-US')} tokens.`
+    : `The most a collection can have is ${limit.toLocaleString('en-US')}.`
+}

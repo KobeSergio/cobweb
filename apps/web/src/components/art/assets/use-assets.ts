@@ -65,14 +65,25 @@ function plural(count: number, word: string) {
   return `${count.toLocaleString('en-US')} ${word}${count === 1 ? '' : 's'}`
 }
 
+/** Where accepted files go to be uploaded (the resumable queue), and how a removed one is dropped. */
+export type AssetUploads = {
+  add: (entries: { id: string; file: File; label: string }[]) => void
+  remove: (id: string) => void
+}
+
 /**
- * The uploaded artworks for a 1/1 or single asset project, and the checks on files being added.
- * Files are read with object URLs and never leave the browser.
+ * The artworks for a 1/1 or single asset project, and the checks on files being added. Files that
+ * pass are listed at once (previewed from object URLs) and handed to `uploads`, the resumable
+ * upload queue, under the item's key.
  *
- * Seam: replace with the uploads table (Phase 3) and storage uploads. `items` becomes the rows,
- * `add` and `replace` start an upload, and `remove` deletes the row and the stored object.
+ * Seam: replace with the uploads table (Phase 3). `items` becomes the rows, and `remove` deletes
+ * the row and the stored object as well as cancelling the upload.
  */
-export function useAssetItems(initial: UploadedAsset[], announce: (text: string) => void) {
+export function useAssetItems(
+  initial: UploadedAsset[],
+  announce: (text: string) => void,
+  uploads: AssetUploads,
+) {
   const [items, setItems] = useState<AssetItem[]>(() => initial.map(fromSample))
   const [rejected, setRejected] = useState<RejectedFile[]>([])
   const [checking, setChecking] = useState(0)
@@ -105,13 +116,14 @@ export function useAssetItems(initial: UploadedAsset[], announce: (text: string)
       if (files.length === 0) return
       const { good, bad } = await check(files)
       setItems((current) => [...current, ...good.map(fromChecked)])
+      uploads.add(good.map((entry) => ({ id: entry.key, file: entry.file, label: entry.file.name })))
       announce(
         bad.length === 0
           ? `Added ${plural(good.length, 'file')}.`
           : `Added ${good.length.toLocaleString('en-US')} of ${plural(files.length, 'file')}. ${plural(bad.length, 'file')} could not be used.`,
       )
     },
-    [check, announce],
+    [check, announce, uploads],
   )
 
   /**
@@ -137,13 +149,15 @@ export function useAssetItems(initial: UploadedAsset[], announce: (text: string)
         announce(`${file.name} could not be used.`)
         return
       }
+      for (const item of latest.current) uploads.remove(item.key)
       setItems((current) => {
         revoke(current)
         return [fromMedia(checked)]
       })
+      uploads.add([{ id: checked.key, file, label: file.name }])
       announce(`Replaced the artwork with ${file.name}.`)
     },
-    [announce],
+    [announce, uploads],
   )
 
   const remove = useCallback(
@@ -151,10 +165,11 @@ export function useAssetItems(initial: UploadedAsset[], announce: (text: string)
       const gone = latest.current.find((item) => item.key === key)
       if (!gone) return
       revoke([gone])
+      uploads.remove(key)
       setItems((current) => current.filter((item) => item.key !== key))
       announce(`Removed ${gone.fileName}.`)
     },
-    [announce],
+    [announce, uploads],
   )
 
   const setQuantity = useCallback((key: string, quantity: number) => {

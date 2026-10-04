@@ -35,7 +35,7 @@ export type Database = {
           created_at: string
           description: string
           id: string
-          max_supply: number
+          max_supply: number | null
           name: string
           owner_id: string
           project_type: Database['public']['Enums']['project_type']
@@ -51,7 +51,7 @@ export type Database = {
           created_at?: string
           description?: string
           id?: string
-          max_supply: number
+          max_supply?: number | null
           name: string
           owner_id?: string
           project_type: Database['public']['Enums']['project_type']
@@ -67,7 +67,7 @@ export type Database = {
           created_at?: string
           description?: string
           id?: string
-          max_supply?: number
+          max_supply?: number | null
           name?: string
           owner_id?: string
           project_type?: Database['public']['Enums']['project_type']
@@ -192,7 +192,7 @@ export type Database = {
     }
     Enums: {
       collection_status: 'draft' | 'art_locked' | 'rendering' | 'rendered' | 'deployed'
-      project_type: 'generative' | 'one_of_one' | 'metadata' | 'single_asset'
+      project_type: 'generative' | 'one_of_one' | 'single_asset'
     }
     CompositeTypes: {
       [_ in never]: never
@@ -317,7 +317,7 @@ export const Constants = {
   public: {
     Enums: {
       collection_status: ['draft', 'art_locked', 'rendering', 'rendered', 'deployed'],
-      project_type: ['generative', 'one_of_one', 'metadata', 'single_asset'],
+      project_type: ['generative', 'one_of_one', 'single_asset'],
     },
   },
 } as const

@@ -15,6 +15,7 @@ export const TokenCard = memo(function TokenCard({
   index,
   selectMode,
   selected,
+  current = false,
   breaksRule,
   onOpen,
   onToggle,
@@ -24,6 +25,8 @@ export const TokenCard = memo(function TokenCard({
   index: TraitIndex
   selectMode: boolean
   selected: boolean
+  /** Open in the detail panel. */
+  current?: boolean
   breaksRule: boolean
   onOpen: (id: number) => void
   onToggle: (id: number) => void
@@ -34,12 +37,13 @@ export const TokenCard = memo(function TokenCard({
         type="button"
         onClick={() => (selectMode ? onToggle(token.id) : onOpen(token.id))}
         aria-pressed={selectMode ? selected : undefined}
+        aria-current={current && !selectMode ? 'true' : undefined}
         aria-label={`Token ${token.id}, rank ${token.rank} of ${total}${breaksRule ? ', breaks a rule' : ''}`}
         className={cn(
           'group/token bg-surface-2 focus-visible:ring-ring focus-visible:ring-offset-background block w-full overflow-hidden rounded-lg border text-left shadow-raised outline-none',
           'transition-[transform,box-shadow,border-color] duration-150 ease-out',
           'hover:border-border-strong hover:shadow-lifted hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-offset-2',
-          selected && 'border-primary hover:border-primary',
+          (selected || (current && !selectMode)) && 'border-primary hover:border-primary',
         )}
       >
         <Composite urls={compositeUrls(token.dna, index)} alt="" seed={`token-${token.id}`}>

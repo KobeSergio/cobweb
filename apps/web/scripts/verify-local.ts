@@ -162,7 +162,7 @@ type Collection = {
   status: string
   chain_id: number | null
   contract_address: string | null
-  max_supply: number
+  max_supply: number | null
   updated_at: string
 }
 
@@ -171,7 +171,6 @@ function collectionInput(overrides: Record<string, unknown> = {}): Record<string
     name: uniqueName(),
     symbol: 'VFY',
     project_type: 'generative',
-    max_supply: 100,
     ...overrides,
   }
 }
@@ -195,7 +194,7 @@ async function nameExists(value: string): Promise<boolean> {
   return (data?.length ?? 0) > 0
 }
 
-// Reserves a mint page address through the public RPC, as the given client.
+// Reserves a mint page link through the public RPC, as the given client.
 async function reserve(client: SupabaseClient, collectionId: string, value: string) {
   const { error } = await client.rpc('reserve_slug', { p_collection_id: collectionId, p_slug: value })
   return error as DbError
@@ -266,7 +265,6 @@ async function main(): Promise<void> {
         name: 'No wallet',
         symbol: 'NOW',
         project_type: 'generative',
-        max_supply: 10,
       })
       .select('id')
     return error || !data?.length ? null : 'accepted (1 row written)'
@@ -370,6 +368,7 @@ async function main(): Promise<void> {
     if (created.row.owner_id !== A.userId) return `owner_id ${created.row.owner_id}`
     if (created.row.status !== 'draft') return `status ${created.row.status}`
     if (created.row.slug !== null) return `slug ${created.row.slug}, expected none`
+    if (created.row.max_supply !== null) return `max_supply ${created.row.max_supply}, expected none`
     return null
   })
   if (!created.row) return
@@ -515,6 +514,69 @@ async function main(): Promise<void> {
       .select()
     return expectError(error, CHECK, data)
   })
+  await check("constraints: project_type 'metadata' rejected (the type was removed)", async () => {
+    const input = collectionInput({ project_type: 'metadata' })
+    const { data, error } = await A.client.from('collections').insert(input).select()
+    // 22P02: not a value of the project_type enum.
+    const problem = expectError(error, ['22P02'], data)
+    if (problem) return problem
+    return (await nameExists(input.name as string)) ? 'error returned but a row was stored' : null
+  })
+  await check('supply: A sets max_supply on a draft that has none', async () => {
+    const draft = await insertCollection(A.client)
+    if (!draft.row) return `setup: ${describe(draft.error)}`
+    const { data, error } = await A.client
+      .from('collections')
+      .update({ max_supply: 250 })
+      .eq('id', draft.row.id)
+      .select()
+    if (error) return describe(error)
+    if (data.length !== 1) return `updated ${data.length} rows`
+    return (await stored(draft.row.id))?.max_supply === 250 ? null : 'max_supply not stored'
+  })
+  await check('supply: A can change max_supply again while the collection is a draft', async () => {
+    const draft = await insertCollection(A.client, { max_supply: 10 })
+    if (!draft.row) return `setup: ${describe(draft.error)}`
+    const { error } = await A.client.from('collections').update({ max_supply: 12 }).eq('id', draft.row.id)
+    if (error) return describe(error)
+    return (await stored(draft.row.id))?.max_supply === 12 ? null : 'max_supply not changed'
+  })
+  await check('supply: max_supply over 100,000 rejected on update', async () => {
+    const draft = await insertCollection(A.client)
+    if (!draft.row) return `setup: ${describe(draft.error)}`
+    const { data, error } = await A.client
+      .from('collections')
+      .update({ max_supply: 100_001 })
+      .eq('id', draft.row.id)
+      .select()
+    return expectError(error, CHECK, data)
+  })
+  await check('supply: a collection cannot leave draft without a supply', async () => {
+    const draft = await insertCollection(A.client)
+    if (!draft.row) return `setup: ${describe(draft.error)}`
+    const { error } = await admin.from('collections').update({ status: 'art_locked' }).eq('id', draft.row.id)
+    const problem = expectError(error, CHECK)
+    if (problem) return problem
+    return (await stored(draft.row.id))?.status === 'draft' ? null : 'status changed'
+  })
+  await check('supply: max_supply is refused once art_locked; stored row unchanged', async () => {
+    const target = await insertCollection(A.client)
+    if (!target.row) return `setup: ${describe(target.error)}`
+    const lock = await admin
+      .from('collections')
+      .update({ status: 'art_locked', max_supply: 100 })
+      .eq('id', target.row.id)
+    if (lock.error) return `service role could not lock it: ${describe(lock.error)}`
+    const before = await stored(target.row.id)
+    const { data, error } = await A.client
+      .from('collections')
+      .update({ max_supply: 101 })
+      .eq('id', target.row.id)
+      .select()
+    const problem = expectError(error, CHECK, data)
+    if (problem) return problem
+    return sameStoredRow(before, await stored(target.row.id)) ? null : 'stored row changed'
+  })
 
   // 7. Mint groups -----------------------------------------------------------------------------
   await check("mint_groups: B cannot create a group under A's collection", async () => {
@@ -634,11 +696,11 @@ async function main(): Promise<void> {
     return `${problem}; B adding the same wallet to their own group then gets: ${describe(blocked.error)}`
   })
 
-  // 7b. Mint page address reservations ---------------------------------------------------------
+  // 7b. Mint page link reservations ---------------------------------------------------------
   const DAY_MS = 24 * 3600 * 1000
   const reservedSlug = slug()
   const first = await insertCollection(A.client)
-  await check('reserve_slug: the owner reserves an address; slug_reserved_at is set', async () => {
+  await check('reserve_slug: the owner reserves a link; slug_reserved_at is set', async () => {
     if (!first.row) return `setup: ${describe(first.error)}`
     const error = await reserve(A.client, first.row.id, reservedSlug)
     if (error) return describe(error)
@@ -685,7 +747,7 @@ async function main(): Promise<void> {
       return null
     },
   )
-  await check('reserve_slug: the owner can change their reservation; the old address is freed', async () => {
+  await check('reserve_slug: the owner can change their reservation; the old link is freed', async () => {
     if (!second.row) return 'no collection'
     const next = slug()
     const error = await reserve(B.client, second.row.id, next)
@@ -694,25 +756,44 @@ async function main(): Promise<void> {
     const reuse = await insertCollection(A.client)
     if (!reuse.row) return `setup: ${describe(reuse.error)}`
     const again = await reserve(A.client, reuse.row.id, reservedSlug)
-    return again ? `old address not free: ${describe(again)}` : null
+    return again ? `old link not free: ${describe(again)}` : null
   })
 
   const deployedSlug = slug()
   const shipped = await insertCollection(A.client)
-  await check('reserve_slug: a deployed collection that has an address is refused; P0001', async () => {
+  await check('reserve_slug: a deployed collection can change its link; the old one is freed', async () => {
     if (!shipped.row) return `setup: ${describe(shipped.error)}`
-    const reserved = await reserve(A.client, shipped.row.id, deployedSlug)
+    const oldSlug = slug()
+    const reserved = await reserve(A.client, shipped.row.id, oldSlug)
     if (reserved) return `setup reserve: ${describe(reserved)}`
     const set = await admin
       .from('collections')
-      .update({ status: 'deployed', chain_id: 1, contract_address: '0x' + '5'.repeat(40) })
+      .update({ status: 'deployed', max_supply: 100, chain_id: 1, contract_address: '0x' + '5'.repeat(40) })
       .eq('id', shipped.row.id)
     if (set.error) return `service role could not deploy it: ${describe(set.error)}`
-    const problem = expectError(await reserve(A.client, shipped.row.id, slug()), ['P0001'])
-    if (problem) return problem
-    return (await stored(shipped.row.id))?.slug === deployedSlug ? null : 'address changed'
+    const error = await reserve(A.client, shipped.row.id, deployedSlug)
+    if (error) return describe(error)
+    const row = await stored(shipped.row.id)
+    if (row?.slug !== deployedSlug) return `slug ${row?.slug}`
+    if (row.slug_reserved_at !== null) return `slug_reserved_at ${row.slug_reserved_at}, expected none`
+    const reuse = await insertCollection(B.client)
+    if (!reuse.row) return `setup: ${describe(reuse.error)}`
+    const again = await reserve(B.client, reuse.row.id, oldSlug)
+    return again ? `old link not free: ${describe(again)}` : null
   })
-  await check("reserve_slug: a deployed collection's address is never taken over, however old", async () => {
+  await check('collections: A cannot change the link of a deployed collection directly', async () => {
+    if (!shipped.row) return 'no collection'
+    const before = await stored(shipped.row.id)
+    const { data, error } = await A.client
+      .from('collections')
+      .update({ slug: slug() })
+      .eq('id', shipped.row.id)
+      .select()
+    const problem = expectError(error, PERMISSION, data)
+    if (problem) return problem
+    return sameStoredRow(before, await stored(shipped.row.id)) ? null : 'stored row changed'
+  })
+  await check("reserve_slug: a deployed collection's link is never taken over, however old", async () => {
     if (!shipped.row) return 'no collection'
     await admin
       .from('collections')
@@ -722,20 +803,23 @@ async function main(): Promise<void> {
     if (!other.row) return `setup: ${describe(other.error)}`
     const problem = expectError(await reserve(B.client, other.row.id, deployedSlug), UNIQUE)
     if (problem) return problem
-    return (await stored(shipped.row.id))?.slug === deployedSlug ? null : 'deployed address lost'
+    return (await stored(shipped.row.id))?.slug === deployedSlug ? null : 'deployed link lost'
   })
-  await check('reserve_slug: a deployed collection without an address can set one, once', async () => {
+  await check('reserve_slug: a deployed collection without a link can set one, then change it', async () => {
     const bare = await insertCollection(A.client)
     if (!bare.row) return `setup: ${describe(bare.error)}`
     await admin
       .from('collections')
-      .update({ status: 'deployed', chain_id: 1, contract_address: '0x' + '6'.repeat(40) })
+      .update({ status: 'deployed', max_supply: 100, chain_id: 1, contract_address: '0x' + '6'.repeat(40) })
       .eq('id', bare.row.id)
     const value = slug()
     const error = await reserve(A.client, bare.row.id, value)
     if (error) return describe(error)
     if ((await stored(bare.row.id))?.slug !== value) return 'not stored'
-    return expectError(await reserve(A.client, bare.row.id, slug()), ['P0001'])
+    const next = slug()
+    const changed = await reserve(A.client, bare.row.id, next)
+    if (changed) return `change refused: ${describe(changed)}`
+    return (await stored(bare.row.id))?.slug === next ? null : 'not changed'
   })
   await check('collections: a reservation that lapsed before deploy is released at deploy', async () => {
     const late = await insertCollection(A.client)
@@ -748,7 +832,7 @@ async function main(): Promise<void> {
       .eq('id', late.row.id)
     const set = await admin
       .from('collections')
-      .update({ status: 'deployed', chain_id: 1, contract_address: '0x' + '7'.repeat(40) })
+      .update({ status: 'deployed', max_supply: 100, chain_id: 1, contract_address: '0x' + '7'.repeat(40) })
       .eq('id', late.row.id)
     if (set.error) return `service role could not deploy it: ${describe(set.error)}`
     const row = await stored(late.row.id)
@@ -796,7 +880,10 @@ async function main(): Promise<void> {
   await check('collections: A cannot delete a non-draft', async () => {
     const locked = await insertCollection(A.client)
     if (!locked.row) return `setup: ${describe(locked.error)}`
-    const set = await admin.from('collections').update({ status: 'art_locked' }).eq('id', locked.row.id)
+    const set = await admin
+      .from('collections')
+      .update({ status: 'art_locked', max_supply: 100 })
+      .eq('id', locked.row.id)
     if (set.error) return `service role could not set status: ${describe(set.error)}`
     const { data, error } = await A.client.from('collections').delete().eq('id', locked.row.id).select()
     const problem = expectNothing(error, data)
@@ -806,7 +893,10 @@ async function main(): Promise<void> {
   await check('collections: A cannot move a non-draft back to draft (and then delete it)', async () => {
     const locked = await insertCollection(A.client)
     if (!locked.row) return `setup: ${describe(locked.error)}`
-    const set = await admin.from('collections').update({ status: 'art_locked' }).eq('id', locked.row.id)
+    const set = await admin
+      .from('collections')
+      .update({ status: 'art_locked', max_supply: 100 })
+      .eq('id', locked.row.id)
     if (set.error) return `service role could not set status: ${describe(set.error)}`
     const reset = await A.client
       .from('collections')
@@ -825,7 +915,7 @@ async function main(): Promise<void> {
     if (deployed.row) {
       await admin
         .from('collections')
-        .update({ status: 'deployed', chain_id: 1, contract_address: '0x' + '4'.repeat(40) })
+        .update({ status: 'deployed', max_supply: 100, chain_id: 1, contract_address: '0x' + '4'.repeat(40) })
         .eq('id', deployed.row.id)
       const upd = await A.client
         .from('collections')

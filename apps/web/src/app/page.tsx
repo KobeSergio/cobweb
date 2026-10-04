@@ -24,7 +24,8 @@ function sampleArt(): string[] {
 
 /**
  * The sign-in screen. The legacy split: the invitation on the left, a panel on the right. The
- * right panel hangs sample artwork as a gallery wall and lists the five stages of a launch.
+ * right panel hangs sample artwork as a gallery wall and lists the four build stages of a launch,
+ * closing on managing the drop.
  */
 export default async function SignInPage() {
   if (await getSessionUser()) redirect('/collections')
@@ -96,7 +97,10 @@ export default async function SignInPage() {
               {STEPS.map((step, index) => (
                 <li key={step.slug} className="relative flex gap-4 pb-5 last:pb-0">
                   {index < STEPS.length - 1 && (
-                    <span aria-hidden="true" className="absolute top-8 bottom-1 left-3.5 w-px bg-border-strong" />
+                    <span
+                      aria-hidden="true"
+                      className="absolute top-8 bottom-1 left-3.5 w-px bg-border-strong"
+                    />
                   )}
                   <span
                     aria-hidden="true"
@@ -111,11 +115,16 @@ export default async function SignInPage() {
                   </span>
                   <div className="min-w-0 pt-0.5">
                     <h3 className="text-sm font-semibold">{step.name}</h3>
-                    <p className="mt-0.5 text-[0.8125rem] leading-snug text-muted-foreground">{step.summary}</p>
+                    <p className="mt-0.5 text-[0.8125rem] leading-snug text-muted-foreground">
+                      {step.summary}
+                    </p>
                   </div>
                 </li>
               ))}
             </ol>
+            <p className="mt-5 border-t pt-4 text-[0.8125rem] leading-snug text-muted-foreground">
+              Then manage your drop: phases, whitelists, the mint page, reveal and airdrops.
+            </p>
           </div>
         </RiseIn>
       </section>

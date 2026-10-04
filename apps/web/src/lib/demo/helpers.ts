@@ -72,3 +72,11 @@ export function sampleHex(seed: number, bytes: number): `0x${string}` {
 
 export const sampleAddress = (seed: number): Address => sampleHex(seed, 20)
 export const sampleTxHash = (seed: number): Hex => sampleHex(seed + 100_000, 32)
+
+/**
+ * The supply a sample-backed screen should draw against. A real collection has no supply until
+ * its art sets one; in sample mode the sample collection's supply stands in so counts stay sane.
+ */
+export function sampleSupply(maxSupply: number | null, fallback: number): number {
+  return maxSupply ?? (process.env.NEXT_PUBLIC_DEMO_DATA === '1' ? fallback : 0)
+}

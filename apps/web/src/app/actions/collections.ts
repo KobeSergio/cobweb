@@ -9,7 +9,7 @@ import { createClient } from '@/lib/supabase/server'
 export type CreateCollectionState = {
   /** A message for the whole form, when the problem is not one field's. */
   formError?: string
-  fieldErrors?: Partial<Record<'name' | 'symbol' | 'projectType' | 'maxSupply', string>>
+  fieldErrors?: Partial<Record<'name' | 'symbol' | 'projectType', string>>
 }
 
 /** A form field as text. A missing field becomes '', so validation gives its own message. */
@@ -19,8 +19,12 @@ function text(formData: FormData, name: string): string {
 }
 
 /**
- * Creates a draft collection for the signed-in creator and opens it.
- * The owner is set by the database from the session, never taken from the form.
+ * Creates a draft collection for the signed-in creator and opens its art. The owner is set by the
+ * database from the session, never taken from the form. There is no supply yet (`max_supply` is
+ * null): it is set at Generate or from the uploads, through `setCollectionSupply`.
+ *
+ * Where each type lands (`stageHref(id, 'art', type)`): Generative on Layers, which opens as the
+ * folder upload while there are no layers; 1/1s and Single asset on the asset upload.
  */
 export async function createCollection(
   _previous: CreateCollectionState,
@@ -33,7 +37,6 @@ export async function createCollection(
     name: text(formData, 'name'),
     symbol: text(formData, 'symbol'),
     projectType: text(formData, 'projectType'),
-    maxSupply: text(formData, 'maxSupply'),
   })
   if (!parsed.success) {
     // Keep the first message for each field.
@@ -52,13 +55,11 @@ export async function createCollection(
       name: parsed.data.name,
       symbol: parsed.data.symbol,
       project_type: parsed.data.projectType,
-      max_supply: parsed.data.maxSupply,
     })
     .select('id')
     .single()
 
   if (error) return { formError: 'The collection could not be created. Try again.' }
 
-  // Straight into the art: the first Art sub-step for this project type.
   redirect(stageHref(data.id, 'art', parsed.data.projectType))
 }

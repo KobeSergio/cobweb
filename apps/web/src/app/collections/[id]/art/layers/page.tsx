@@ -1,14 +1,17 @@
 import { redirect } from 'next/navigation'
+import { FinishLaterAction } from '@/components/art/finish-later'
 import { LayersScreen } from '@/components/art/layers-screen'
 import { StagePage } from '@/components/shell/stage-page'
 import { requireOwnedCollection } from '@/lib/auth'
-import { DEMO_LAYERS, DEMO_TRAIT_COUNTS } from '@/lib/demo'
+import { DEMO_COLLECTIONS, DEMO_LAYERS, DEMO_TRAIT_COUNTS } from '@/lib/demo'
 import { artSubSteps, hasArtSubStep, stageHref } from '@/lib/steps'
 import { searchParam, stageContext, type CollectionParams, type SearchParams } from '../../_lib/stage'
 
 /**
- * Art, step 1 (generative): layers and rarity. Sample data until the art tables exist. In sample
- * mode `?art=deferred` shows the deferred-art scenario.
+ * Art, step 1 (generative): layers and rarity. A new generative collection lands here, and with no
+ * layers it opens as the folder upload. Sample layers in sample-data mode (`?layers=empty` shows the
+ * folder upload there; `?art=deferred` the deferred-art scenario); a real collection starts empty
+ * until the art tables exist.
  */
 export default async function Page({
   params,
@@ -24,6 +27,7 @@ export default async function Page({
   const ctx = stageContext(collection, 'art', 'art/layers', { art: await searchParam(searchParams, 'art') })
   const subs = artSubSteps(collection.project_type)
   const index = subs.findIndex((sub) => sub.slug === 'layers')
+  const sample = ctx.demo && (await searchParam(searchParams, 'layers')) !== 'empty'
 
   return (
     <StagePage
@@ -31,16 +35,21 @@ export default async function Page({
       title="Layers"
       description={subs[index]!.summary}
       sampleNotice={ctx.sampleNotice}
+      actions={
+        ctx.demo && !ctx.readOnly && !ctx.artDeferred ? (
+          <FinishLaterAction collectionId={collection.id} />
+        ) : undefined
+      }
       width="wide"
       bodyHasFooter
     >
       <LayersScreen
         collection={collection}
-        layers={DEMO_LAYERS}
-        traitCounts={DEMO_TRAIT_COUNTS}
+        collections={sample ? DEMO_COLLECTIONS : []}
+        layers={sample ? DEMO_LAYERS : []}
+        traitCounts={sample ? DEMO_TRAIT_COUNTS : {}}
         readOnly={ctx.readOnly}
         artDeferred={ctx.artDeferred}
-        canDefer={ctx.demo}
       />
     </StagePage>
   )

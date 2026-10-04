@@ -14,53 +14,81 @@ import {
 } from '@cobweb/ui/components/empty'
 import { ToggleGroup, ToggleGroupItem } from '@cobweb/ui/components/toggle-group'
 import type { Tables } from '@/lib/database.types'
-import type { ArtRule, Layer, RuleConflict, RuleKind } from '@/lib/demo'
+import type { ArtRule, Collection, Layer, RuleConflict, RuleKind } from '@/lib/demo'
 import { flowNeighbours } from '@/lib/steps'
 import { StageFooter } from '@/components/shell/stage-footer'
+import { CollectionSwitcher } from './collections/collection-switcher'
+import { useCollections } from './collections/use-collections'
 import { ConfirmDialog, type ConfirmRequest } from './confirm-dialog'
+import { DeferredArtNotice } from './finish-later'
 import { ReadOnlyNotice } from './read-only-notice'
-import { ConflictsPanel } from './rules/conflicts-panel'
+import { ConflictWarning } from './rules/conflict-warning'
 import { RuleDialog, type RuleDialogState } from './rules/rule-dialog'
 import { RuleRow } from './rules/rule-row'
 import { useRulesEditor } from './rules/use-rules-editor'
+import { collectionOfTrait, rulesOf } from './state/collection-edits'
+import { layersOf } from './state/layer-edits'
 import { RULE_KINDS, ruleSentence } from './state/rule-logic'
 
 export type RulesScreenProps = {
   collection: Tables<'collections'>
+  /** The project's collections; each has its own rules, which only name its own traits. */
+  collections: Collection[]
+  /** Every collection's layers. */
   layers: Layer[]
   /** Rules of the three kinds: doesn't mix with, always pairs with, must pair with. */
   rules: ArtRule[]
   /** What the analyser reports; at least one in the sample. */
   conflicts: RuleConflict[]
   readOnly: boolean
+  /** "Finish the art later" is on (MASTER_PLAN, Flow: pre-reveal): the contract starts on a placeholder. */
+  artDeferred?: boolean
 }
 
 type Filter = 'all' | RuleKind
 
 /**
- * Art, step 2 (generative): add, edit and delete trait-pairing rules, with a duplicate check and
- * the conflict analyser surfacing contradictions before generation.
+ * Art, step 2 (generative): add, edit and delete trait-pairing rules of the collection shown, with
+ * a duplicate check. The conflict analyser's findings sit in a red chip beside Continue.
  */
 export function RulesScreen({
   collection,
+  collections: seedCollections,
   layers,
   rules: seedRules,
   conflicts: seedConflicts,
   readOnly,
+  artDeferred = false,
 }: RulesScreenProps) {
+  const collections = useCollections(collection.id, collection.name, {
+    collections: seedCollections,
+    layers,
+    rules: seedRules,
+  })
   const editor = useRulesEditor(collection.id, layers, seedRules, seedConflicts)
-  const { rules, conflicts, index } = editor
+  const { conflicts, index } = editor
+  const { activeId } = collections
+  const rules = rulesOf(editor.rules, editor.layers, activeId)
   const [filter, setFilter] = useState<Filter>('all')
   const [dialog, setDialog] = useState<RuleDialogState | null>(null)
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
   const [highlighted, setHighlighted] = useState<string[]>([])
   const timer = useRef<number | undefined>(undefined)
   const { previous, next } = flowNeighbours(collection.id, collection.project_type, 'art/rules')
+  const deferredNext = artDeferred && next ? { ...next, href: `${next.href}?art=deferred` } : next
 
   const inConflict = new Set(conflicts.flatMap((conflict) => conflict.ruleIds))
   const shown = filter === 'all' ? rules : rules.filter((rule) => rule.kind === filter)
 
+  const collectionOfRule = (ruleId: string) => {
+    const rule = editor.rules.find((candidate) => candidate.id === ruleId)
+    return rule ? collectionOfTrait(editor.layers, rule.traitId) : undefined
+  }
+
   const highlight = (ids: string[]) => {
+    // A conflict's rules may be in another collection: show that one first.
+    const owner = ids[0] ? collectionOfRule(ids[0]) : undefined
+    if (owner && owner !== activeId) collections.select(owner)
     setFilter('all')
     setHighlighted(ids)
     window.clearTimeout(timer.current)
@@ -93,6 +121,8 @@ export function RulesScreen({
   return (
     <div className="flex flex-1 flex-col gap-6">
       {readOnly && <ReadOnlyNotice what="the rules" />}
+      {artDeferred && <DeferredArtNotice collectionId={collection.id} />}
+      <CollectionSwitcher control={collections} readOnly={readOnly} />
 
       {rules.length === 0 ? (
         <Empty className="bg-card border py-14">
@@ -100,7 +130,11 @@ export function RulesScreen({
             <EmptyMedia variant="icon">
               <GitMergeIcon />
             </EmptyMedia>
-            <EmptyTitle>No rules yet</EmptyTitle>
+            <EmptyTitle>
+              {collections.collections.length > 1
+                ? `No rules in ${collections.active?.name} yet`
+                : 'No rules yet'}
+            </EmptyTitle>
             <EmptyDescription>
               Without rules, any trait can appear with any other. Add a rule when some traits should never
               meet, or should always come together. Rules are optional.
@@ -125,8 +159,6 @@ export function RulesScreen({
         </Empty>
       ) : (
         <>
-          <ConflictsPanel conflicts={conflicts} ruleCount={rules.length} onShow={highlight} />
-
           <section aria-labelledby="rules-heading" className="bg-card rounded-xl border shadow-raised">
             <header className="flex flex-wrap items-center justify-between gap-4 border-b px-6 py-4">
               <h3 id="rules-heading" className="text-heading flex items-baseline gap-2">
@@ -185,9 +217,9 @@ export function RulesScreen({
       <RuleDialog
         state={dialog}
         onClose={() => setDialog(null)}
-        layers={editor.layers}
+        layers={layersOf(editor.layers, activeId)}
         index={index}
-        rules={rules}
+        rules={editor.rules}
         onSave={(draft, id) => {
           if (id) {
             editor.edit(id, draft)
@@ -200,7 +232,23 @@ export function RulesScreen({
         }}
       />
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
-      <StageFooter previous={previous} next={next} />
+      <StageFooter
+        previous={artDeferred && previous ? { ...previous, href: `${previous.href}?art=deferred` } : previous}
+        // While a conflict exists, Continue opens the conflict dialog first (in `ConflictWarning`).
+        next={conflicts.length > 0 ? undefined : deferredNext}
+        extra={
+          <ConflictWarning
+            conflicts={conflicts}
+            next={deferredNext}
+            whereOf={(conflict) => {
+              if (collections.collections.length < 2) return undefined
+              const owner = conflict.ruleIds[0] ? collectionOfRule(conflict.ruleIds[0]) : undefined
+              return collections.collections.find((c) => c.id === owner)?.name
+            }}
+            onShow={highlight}
+          />
+        }
+      />
     </div>
   )
 }

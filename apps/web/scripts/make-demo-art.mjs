@@ -17,13 +17,17 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  DEMO_COLLECTIONS,
   DEMO_LAYERS,
   DEMO_PREVIEW_COUNT,
   DEMO_RULES,
-  DEMO_TOKEN_COUNT,
-  generateTokens,
+  generateCollections,
   slugify,
 } from '../src/lib/demo/art.ts'
+
+// The first collection's layers carry the drawings; the other collections reuse its images by name,
+// and the previewed tokens (1 to 24) all belong to it.
+const ART_LAYERS = DEMO_LAYERS.filter((layer) => layer.collectionId === DEMO_COLLECTIONS[0].id)
 
 const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'demo')
 const SIZE = 1000
@@ -367,7 +371,7 @@ const DRAW = { background, body, belly, eyes, beak, headwear, accessory }
 
 /** The inner markup for one trait, or '' for a blank. */
 function traitMarkup(traitId) {
-  for (const layer of DEMO_LAYERS) {
+  for (const layer of ART_LAYERS) {
     const trait = layer.traits.find((t) => t.id === traitId)
     if (!trait) continue
     if (trait.blank) return ''
@@ -383,7 +387,7 @@ function traitMarkup(traitId) {
 rmSync(OUT, { recursive: true, force: true })
 
 let layerFiles = 0
-for (const layer of DEMO_LAYERS) {
+for (const layer of ART_LAYERS) {
   for (const trait of layer.traits) {
     if (trait.blank) continue
     const file = join(OUT, 'layers', layer.id, `${slugify(trait.name)}.svg`)
@@ -393,7 +397,7 @@ for (const layer of DEMO_LAYERS) {
   }
 }
 
-const tokens = generateTokens(DEMO_LAYERS, DEMO_RULES, DEMO_TOKEN_COUNT)
+const tokens = generateCollections(DEMO_LAYERS, DEMO_RULES, DEMO_COLLECTIONS)
 mkdirSync(join(OUT, 'tokens'), { recursive: true })
 for (const token of tokens.slice(0, DEMO_PREVIEW_COUNT)) {
   writeFileSync(join(OUT, 'tokens', `${token.id}.svg`), svg(token.dna.map(traitMarkup).join('')))

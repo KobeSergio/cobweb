@@ -8,7 +8,7 @@ import { stageContext, type CollectionParams } from '../_lib/stage'
 export default async function DetailsPage({ params }: { params: CollectionParams }) {
   const { id } = await params
   const collection = await requireOwnedCollection(id)
-  const { eyebrow, next } = stageContext(collection, 'details', 'details')
+  const { eyebrow, next, readOnly } = stageContext(collection, 'details', 'details')
 
   return (
     <StagePage
@@ -18,7 +18,7 @@ export default async function DetailsPage({ params }: { params: CollectionParams
       width="narrow"
       bodyHasFooter
     >
-      <DetailsForm collection={collection} next={next} />
+      <DetailsForm collection={collection} next={next} readOnly={readOnly} />
     </StagePage>
   )
 }

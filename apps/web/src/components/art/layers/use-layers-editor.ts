@@ -12,6 +12,7 @@ import {
   deleteLayer,
   deleteTrait,
   evenOut,
+  layersOf,
   moveLayer,
   pruneRules,
   remapDna,
@@ -30,12 +31,19 @@ function plural(count: number, one: string, many = `${one}s`) {
 }
 
 /**
- * Everything the Layers screen does to the project. Edits that would invalidate the generated set
- * (adding or deleting a layer, deleting a trait that tokens use) ask first and then clear the set.
+ * Everything the Layers screen does to the project, on the layers of the collection being shown
+ * (`activeCollectionId`). Edits that would invalidate the generated set (adding or deleting a
+ * layer, deleting a trait that tokens use) ask first and then clear the set.
  */
-export function useLayersEditor(collectionId: string, seedLayers: Layer[], seedCounts: TraitCounts) {
+export function useLayersEditor(
+  collectionId: string,
+  seedLayers: Layer[],
+  seedCounts: TraitCounts,
+  activeCollectionId: string,
+) {
   const [project, update] = useArtProject(collectionId, { layers: seedLayers })
-  const layers = project.layers ?? seedLayers
+  const allLayers = project.layers ?? seedLayers
+  const layers = useMemo(() => layersOf(allLayers, activeCollectionId), [allLayers, activeCollectionId])
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
   const [naming, setNaming] = useState<NameRequest | null>(null)
 
@@ -44,12 +52,16 @@ export function useLayersEditor(collectionId: string, seedLayers: Layer[], seedC
     () => (project.tokens === undefined ? seedCounts : project.tokens ? countTraits(project.tokens) : {}),
     [project.tokens, seedCounts],
   )
+  // Tokens in the whole project: every token has one trait in each layer of its collection, so the
+  // fullest layer of each collection counts that collection's tokens.
   const generated = useMemo(() => {
     if (project.tokens !== undefined) return project.tokens?.length ?? 0
-    return Math.max(
-      0,
-      ...seedLayers.map((layer) => layer.traits.reduce((n, t) => n + (counts[t.id] ?? 0), 0)),
-    )
+    const perCollection = new Map<string, number>()
+    for (const layer of seedLayers) {
+      const used = layer.traits.reduce((n, t) => n + (counts[t.id] ?? 0), 0)
+      perCollection.set(layer.collectionId, Math.max(perCollection.get(layer.collectionId) ?? 0, used))
+    }
+    return [...perCollection.values()].reduce((sum, n) => sum + n, 0)
   }, [project.tokens, seedLayers, counts])
 
   const clearsSet =
@@ -82,6 +94,7 @@ export function useLayersEditor(collectionId: string, seedLayers: Layer[], seedC
     project.rules ? rulesTouching(project.rules, new Set(traitIds)) : 0
 
   return {
+    /** The shown collection's layers, bottom first. */
     layers,
     /** Known once the Rules or Generate screen has loaded them this session. */
     rules: project.rules ?? [],
@@ -97,7 +110,7 @@ export function useLayersEditor(collectionId: string, seedLayers: Layer[], seedC
     moveLayer: (from: number, to: number) =>
       apply((p) => {
         const before = p.layers ?? seedLayers
-        const after = moveLayer(before, from, to)
+        const after = moveLayer(before, activeCollectionId, from, to)
         return { ...p, layers: after, tokens: p.tokens ? remapDna(p.tokens, before, after) : p.tokens }
       }),
 
@@ -113,7 +126,7 @@ export function useLayersEditor(collectionId: string, seedLayers: Layer[], seedC
         onSubmit: (name) => {
           let id = ''
           structural((current) => {
-            const result = addLayer(current, name)
+            const result = addLayer(current, activeCollectionId, name)
             id = result.id
             return result.layers
           }, generated > 0)

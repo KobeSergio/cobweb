@@ -81,7 +81,7 @@ export type AssetCardActions = {
   /** Show the editions field (1/1s). */
   editions: boolean
   readOnly: boolean
-  /** Attributes and removal are edited here. Metadata sets come from their JSON files instead. */
+  /** Attributes and removal are edited here. */
   editable: boolean
   onQuantity: (key: string, quantity: number) => void
   onAttributes: (key: string, attributes: Attribute[]) => void

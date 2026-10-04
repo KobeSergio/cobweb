@@ -1,8 +1,7 @@
 import type { Metadata } from 'next'
 import { CornerWeb } from '@cobweb/ui/components/artwork'
-import { Stagger, StaggerItem } from '@cobweb/ui/components/motion'
 import { PageHeader } from '@cobweb/ui/components/page-header'
-import { CollectionCard } from '@/components/collections/collection-card'
+import { CollectionsBrowser } from '@/components/collections/collections-browser'
 import { CreateCollectionDialog } from '@/components/collections/create-collection-dialog'
 import { DashboardTopbar } from '@/components/shell/dashboard-topbar'
 import { requireUser } from '@/lib/auth'
@@ -44,13 +43,7 @@ export default async function CollectionsPage() {
             }
             actions={<CreateCollectionDialog />}
           />
-          <Stagger className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3 3xl:grid-cols-4">
-            {collections.map((collection) => (
-              <StaggerItem key={collection.id}>
-                <CollectionCard collection={collection} />
-              </StaggerItem>
-            ))}
-          </Stagger>
+          <CollectionsBrowser collections={collections} />
         </div>
       )}
     </>
@@ -59,7 +52,8 @@ export default async function CollectionsPage() {
 
 /**
  * First visit: an empty gallery wall. Three empty frames hang behind the invitation to start,
- * and the stages of a launch sit underneath so the creator knows what follows.
+ * and the four build stages of a launch sit underneath so the creator knows what follows, then
+ * managing the drop.
  */
 function EmptyDashboard() {
   return (
@@ -83,22 +77,24 @@ function EmptyDashboard() {
       <div className="relative z-10 mt-40 flex max-w-xl flex-col items-center text-center">
         <h1 className="text-display">Your first collection starts here</h1>
         <p className="mt-4 max-w-md text-[0.9375rem] leading-relaxed text-muted-foreground">
-          Give it a name and a type. You will build the art, deploy the contract and open the mint from
-          there.
+          Give it a name and a type. You will build the art, deploy the contract and open the mint from there.
         </p>
         <div className="mt-8">
           <CreateCollectionDialog variant="empty" />
         </div>
       </div>
 
-      <ol className="relative z-10 mt-16 grid w-full max-w-4xl grid-cols-5 gap-3">
+      <ol className="relative z-10 mt-16 grid w-full max-w-3xl grid-cols-4 gap-3">
         {STEPS.map((step, index) => (
           <li key={step.slug} className="rounded-lg border bg-card/60 px-4 py-3.5">
-            <span className="numeric text-xs text-muted-foreground">{String(index + 1).padStart(2, '0')}</span>
+            <span className="numeric text-xs text-muted-foreground">
+              {String(index + 1).padStart(2, '0')}
+            </span>
             <p className="mt-1 text-sm font-medium">{step.name}</p>
           </li>
         ))}
       </ol>
+      <p className="relative z-10 mt-4 text-sm text-muted-foreground">Then manage your drop.</p>
     </div>
   )
 }
