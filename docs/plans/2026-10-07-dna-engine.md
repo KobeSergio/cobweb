@@ -2334,7 +2334,10 @@ git commit -m "Build the sample tokens with the DNA engine"
 - Modify: `apps/web/src/components/art/state/generation.ts`
 - Modify: `apps/web/src/components/art/state/token-logic.ts`
 - Modify: `apps/web/src/components/art/state/layer-edits.ts` (`pruneRules`, `rulesTouching` become re-exports)
-- Delete: `apps/web/src/components/art/state/generation.test.ts`, `apps/web/src/components/art/state/rule-logic.test.ts` (covered by the package tests from Tasks 3 and 5)
+- Modify: `apps/web/src/components/art/generate/use-generator.ts` (one line: the set context carries `layers`)
+- Modify: `apps/web/src/components/art/state/generation.test.ts` (trimmed to the app-side cases)
+- Create: `apps/web/src/components/art/state/token-logic.test.ts`
+- Delete: `apps/web/src/components/art/state/rule-logic.test.ts` (covered by the package tests from Task 3)
 
 **Interfaces:**
 
@@ -2426,8 +2429,12 @@ export { dnaKey, MAX_COLLECTION_SIZE, newSeed } from '@cobweb/dna'
 
 export type Draft = Omit<GeneratedToken, 'rank' | 'previewUrl'>
 
-/** What names and ranks depend on: the token name chosen at Generate and the current layers. */
-export type SetContext = { tokenName: string; index: TraitIndex }
+/**
+ * What names and ranks depend on: the token name chosen at Generate and the current layers. `layers`
+ * is the project's layer list; when given, trait changes check layer membership against it rather
+ * than rebuilding it from the index (which cannot see a layer with no traits).
+ */
+export type SetContext = { tokenName: string; index: TraitIndex; layers?: Layer[] }
 
 /** Characters the legacy tool refused in a token name: `#` marks the id, quotes broke its metadata. */
 const NAME_FORBIDDEN = /[#'"`]/
@@ -2554,7 +2561,7 @@ export {
 
 export type ChangeOutcome = { ok: true; tokens: GeneratedToken[] } | { ok: false; reason: string }
 
-/** The layers behind an index, in list order. */
+/** The layers behind an index, in list order. A fallback: a layer with no traits is not in the index. */
 function layersOfIndex(index: SetContext['index']): EngineLayer[] {
   const byId = new Map<string, { layer: EngineLayer; at: number }>()
   for (const entry of index.values()) byId.set(entry.layer.id, { layer: entry.layer, at: entry.layerIndex })
@@ -2573,7 +2580,8 @@ export function changeTrait(
   rules: ArtRule[],
   ctx: SetContext,
 ): ChangeOutcome {
-  const result = changeTraitWith(tokens, tokenId, layerIndex, traitId, { layers: layersOfIndex(ctx.index), rules }, ctx.index)
+  const layers = ctx.layers ?? layersOfIndex(ctx.index)
+  const result = changeTraitWith(tokens, tokenId, layerIndex, traitId, { layers, rules }, ctx.index)
   return result.ok ? { ok: true, tokens: finalise(result.tokens, ctx) } : result
 }
 
@@ -2630,12 +2638,56 @@ export function matchesSearch(token: GeneratedToken, search: string, index: SetC
 }
 ```
 
-- [ ] **Step 6: Delete the moved tests, run everything**
+- [ ] **Step 6: Trim the moved tests, keep the app-side ones, run everything**
 
-Delete `generation.test.ts` and `rule-logic.test.ts` under `components/art/state/`. Then:
+Delete `rule-logic.test.ts` under `components/art/state/` (the analyser tests live in the package now). Replace `generation.test.ts` with only the three app-side cases, taken from its current content: the token naming across collections ("Night Owls #1", "#601" in the owlets collection, the description on every token), `tokenNameProblem` refusing `#`, quotes and backticks, and the short-set wording (`/Only 3 of 4 tokens/` and `/10,000 tries/`) on the two-layer tiny project. Drop the cap and deleted-layer cases, which the package covers.
+
+In `apps/web/src/components/art/generate/use-generator.ts` change `const ctx: SetContext = { tokenName, index }` to `const ctx: SetContext = { tokenName, index, layers }` (the hook already holds `layers`). Add `apps/web/src/components/art/state/token-logic.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest'
+import { DEMO_LAYERS } from '@/lib/demo'
+import type { Layer } from '@/lib/demo'
+import { buildTraitIndex } from '../lib/trait-index'
+import { layersOf } from './layer-edits'
+import { changeTrait } from './token-logic'
+
+describe('changeTrait with an empty layer in the stack', () => {
+  const owls = layersOf(DEMO_LAYERS, 'owls')
+  // An empty layer under the top one: it has no traits, so the trait index knows nothing about it.
+  const empty: Layer = { id: 'empty', collectionId: 'owls', name: 'Empty', position: owls.length - 1, traits: [] }
+  const layers = [...owls.slice(0, -1), empty, { ...owls[owls.length - 1]!, position: owls.length }]
+  const top = layers[layers.length - 1]!
+  const token = {
+    id: 1,
+    collectionId: 'owls',
+    dna: layers.map((layer) => layer.traits[0]?.id ?? ''),
+    name: 'Owl #1',
+    rank: 1,
+    previewUrl: null,
+  }
+  const other = top.traits.find((t) => t.id !== token.dna[layers.length - 1])!
+
+  it('still accepts a change on the top layer when the context carries the real layers', () => {
+    const ctx = { tokenName: 'Owl', index: buildTraitIndex(layers), layers }
+    const result = changeTrait([token], 1, layers.length - 1, other.id, [], ctx)
+    expect(result.ok).toBe(true)
+  })
+
+  it('cannot tell without them: the rebuilt list skips the empty layer', () => {
+    const ctx = { tokenName: 'Owl', index: buildTraitIndex(layers) }
+    expect(changeTrait([token], 1, layers.length - 1, other.id, [], ctx)).toEqual({
+      ok: false,
+      reason: 'That trait belongs to another layer.',
+    })
+  })
+})
+```
+
+The second case documents the fallback's limit; the first is the behaviour the screens get, since the hook passes `layers`. Then:
 
 Run: `pnpm typecheck && pnpm lint && pnpm test`
-Expected: PASS at the root (web, dna, ui, shared). Web test count drops by the two deleted files and the `art.test.ts` cases; the pin from Task 9 step 1 passes, proving the sample DNA did not move. If `layer-edits.test.ts` fails on `pruneRules`, the re-export is wrong; fix the export, not the test.
+Expected: PASS at the root (web, dna, ui, shared). The pin from Task 9 step 1 passes, proving the sample DNA did not move. If `layer-edits.test.ts` fails on `pruneRules`, the re-export is wrong; fix the export, not the test.
 
 - [ ] **Step 7: Walk the screens once**
 
