@@ -1984,10 +1984,12 @@ describe('validateTokenList', () => {
   })
 
   it('lists at most 20 ids and says how many more', () => {
-    const many = good.map((t) => ({ ...t, id: t.id + 100 }))
-    const result = validateTokenList(project, many, strict)
-    const ids = problem(result, 'ids')!
-    expect(ids.tokenIds!.length).toBeLessThanOrEqual(20)
+    // Thirty tokens of a collection the project does not have, numbered on from the good set.
+    const ghosts = Array.from({ length: 30 }, (_, i) => ({ id: good.length + i + 1, collectionId: 'ghosts', dna: ['x'] }))
+    const result = validateTokenList(project, [...good, ...ghosts], strict)
+    const found = problem(result, 'collection')!
+    expect(found.tokenIds).toHaveLength(20)
+    expect(found.message).toMatch(/and 10 more/)
   })
 
   it('does not mutate its input', () => {
