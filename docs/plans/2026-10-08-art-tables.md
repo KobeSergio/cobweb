@@ -728,7 +728,11 @@ begin
   ) then
     raise exception 'The image is not a layer image of this project.' using errcode = 'check_violation';
   end if;
+  -- Only server code can change layer_id (it is not in the client grant); the branch still guards it.
   if tg_op = 'INSERT' or new.layer_id <> old.layer_id then
+    -- Serialise inserts into one layer for this transaction, so two concurrent inserts at 499
+    -- cannot both pass the count.
+    perform pg_advisory_xact_lock(hashtextextended(new.layer_id::text, 0));
     if (select count(*) from public.traits t where t.layer_id = new.layer_id) >= 500 then
       raise exception 'A layer can have at most 500 traits.' using errcode = 'check_violation';
     end if;
@@ -837,6 +841,7 @@ create table public.at_least_one (
 );
 
 create index at_least_one_collection_id_idx on public.at_least_one (collection_id);
+create index at_least_one_art_collection_id_idx on public.at_least_one (art_collection_id);
 
 create function public.at_least_one_guard()
 returns trigger
