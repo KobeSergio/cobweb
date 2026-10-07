@@ -191,7 +191,7 @@ async function artFoundation(A: Creator, B: Creator): Promise<void> {
     const first = uploadInput(cid)
     const a = await recordUpload(A.client, cid, first)
     if (a.error) return `setup: ${describe(a.error)}`
-    const { id, error } = await recordUpload(A.client, cid, { ...first, storage_key: `${first.storage_key}-again` })
+    const { id, error } = await recordUpload(A.client, cid, { ...first, storage_key: `${(first.storage_key as string).replace(/\.png$/, '')}-again.png` })
     return expectError(error, UNIQUE, id ? [id] : null)
   })
   await check('uploads: A cannot change the stored object description', async () => {
