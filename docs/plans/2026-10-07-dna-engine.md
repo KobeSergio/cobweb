@@ -1474,7 +1474,7 @@ git commit -m "Add seeded generation, re-rolls and fill to the DNA engine"
 **Interfaces:**
 
 - Consumes: `brokenRule`, `activeProjectRules`, `constraintsOf` (Task 3); `TraitIndex`, `layersOf` (Task 2); `seededRandom`, `shuffle` (Task 1).
-- Produces: `ChangeOutcome<T> = { ok: true; tokens: T[] } | { ok: false; reason: string }`, `changeTrait<T extends TokenCore>(tokens: T[], tokenId: number, layerIndex: number, traitId: string, project: Pick<Project, 'layers' | 'rules' | 'atLeastOne'>, index: TraitIndex): ChangeOutcome<T>`, `swapIds<T>(tokens: T[], a: number, b: number): T[]`, `deleteTokens<T>(tokens: T[], ids: ReadonlySet<number>): T[]` (closes the gaps so ids stay 1 to N), `shuffleIds<T>(tokens: T[], ids: ReadonlySet<number>, seed: number): T[]`.
+- Produces: `ChangeOutcome<T> = { ok: true; tokens: T[] } | { ok: false; reason: string }`, `changeTrait<T extends TokenCore>(tokens: T[], tokenId: number, layerIndex: number, traitId: string, project: Pick<Project, 'layers' | 'rules' | 'atLeastOne'>, index: TraitIndex): ChangeOutcome<T>` (refuses a trait that is not in the collection's layer at `layerIndex`, which also covers an out-of-range index), `swapIds<T>(tokens: T[], a: number, b: number): T[]`, `deleteTokens<T>(tokens: T[], ids: ReadonlySet<number>): T[]` (closes the gaps so ids stay 1 to N), `shuffleIds<T>(tokens: T[], ids: ReadonlySet<number>, seed: number): T[]`.
 
 - [ ] **Step 1: Failing tests** (append to `curate.test.ts`; put the two new `import` lines in the import block at the top, not mid-file)
 
@@ -1519,9 +1519,13 @@ describe('changeTrait', () => {
     // Changing only the bypassed layer is always fine: the key does not see it.
     expect(changeTrait(hand, 1, 0, 'bg-sand', project, index).ok).toBe(true)
   })
-  it('explains a missing token or trait', () => {
+  it('explains a missing token or trait, and refuses a trait from another layer or collection', () => {
     expect(changeTrait(hand, 99, 0, 'bg-sand', project, index)).toEqual({ ok: false, reason: 'This token no longer exists.' })
     expect(changeTrait(hand, 1, 0, 'nope', project, index)).toEqual({ ok: false, reason: 'That trait no longer exists.' })
+    const elsewhere = { ok: false, reason: 'That trait belongs to another layer.' }
+    expect(changeTrait(hand, 1, 0, 'acc-monocle', project, index)).toEqual(elsewhere) // accessory trait into Background
+    expect(changeTrait(hand, 1, 1, 'ob-1', project, index)).toEqual(elsewhere) // an owlet trait into an owl
+    expect(changeTrait(hand, 1, 9, 'eyes-gold', project, index)).toEqual(elsewhere) // no such layer
   })
 })
 
@@ -1532,10 +1536,13 @@ describe('ids', () => {
     expect(swapped[0]!.dna).toBe(hand[0]!.dna)
     const deleted = deleteTokens(hand, new Set([2]))
     expect(deleted.map((t) => [t.id, t.dna[3]])).toEqual([[1, 'acc-none'], [2, 'acc-scarf'], [3, 'acc-none']])
-    const shuffled = shuffleIds(hand, new Set([1, 2, 3]), 5)
+    // Pick a seed whose permutation of {1, 2, 3} is not the identity, so a no-op shuffle fails this test.
+    const seed = [1, 2, 3, 4, 5, 6, 7, 8].find((s) => shuffleIds(hand, new Set([1, 2, 3]), s).map((t) => t.id).join() !== '1,2,3,4')!
+    const shuffled = shuffleIds(hand, new Set([1, 2, 3]), seed)
+    expect(shuffled.map((t) => t.id)).not.toEqual([1, 2, 3, 4])
     expect([...shuffled.map((t) => t.id)].sort()).toEqual([1, 2, 3, 4])
     expect(shuffled.find((t) => t.dna === hand[3]!.dna)!.id).toBe(4)
-    expect(shuffleIds(hand, new Set([1, 2, 3]), 5)).toEqual(shuffled)
+    expect(shuffleIds(hand, new Set([1, 2, 3]), seed)).toEqual(shuffled)
     expect(hand.map((t) => t.id)).toEqual([1, 2, 3, 4])
   })
 })
@@ -1574,6 +1581,8 @@ export function changeTrait<T extends TokenCore>(
   const from = index.get(token.dna[layerIndex] ?? '')?.trait
   const to = index.get(traitId)?.trait
   if (!to) return { ok: false, reason: 'That trait no longer exists.' }
+  const own = layersOf(project.layers, token.collectionId)
+  if (own[layerIndex]?.id !== to.layerId) return { ok: false, reason: 'That trait belongs to another layer.' }
   if (to.constant && from?.id !== to.id) {
     const carrying = tokens.filter((t) => t.dna.includes(to.id)).length
     if (carrying >= to.constant)
@@ -1585,7 +1594,6 @@ export function changeTrait<T extends TokenCore>(
   const dna = token.dna.map((id, i) => (i === layerIndex ? traitId : id))
   const broken = brokenRule(dna, activeProjectRules(project, index), index, constraintsOf(project.atLeastOne, token.collectionId))
   if (broken) return { ok: false, reason: `That breaks a rule: ${broken}` }
-  const own = layersOf(project.layers, token.collectionId)
   const key = uniqueKey(dna, own)
   const twin = tokens.find((t) => t.id !== tokenId && t.collectionId === token.collectionId && uniqueKey(t.dna, own) === key)
   if (twin) return { ok: false, reason: `Token #${twin.id} already has exactly these traits. Every token must be unique.` }
