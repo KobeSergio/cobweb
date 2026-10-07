@@ -47,14 +47,8 @@ export function changeTrait(
   rules: ArtRule[],
   ctx: SetContext,
 ): ChangeOutcome {
-  const result = changeTraitWith(
-    tokens,
-    tokenId,
-    layerIndex,
-    traitId,
-    { layers: layersOfIndex(ctx.index), rules },
-    ctx.index,
-  )
+  const layers = ctx.layers ?? layersOfIndex(ctx.index)
+  const result = changeTraitWith(tokens, tokenId, layerIndex, traitId, { layers, rules }, ctx.index)
   return result.ok ? { ok: true, tokens: finalise(result.tokens, ctx) } : result
 }
 

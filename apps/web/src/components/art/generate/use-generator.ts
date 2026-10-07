@@ -50,7 +50,7 @@ export function useGenerator(
   const tokenDescription = project.tokenDescription ?? project0.description
   // Both are required, as in the legacy auto-populate.
   const nameProblem = tokenNameProblem(tokenName)
-  const ctx: SetContext = { tokenName, index }
+  const ctx: SetContext = { tokenName, index, layers }
   const rules = useMemo(
     () => pruneRules(project.rules ?? seed.rules, new Set(index.keys())),
     [project.rules, seed.rules, index],

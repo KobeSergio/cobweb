@@ -23,7 +23,7 @@ export { dnaKey, MAX_COLLECTION_SIZE, newSeed } from '@cobweb/dna'
 export type Draft = Omit<GeneratedToken, 'rank' | 'previewUrl'>
 
 /** What names and ranks depend on: the token name chosen at Generate and the current layers. */
-export type SetContext = { tokenName: string; index: TraitIndex }
+export type SetContext = { tokenName: string; index: TraitIndex; layers?: Layer[] }
 
 /** Characters the legacy tool refused in a token name: `#` marks the id, quotes broke its metadata. */
 const NAME_FORBIDDEN = /[#'"`]/
