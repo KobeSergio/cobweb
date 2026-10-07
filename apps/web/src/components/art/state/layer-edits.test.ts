@@ -88,11 +88,27 @@ describe('deleting a trait that rules refer to', () => {
         .map((t) => t.id),
     )
     const rules = pruneRules(DEMO_RULES, kept)
-    expect(rules.length).toBeLessThan(DEMO_RULES.length)
+    expect(rules.length).toBe(DEMO_RULES.length - 2)
     for (const rule of rules) {
       expect(rule.traitId).not.toBe(traitId)
       expect(rule.relatedTraitIds).not.toContain(traitId)
       expect(rule.relatedTraitIds.length).toBeGreaterThan(0)
     }
+    const untouched = DEMO_RULES.filter((r) => r.traitId !== traitId && !r.relatedTraitIds.includes(traitId))
+    expect(rules).toEqual(untouched)
+  })
+
+  it('trims a rule that still has other traits to pair with, keeping the rest', () => {
+    const kept = new Set(
+      deleteTrait(DEMO_LAYERS, 'eyes-wink')
+        .flatMap((l) => l.traits)
+        .map((t) => t.id),
+    )
+    const rules = pruneRules(DEMO_RULES, kept)
+    expect(rules.length).toBe(DEMO_RULES.length)
+    expect(rules.find((r) => r.id === 'rule-monocle-eyes')!.relatedTraitIds).toEqual([
+      'eyes-sleepy',
+      'eyes-squint',
+    ])
   })
 })

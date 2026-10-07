@@ -1,5 +1,5 @@
 import { cn } from '@cobweb/ui/lib/utils'
-import { clampToSupply, type MintGroup } from '@/lib/demo'
+import type { MintGroup } from '@/lib/demo'
 import { count, percent } from './format'
 
 /**
@@ -20,10 +20,7 @@ export function SupplyMap({
   totalMinted: number
   onEdit?: (groupId: number) => void
 }) {
-  const allocated = clampToSupply(
-    groups.reduce((sum, group) => sum + group.maxSupply, 0),
-    maxSupply,
-  )
+  const allocated = groups.reduce((sum, group) => sum + group.maxSupply, 0)
   const phaseMinted = groups.reduce((sum, group) => sum + group.minted, 0)
   const airdropped = Math.max(0, totalMinted - phaseMinted)
   const unallocated = Math.max(0, maxSupply - allocated)

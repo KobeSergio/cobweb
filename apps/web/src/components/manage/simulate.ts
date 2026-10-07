@@ -8,7 +8,6 @@ import {
   DEMO_MINT_PAGE_SETTINGS,
   DEMO_NOW,
   DEMO_RENDER_JOBS,
-  DEMO_TOTAL_MINTED,
   DEMO_WHITELISTS,
 } from '@/lib/demo'
 import type { Address, Hex, MintGroup } from '@/lib/demo'
@@ -95,8 +94,6 @@ export const SAMPLE = {
   transferValidator: '0x721C008fdff27BF06E7E123956E2Fe03B63342e3' as Address,
   /** SEAM: `render_jobs.metadata_cid` of the finished render job, the reveal target. */
   metadataCid: DEMO_RENDER_JOBS.done.metadataCid,
-  /** SEAM: `totalMinted()` from `collectionState()`, phases plus airdrops. */
-  totalMinted: DEMO_TOTAL_MINTED,
 } as const
 
 /**

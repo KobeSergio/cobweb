@@ -29,7 +29,7 @@ import {
 import { PhaseDetailsDialog } from './phase-details'
 import { PHASE_COLUMNS, PhaseRow, type PhaseAction } from './phase-row'
 import { AddPhaseDialog, ScheduleDialog } from './phase-schedule'
-import { chainReadGroup, SAMPLE, saveOffChain } from './simulate'
+import { chainReadGroup, saveOffChain } from './simulate'
 import { SupplyMap } from './supply-map'
 
 export type PhasesScreenProps = {
@@ -38,6 +38,8 @@ export type PhasesScreenProps = {
   chain: SupportedChain
   /** Mint groups shaped like `collectionState()`. Group 0 is public. */
   groups: MintGroup[]
+  /** Everything minted so far, phases and airdrops, as the chain reports it. */
+  totalMinted: number
   publicMaxMintPerWallet: number
   /** The chain's block timestamp at the read, for "starts in" text. Never the browser clock. */
   blockTimestamp: number
@@ -54,6 +56,7 @@ export function PhasesScreen({
   collection,
   chain,
   groups: initial,
+  totalMinted,
   publicMaxMintPerWallet,
   blockTimestamp,
 }: PhasesScreenProps) {
@@ -67,7 +70,7 @@ export function PhasesScreen({
   // The list keeps the creator's order, which is also the order on the mint page (legacy's
   // "Arrange groups"). Seam: the order is `mint_groups.position`; the chain has no order.
   const ordered = groups
-  const airdropped = Math.max(0, SAMPLE.totalMinted - groups.reduce((sum, group) => sum + group.minted, 0))
+  const airdropped = Math.max(0, totalMinted - groups.reduce((sum, group) => sum + group.minted, 0))
 
   function act(action: DialogAction, groupId = -1) {
     if (action === 'up' || action === 'down') {
@@ -127,7 +130,7 @@ export function PhasesScreen({
         <SupplyMap
           groups={ordered}
           maxSupply={sampleSupply(collection.max_supply, DEMO_COLLECTION.maxSupply)}
-          totalMinted={SAMPLE.totalMinted}
+          totalMinted={totalMinted}
           onEdit={(groupId) => act('supply', groupId)}
         />
       </Panel>

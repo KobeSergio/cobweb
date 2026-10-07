@@ -1,7 +1,14 @@
 import { AirdropScreen } from '@/components/manage/airdrop-screen'
 import { StagePage } from '@/components/shell/stage-page'
 import { requireOwnedCollection } from '@/lib/auth'
-import { DEMO_AIRDROPS, DEMO_DEPLOYMENT, DEMO_TOTAL_MINTED, getChain } from '@/lib/demo'
+import {
+  DEMO_AIRDROPS,
+  DEMO_COLLECTION,
+  DEMO_DEPLOYMENT,
+  getChain,
+  sampleSupply,
+  scaleSampleToSupply,
+} from '@/lib/demo'
 import { LockedStagePage, stageContext, type CollectionParams } from '../../_lib/stage'
 
 /** Manage drop, airdrop. Sample data until the contract reads and writes are wired. */
@@ -23,7 +30,10 @@ export default async function Page({ params }: { params: CollectionParams }) {
         deployment={DEMO_DEPLOYMENT}
         chain={chain}
         airdrops={DEMO_AIRDROPS}
-        totalMinted={DEMO_TOTAL_MINTED}
+        // Seam: the minted total comes from the freshness server once Phase 6 lands.
+        totalMinted={
+          scaleSampleToSupply(sampleSupply(collection.max_supply, DEMO_COLLECTION.maxSupply)).totalMinted
+        }
       />
     </StagePage>
   )
