@@ -4,12 +4,7 @@
  * Screens import only from this module (through `useTransaction`) for anything that will be a
  * transaction, so wiring the contract later touches this file and not the screens.
  */
-import {
-  DEMO_MINT_PAGE_SETTINGS,
-  DEMO_NOW,
-  DEMO_RENDER_JOBS,
-  DEMO_WHITELISTS,
-} from '@/lib/demo'
+import { DEMO_MINT_PAGE_SETTINGS, DEMO_NOW, DEMO_RENDER_JOBS, DEMO_WHITELISTS } from '@/lib/demo'
 import type { Address, Hex, MintGroup } from '@/lib/demo'
 
 /** A contract call as the creator reviews it before signing. */
