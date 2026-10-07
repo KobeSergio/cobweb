@@ -1401,19 +1401,27 @@ set search_path = ''
 as $$
 declare
   v_collection uuid;
+  v_locked timestamptz;
 begin
   if current_user not in ('anon', 'authenticated') then
     return case when tg_op = 'DELETE' then old else new end;
   end if;
   -- Both the row's current project and (on an update) the one it came from: neither may be locked.
-  v_collection := case when tg_op = 'DELETE' then old.collection_id else new.collection_id end;
-  if exists (select 1 from public.collections c where c.id = v_collection and c.art_locked_at is not null)
-    or (tg_op = 'UPDATE' and exists (
-      select 1 from public.collections c where c.id = old.collection_id and c.art_locked_at is not null
-    ))
-  then
-    raise exception 'The art is locked and cannot change.' using errcode = 'insufficient_privilege';
-  end if;
+  -- The collection row is read FOR SHARE, so a client write in flight holds the row until it
+  -- commits and the server's lock update (which needs a stronger lock on that row) waits for it;
+  -- once the lock is set, every later write sees it. No write can slip past the lock in a race.
+  foreach v_collection in array (
+    case
+      when tg_op = 'DELETE' then array[old.collection_id]
+      when tg_op = 'UPDATE' and old.collection_id <> new.collection_id then array[new.collection_id, old.collection_id]
+      else array[new.collection_id]
+    end
+  ) loop
+    select c.art_locked_at into v_locked from public.collections c where c.id = v_collection for share;
+    if v_locked is not null then
+      raise exception 'The art is locked and cannot change.' using errcode = 'insufficient_privilege';
+    end if;
+  end loop;
   return case when tg_op = 'DELETE' then old else new end;
 end;
 $$;
@@ -1559,9 +1567,9 @@ async function artInvariants(A: Creator): Promise<void> {
 Run: `pnpm --filter @cobweb/web verify:local 2>&1 | grep -E '^(FAIL|INFO|[0-9]+ passed)'`
 Expected: the schema check FAILs (`function public.art_table_facts() does not exist`); the timing check runs and passes or fails on time (note the INFO line either way).
 
-- [ ] **Step 3: Append the facts function to the migration, and fix the waiver key**
+- [ ] **Step 3: Append the facts function to the migration, fix the waiver key, and make the lock gate race-safe**
 
-In the `render_jobs` table definition earlier in the migration, change `waived_by uuid references auth.users (id) on delete set null` to `on delete restrict` with the comment the plan's Task 4 now shows: the waiver columns are checked as a pair, so a set-null would trip the check when an admin account is deleted. Then append:
+In `public.art_guard_lock`, replace the two `exists` checks with the `foreach ... for share` loop the plan's Task 4 now shows (a `v_locked timestamptz` declaration, the collection row read `for share`, the refusal when it is locked). Behaviour is unchanged when there is no race; the share lock makes the server's lock update wait for in-flight client writes. In the `render_jobs` table definition earlier in the migration, change `waived_by uuid references auth.users (id) on delete set null` to `on delete restrict` with the comment the plan's Task 4 now shows: the waiver columns are checked as a pair, so a set-null would trip the check when an admin account is deleted. Then append:
 
 ```sql
 -- ---------------------------------------------------------------------------------------------
