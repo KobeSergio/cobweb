@@ -69,3 +69,28 @@ describe('toCsv', () => {
     ).toBe('a,"b,c"\n1,"say ""hi"""')
   })
 })
+
+describe('parseRecipients with files from other tools', () => {
+  it('reads Windows line endings, a BOM, quoted fields and a header row', () => {
+    const text = `\uFEFFaddress,quota\r\n"${A}",2\r\n${B},1\r\n`
+    const result = parseRecipients(text, WHITELIST)
+    expect(result.header).toBe(true)
+    expect(result.rows.map((row) => row.amount)).toEqual([2, 1])
+    expect(result.invalid).toEqual([])
+  })
+
+  it('reports a bad address by its line number', () => {
+    const result = parseRecipients(`${A},1\nnot-an-address,1\n`, WHITELIST)
+    expect(result.rows).toHaveLength(1)
+    expect(result.invalid[0]?.line).toBe(2)
+  })
+})
+
+describe('parseRecipients with a byte order mark and no header', () => {
+  it('still reads the first address', () => {
+    const result = parseRecipients(`\uFEFF${A},2\n${B},1\n`, WHITELIST)
+    expect(result.header).toBe(false)
+    expect(result.rows).toHaveLength(2)
+    expect(result.invalid).toEqual([])
+  })
+})

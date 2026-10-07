@@ -80,3 +80,11 @@ export const sampleTxHash = (seed: number): Hex => sampleHex(seed + 100_000, 32)
 export function sampleSupply(maxSupply: number | null, fallback: number): number {
   return maxSupply ?? (process.env.NEXT_PUBLIC_DEMO_DATA === '1' ? fallback : 0)
 }
+
+/**
+ * A sample count drawn against a real collection's supply. Sample mint groups mint 238 of the
+ * sample's 777; a real row with `max_supply` 100 must never read "238 of 100".
+ */
+export function clampToSupply(count: number, maxSupply: number): number {
+  return Math.min(count, maxSupply)
+}

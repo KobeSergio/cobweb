@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { Layer } from '@/lib/demo'
+import { DEMO_LAYERS, DEMO_RULES, type Layer } from '@/lib/demo'
 import { roundWeight, weightsValid, weightTotal } from '../lib/trait-index'
-import { addTraits, evenOut, evenWeights, setBlank } from './layer-edits'
+import { addTraits, deleteTrait, evenOut, evenWeights, pruneRules, setBlank } from './layer-edits'
 
 function layer(weights: number[], extra: Partial<Layer> = {}): Layer {
   return {
@@ -70,5 +70,29 @@ describe('adding a trait (legacy bug: it reset every weight, turning the blank o
     expect(traits.find((t) => t.blank)!.weight).toBe(0)
     expect(traits.find((t) => t.name === 'Laser')!.weight).toBe(0)
     expect(traits.filter((t) => !t.blank && t.name !== 'Laser').map((t) => t.weight)).toEqual([60, 40])
+  })
+})
+
+describe('deleting a trait that rules refer to', () => {
+  const traitId = 'headwear-wizard-hat' // source of rule-wizard-starry, related in rule-starry-wizard
+
+  it('removes the trait from its layer', () => {
+    const layers = deleteTrait(DEMO_LAYERS, traitId)
+    expect(layers.flatMap((l) => l.traits).some((t) => t.id === traitId)).toBe(false)
+  })
+
+  it('drops the trait from every rule and removes rules left with nothing to pair', () => {
+    const kept = new Set(
+      deleteTrait(DEMO_LAYERS, traitId)
+        .flatMap((l) => l.traits)
+        .map((t) => t.id),
+    )
+    const rules = pruneRules(DEMO_RULES, kept)
+    expect(rules.length).toBeLessThan(DEMO_RULES.length)
+    for (const rule of rules) {
+      expect(rule.traitId).not.toBe(traitId)
+      expect(rule.relatedTraitIds).not.toContain(traitId)
+      expect(rule.relatedTraitIds.length).toBeGreaterThan(0)
+    }
   })
 })

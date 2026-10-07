@@ -15,6 +15,7 @@ import { PhaseDetailsFields, type PhaseDetails } from './phase-details'
 import { allocationCheck, phaseNameError, priceError } from './phase-rules'
 import { PriceInput } from './price-input'
 import { defaultStart, unixToZoned, zonedToUnix, type ZonedStart } from './schedule'
+import { scheduleWarning } from './schedule-logic'
 import { TransactionDialog } from './transaction-dialog'
 
 /** `YYYY-MM-DD` to a Date for the calendar (a calendar day, not an instant). */
@@ -44,6 +45,7 @@ function StartPicker({
   const id = useId()
   const [calendarOpen, setCalendarOpen] = useState(false)
   const unix = zonedToUnix(value, timeZone)
+  const warning = scheduleWarning(unix, blockTimestamp)
   const day = toCalendarDay(value.date)
   const chainDay = toCalendarDay(unixToZoned(blockTimestamp, timeZone).date)
   return (
@@ -111,10 +113,10 @@ function StartPicker({
           </FieldError>
         )
       )}
-      {unix !== null && unix <= blockTimestamp && (
+      {warning && (
         <p role="alert" className="bg-warning-soft flex gap-2 rounded-lg px-4 py-3 text-sm">
           <AlertTriangleIcon aria-hidden="true" className="text-warning-foreground mt-0.5 size-4 shrink-0" />
-          This time has already passed on chain, so the phase opens as soon as the transaction confirms.
+          {warning}
         </p>
       )}
     </div>

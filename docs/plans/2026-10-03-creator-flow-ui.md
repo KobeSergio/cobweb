@@ -75,7 +75,7 @@ Inputs the spec implies but no task's tests exercise. Each is pinned to the task
 - [x] **Step 3: Create every route page** calling `requireOwnedCollection`, resolving access through `stageContext`, rendering a `ScreenPlaceholder` in a per-screen component file with typed props.
 - [x] **Step 4: Build the Details form and action** with zod, `getVerifiedUser`, ownership, frozen fields mirroring `collections_guard_frozen_fields`, and handling of 23505 (taken slug) and 23514 (frozen field).
 - [x] **Step 5: Write the sample data**: 7 layers, 6 rules with one conflict, 777 seeded tokens, render jobs in four states, six chains, a Base deployment, three mint groups, two whitelists with chunks, airdrops, activity, mint page settings and variants. Fixed `DEMO_NOW`.
-- [ ] **Step 6: Pin review focus 2.** Add `apps/web/src/lib/demo/data.test.ts`:
+- [x] **Step 6: Pin review focus 2.** Add `apps/web/src/lib/demo/data.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -116,7 +116,7 @@ Run: `pnpm --filter @cobweb/web test`. Expected: PASS. If `vitest` cannot resolv
 - [x] **Step 2: Rules**: sentence rows with trait chips, kind filter, add/edit dialog with duplicate detection, delete confirmation, conflicts panel with jump-to and in-list marking.
 - [x] **Step 3: Generate**: seeded generation with progress, 48-per-page gallery, search, trait filter with counts, sort, rarity tiers, token detail with rule-checked trait change, swap, regenerate, delete, selection mode, statistics tab, footer disabled with reason until the set is full and valid.
 - [x] **Step 4: Assets**: one screen adapting to single asset (one file, quantity up to 4,000), 1/1s (editions, attributes) and metadata (images plus JSON with the validation checklist).
-- [ ] **Step 5: Pin review focus 3.** Add `apps/web/src/components/art/state/layer-edits.test.ts` (both functions already exist in `layer-edits.ts`: `deleteTrait(layers, traitId): Layer[]` and `pruneRules(rules, traitIds: ReadonlySet<string>): ArtRule[]`):
+- [x] **Step 5: Pin review focus 3.** Add `apps/web/src/components/art/state/layer-edits.test.ts` (both functions already exist in `layer-edits.ts`: `deleteTrait(layers, traitId): Layer[]` and `pruneRules(rules, traitIds: ReadonlySet<string>): ArtRule[]`):
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -176,7 +176,7 @@ Run `pnpm --filter @cobweb/web test`. Expected: PASS. If `pruneRules` keeps a ru
 - [x] **Step 1: Overview** (supply meter by source, live phases, next scheduled with local time, CSS mints chart, proceeds, recent mints, setup checklist).
 - [x] **Step 2: Phases** (supply strip with labelled, ordered segments; rows; Open, Close, Schedule, Clear, Edit price, Edit max supply with floor, Edit per-wallet limit, Add phase, Close all).
 - [x] **Step 3: Whitelist, Mint page, Airdrop, Settings** as in the spec.
-- [ ] **Step 4: Pin review focus 1.** Add `apps/web/src/components/manage/recipients.test.ts`:
+- [x] **Step 4: Pin review focus 1.** Add `apps/web/src/components/manage/recipients.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -205,7 +205,7 @@ describe('parseRecipients', () => {
 
 `ParseResult` is `{ rows: { address, amount, line }[], invalid: { line, text, reason }[], duplicates, header }`. Run: `pnpm --filter @cobweb/web test`. If the BOM or `\r` case fails, strip a leading `\uFEFF` and split on `/\r?\n/` in `parseRecipients`, and unquote fields with `.replace(/^"(.*)"$/, '$1')` before the address check. Expected: PASS.
 
-- [ ] **Step 5: Pin review focus 4.** The past-start check lives inline in `phase-schedule.tsx` (`unix !== null && unix <= blockTimestamp`, around line 130). Extract it into a pure function in a new `apps/web/src/components/manage/schedule-logic.ts` and call it from the component:
+- [x] **Step 5: Pin review focus 4.** The past-start check lives inline in `phase-schedule.tsx` (`unix !== null && unix <= blockTimestamp`, around line 130). Extract it into a pure function in a new `apps/web/src/components/manage/schedule-logic.ts` and call it from the component:
 
 ```ts
 /** Why a start time cannot be used, judged against the chain's clock, never the browser's. Null when fine. */
@@ -253,7 +253,7 @@ Run `pnpm --filter @cobweb/web test`. Expected: PASS. Then `pnpm --filter @cobwe
 - [x] **Step 2: Hero, panel, phases, below-the-fold** as in spec 4.7, with the button label rules and yellow only when pressing does something.
 - [x] **Step 3: Mint flow** dialog (bottom sheet on phones) with success reveal and every failure state.
 - [x] **Step 4: Phone layout** with sticky mint bar; 14 px root font under 640 px on this page.
-- [ ] **Step 5: Pin review focus 5.** Add `apps/web/src/components/mint/model.test.ts`:
+- [x] **Step 5: Pin review focus 5.** Add `apps/web/src/components/mint/model.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest'
