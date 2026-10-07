@@ -54,6 +54,33 @@ describe('rankTokens (sum of supply over attribute count)', () => {
     expect(ranked.find((t) => t.id === 2)!.rank).toBe(3)
   })
 
+  it('treats the same attributes in a different layer order as a tie, whatever the float drift', () => {
+    // A baseline with no ties, to show the sum still orders distinct scores.
+    const tokens = [
+      token(1, ['a:L1:x', 'a:L2:y', 'a:L3:common']),
+      token(2, ['a:L1:common', 'a:L2:z', 'a:L3:w']),
+      token(3, ['a:L1:common', 'a:L2:q', 'a:L3:common']),
+      token(4, ['a:L1:p', 'a:L2:q', 'a:L3:common']),
+    ]
+    // common on L1: tokens 2 and 3 (2); common on L3: tokens 1, 3, 4 (3); q on L2: 3 and 4 (2); the rest 1.
+    // Token 1: 4 + 4 + 4/3. Token 2: 2 + 4 + 4. Token 4: 4 + 2 + 4/3. Token 3: 2 + 2 + 4/3.
+    const ranked = rankTokens(tokens, keyOf)
+    expect(ranked.map((t) => [t.id, t.rank])).toEqual([
+      [1, 2],
+      [2, 1],
+      [3, 4],
+      [4, 3],
+    ])
+    const twins = [
+      token(1, ['a:L1:a', 'a:L2:b', 'a:L3:c']),
+      token(2, ['a:L1:c', 'a:L2:a', 'a:L3:b']),
+      token(3, ['a:L1:a', 'a:L2:a', 'a:L3:a']),
+    ]
+    // Tokens 1 and 2 carry the same three attributes (counts 5, 2, 2 by trait name) in different layer
+    // orders. Summed in DNA order the floats can differ by one ulp; sorted first they are equal, so 1 before 2.
+    expect(rankTokens(twins, (id) => id.split(':')[2]!).map((t) => t.rank)).toEqual([1, 2, 3])
+  })
+
   it('copes with mixed DNA lengths and unknown ids after a layer is deleted', () => {
     const project = fixture()
     const keyOfIndex = attributeKeyOf(buildTraitIndex(project.layers))
