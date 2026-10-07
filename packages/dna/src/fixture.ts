@@ -36,8 +36,9 @@ function layer(
 /**
  * Two collections. "owls": four layers, Background bypasses uniqueness, Eyes has a capped trait,
  * Accessory has a blank, and one rule of each kind. "owlets": two plain layers. Sizes 12 and 4.
- * Unique owls under the key (Background ignored): 2 bodies x 3 eyes x 3 accessories = 18, minus
- * what the rules forbid, so 12 is reachable and 18 is not.
+ * Unique owls under the key (Background ignored): Scarf and Snow go only with each other, so a Snow
+ * owl is 3 eyes x Scarf = 3; a Barn or Gray owl is 3 eyes x {None, Hat, Monocle} = 9 minus the
+ * Hat-with-Sleepy pair = 8 each. 19 in all, so 12 is reachable and 30 is not.
  */
 export function fixture(): Project {
   return deepFreeze({
@@ -57,8 +58,9 @@ export function fixture(): Project {
         { bypassDna: true },
       ),
       layer('owls', 'body', 1, [
-        { id: 'body-barn', name: 'Barn', weight: 60 },
-        { id: 'body-snow', name: 'Snow', weight: 40 },
+        { id: 'body-barn', name: 'Barn', weight: 40 },
+        { id: 'body-snow', name: 'Snow', weight: 30 },
+        { id: 'body-gray', name: 'Gray', weight: 30 },
       ]),
       layer('owls', 'eyes', 2, [
         { id: 'eyes-wide', name: 'Wide', weight: 50 },
@@ -66,9 +68,10 @@ export function fixture(): Project {
         { id: 'eyes-gold', name: 'Gold', weight: 0, constant: 3 },
       ]),
       layer('owls', 'accessory', 3, [
-        { id: 'acc-none', name: 'None', weight: 50, blank: true },
-        { id: 'acc-hat', name: 'Hat', weight: 25 },
-        { id: 'acc-scarf', name: 'Scarf', weight: 25 },
+        { id: 'acc-none', name: 'None', weight: 40, blank: true },
+        { id: 'acc-hat', name: 'Hat', weight: 20 },
+        { id: 'acc-scarf', name: 'Scarf', weight: 20 },
+        { id: 'acc-monocle', name: 'Monocle', weight: 20 },
       ]),
       layer('owlets', 'o-body', 0, [
         { id: 'ob-1', name: 'Barn', weight: 50 },
