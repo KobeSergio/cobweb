@@ -1700,8 +1700,7 @@ describe('rankTokens (sum of supply over attribute count)', () => {
   })
 
   it('treats the same attributes in a different layer order as a tie, whatever the float drift', () => {
-    // Counts 1, 1 and 3 over a total of 4: summed as [4, 4, 1.33] and as [1.33, 4, 4] the floats differ
-    // by one ulp, so a plain comparison would never reach the id tie-break.
+    // A baseline with no ties, to show the sum still orders distinct scores.
     const tokens = [
       token(1, ['a:L1:x', 'a:L2:y', 'a:L3:common']),
       token(2, ['a:L1:common', 'a:L2:z', 'a:L3:w']),
@@ -1713,7 +1712,8 @@ describe('rankTokens (sum of supply over attribute count)', () => {
     const ranked = rankTokens(tokens, keyOf)
     expect(ranked.map((t) => [t.id, t.rank])).toEqual([[1, 2], [2, 1], [3, 4], [4, 3]])
     const twins = [token(1, ['a:L1:a', 'a:L2:b', 'a:L3:c']), token(2, ['a:L1:c', 'a:L2:a', 'a:L3:b']), token(3, ['a:L1:a', 'a:L2:a', 'a:L3:a'])]
-    // Tokens 1 and 2 have the same three attribute counts in different layer orders: an exact tie, so 1 before 2.
+    // Tokens 1 and 2 carry the same three attributes (counts 5, 2, 2 by trait name) in different layer
+    // orders. Summed in DNA order the floats can differ by one ulp; sorted first they are equal, so 1 before 2.
     expect(rankTokens(twins, (id) => id.split(':')[2]!).map((t) => t.rank)).toEqual([1, 2, 3])
   })
 
