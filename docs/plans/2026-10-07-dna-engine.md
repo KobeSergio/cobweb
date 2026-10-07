@@ -50,7 +50,7 @@ Inputs the spec implies but no task's tests exercise. Each is pinned to the task
 
 - Produces: every type in `types.ts` below; `seededRandom(seed: number): () => number`, `shuffle<T>(items: readonly T[], random: () => number): T[]`, `newSeed(): number`, `collectionSeed(seed: number, position: number): number`; `fixture(): Project` (deep-frozen, two collections) and `deepFreeze<T>(value: T): T`.
 
-- [ ] **Step 1: Package manifest and tsconfig**
+- [x] **Step 1: Package manifest and tsconfig**
 
 Replace `packages/dna/package.json` with:
 
@@ -73,7 +73,7 @@ Replace `packages/dna/package.json` with:
 
 `packages/dna/tsconfig.json` stays `{ "extends": "../../tsconfig.base.json", "include": ["src"] }`. The root `@types/node` is picked up automatically, which types the `crypto` and `TextEncoder` globals; the purity test below is what keeps `node:*` imports out.
 
-- [ ] **Step 2: Types**
+- [x] **Step 2: Types**
 
 `packages/dna/src/types.ts`:
 
@@ -182,7 +182,7 @@ export type Shortfall = { trait: Trait; cap: number; actual: number }
 export type Made = { collectionId: string; wanted: number; made: number }
 ```
 
-- [ ] **Step 3: Failing tests for randomness**
+- [x] **Step 3: Failing tests for randomness**
 
 `packages/dna/src/random.test.ts`:
 
@@ -219,12 +219,12 @@ describe('collectionSeed', () => {
 })
 ```
 
-- [ ] **Step 4: Run, expect failure**
+- [x] **Step 4: Run, expect failure**
 
 Run: `pnpm --filter @cobweb/dna test`
 Expected: FAIL, `Cannot find module './random'`.
 
-- [ ] **Step 5: Implement randomness**
+- [x] **Step 5: Implement randomness**
 
 `packages/dna/src/random.ts`:
 
@@ -264,7 +264,7 @@ export function collectionSeed(seed: number, position: number): number {
 }
 ```
 
-- [ ] **Step 6: The fixture (test-only)**
+- [x] **Step 6: The fixture (test-only)**
 
 `packages/dna/src/fixture.ts`:
 
@@ -366,7 +366,7 @@ export function fixtureWithAtLeastOne(): Project {
 }
 ```
 
-- [ ] **Step 7: Purity test and the index**
+- [x] **Step 7: Purity test and the index**
 
 `packages/dna/src/purity.test.ts` (tests may use `node:*`; the engine may not):
 
@@ -397,12 +397,12 @@ export * from './types'
 export * from './random'
 ```
 
-- [ ] **Step 8: Run, expect pass; typecheck and lint**
+- [x] **Step 8: Run, expect pass; typecheck and lint**
 
 Run: `pnpm --filter @cobweb/dna test && pnpm --filter @cobweb/dna typecheck && pnpm --filter @cobweb/dna lint`
 Expected: 2 test files pass; no type or lint errors. If `import.meta.dirname` is not typed, use `fileURLToPath(new URL('.', import.meta.url))` from `node:url` in the test.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add packages/dna
@@ -422,7 +422,7 @@ git commit -m "Scaffold the DNA engine package with its types, seeded randomness
 - Consumes: `Layer`, `Trait` from Task 1.
 - Produces: `TraitEntry = { trait: Trait; layer: Layer; layerIndex: number }`, `TraitIndex = Map<string, TraitEntry>`, `buildTraitIndex(layers: Layer[]): TraitIndex`, `layersOf(layers: Layer[], collectionId: string): Layer[]` (filtered, sorted by `position`), `traitName(index, traitId): string`, `joinOr(names: string[]): string`, `weightedTraits(layer): Trait[]`, `roundWeight(value): number`, `WEIGHT_TOTAL_MAX = 100.05`, `weightTotal(layer): number`, `weightsValid(layer): boolean`, `constantTotal(layer): number`, `expectedCount(layer, trait, supply): number`, `attributeKey(layerName, traitName): string`, `attributeKeyOf(index): (traitId: string) => string`, `attributeCounts(tokens: { dna: string[] }[], index): Map<string, number>`.
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 `packages/dna/src/index-of.test.ts`:
 
@@ -502,12 +502,12 @@ describe('attributes', () => {
 })
 ```
 
-- [ ] **Step 2: Run, expect failure**
+- [x] **Step 2: Run, expect failure**
 
 Run: `pnpm --filter @cobweb/dna test`
 Expected: FAIL, `Cannot find module './index-of'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `packages/dna/src/index-of.ts` (the body of `apps/web/src/components/art/lib/trait-index.ts` without `compositeUrls`, `formatPercent`, `formatCount`, plus `attributeKey` and `layersOf`):
 
@@ -608,12 +608,12 @@ export function attributeCounts(tokens: { dna: string[] }[], index: TraitIndex):
 
 Add `export * from './index-of'` to `packages/dna/src/index.ts`.
 
-- [ ] **Step 4: Run, expect pass**
+- [x] **Step 4: Run, expect pass**
 
 Run: `pnpm --filter @cobweb/dna test`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/dna
@@ -633,7 +633,7 @@ git commit -m "Add the trait index to the DNA engine"
 - Consumes: `TraitIndex`, `traitName`, `joinOr` from Task 2; types from Task 1.
 - Produces: `isBidirectional(kind): boolean`, `constraintsOf(atLeastOne: AtLeastOne[] | undefined, collectionId): AtLeastOne[]`, `satisfiesRules(traitIds: ReadonlySet<string>, rules: ArtRule[], atLeastOne?: AtLeastOne[]): boolean`, `brokenRule(traitIds: string[], rules, index, atLeastOne?): string | null`, `findDuplicate(candidate: Omit<ArtRule, 'id'>, rules, ignoreId?): ArtRule | undefined`, `analyseRules(layers, rules, index): RuleConflict[]`, `activeRules(rules, conflicts): ArtRule[]`, `activeProjectRules(project: Pick<Project, 'layers' | 'rules'>, index?: TraitIndex): ArtRule[]`, `pruneRules(rules, keptTraitIds: ReadonlySet<string>): ArtRule[]`, `rulesTouching(rules, traitIds: ReadonlySet<string>): number`.
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 `packages/dna/src/rules.test.ts`:
 
@@ -771,12 +771,12 @@ describe('pruneRules', () => {
 })
 ```
 
-- [ ] **Step 2: Run, expect failure**
+- [x] **Step 2: Run, expect failure**
 
 Run: `pnpm --filter @cobweb/dna test`
 Expected: FAIL, `Cannot find module './rules'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `packages/dna/src/rules.ts`. The analyser body (`analyseRules`, `chainConflicts`, `mixBlocker`, `conflictKey`) is copied verbatim from `apps/web/src/components/art/state/rule-logic.ts` with imports changed to `./index-of` and `./types`; `pruneRules` and `rulesTouching` are copied from `apps/web/src/components/art/state/layer-edits.ts`. The new parts are shown in full:
 
@@ -876,12 +876,12 @@ export function activeProjectRules(project: Pick<Project, 'layers' | 'rules'>, i
 
 Import `buildTraitIndex` from `./index-of` for `activeProjectRules`. Add `export * from './rules'` to `index.ts`. If `rules.ts` passes 300 lines, move `analyseRules` and `chainConflicts` to `analyse.ts` and re-export them from `rules.ts`.
 
-- [ ] **Step 4: Run, expect pass**
+- [x] **Step 4: Run, expect pass**
 
 Run: `pnpm --filter @cobweb/dna test`
 Expected: PASS. If the chain test's `ruleIds` order differs, compare sorted, as the test does.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/dna
@@ -901,7 +901,7 @@ git commit -m "Add rules, duplicates and the conflict analyser to the DNA engine
 - Consumes: `Layer`, `TokenCore`, `TraitCounts`, `Shortfall`, `ArtRule`, `AtLeastOne` from Task 1; `satisfiesRules` from Task 3.
 - Produces: `dnaKey(token: Pick<TokenCore, 'collectionId' | 'dna'>): string` (`"<collection>:<dna joined by |>"`), `uniqueKey(dna: readonly string[], layers: Layer[]): string` (DNA with each `bypassDna` layer's entry replaced by `*`, joined by `|`), `countTraits(tokens: Pick<TokenCore, 'dna'>[]): TraitCounts`, `cappedShortfalls(layers, counts): Shortfall[]`, `tokensBreakingRules(tokens: TokenCore[], rules, atLeastOne?: AtLeastOne[]): number[]`, `countByCollection(tokens): Map<string, number>`.
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 `packages/dna/src/curate.test.ts`:
 
@@ -945,12 +945,12 @@ describe('counts', () => {
 })
 ```
 
-- [ ] **Step 2: Run, expect failure**
+- [x] **Step 2: Run, expect failure**
 
 Run: `pnpm --filter @cobweb/dna test`
 Expected: FAIL, `Cannot find module './curate'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `packages/dna/src/curate.ts`:
 
@@ -1000,7 +1000,7 @@ export function countByCollection(tokens: TokenCore[]): Map<string, number> {
 
 Add `export * from './curate'` to `index.ts`.
 
-- [ ] **Step 4: Run, expect pass; commit**
+- [x] **Step 4: Run, expect pass; commit**
 
 Run: `pnpm --filter @cobweb/dna test`
 Expected: PASS.
@@ -1023,7 +1023,7 @@ git commit -m "Add DNA keys and counts to the engine"
 - Consumes: `seededRandom`, `collectionSeed` (Task 1); `buildTraitIndex`, `layersOf`, `weightsValid`, `constantTotal` (Task 2); `satisfiesRules`, `constraintsOf`, `activeProjectRules` (Task 3); `uniqueKey`, `countTraits`, `cappedShortfalls` (Task 4).
 - Produces: `MAX_ATTEMPTS = 10_000`, `MAX_COLLECTION_SIZE = 10_000`, `generationProblems(project: Project): string[]`, `repairPairs(dna: string[], layers: Layer[], rules: ArtRule[], random): string[]`, `repairAtLeastOne(dna, layers, constraints: AtLeastOne[], random): string[]`, `generateCollection(layers: Layer[], rules: ArtRule[], atLeastOne: AtLeastOne[], count: number, seed: number, firstId?: number): TokenCore[]` (expects the active rules), `generateProject(project: Project, seed: number): { tokens: TokenCore[]; made: Made[]; shortfalls: Shortfall[] }`, `regenerate<T extends TokenCore>(tokens: T[], ids: ReadonlySet<number>, project: Pick<Project, 'layers' | 'rules' | 'atLeastOne'>, seed: number): T[] | null`, `fillTo<T extends TokenCore>(tokens: T[], project: Project, seed: number, make: (id: number, collectionId: string, dna: string[]) => T): T[] | null`.
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 `packages/dna/src/generate.test.ts`:
 
@@ -1153,12 +1153,12 @@ describe('regenerate and fillTo', () => {
 })
 ```
 
-- [ ] **Step 2: Run, expect failure**
+- [x] **Step 2: Run, expect failure**
 
 Run: `pnpm --filter @cobweb/dna test`
 Expected: FAIL, `Cannot find module './generate'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `packages/dna/src/generate.ts`:
 
@@ -1452,12 +1452,12 @@ export function fillTo<T extends TokenCore>(
 
 Add `export * from './generate'` to `index.ts`. If the file passes 300 lines, move `regenerate`, `fillTo`, `reroll`, `pick` and `scope` to `reroll.ts` and re-export.
 
-- [ ] **Step 4: Run, expect pass**
+- [x] **Step 4: Run, expect pass**
 
 Run: `pnpm --filter @cobweb/dna test`
 Expected: PASS. If the all-bypass test takes long, lower nothing: 10,000 rolls for one slot then `break` is the contract; it should finish well under a second.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/dna
@@ -1476,7 +1476,7 @@ git commit -m "Add seeded generation, re-rolls and fill to the DNA engine"
 - Consumes: `brokenRule`, `activeProjectRules`, `constraintsOf` (Task 3); `TraitIndex`, `layersOf` (Task 2); `seededRandom`, `shuffle` (Task 1).
 - Produces: `ChangeOutcome<T> = { ok: true; tokens: T[] } | { ok: false; reason: string }`, `changeTrait<T extends TokenCore>(tokens: T[], tokenId: number, layerIndex: number, traitId: string, project: Pick<Project, 'layers' | 'rules' | 'atLeastOne'>, index: TraitIndex): ChangeOutcome<T>` (refuses a trait that is not in the collection's layer at `layerIndex`, which also covers an out-of-range index), `swapIds<T>(tokens: T[], a: number, b: number): T[]`, `deleteTokens<T>(tokens: T[], ids: ReadonlySet<number>): T[]` (closes the gaps so ids stay 1 to N), `shuffleIds<T>(tokens: T[], ids: ReadonlySet<number>, seed: number): T[]`.
 
-- [ ] **Step 1: Failing tests** (append to `curate.test.ts`; put the two new `import` lines in the import block at the top, not mid-file)
+- [x] **Step 1: Failing tests** (append to `curate.test.ts`; put the two new `import` lines in the import block at the top, not mid-file)
 
 ```ts
 import { changeTrait, deleteTokens, shuffleIds, swapIds } from './curate'
@@ -1548,12 +1548,12 @@ describe('ids', () => {
 })
 ```
 
-- [ ] **Step 2: Run, expect failure**
+- [x] **Step 2: Run, expect failure**
 
 Run: `pnpm --filter @cobweb/dna test`
 Expected: FAIL, `changeTrait` is not exported.
 
-- [ ] **Step 3: Implement** (append to `curate.ts`; add the imports at the top)
+- [x] **Step 3: Implement** (append to `curate.ts`; add the imports at the top)
 
 ```ts
 import { buildTraitIndex, layersOf, type TraitIndex } from './index-of'
@@ -1624,7 +1624,7 @@ export function shuffleIds<T extends TokenCore>(tokens: T[], ids: ReadonlySet<nu
 
 Mind the import cycle: `generate.ts` imports `curate.ts`, so `curate.ts` must not import `generate.ts`. It does not.
 
-- [ ] **Step 4: Run, expect pass; commit**
+- [x] **Step 4: Run, expect pass; commit**
 
 Run: `pnpm --filter @cobweb/dna test`
 Expected: PASS.
@@ -1647,7 +1647,7 @@ git commit -m "Add trait changes, id swaps, deletes and shuffles to the DNA engi
 - Consumes: `TokenCore`, `Ranked`, `Layer` (Task 1); `TraitIndex`, `attributeKeyOf` (Task 2).
 - Produces: `rankTokens<T extends TokenCore>(tokens: T[], keyOf: (traitId: string) => string): Ranked<T>[]` (same order as the input, `rank` 1 is rarest), `RarityTier = { key: 'legendary' | 'epic' | 'rare' | 'uncommon' | 'common'; label: string }`, `rarityTier(rank: number, total: number): RarityTier`, `TIER_RANGES: Record<RarityTier['key'], string>`, `tokenAttributes(token: Pick<TokenCore, 'dna'>, layers: Layer[], index: TraitIndex, options: { showBlankTraits: boolean }): { trait_type: string; value: string }[]`.
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 `packages/dna/src/rank.test.ts`:
 
@@ -1793,12 +1793,12 @@ describe('tokenAttributes', () => {
 })
 ```
 
-- [ ] **Step 2: Run, expect failure**
+- [x] **Step 2: Run, expect failure**
 
 Run: `pnpm --filter @cobweb/dna test`
 Expected: FAIL, `Cannot find module './rank'` and `'./metadata'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `packages/dna/src/rank.ts`:
 
@@ -1881,7 +1881,7 @@ export function tokenAttributes(
 
 Add `export * from './rank'` and `export * from './metadata'` to `index.ts`.
 
-- [ ] **Step 4: Run, expect pass; commit**
+- [x] **Step 4: Run, expect pass; commit**
 
 Run: `pnpm --filter @cobweb/dna test`
 Expected: PASS.
@@ -1904,7 +1904,7 @@ git commit -m "Add sum-based ranking, tiers and metadata attributes to the DNA e
 - Consumes: `buildTraitIndex`, `layersOf`, `traitName`, `joinOr` (Task 2); `activeProjectRules`, `constraintsOf`, `brokenRule` (Task 3); `uniqueKey`, `countTraits` (Task 4).
 - Produces: `LockProblem = { code: 'ids' | 'size' | 'collection' | 'dna-length' | 'trait' | 'rule' | 'cap' | 'duplicate'; message: string; tokenIds?: number[] }`, `validateTokenList(project: Project, tokens: TokenCore[], options: { allowDuplicates: boolean }): { ok: true } | { ok: false; problems: LockProblem[] }`, `canonicalTokenList(tokens: TokenCore[]): string`, `hashTokenList(tokens: TokenCore[]): Promise<\`0x${string}\`>`.
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 `packages/dna/src/lock.test.ts`:
 
@@ -2019,12 +2019,12 @@ describe('canonicalTokenList and hashTokenList', () => {
 })
 ```
 
-- [ ] **Step 2: Run, expect failure**
+- [x] **Step 2: Run, expect failure**
 
 Run: `pnpm --filter @cobweb/dna test`
 Expected: FAIL, `Cannot find module './lock'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `packages/dna/src/lock.ts`:
 
@@ -2168,12 +2168,12 @@ export async function hashTokenList(tokens: TokenCore[]): Promise<`0x${string}`>
 
 Add `export * from './lock'` to `index.ts`.
 
-- [ ] **Step 4: Run, expect pass; typecheck and lint the package**
+- [x] **Step 4: Run, expect pass; typecheck and lint the package**
 
 Run: `pnpm --filter @cobweb/dna test && pnpm --filter @cobweb/dna typecheck && pnpm --filter @cobweb/dna lint`
 Expected: PASS, no errors. If `crypto` is untyped, the root `@types/node` is not being picked up: add `"types": ["node"]` to the package tsconfig `compilerOptions`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/dna
@@ -2199,7 +2199,7 @@ git commit -m "Add the lock validator and token list hash to the DNA engine"
 - Consumes: the whole package through `@cobweb/dna`.
 - Produces: `GeneratedToken = Ranked<TokenCore> & { name: string; description?: string; previewUrl: string | null }` in `types.ts`; `DEMO_SEED` from `art.ts`; `DEMO_TOKENS`, `DEMO_TRAIT_COUNTS` unchanged in shape. The web still exports `tokenLayerUrls`, `getTrait`, `slugify`, `DEMO_RULE_CONFLICTS`, `DEMO_PREVIEW_COUNT` from `@/lib/demo`.
 
-- [ ] **Step 1: Pin the sample DNA before anything moves**
+- [x] **Step 1: Pin the sample DNA before anything moves**
 
 The sample art (24 pre-rendered token SVGs) depends on the exact DNA the generator rolls. Record it first. Append to `apps/web/src/lib/demo/data.test.ts`:
 
@@ -2223,11 +2223,11 @@ git add apps/web/src/lib/demo/data.test.ts
 git commit -m "Pin the sample tokens' DNA before the engine moves"
 ```
 
-- [ ] **Step 2: Add the dependency**
+- [x] **Step 2: Add the dependency**
 
 In `apps/web/package.json` dependencies add `"@cobweb/dna": "workspace:^"` next to `@cobweb/ui`. In `apps/web/next.config.ts` change `transpilePackages: ['@cobweb/ui']` to `transpilePackages: ['@cobweb/ui', '@cobweb/dna']` and update the comment to "The UI and DNA packages ship TypeScript source". Run `pnpm install`.
 
-- [ ] **Step 3: Re-export the art types**
+- [x] **Step 3: Re-export the art types**
 
 In `apps/web/src/lib/demo/types.ts`, replace everything from the `// Art (Phase 3: art generator)` banner down to and including the `TraitCounts` type with:
 
@@ -2267,7 +2267,7 @@ export type GeneratedToken = Ranked<TokenCore> & {
 
 Keep `MediaType` and `UploadedAsset` and everything after them as they are.
 
-- [ ] **Step 4: Trim `art.ts` to data**
+- [x] **Step 4: Trim `art.ts` to data**
 
 In `apps/web/src/lib/demo/art.ts`:
 
@@ -2277,7 +2277,7 @@ In `apps/web/src/lib/demo/art.ts`:
 - Fix the type import to only what remains: `import type { ArtRule, Collection, Layer, RuleConflict, Trait } from './types'`.
 - The file still has no runtime imports; keep the header comment's promise true.
 
-- [ ] **Step 5: Build the sample tokens from the engine**
+- [x] **Step 5: Build the sample tokens from the engine**
 
 In `apps/web/src/lib/demo/data.ts`, change the imports from `./art` to drop `countTraits, generateCollections, rankTokens, seededRandom` and add `DEMO_SEED`; add
 
@@ -2304,7 +2304,7 @@ export const DEMO_TOKENS: GeneratedToken[] = rankTokens(
 
 In `apps/web/src/lib/demo/index.ts` nothing changes: `export * from './art'` no longer carries the generator functions, which is the point.
 
-- [ ] **Step 6: Re-point the other consumers**
+- [x] **Step 6: Re-point the other consumers**
 
 - `apps/web/src/components/art/generate/stats-view.tsx`: `import { cappedShortfalls } from '@cobweb/dna'`.
 - `apps/web/src/components/art/layers-screen.tsx`: `import { satisfiesRules, seededRandom } from '@cobweb/dna'`.
@@ -2313,12 +2313,12 @@ In `apps/web/src/lib/demo/index.ts` nothing changes: `export * from './art'` no 
 - `apps/web/scripts/make-demo-art.mjs`: replace `generateCollections` in the import list with `DEMO_SEED`; add `import { generateProject } from '../../../packages/dna/src/index.ts'`; change line 400 to `const tokens = generateProject({ layers: DEMO_LAYERS, rules: DEMO_RULES, collections: DEMO_COLLECTIONS }, DEMO_SEED).tokens`. Run `node apps/web/scripts/make-demo-art.mjs` and check `git status` shows no change under `apps/web/public/demo/` (same DNA, same pictures). If it does show changes, the generator's `random()` call order drifted: fix the engine, never the pictures.
 - Delete `apps/web/src/lib/demo/art.test.ts`.
 
-- [ ] **Step 7: Typecheck the web app**
+- [x] **Step 7: Typecheck the web app**
 
 Run: `pnpm --filter @cobweb/web typecheck`
 Expected: errors only in `components/art/state/*.ts` and `components/art/lib/trait-index.ts`, which still import the deleted functions from `@/lib/demo/art`. Task 10 fixes those. If anything else fails, fix it here.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/web pnpm-lock.yaml
@@ -2344,7 +2344,7 @@ git commit -m "Build the sample tokens with the DNA engine"
 - Consumes: everything the package exports.
 - Produces: the same export names and signatures the screens import today, so no screen file changes. Key ones: `generateSet(layers, rules, collections, seed, ctx, description): GenerateOutcome`, `regenerate(tokens, ids, layers, rules, ctx): GeneratedToken[] | null`, `fillTo(tokens, collections, layers, rules, ctx, description): GeneratedToken[] | null`, `changeTrait(tokens, tokenId, layerIndex, traitId, rules, ctx): ChangeOutcome`, `swapIds(tokens, a, b, ctx)`, `deleteTokens(tokens, ids, ctx)`, `shuffleIds(tokens, ids, ctx)`, `tokenAttributes(token, layers, index, showBlankTraits)`.
 
-- [ ] **Step 1: `trait-index.ts`**
+- [x] **Step 1: `trait-index.ts`**
 
 Replace the file's body with the app-side helpers plus re-exports:
 
@@ -2388,7 +2388,7 @@ export function formatCount(value: number): string {
 }
 ```
 
-- [ ] **Step 2: `rule-logic.ts`**
+- [x] **Step 2: `rule-logic.ts`**
 
 Keep `RULE_KINDS` and `ruleSentence` (they import `joinOr`, `traitName` and `TraitIndex` from `../lib/trait-index`, unchanged). Delete `isBidirectional`, `overlaps`, `findDuplicate`, `mixBlocker`, `analyseRules`, `conflictKey`, `chainConflicts`, `activeRules`, `brokenRule`, and add:
 
@@ -2396,11 +2396,11 @@ Keep `RULE_KINDS` and `ruleSentence` (they import `joinOr`, `traitName` and `Tra
 export { activeRules, analyseRules, brokenRule, findDuplicate, isBidirectional } from '@cobweb/dna'
 ```
 
-- [ ] **Step 3: `layer-edits.ts`**
+- [x] **Step 3: `layer-edits.ts`**
 
 Delete `pruneRules` and `rulesTouching` and add `export { pruneRules, rulesTouching } from '@cobweb/dna'`. Keep `layersOf` and every editing function.
 
-- [ ] **Step 4: `generation.ts`**
+- [x] **Step 4: `generation.ts`**
 
 Replace the file with:
 
@@ -2526,7 +2526,7 @@ export function fillTo(
 
 `MAX_COLLECTION_SIZE` and `dnaKey` are re-exported without being imported, which is what the screens need.
 
-- [ ] **Step 5: `token-logic.ts`**
+- [x] **Step 5: `token-logic.ts`**
 
 Replace the file with:
 
@@ -2638,7 +2638,7 @@ export function matchesSearch(token: GeneratedToken, search: string, index: SetC
 }
 ```
 
-- [ ] **Step 6: Trim the moved tests, keep the app-side ones, run everything**
+- [x] **Step 6: Trim the moved tests, keep the app-side ones, run everything**
 
 Delete `rule-logic.test.ts` under `components/art/state/` (the analyser tests live in the package now). Replace `generation.test.ts` with only the three app-side cases, taken from its current content: the token naming across collections ("Night Owls #1", "#601" in the owlets collection, the description on every token), `tokenNameProblem` refusing `#`, quotes and backticks, and the short-set wording (`/Only 3 of 4 tokens/` and `/10,000 tries/`) on the two-layer tiny project. Drop the cap and deleted-layer cases, which the package covers.
 
@@ -2689,11 +2689,11 @@ The second case documents the fallback's limit; the first is the behaviour the s
 Run: `pnpm typecheck && pnpm lint && pnpm test`
 Expected: PASS at the root (web, dna, ui, shared). The pin from Task 9 step 1 passes, proving the sample DNA did not move. If `layer-edits.test.ts` fails on `pruneRules`, the re-export is wrong; fix the export, not the test.
 
-- [ ] **Step 7: Walk the screens once**
+- [x] **Step 7: Walk the screens once**
 
 Run `supabase start`, `node apps/web/scripts/dev-wallet/signer.mjs` and `pnpm --filter @cobweb/web dev`; sign in with the dev wallet, create a generative collection and open Layers, Rules and Generate. Generate the set, change a trait to break a rule (expect the refusal), swap two ids, regenerate a selection, open the statistics tab. Everything reads as before; only tier badges may differ. Stop the services.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/web
@@ -2708,19 +2708,19 @@ git commit -m "Run the Art screens on the DNA engine"
 - Modify: `docs/MASTER_PLAN.md` (Phase 3 status)
 - Modify: `docs/specs/2026-10-07-dna-engine.md` (acceptance ticks)
 
-- [ ] **Step 1: Creator flow spec, section 5**
+- [x] **Step 1: Creator flow spec, section 5**
 
 In the table, change the Phase 3 row's "Replaced by" cell to: `` `@cobweb/dna` types and analyser (done); the art tables and the token list submitted and validated at lock with `validateTokenList` and hashed with `hashTokenList` ``. In the `RenderJob` row, after "the quote written at lock from `artFeePerToken()`", add ", the token list hash from `hashTokenList`".
 
-- [ ] **Step 2: Master plan**
+- [x] **Step 2: Master plan**
 
 Under Phase 3, change `**Status:** not started.` to `**Status:** in progress. The DNA engine (first sub-project) landed on <date>; see its spec. Next: the art tables.` Replace `<date>` with today's date in words.
 
-- [ ] **Step 3: Tick the acceptance criteria**
+- [x] **Step 3: Tick the acceptance criteria**
 
 In `docs/specs/2026-10-07-dna-engine.md` section 6, tick each line you verified: the purity test (dependencies), the determinism test and the hash test (same value in Node; the browser value was checked by running `pnpm --filter @cobweb/web test`, whose vitest environment is Node too, so note "browser check deferred to the screen wiring sub-project" on that line if no browser run was done), the deep-frozen fixture, the screen walk, the eight codes, the root commands, and the spec update.
 
-- [ ] **Step 4: Format and commit**
+- [x] **Step 4: Format and commit**
 
 ```bash
 pnpm exec prettier --write docs/specs/2026-10-03-creator-flow-ui.md docs/MASTER_PLAN.md docs/specs/2026-10-07-dna-engine.md

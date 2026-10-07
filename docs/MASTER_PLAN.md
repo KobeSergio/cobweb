@@ -175,7 +175,7 @@ What exists:
 
 ### Phase 3: Art generator
 
-**Status:** not started.
+**Status:** in progress. The DNA engine (first sub-project) landed on 7 October 2026; see its spec. Next: the art tables.
 
 Source: [legacy/market-creator-flow.md](legacy/market-creator-flow.md), sections 2, 3, 4, 7 and 8.
 
