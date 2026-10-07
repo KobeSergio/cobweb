@@ -9,15 +9,21 @@
 import {
   DEMO_COLLECTIONS,
   DEMO_LAYERS,
+  DEMO_PREVIEW_COUNT,
   DEMO_RULE_CONFLICTS,
   DEMO_RULES,
+  DEMO_SEED,
   DEMO_TOKEN_COUNT,
-  countTraits,
-  generateCollections,
-  rankTokens,
-  seededRandom,
   tokenLayerUrls,
 } from './art'
+import {
+  attributeKeyOf,
+  buildTraitIndex,
+  countTraits,
+  generateProject,
+  rankTokens,
+  seededRandom,
+} from '@cobweb/dna'
 import { mulWei, sampleAddress, sampleHex, sampleTxHash, sumWei, toWei } from './helpers'
 import type {
   Address,
@@ -72,11 +78,18 @@ export const DEMO_COLLECTION = {
 
 /**
  * The generated set, ranked: the owls are 1 to 600, the owlets 601 to 777. Tokens 1 to 24 have a
- * `previewUrl`; stack `tokenLayerUrls(dna)` for the rest.
+ * `previewUrl`; stack `tokenLayerUrls(dna)` for the rest. Same seed as `scripts/make-demo-art.mjs`.
  */
 export const DEMO_TOKENS: GeneratedToken[] = rankTokens(
-  generateCollections(DEMO_LAYERS, DEMO_RULES, DEMO_COLLECTIONS),
-)
+  generateProject(
+    { layers: DEMO_LAYERS, rules: DEMO_RULES, collections: DEMO_COLLECTIONS },
+    DEMO_SEED,
+  ).tokens.map((token) => ({ ...token, name: `${DEMO_COLLECTION.name} #${token.id}` })),
+  attributeKeyOf(buildTraitIndex(DEMO_LAYERS)),
+).map((token) => ({
+  ...token,
+  previewUrl: token.id <= DEMO_PREVIEW_COUNT ? `/demo/tokens/${token.id}.svg` : null,
+}))
 
 /** How many tokens carry each trait. */
 export const DEMO_TRAIT_COUNTS: TraitCounts = countTraits(DEMO_TOKENS)

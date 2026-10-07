@@ -6,7 +6,7 @@ import { Alert, AlertDescription, AlertTitle } from '@cobweb/ui/components/alert
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@cobweb/ui/components/select'
 import { Stat, StatGroup } from '@cobweb/ui/components/stat'
 import { cn } from '@cobweb/ui/lib/utils'
-import { cappedShortfalls } from '@/lib/demo/art'
+import { cappedShortfalls } from '@cobweb/dna'
 import type { Collection, GeneratedToken, Layer, TraitCounts } from '@/lib/demo'
 import { Composite } from '../composite'
 import { expectedCount, formatCount } from '../lib/trait-index'

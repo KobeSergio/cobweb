@@ -16,14 +16,25 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import {
-  DEMO_COLLECTIONS,
-  DEMO_LAYERS,
-  DEMO_PREVIEW_COUNT,
-  DEMO_RULES,
-  generateCollections,
-  slugify,
-} from '../src/lib/demo/art.ts'
+import { registerHooks } from 'node:module'
+
+// The engine's source imports its own files without extensions (as TypeScript and the bundlers
+// expect), which node's loader does not resolve. This hook adds ".ts" when a relative import fails.
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    try {
+      return nextResolve(specifier, context)
+    } catch (error) {
+      if (specifier.startsWith('.') && !/\.[a-z]+$/.test(specifier))
+        return nextResolve(`${specifier}.ts`, context)
+      throw error
+    }
+  },
+})
+
+const { DEMO_COLLECTIONS, DEMO_LAYERS, DEMO_PREVIEW_COUNT, DEMO_RULES, DEMO_SEED, slugify } =
+  await import('../src/lib/demo/art.ts')
+const { generateProject } = await import('../../../packages/dna/src/index.ts')
 
 // The first collection's layers carry the drawings; the other collections reuse its images by name,
 // and the previewed tokens (1 to 24) all belong to it.
@@ -397,7 +408,10 @@ for (const layer of ART_LAYERS) {
   }
 }
 
-const tokens = generateCollections(DEMO_LAYERS, DEMO_RULES, DEMO_COLLECTIONS)
+const tokens = generateProject(
+  { layers: DEMO_LAYERS, rules: DEMO_RULES, collections: DEMO_COLLECTIONS },
+  DEMO_SEED,
+).tokens
 mkdirSync(join(OUT, 'tokens'), { recursive: true })
 for (const token of tokens.slice(0, DEMO_PREVIEW_COUNT)) {
   writeFileSync(join(OUT, 'tokens', `${token.id}.svg`), svg(token.dna.map(traitMarkup).join('')))

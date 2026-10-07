@@ -37,6 +37,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@cobweb/dna':
+        specifier: workspace:^
+        version: link:../../packages/dna
       '@cobweb/ui':
         specifier: workspace:^
         version: link:../../packages/ui

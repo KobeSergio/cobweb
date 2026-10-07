@@ -1,8 +1,8 @@
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
-  // The UI package ships TypeScript source, so Next compiles it with the app.
-  transpilePackages: ['@cobweb/ui'],
+  // The UI and DNA packages ship TypeScript source, so Next compiles it with the app.
+  transpilePackages: ['@cobweb/ui', '@cobweb/dna'],
   poweredByHeader: false,
   async headers() {
     return [

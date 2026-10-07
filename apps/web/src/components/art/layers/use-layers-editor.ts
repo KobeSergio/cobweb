@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { countTraits } from '@/lib/demo/art'
+import { countTraits } from '@cobweb/dna'
 import type { Layer, Trait, TraitCounts } from '@/lib/demo'
 import type { ConfirmRequest } from '../confirm-dialog'
 import type { NameRequest } from '../name-dialog'

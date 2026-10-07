@@ -8,100 +8,36 @@ export type Address = `0x${string}`
 export type Hex = `0x${string}`
 
 // ---------------------------------------------------------------------------------------------
-// Art (Phase 3: art generator)
+// Art (Phase 3: art generator). The shapes live in `@cobweb/dna`; the screens import them from here.
 // ---------------------------------------------------------------------------------------------
 
-/** One trait of a layer. Replaced by: the project's layer and trait rows (Phase 3 art tables). */
-export type Trait = {
-  /** Unique within the project, e.g. `eyes-starry`. DNA and rules refer to traits by this id. */
-  id: string
-  layerId: string
-  name: string
-  /** Chance in percent among the layer's weighted traits. 0 for a constant. Weights sum to 100 per layer. */
-  weight: number
-  /**
-   * A fixed-quantity trait: placed on at most this many tokens instead of by weight. A cap, not an
-   * exact count (MASTER_PLAN, Art: maximum counts): rules and uniqueness can stop the generator from reaching it.
-   */
-  constant?: number
-  /** The empty trait: the layer is left out of a token. Has no image. */
-  blank: boolean
-  /** Full-size layer image, or null for a blank. Square, transparent, stacks in layer order. */
-  imageUrl: string | null
-}
+export type {
+  ArtRule,
+  AtLeastOne,
+  Collection,
+  Layer,
+  Project,
+  Ranked,
+  RuleConflict,
+  RuleKind,
+  TokenCore,
+  Trait,
+  TraitCounts,
+} from '@cobweb/dna'
+import type { Ranked, TokenCore } from '@cobweb/dna'
 
 /**
- * One collection of a generative project, as in the legacy app (for example male and female). Each
- * has its own layers and rules and its own size; token ids run on across collections (1 to N) and
- * uniqueness is checked within a collection. Replaced by: the project's collection rows (Phase 3).
+ * One generated token as the screens show it: the engine's core (id, collection, DNA) with its rank,
+ * plus the name chosen at Generate, an optional description and a pre-rendered preview for the
+ * first sample tokens (null: stack `tokenLayerUrls` instead).
  */
-export type Collection = {
-  id: string
-  name: string
-  /** Tokens to generate for this collection. The supply is the sum of the sizes. */
-  size: number
-}
-
-/** A layer, bottom first. Replaced by: the project's layer rows (Phase 3), ordered by position. */
-export type Layer = {
-  id: string
-  /** The collection this layer belongs to. Each collection has its own stack. */
-  collectionId: string
-  name: string
-  /** 0 is the bottom of the collection's stack. */
-  position: number
-  traits: Trait[]
-}
-
-/** The three legacy rule kinds, worded as the creator sees them. Replaced by: the rules enum (Phase 3). */
-export type RuleKind = "doesn't mix with" | 'always pairs with' | 'must pair with'
-
-/**
- * A trait-pairing rule, stored on its source trait. Replaced by: the project's rule rows (Phase 3).
- *  - doesn't mix with: never in the same token as any related trait (both directions).
- *  - always pairs with: appears only with one of the related traits, and they only with it (both directions).
- *  - must pair with: whenever this trait appears, one of the related traits does too (one direction).
- */
-export type ArtRule = {
-  id: string
-  kind: RuleKind
-  traitId: string
-  relatedTraitIds: string[]
-  bidirectional: boolean
-}
-
-/**
- * A contradiction the Rules screen surfaces. Rules name traits, and trait ids are unique in the
- * project, so a rule applies within its traits' collection. Replaced by: the rule analyser in `packages/dna`.
- */
-export type RuleConflict = {
-  kind: 'isolated' | 'mixing' | 'circular'
-  ruleIds: string[]
-  message: string
-  /** The rules generation skips to get round the conflict. Unset: every rule but the first. */
-  skip?: string[]
-}
-
-/** One generated token. Replaced by: the token list the browser submits at lock (MASTER_PLAN, Art: lock check). */
-export type GeneratedToken = {
-  /** Token id, starting at 1 and running on across collections. Also the number in the name. */
-  id: number
+export type GeneratedToken = Ranked<TokenCore> & {
   /** "<token name> #<id>", the token name chosen at Generate (legacy auto-populate). */
   name: string
   /** The metadata description: the one chosen at Generate, or this token's own after an edit. */
   description?: string
-  /** The collection the token belongs to; its DNA follows that collection's layers. */
-  collectionId: string
-  /** The chosen trait id for each of its collection's layers, in layer order (`dna[i]` belongs to `layers[i]`). */
-  dna: string[]
-  /** 1 is the rarest. */
-  rank: number
-  /** Pre-rendered composite for the first tokens, else null: stack `tokenLayerUrls` instead. */
   previewUrl: string | null
 }
-
-/** How often each trait occurs in the generated set. Replaced by: counts from the stored token list. */
-export type TraitCounts = Record<string, number>
 
 /**
  * What an uploaded file is (MASTER_PLAN, Art: media types). 1/1s take images only (PNG, JPG,

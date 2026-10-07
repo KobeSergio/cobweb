@@ -1,3 +1,4 @@
+import { satisfiesRules } from '@cobweb/dna'
 import type { Tables } from '@/lib/database.types'
 import {
   DEMO_COLLECTIONS,
@@ -8,7 +9,6 @@ import {
   DEMO_RULES,
   DEMO_TOKEN_COUNT,
   DEMO_TOKENS,
-  satisfiesRules,
   type GeneratedToken,
   type RenderJob,
   type SupportedChain,

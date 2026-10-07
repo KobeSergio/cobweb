@@ -5,5 +5,5 @@
 export * from './types'
 export * from './helpers'
 export * from './data'
-export { DEMO_PREVIEW_COUNT, getTrait, satisfiesRules } from './art'
+export { DEMO_PREVIEW_COUNT, getTrait } from './art'
 export { scaleSampleToSupply } from './supply'

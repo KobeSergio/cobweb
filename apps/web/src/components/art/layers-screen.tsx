@@ -13,7 +13,7 @@ import {
   EmptyTitle,
 } from '@cobweb/ui/components/empty'
 import type { Tables } from '@/lib/database.types'
-import { satisfiesRules, seededRandom } from '@/lib/demo/art'
+import { satisfiesRules, seededRandom } from '@cobweb/dna'
 import type { Collection, Layer, TraitCounts } from '@/lib/demo'
 import { flowNeighbours } from '@/lib/steps'
 import { StageFooter } from '@/components/shell/stage-footer'
