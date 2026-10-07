@@ -219,7 +219,7 @@ function uploadInput(collectionId: string, overrides: Record<string, unknown> = 
   return {
     collection_id: collectionId,
     kind: 'layer_image',
-    storage_key: `layers/${runId}/${HEX64(++nameCount)}.png`,
+    storage_key: `${collectionId}/layers/${HEX64(++nameCount)}.png`,
     content_hash: HEX64(nameCount),
     mime: 'image/png',
     media_type: 'image',
@@ -229,6 +229,28 @@ function uploadInput(collectionId: string, overrides: Record<string, unknown> = 
     file_name: 'trait.png',
     ...overrides,
   }
+}
+
+/** Records an upload through the RPC, as the upload server action will; returns the new row id. */
+async function recordUpload(
+  client: SupabaseClient,
+  collectionId: string,
+  overrides: Record<string, unknown> = {},
+) {
+  const input = uploadInput(collectionId, overrides)
+  const { data, error } = await client.rpc('record_upload', {
+    p_collection_id: collectionId,
+    p_kind: input.kind,
+    p_storage_key: input.storage_key,
+    p_content_hash: input.content_hash,
+    p_mime: input.mime,
+    p_media_type: input.media_type,
+    p_bytes: input.bytes,
+    p_width: input.width,
+    p_height: input.height,
+    p_file_name: input.file_name,
+  })
+  return { id: (data as string | null) ?? null, error: error as DbError }
 }
 
 async function insertArtCollection(
@@ -1039,28 +1061,35 @@ async function artFoundation(A: Creator, B: Creator): Promise<void> {
   })
 
   let uploadId = ''
-  await check('uploads: A inserts a layer image row', async () => {
-    const { data, error } = await A.client.from('uploads').insert(uploadInput(cid)).select().single()
-    if (error || !data) return describe(error as DbError)
-    uploadId = (data as { id: string }).id
+  await check('uploads: A records a layer image through record_upload', async () => {
+    const { id, error } = await recordUpload(A.client, cid)
+    if (error || !id) return describe(error)
+    uploadId = id
     return null
   })
+  await check('uploads: a direct insert is refused, even by the owner', async () => {
+    const { data, error } = await A.client.from('uploads').insert(uploadInput(cid)).select()
+    return expectError(error as DbError, PERMISSION, data)
+  })
+  await check("uploads: a key outside the collection's prefix is refused", async () => {
+    const { id, error } = await recordUpload(A.client, cid, {
+      storage_key: `${other.row!.id}/layers/stolen.png`,
+    })
+    return expectError(error, CHECK, id ? [id] : null)
+  })
   await check('uploads: a non-square layer image is refused', async () => {
-    const { data, error } = await A.client
-      .from('uploads')
-      .insert(uploadInput(cid, { width: 1000, height: 900 }))
-      .select()
-    return expectError(error as DbError, CHECK, data)
+    const { id, error } = await recordUpload(A.client, cid, { width: 1000, height: 900 })
+    return expectError(error, CHECK, id ? [id] : null)
   })
   await check('uploads: the same content hash twice for one kind is refused', async () => {
     const first = uploadInput(cid)
-    const a = await A.client.from('uploads').insert(first).select()
-    if (a.error) return `setup: ${describe(a.error as DbError)}`
-    const { data, error } = await A.client
-      .from('uploads')
-      .insert({ ...first, storage_key: `${first.storage_key}-again` })
-      .select()
-    return expectError(error as DbError, UNIQUE, data)
+    const a = await recordUpload(A.client, cid, first)
+    if (a.error) return `setup: ${describe(a.error)}`
+    const { id, error } = await recordUpload(A.client, cid, {
+      ...first,
+      storage_key: `${first.storage_key}-again`,
+    })
+    return expectError(error, UNIQUE, id ? [id] : null)
   })
   await check('uploads: A cannot change the stored object description', async () => {
     const { data, error } = await A.client
@@ -1070,10 +1099,12 @@ async function artFoundation(A: Creator, B: Creator): Promise<void> {
       .select()
     return expectError(error as DbError, PERMISSION, data)
   })
-  await check("uploads: B cannot read or insert into A's collection", async () => {
+  await check("uploads: B cannot read A's uploads or record into A's collection", async () => {
     const read = await B.client.from('uploads').select().eq('collection_id', cid)
-    const ins = await B.client.from('uploads').insert(uploadInput(cid)).select()
-    return expectNothing(read.error, read.data) ?? expectError(ins.error as DbError, PERMISSION, ins.data)
+    const rec = await recordUpload(B.client, cid)
+    return (
+      expectNothing(read.error, read.data) ?? expectError(rec.error, PERMISSION, rec.id ? [rec.id] : null)
+    )
   })
 
   await check('collections: A sets the art columns while unlocked', async () => {

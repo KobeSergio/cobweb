@@ -91,10 +91,62 @@ using ((select private.collection_owned(collection_id)))
 with check ((select private.collection_owned(collection_id)));
 
 revoke all on public.uploads from anon, authenticated;
-grant select, insert, delete on public.uploads to authenticated;
--- The stored object's description is written by the upload action; the creator edits only how
--- the file is used.
+-- No client insert: a row is recorded only through record_upload below, which pins the storage
+-- key under the collection's own prefix. The creator edits only how a file is used.
+grant select, delete on public.uploads to authenticated;
 grant update (kind, file_name, position, quantity, attributes) on public.uploads to authenticated;
+
+-- Records an upload for the caller's own collection. Security definer, so it checks everything a
+-- policy would: the caller owns the collection, the art is not locked, and the key lives under
+-- `<collection id>/`, so a row can never point at another project's object.
+create function public.record_upload(
+  p_collection_id uuid,
+  p_kind public.upload_kind,
+  p_storage_key text,
+  p_content_hash text,
+  p_mime text,
+  p_media_type public.media_type,
+  p_bytes bigint,
+  p_width integer,
+  p_height integer,
+  p_file_name text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := (select auth.uid());
+  v_owner uuid;
+  v_locked timestamptz;
+  v_id uuid;
+begin
+  if v_uid is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  select c.owner_id, c.art_locked_at into v_owner, v_locked
+  from public.collections c where c.id = p_collection_id;
+  if v_owner is null or v_owner <> v_uid then
+    raise exception 'collection not found' using errcode = '42501';
+  end if;
+  if v_locked is not null then
+    raise exception 'The art is locked and cannot change.' using errcode = '42501';
+  end if;
+  if p_storage_key is null or p_storage_key not like p_collection_id::text || '/%' then
+    raise exception 'The storage key must be under the collection''s own prefix.' using errcode = '23514';
+  end if;
+  insert into public.uploads (collection_id, kind, storage_key, content_hash, mime, media_type, bytes, width, height, file_name)
+  values (p_collection_id, p_kind, p_storage_key, p_content_hash, p_mime, p_media_type, p_bytes, p_width, p_height, p_file_name)
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+revoke all on function public.record_upload(uuid, public.upload_kind, text, text, text, public.media_type, bigint, integer, integer, text)
+  from public, anon;
+grant execute on function public.record_upload(uuid, public.upload_kind, text, text, text, public.media_type, bigint, integer, integer, text)
+  to authenticated;
 
 -- ---------------------------------------------------------------------------------------------
 -- Art collections: a generative project's inner groups (the sample's Owls and Owlets)
