@@ -1699,6 +1699,24 @@ describe('rankTokens (sum of supply over attribute count)', () => {
     expect(ranked.find((t) => t.id === 2)!.rank).toBe(3)
   })
 
+  it('treats the same attributes in a different layer order as a tie, whatever the float drift', () => {
+    // Counts 1, 1 and 3 over a total of 4: summed as [4, 4, 1.33] and as [1.33, 4, 4] the floats differ
+    // by one ulp, so a plain comparison would never reach the id tie-break.
+    const tokens = [
+      token(1, ['a:L1:x', 'a:L2:y', 'a:L3:common']),
+      token(2, ['a:L1:common', 'a:L2:z', 'a:L3:w']),
+      token(3, ['a:L1:common', 'a:L2:q', 'a:L3:common']),
+      token(4, ['a:L1:p', 'a:L2:q', 'a:L3:common']),
+    ]
+    // common on L1: tokens 2 and 3 (2); common on L3: tokens 1, 3, 4 (3); q on L2: 3 and 4 (2); the rest 1.
+    // Token 1: 4 + 4 + 4/3. Token 2: 2 + 4 + 4. Token 4: 4 + 2 + 4/3. Token 3: 2 + 2 + 4/3.
+    const ranked = rankTokens(tokens, keyOf)
+    expect(ranked.map((t) => [t.id, t.rank])).toEqual([[1, 2], [2, 1], [3, 4], [4, 3]])
+    const twins = [token(1, ['a:L1:a', 'a:L2:b', 'a:L3:c']), token(2, ['a:L1:c', 'a:L2:a', 'a:L3:b']), token(3, ['a:L1:a', 'a:L2:a', 'a:L3:a'])]
+    // Tokens 1 and 2 have the same three attribute counts in different layer orders: an exact tie, so 1 before 2.
+    expect(rankTokens(twins, (id) => id.split(':')[2]!).map((t) => t.rank)).toEqual([1, 2, 3])
+  })
+
   it('copes with mixed DNA lengths and unknown ids after a layer is deleted', () => {
     const project = fixture()
     const keyOfIndex = attributeKeyOf(buildTraitIndex(project.layers))
@@ -1785,19 +1803,26 @@ import type { Ranked, TokenCore } from './types'
  * Ranks tokens by rarity, 1 the rarest: a token's score is the sum over its DNA of
  * (tokens / tokens with that attribute), attributes counted by `keyOf` (layer and trait name, so
  * the same attribute in two collections is one). Blanks and unknown ids count as attributes of their
- * own. No division by layer count, so it ranks like marketplaces do. Ties go to the lower id. The
- * result keeps the input order and every extra field.
+ * own. No division by layer count, so it ranks like marketplaces do. Ties (scores within a relative
+ * epsilon) go to the lower id. The result keeps the input order and every extra field.
  */
 export function rankTokens<T extends TokenCore>(tokens: T[], keyOf: (traitId: string) => string): Ranked<T>[] {
   const counts = new Map<string, number>()
   for (const token of tokens)
     for (const traitId of token.dna) counts.set(keyOf(traitId), (counts.get(keyOf(traitId)) ?? 0) + 1)
   const total = tokens.length
+  // Terms are summed smallest first so two tokens with the same attributes get the same float, and
+  // scores within a relative epsilon count as tied; otherwise summation order could put tied tokens
+  // one ulp apart and the id tie-break would never run.
   const scored = tokens.map((token) => ({
     token,
-    score: token.dna.reduce((sum, traitId) => sum + total / (counts.get(keyOf(traitId)) ?? 1), 0),
+    score: token.dna
+      .map((traitId) => total / (counts.get(keyOf(traitId)) ?? 1))
+      .sort((a, b) => a - b)
+      .reduce((sum, term) => sum + term, 0),
   }))
-  const order = [...scored].sort((a, b) => b.score - a.score || a.token.id - b.token.id)
+  const tied = (a: number, b: number) => Math.abs(a - b) <= 1e-9 * Math.max(Math.abs(a), Math.abs(b))
+  const order = [...scored].sort((a, b) => (tied(a.score, b.score) ? a.token.id - b.token.id : b.score - a.score))
   const rankById = new Map(order.map((entry, i) => [entry.token.id, i + 1]))
   return tokens.map((token) => ({ ...token, rank: rankById.get(token.id)! }))
 }
