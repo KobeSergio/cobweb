@@ -1193,47 +1193,6 @@ async function artFoundation(A: Creator, B: Creator): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 10. Cleanup
-// ---------------------------------------------------------------------------------------------
-async function cleanup(): Promise<void> {
-  await check('cleanup: delete collections created by this run', async () => {
-    const owners = [...createdUserIds]
-    const { error } = await admin.from('collections').delete().in('owner_id', owners)
-    if (error) return describe(error)
-    const { data } = await admin.from('collections').select('id').in('owner_id', owners)
-    return data && data.length > 0 ? `${data.length} left` : null
-  })
-  await check('cleanup: delete auth users created by this run', async () => {
-    const problems: string[] = []
-    for (const id of createdUserIds) {
-      const { error } = await admin.auth.admin.deleteUser(id)
-      if (error) problems.push(`${id}: ${error.message}`)
-    }
-    return problems.length ? problems.join('; ') : null
-  })
-  await check('cleanup: profiles of deleted users are gone', async () => {
-    const { data, error } = await admin
-      .from('profiles')
-      .select('id')
-      .in('id', [...createdUserIds])
-    if (error) return describe(error)
-    return data.length ? `${data.length} left` : null
-  })
-}
-
-try {
-  await main()
-} catch (e) {
-  failed.push('run')
-  console.log(`FAIL run: ${e instanceof Error ? e.message : String(e)}`)
-} finally {
-  await cleanup()
-}
-
-console.log(`\n${passed} passed, ${failed.length} failed`)
-process.exit(failed.length ? 1 : 0)
-
-// ---------------------------------------------------------------------------------------------
 // 9b. Traits, rules and constraints
 // ---------------------------------------------------------------------------------------------
 async function artTraitsAndRules(A: Creator, B: Creator): Promise<void> {
@@ -1398,3 +1357,44 @@ async function artTraitsAndRules(A: Creator, B: Creator): Promise<void> {
     return expectError(error as DbError, CHECK, data)
   })
 }
+
+// ---------------------------------------------------------------------------------------------
+// 10. Cleanup
+// ---------------------------------------------------------------------------------------------
+async function cleanup(): Promise<void> {
+  await check('cleanup: delete collections created by this run', async () => {
+    const owners = [...createdUserIds]
+    const { error } = await admin.from('collections').delete().in('owner_id', owners)
+    if (error) return describe(error)
+    const { data } = await admin.from('collections').select('id').in('owner_id', owners)
+    return data && data.length > 0 ? `${data.length} left` : null
+  })
+  await check('cleanup: delete auth users created by this run', async () => {
+    const problems: string[] = []
+    for (const id of createdUserIds) {
+      const { error } = await admin.auth.admin.deleteUser(id)
+      if (error) problems.push(`${id}: ${error.message}`)
+    }
+    return problems.length ? problems.join('; ') : null
+  })
+  await check('cleanup: profiles of deleted users are gone', async () => {
+    const { data, error } = await admin
+      .from('profiles')
+      .select('id')
+      .in('id', [...createdUserIds])
+    if (error) return describe(error)
+    return data.length ? `${data.length} left` : null
+  })
+}
+
+try {
+  await main()
+} catch (e) {
+  failed.push('run')
+  console.log(`FAIL run: ${e instanceof Error ? e.message : String(e)}`)
+} finally {
+  await cleanup()
+}
+
+console.log(`\n${passed} passed, ${failed.length} failed`)
+process.exit(failed.length ? 1 : 0)
