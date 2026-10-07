@@ -1453,6 +1453,31 @@ async function artTokens(A: Creator, B: Creator): Promise<void> {
       .select()
     return expectError(error as DbError, CHECK, data)
   })
+  await check('layers: adding a layer is refused while the art collection has tokens', async () => {
+    const { error, row } = await insertLayer(A.client, cid, art.row!.id, { name: 'Late', position: 7 })
+    return expectError(error, CHECK, row ? [row] : null)
+  })
+  await check('tokens: two ids swap in one statement under the deferrable key', async () => {
+    // Tokens 1 and 2 both carry [ink, none] by now; give token 2 a distinct DNA so the swap is observable.
+    const prep = await A.client
+      .from('tokens')
+      .update({ dna: [ink, wide] })
+      .eq('collection_id', cid)
+      .eq('token_id', 2)
+    if (prep.error) return `setup: ${describe(prep.error as DbError)}`
+    const { error } = await A.client.rpc('swap_token_ids_for_check', { p_collection_id: cid, p_a: 1, p_b: 2 })
+    if (error) return describe(error as DbError)
+    const { data } = await admin
+      .from('tokens')
+      .select('token_id, dna')
+      .eq('collection_id', cid)
+      .in('token_id', [1, 2])
+      .order('token_id')
+    const rows = (data ?? []) as { token_id: number; dna: string[] }[]
+    return rows[0]?.dna[1] === wide && rows[1]?.dna[1] === none
+      ? null
+      : `ids did not swap: ${JSON.stringify(rows)}`
+  })
   await check('layers: a rename is still allowed while tokens exist', async () => {
     const { error } = await A.client.from('layers').update({ name: 'Eyes 2' }).eq('id', eyes.row!.id)
     return error ? describe(error as DbError) : null

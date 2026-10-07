@@ -445,12 +445,15 @@ create table public.tokens (
   collection_id uuid not null references public.collections (id) on delete cascade,
   token_id integer not null check (token_id between 1 and 100000),
   art_collection_id uuid not null references public.art_collections (id) on delete cascade,
-  -- One trait per layer of the art collection, bottom layer first.
-  dna uuid[] not null,
+  -- One trait per layer of the art collection, bottom layer first. One dimension only: a nested
+  -- array would flatten through unnest and store wrong.
+  dna uuid[] not null check (array_ndims(dna) = 1),
   -- A token's own description after an edit; null means the project's token_description applies.
   description text check (description is null or char_length(description) <= 500),
   updated_at timestamptz not null default now(),
-  primary key (collection_id, token_id)
+  -- Deferrable, so a swap or a renumbering after a delete can run as one statement or one
+  -- transaction without tripping over itself row by row.
+  primary key (collection_id, token_id) deferrable initially immediate
 );
 
 create index tokens_art_collection_id_idx on public.tokens (art_collection_id);
@@ -516,25 +519,27 @@ before update on public.tokens
 for each row execute function public.set_updated_at();
 
 -- Stored DNA is positional, so the layer stack cannot change shape under it: while an art
--- collection has tokens, its layers keep their positions and are not deleted. The server action
--- that reorders or removes a layer remaps or clears the tokens first, as the browser store does.
+-- collection has tokens, its layers are not added, reordered or deleted. The server action that
+-- changes the stack remaps or clears the tokens first, as the browser store does.
 create function public.layers_guard_tokens()
 returns trigger
 language plpgsql
 security invoker
 set search_path = ''
 as $$
+declare
+  v_art uuid := case when tg_op = 'INSERT' then new.art_collection_id else old.art_collection_id end;
 begin
   -- A cascaded delete (the art collection or the project going away) takes the tokens with it;
-  -- only a direct layer delete or a reorder is refused while tokens exist.
+  -- only a direct layer delete, an insert or a reorder is refused while tokens exist.
   if tg_op = 'DELETE' and pg_trigger_depth() > 1 then
     return old;
   end if;
   if tg_op = 'UPDATE' and new.position = old.position and new.art_collection_id = old.art_collection_id then
     return new;
   end if;
-  if exists (select 1 from public.tokens t where t.art_collection_id = old.art_collection_id) then
-    raise exception 'The layers cannot be reordered or removed while the collection has tokens. Clear the tokens first.'
+  if exists (select 1 from public.tokens t where t.art_collection_id = v_art) then
+    raise exception 'The layers cannot be added, reordered or removed while the collection has tokens. Clear the tokens first.'
       using errcode = 'check_violation';
   end if;
   return case when tg_op = 'DELETE' then old else new end;
@@ -542,5 +547,21 @@ end;
 $$;
 
 create trigger layers_guard_tokens
-before update or delete on public.layers
+before insert or update or delete on public.layers
 for each row execute function public.layers_guard_tokens();
+
+-- Swaps two token ids of the caller's collection in one statement. The deferrable key makes this
+-- possible; the Generate screen's swap will call a function of this shape (screen wiring sub-project).
+create function public.swap_token_ids_for_check(p_collection_id uuid, p_a integer, p_b integer)
+returns void
+language sql
+security invoker
+set search_path = ''
+as $$
+  update public.tokens t
+  set token_id = case when t.token_id = p_a then p_b else p_a end
+  where t.collection_id = p_collection_id and t.token_id in (p_a, p_b);
+$$;
+
+revoke all on function public.swap_token_ids_for_check(uuid, integer, integer) from public, anon;
+grant execute on function public.swap_token_ids_for_check(uuid, integer, integer) to authenticated;
