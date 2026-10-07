@@ -3,6 +3,7 @@ import {
   DEMO_AIRDROPS,
   DEMO_COLLECTION,
   DEMO_MINT_GROUPS,
+  DEMO_TOKENS,
   DEMO_TOTAL_MINTED,
   scaleSampleToSupply,
 } from '@/lib/demo'
@@ -49,5 +50,29 @@ describe('scaleSampleToSupply', () => {
     const view = scaleSampleToSupply(1)
     expect(view.groups.reduce((sum, g) => sum + g.maxSupply, 0)).toBeLessThanOrEqual(1)
     expect(view.totalMinted).toBeLessThanOrEqual(1)
+  })
+})
+
+describe('sample tokens', () => {
+  it('roll the same DNA as the pre-rendered art (tokens 1 and 601)', () => {
+    expect(DEMO_TOKENS[0]!.dna).toEqual([
+      'background-moss',
+      'body-barn',
+      'belly-speckled',
+      'eyes-glance',
+      'beak-tiny',
+      'headwear-sprout',
+      'accessory-none',
+    ])
+    expect(DEMO_TOKENS[600]!.dna).toEqual([
+      'owlets-background-sand',
+      'owlets-body-tawny',
+      'owlets-belly-speckled',
+      'owlets-eyes-sleepy',
+      'owlets-beak-rose',
+      'owlets-headwear-none',
+      'owlets-accessory-scarf',
+    ])
+    expect(DEMO_TOKENS).toHaveLength(777)
   })
 })
