@@ -1,4 +1,4 @@
-import type { ArtRule, GeneratedToken, Layer, Trait } from '@/lib/demo'
+import type { GeneratedToken, Layer, Trait } from '@/lib/demo'
 
 /**
  * Pure edits on the layer stack. Every function returns new arrays and never touches the other
@@ -202,27 +202,4 @@ export function setBlank(layers: Layer[], layerId: string, on: boolean): Layer[]
   })
 }
 
-/** Drops rule references to traits that no longer exist, and rules left with nothing to relate. */
-export function pruneRules(rules: ArtRule[], traitIds: ReadonlySet<string>): ArtRule[] {
-  const next: ArtRule[] = []
-  let changed = false
-  for (const rule of rules) {
-    const related = rule.relatedTraitIds.filter((id) => traitIds.has(id))
-    if (!traitIds.has(rule.traitId) || related.length === 0) {
-      changed = true
-      continue
-    }
-    if (related.length !== rule.relatedTraitIds.length) {
-      changed = true
-      next.push({ ...rule, relatedTraitIds: related })
-    } else next.push(rule)
-  }
-  return changed ? next : rules
-}
-
-/** How many rules mention any of these traits. */
-export function rulesTouching(rules: ArtRule[], traitIds: ReadonlySet<string>): number {
-  return rules.filter(
-    (rule) => traitIds.has(rule.traitId) || rule.relatedTraitIds.some((id) => traitIds.has(id)),
-  ).length
-}
+export { pruneRules, rulesTouching } from '@cobweb/dna'
