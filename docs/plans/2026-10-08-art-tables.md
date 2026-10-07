@@ -43,7 +43,7 @@ Inputs the spec implies but no task's tests exercise. Each is pinned to the task
 
 **Interfaces:**
 
-- Produces: enums `public.upload_kind`, `public.media_type`; tables `public.uploads`, `public.art_collections`, `public.layers`; columns on `public.collections`: `art_deferred`, `art_locked_at`, `token_name`, `token_description`, `show_blank_traits`, `generation_seed`, `canvas_width`, `canvas_height`; function `private.collection_owned(uuid) returns boolean` (used by every later policy); verify-local helpers `uploadInput(collectionId, overrides)`, `insertArtCollection(client, collectionId, overrides)`, `insertLayer(client, collectionId, artCollectionId, overrides)`.
+- Produces: enums `public.upload_kind`, `public.media_type`; tables `public.uploads`, `public.art_collections`, `public.layers`; function `public.record_upload(...) returns uuid` (the only way a client records an upload); columns on `public.collections`: `art_deferred`, `art_locked_at`, `token_name`, `token_description`, `show_blank_traits`, `generation_seed`, `canvas_width`, `canvas_height`; function `private.collection_owned(uuid) returns boolean` (used by every later policy); verify-local helpers `uploadInput(collectionId, overrides)`, `recordUpload(client, collectionId, overrides)`, `insertArtCollection(client, collectionId, overrides)`, `insertLayer(client, collectionId, artCollectionId, overrides)`.
 
 - [ ] **Step 1: Write the failing checks**
 
@@ -56,7 +56,7 @@ function uploadInput(collectionId: string, overrides: Record<string, unknown> = 
   return {
     collection_id: collectionId,
     kind: 'layer_image',
-    storage_key: `layers/${runId}/${HEX64(++nameCount)}.png`,
+    storage_key: `${collectionId}/layers/${HEX64(++nameCount)}.png`,
     content_hash: HEX64(nameCount),
     mime: 'image/png',
     media_type: 'image',
@@ -66,6 +66,24 @@ function uploadInput(collectionId: string, overrides: Record<string, unknown> = 
     file_name: 'trait.png',
     ...overrides,
   }
+}
+
+/** Records an upload through the RPC, as the upload server action will; returns the new row id. */
+async function recordUpload(client: SupabaseClient, collectionId: string, overrides: Record<string, unknown> = {}) {
+  const input = uploadInput(collectionId, overrides)
+  const { data, error } = await client.rpc('record_upload', {
+    p_collection_id: collectionId,
+    p_kind: input.kind,
+    p_storage_key: input.storage_key,
+    p_content_hash: input.content_hash,
+    p_mime: input.mime,
+    p_media_type: input.media_type,
+    p_bytes: input.bytes,
+    p_width: input.width,
+    p_height: input.height,
+    p_file_name: input.file_name,
+  })
+  return { id: (data as string | null) ?? null, error: error as DbError }
 }
 
 async function insertArtCollection(client: SupabaseClient, collectionId: string, overrides: Record<string, unknown> = {}) {
@@ -147,34 +165,39 @@ async function artFoundation(A: Creator, B: Creator): Promise<void> {
   })
 
   let uploadId = ''
-  await check('uploads: A inserts a layer image row', async () => {
-    const { data, error } = await A.client.from('uploads').insert(uploadInput(cid)).select().single()
-    if (error || !data) return describe(error as DbError)
-    uploadId = (data as { id: string }).id
+  await check('uploads: A records a layer image through record_upload', async () => {
+    const { id, error } = await recordUpload(A.client, cid)
+    if (error || !id) return describe(error)
+    uploadId = id
     return null
   })
+  await check('uploads: a direct insert is refused, even by the owner', async () => {
+    const { data, error } = await A.client.from('uploads').insert(uploadInput(cid)).select()
+    return expectError(error as DbError, PERMISSION, data)
+  })
+  await check("uploads: a key outside the collection's prefix is refused", async () => {
+    const { id, error } = await recordUpload(A.client, cid, { storage_key: `${other.row!.id}/layers/stolen.png` })
+    return expectError(error, CHECK, id ? [id] : null)
+  })
   await check('uploads: a non-square layer image is refused', async () => {
-    const { data, error } = await A.client.from('uploads').insert(uploadInput(cid, { width: 1000, height: 900 })).select()
-    return expectError(error as DbError, CHECK, data)
+    const { id, error } = await recordUpload(A.client, cid, { width: 1000, height: 900 })
+    return expectError(error, CHECK, id ? [id] : null)
   })
   await check('uploads: the same content hash twice for one kind is refused', async () => {
     const first = uploadInput(cid)
-    const a = await A.client.from('uploads').insert(first).select()
-    if (a.error) return `setup: ${describe(a.error as DbError)}`
-    const { data, error } = await A.client
-      .from('uploads')
-      .insert({ ...first, storage_key: `${first.storage_key}-again` })
-      .select()
-    return expectError(error as DbError, UNIQUE, data)
+    const a = await recordUpload(A.client, cid, first)
+    if (a.error) return `setup: ${describe(a.error)}`
+    const { id, error } = await recordUpload(A.client, cid, { ...first, storage_key: `${first.storage_key}-again` })
+    return expectError(error, UNIQUE, id ? [id] : null)
   })
   await check('uploads: A cannot change the stored object description', async () => {
     const { data, error } = await A.client.from('uploads').update({ storage_key: 'moved' }).eq('id', uploadId).select()
     return expectError(error as DbError, PERMISSION, data)
   })
-  await check("uploads: B cannot read or insert into A's collection", async () => {
+  await check("uploads: B cannot read A's uploads or record into A's collection", async () => {
     const read = await B.client.from('uploads').select().eq('collection_id', cid)
-    const ins = await B.client.from('uploads').insert(uploadInput(cid)).select()
-    return expectNothing(read.error, read.data) ?? expectError(ins.error as DbError, PERMISSION, ins.data)
+    const rec = await recordUpload(B.client, cid)
+    return expectNothing(read.error, read.data) ?? expectError(rec.error, PERMISSION, rec.id ? [rec.id] : null)
   })
 
   await check('collections: A sets the art columns while unlocked', async () => {
@@ -304,10 +327,62 @@ using ((select private.collection_owned(collection_id)))
 with check ((select private.collection_owned(collection_id)));
 
 revoke all on public.uploads from anon, authenticated;
-grant select, insert, delete on public.uploads to authenticated;
--- The stored object's description is written by the upload action; the creator edits only how
--- the file is used.
+-- No client insert: a row is recorded only through record_upload below, which pins the storage
+-- key under the collection's own prefix. The creator edits only how a file is used.
+grant select, delete on public.uploads to authenticated;
 grant update (kind, file_name, position, quantity, attributes) on public.uploads to authenticated;
+
+-- Records an upload for the caller's own collection. Security definer, so it checks everything a
+-- policy would: the caller owns the collection, the art is not locked, and the key lives under
+-- `<collection id>/`, so a row can never point at another project's object.
+create function public.record_upload(
+  p_collection_id uuid,
+  p_kind public.upload_kind,
+  p_storage_key text,
+  p_content_hash text,
+  p_mime text,
+  p_media_type public.media_type,
+  p_bytes bigint,
+  p_width integer,
+  p_height integer,
+  p_file_name text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := (select auth.uid());
+  v_owner uuid;
+  v_locked timestamptz;
+  v_id uuid;
+begin
+  if v_uid is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  select c.owner_id, c.art_locked_at into v_owner, v_locked
+  from public.collections c where c.id = p_collection_id;
+  if v_owner is null or v_owner <> v_uid then
+    raise exception 'collection not found' using errcode = '42501';
+  end if;
+  if v_locked is not null then
+    raise exception 'The art is locked and cannot change.' using errcode = '42501';
+  end if;
+  if p_storage_key is null or p_storage_key not like p_collection_id::text || '/%' then
+    raise exception 'The storage key must be under the collection''s own prefix.' using errcode = '23514';
+  end if;
+  insert into public.uploads (collection_id, kind, storage_key, content_hash, mime, media_type, bytes, width, height, file_name)
+  values (p_collection_id, p_kind, p_storage_key, p_content_hash, p_mime, p_media_type, p_bytes, p_width, p_height, p_file_name)
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+revoke all on function public.record_upload(uuid, public.upload_kind, text, text, text, public.media_type, bigint, integer, integer, text)
+  from public, anon;
+grant execute on function public.record_upload(uuid, public.upload_kind, text, text, text, public.media_type, bigint, integer, integer, text)
+  to authenticated;
 
 -- ---------------------------------------------------------------------------------------------
 -- Art collections: a generative project's inner groups (the sample's Owls and Owlets)
@@ -400,7 +475,7 @@ for each row execute function public.set_updated_at();
 - [ ] **Step 4: Reset and run, expect pass**
 
 Run: `supabase db reset 2>&1 | tail -3 && pnpm --filter @cobweb/web verify:local 2>&1 | grep -E '^(FAIL|[0-9]+ passed)'`
-Expected: the reset ends with "Finished supabase db reset"; every check passes (82 plus the 18 new ones). If the `layers` cross-collection check fails with a permission code instead of a check code, that is fine: the test accepts both, since the policy refuses before the trigger runs.
+Expected: the reset ends with "Finished supabase db reset"; every check passes (82 plus the new ones). If the `layers` cross-collection check fails with a permission code instead of a check code, that is fine: the test accepts both, since the policy refuses before the trigger runs.
 
 - [ ] **Step 5: Commit**
 
@@ -427,9 +502,9 @@ Helpers, after `insertLayer`:
 
 ```ts
 async function insertUploadRow(client: SupabaseClient, collectionId: string): Promise<string> {
-  const { data, error } = await client.from('uploads').insert(uploadInput(collectionId)).select().single()
-  if (error || !data) throw new Error(`upload setup: ${describe(error as DbError)}`)
-  return (data as { id: string }).id
+  const { id, error } = await recordUpload(client, collectionId)
+  if (error || !id) throw new Error(`upload setup: ${describe(error)}`)
+  return id
 }
 
 async function insertTrait(
@@ -1114,6 +1189,10 @@ async function artLockAndJobs(A: Creator, B: Creator): Promise<void> {
       return expectError(ins.error as DbError, LOCKED, ins.data) ?? expectError(upd.error as DbError, LOCKED, upd.data) ?? expectError(del.error as DbError, LOCKED, del.data)
     })
   }
+  await check('lock: record_upload refuses once the art is locked', async () => {
+    const { id, error } = await recordUpload(A.client, cid)
+    return expectError(error, LOCKED, id ? [id] : null)
+  })
   await check('lock: A still reads every art row', async () => {
     for (const table of ['art_collections', 'layers', 'traits', 'tokens', 'uploads']) {
       const { data, error } = await A.client.from(table).select('collection_id').eq('collection_id', cid)
