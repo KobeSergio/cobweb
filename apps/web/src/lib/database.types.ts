@@ -28,56 +28,208 @@ export type Database = {
   }
   public: {
     Tables: {
+      art_collections: {
+        Row: {
+          collection_id: string
+          created_at: string
+          id: string
+          name: string
+          position: number
+          size: number
+          updated_at: string
+        }
+        Insert: {
+          collection_id: string
+          created_at?: string
+          id?: string
+          name: string
+          position: number
+          size?: number
+          updated_at?: string
+        }
+        Update: {
+          collection_id?: string
+          created_at?: string
+          id?: string
+          name?: string
+          position?: number
+          size?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'art_collections_collection_id_fkey'
+            columns: ['collection_id']
+            isOneToOne: false
+            referencedRelation: 'collections'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      at_least_one: {
+        Row: {
+          art_collection_id: string
+          collection_id: string
+          created_at: string
+          id: string
+          trait_ids: string[]
+        }
+        Insert: {
+          art_collection_id: string
+          collection_id: string
+          created_at?: string
+          id?: string
+          trait_ids: string[]
+        }
+        Update: {
+          art_collection_id?: string
+          collection_id?: string
+          created_at?: string
+          id?: string
+          trait_ids?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'at_least_one_art_collection_id_fkey'
+            columns: ['art_collection_id']
+            isOneToOne: false
+            referencedRelation: 'art_collections'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'at_least_one_collection_id_fkey'
+            columns: ['collection_id']
+            isOneToOne: false
+            referencedRelation: 'collections'
+            referencedColumns: ['id']
+          },
+        ]
+      }
       collections: {
         Row: {
+          art_deferred: boolean
+          art_locked_at: string | null
+          canvas_height: number | null
+          canvas_width: number | null
           chain_id: number | null
           contract_address: string | null
           created_at: string
           description: string
+          generation_seed: number | null
           id: string
           max_supply: number | null
           name: string
           owner_id: string
           project_type: Database['public']['Enums']['project_type']
+          show_blank_traits: boolean
           slug: string | null
           slug_reserved_at: string | null
           status: Database['public']['Enums']['collection_status']
           symbol: string
+          token_description: string
+          token_name: string | null
           updated_at: string
         }
         Insert: {
+          art_deferred?: boolean
+          art_locked_at?: string | null
+          canvas_height?: number | null
+          canvas_width?: number | null
           chain_id?: number | null
           contract_address?: string | null
           created_at?: string
           description?: string
+          generation_seed?: number | null
           id?: string
           max_supply?: number | null
           name: string
           owner_id?: string
           project_type: Database['public']['Enums']['project_type']
+          show_blank_traits?: boolean
           slug?: string | null
           slug_reserved_at?: string | null
           status?: Database['public']['Enums']['collection_status']
           symbol: string
+          token_description?: string
+          token_name?: string | null
           updated_at?: string
         }
         Update: {
+          art_deferred?: boolean
+          art_locked_at?: string | null
+          canvas_height?: number | null
+          canvas_width?: number | null
           chain_id?: number | null
           contract_address?: string | null
           created_at?: string
           description?: string
+          generation_seed?: number | null
           id?: string
           max_supply?: number | null
           name?: string
           owner_id?: string
           project_type?: Database['public']['Enums']['project_type']
+          show_blank_traits?: boolean
           slug?: string | null
           slug_reserved_at?: string | null
           status?: Database['public']['Enums']['collection_status']
           symbol?: string
+          token_description?: string
+          token_name?: string | null
           updated_at?: string
         }
         Relationships: []
+      }
+      layers: {
+        Row: {
+          art_collection_id: string
+          bypass_dna: boolean
+          collection_id: string
+          created_at: string
+          display_name: string | null
+          id: string
+          name: string
+          position: number
+          updated_at: string
+        }
+        Insert: {
+          art_collection_id: string
+          bypass_dna?: boolean
+          collection_id: string
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          name: string
+          position: number
+          updated_at?: string
+        }
+        Update: {
+          art_collection_id?: string
+          bypass_dna?: boolean
+          collection_id?: string
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          name?: string
+          position?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'layers_art_collection_id_fkey'
+            columns: ['art_collection_id']
+            isOneToOne: false
+            referencedRelation: 'art_collections'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'layers_collection_id_fkey'
+            columns: ['collection_id']
+            isOneToOne: false
+            referencedRelation: 'collections'
+            referencedColumns: ['id']
+          },
+        ]
       }
       mint_groups: {
         Row: {
@@ -141,6 +293,377 @@ export type Database = {
         }
         Relationships: []
       }
+      render_batches: {
+        Row: {
+          attempts: number
+          error: string | null
+          first_token_id: number
+          images_cid: string | null
+          index: number
+          job_id: string
+          last_token_id: number
+          state: Database['public']['Enums']['batch_state']
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          error?: string | null
+          first_token_id: number
+          images_cid?: string | null
+          index: number
+          job_id: string
+          last_token_id: number
+          state?: Database['public']['Enums']['batch_state']
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          error?: string | null
+          first_token_id?: number
+          images_cid?: string | null
+          index?: number
+          job_id?: string
+          last_token_id?: number
+          state?: Database['public']['Enums']['batch_state']
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'render_batches_job_id_fkey'
+            columns: ['job_id']
+            isOneToOne: false
+            referencedRelation: 'render_jobs'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      render_jobs: {
+        Row: {
+          allow_duplicates: boolean
+          batch_size: number
+          batches_done: number
+          batches_total: number
+          collection_id: string
+          created_at: string
+          error: string | null
+          fee_per_token_wei: number
+          finished_at: string | null
+          id: string
+          images_cid: string | null
+          kind: Database['public']['Enums']['render_kind']
+          metadata_cid: string | null
+          paid_amount_wei: number | null
+          paid_at: string | null
+          payment_tx_hash: string | null
+          placeholder_upload_id: string | null
+          quote_chain_id: number | null
+          quote_expires_at: string | null
+          quote_payer: string | null
+          quote_total_wei: number
+          started_at: string | null
+          state: Database['public']['Enums']['render_state']
+          token_count: number
+          token_list_hash: string | null
+          updated_at: string
+          waived_by: string | null
+          waived_reason: string | null
+        }
+        Insert: {
+          allow_duplicates?: boolean
+          batch_size?: number
+          batches_done?: number
+          batches_total?: number
+          collection_id: string
+          created_at?: string
+          error?: string | null
+          fee_per_token_wei: number
+          finished_at?: string | null
+          id?: string
+          images_cid?: string | null
+          kind: Database['public']['Enums']['render_kind']
+          metadata_cid?: string | null
+          paid_amount_wei?: number | null
+          paid_at?: string | null
+          payment_tx_hash?: string | null
+          placeholder_upload_id?: string | null
+          quote_chain_id?: number | null
+          quote_expires_at?: string | null
+          quote_payer?: string | null
+          quote_total_wei: number
+          started_at?: string | null
+          state?: Database['public']['Enums']['render_state']
+          token_count: number
+          token_list_hash?: string | null
+          updated_at?: string
+          waived_by?: string | null
+          waived_reason?: string | null
+        }
+        Update: {
+          allow_duplicates?: boolean
+          batch_size?: number
+          batches_done?: number
+          batches_total?: number
+          collection_id?: string
+          created_at?: string
+          error?: string | null
+          fee_per_token_wei?: number
+          finished_at?: string | null
+          id?: string
+          images_cid?: string | null
+          kind?: Database['public']['Enums']['render_kind']
+          metadata_cid?: string | null
+          paid_amount_wei?: number | null
+          paid_at?: string | null
+          payment_tx_hash?: string | null
+          placeholder_upload_id?: string | null
+          quote_chain_id?: number | null
+          quote_expires_at?: string | null
+          quote_payer?: string | null
+          quote_total_wei?: number
+          started_at?: string | null
+          state?: Database['public']['Enums']['render_state']
+          token_count?: number
+          token_list_hash?: string | null
+          updated_at?: string
+          waived_by?: string | null
+          waived_reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'render_jobs_collection_id_fkey'
+            columns: ['collection_id']
+            isOneToOne: false
+            referencedRelation: 'collections'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'render_jobs_placeholder_upload_id_fkey'
+            columns: ['placeholder_upload_id']
+            isOneToOne: false
+            referencedRelation: 'uploads'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      rules: {
+        Row: {
+          bidirectional: boolean
+          collection_id: string
+          created_at: string
+          id: string
+          kind: Database['public']['Enums']['rule_kind']
+          related_trait_ids: string[]
+          trait_id: string
+          updated_at: string
+        }
+        Insert: {
+          bidirectional: boolean
+          collection_id: string
+          created_at?: string
+          id?: string
+          kind: Database['public']['Enums']['rule_kind']
+          related_trait_ids: string[]
+          trait_id: string
+          updated_at?: string
+        }
+        Update: {
+          bidirectional?: boolean
+          collection_id?: string
+          created_at?: string
+          id?: string
+          kind?: Database['public']['Enums']['rule_kind']
+          related_trait_ids?: string[]
+          trait_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'rules_collection_id_fkey'
+            columns: ['collection_id']
+            isOneToOne: false
+            referencedRelation: 'collections'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'rules_trait_id_fkey'
+            columns: ['trait_id']
+            isOneToOne: false
+            referencedRelation: 'traits'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      tokens: {
+        Row: {
+          art_collection_id: string
+          collection_id: string
+          description: string | null
+          dna: string[]
+          token_id: number
+          updated_at: string
+        }
+        Insert: {
+          art_collection_id: string
+          collection_id: string
+          description?: string | null
+          dna: string[]
+          token_id: number
+          updated_at?: string
+        }
+        Update: {
+          art_collection_id?: string
+          collection_id?: string
+          description?: string | null
+          dna?: string[]
+          token_id?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'tokens_art_collection_id_fkey'
+            columns: ['art_collection_id']
+            isOneToOne: false
+            referencedRelation: 'art_collections'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'tokens_collection_id_fkey'
+            columns: ['collection_id']
+            isOneToOne: false
+            referencedRelation: 'collections'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      traits: {
+        Row: {
+          blank: boolean
+          collection_id: string
+          constant: number | null
+          created_at: string
+          id: string
+          in_metadata: boolean
+          layer_id: string
+          name: string
+          position: number
+          updated_at: string
+          upload_id: string | null
+          weight: number
+        }
+        Insert: {
+          blank?: boolean
+          collection_id: string
+          constant?: number | null
+          created_at?: string
+          id?: string
+          in_metadata?: boolean
+          layer_id: string
+          name: string
+          position: number
+          updated_at?: string
+          upload_id?: string | null
+          weight: number
+        }
+        Update: {
+          blank?: boolean
+          collection_id?: string
+          constant?: number | null
+          created_at?: string
+          id?: string
+          in_metadata?: boolean
+          layer_id?: string
+          name?: string
+          position?: number
+          updated_at?: string
+          upload_id?: string | null
+          weight?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'traits_collection_id_fkey'
+            columns: ['collection_id']
+            isOneToOne: false
+            referencedRelation: 'collections'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'traits_layer_id_fkey'
+            columns: ['layer_id']
+            isOneToOne: false
+            referencedRelation: 'layers'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'traits_upload_id_fkey'
+            columns: ['upload_id']
+            isOneToOne: false
+            referencedRelation: 'uploads'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      uploads: {
+        Row: {
+          attributes: Json
+          bytes: number
+          collection_id: string
+          content_hash: string
+          created_at: string
+          file_name: string
+          height: number | null
+          id: string
+          kind: Database['public']['Enums']['upload_kind']
+          media_type: Database['public']['Enums']['media_type']
+          mime: string
+          position: number | null
+          quantity: number
+          storage_key: string
+          width: number | null
+        }
+        Insert: {
+          attributes?: Json
+          bytes: number
+          collection_id: string
+          content_hash: string
+          created_at?: string
+          file_name: string
+          height?: number | null
+          id?: string
+          kind: Database['public']['Enums']['upload_kind']
+          media_type: Database['public']['Enums']['media_type']
+          mime: string
+          position?: number | null
+          quantity?: number
+          storage_key: string
+          width?: number | null
+        }
+        Update: {
+          attributes?: Json
+          bytes?: number
+          collection_id?: string
+          content_hash?: string
+          created_at?: string
+          file_name?: string
+          height?: number | null
+          id?: string
+          kind?: Database['public']['Enums']['upload_kind']
+          media_type?: Database['public']['Enums']['media_type']
+          mime?: string
+          position?: number | null
+          quantity?: number
+          storage_key?: string
+          width?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'uploads_collection_id_fkey'
+            columns: ['collection_id']
+            isOneToOne: false
+            referencedRelation: 'collections'
+            referencedColumns: ['id']
+          },
+        ]
+      }
       whitelist_entries: {
         Row: {
           collection_id: string
@@ -185,14 +708,48 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      art_table_facts: {
+        Args: never
+        Returns: {
+          anon_grants: number
+          policies: number
+          rls: boolean
+          table_name: string
+        }[]
+      }
+      record_upload: {
+        Args: {
+          p_bytes: number
+          p_collection_id: string
+          p_content_hash: string
+          p_file_name: string
+          p_height: number
+          p_kind: Database['public']['Enums']['upload_kind']
+          p_media_type: Database['public']['Enums']['media_type']
+          p_mime: string
+          p_storage_key: string
+          p_width: number
+        }
+        Returns: string
+      }
       reserve_slug: {
         Args: { p_collection_id: string; p_slug: string }
         Returns: undefined
       }
+      swap_token_ids_for_check: {
+        Args: { p_a: number; p_b: number; p_collection_id: string }
+        Returns: undefined
+      }
     }
     Enums: {
+      batch_state: 'queued' | 'running' | 'done' | 'failed'
       collection_status: 'draft' | 'art_locked' | 'rendering' | 'rendered' | 'deployed'
+      media_type: 'image' | 'gif' | 'video'
       project_type: 'generative' | 'one_of_one' | 'single_asset'
+      render_kind: 'real' | 'placeholder'
+      render_state: 'locked' | 'payment_due' | 'paid' | 'waived' | 'rendering' | 'done' | 'failed'
+      rule_kind: 'doesnt_mix_with' | 'always_pairs_with' | 'must_pair_with'
+      upload_kind: 'layer_image' | 'asset' | 'placeholder' | 'thumbnail'
     }
     CompositeTypes: {
       [_ in never]: never
@@ -316,8 +873,14 @@ export const Constants = {
   },
   public: {
     Enums: {
+      batch_state: ['queued', 'running', 'done', 'failed'],
       collection_status: ['draft', 'art_locked', 'rendering', 'rendered', 'deployed'],
+      media_type: ['image', 'gif', 'video'],
       project_type: ['generative', 'one_of_one', 'single_asset'],
+      render_kind: ['real', 'placeholder'],
+      render_state: ['locked', 'payment_due', 'paid', 'waived', 'rendering', 'done', 'failed'],
+      rule_kind: ['doesnt_mix_with', 'always_pairs_with', 'must_pair_with'],
+      upload_kind: ['layer_image', 'asset', 'placeholder', 'thumbnail'],
     },
   },
 } as const

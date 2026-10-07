@@ -1037,6 +1037,7 @@ async function main(): Promise<void> {
   await artTraitsAndRules(A, B)
   await artTokens(A, B)
   await artLockAndJobs(A, B)
+  await artInvariants(A)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1694,6 +1695,70 @@ async function artLockAndJobs(A: Creator, B: Creator): Promise<void> {
       .eq('id', cid)
       .select()
     return expectError(error, PERMISSION, data)
+  })
+}
+
+// ---------------------------------------------------------------------------------------------
+// 9e. Schema invariants and a timing check
+// ---------------------------------------------------------------------------------------------
+const ART_TABLES = [
+  'art_collections',
+  'layers',
+  'traits',
+  'rules',
+  'at_least_one',
+  'tokens',
+  'uploads',
+  'render_jobs',
+  'render_batches',
+]
+
+async function artInvariants(A: Creator): Promise<void> {
+  await check('schema: every art table has RLS, an owner policy, and no grant to anon', async () => {
+    const { data, error } = await admin.rpc('art_table_facts')
+    if (error) return describe(error as DbError)
+    const facts = data as { table_name: string; rls: boolean; policies: number; anon_grants: number }[]
+    const problems: string[] = []
+    for (const table of ART_TABLES) {
+      const f = facts.find((row) => row.table_name === table)
+      if (!f) problems.push(`${table}: missing`)
+      else if (!f.rls || f.policies < 1 || f.anon_grants > 0)
+        problems.push(`${table}: rls ${f.rls}, policies ${f.policies}, anon grants ${f.anon_grants}`)
+    }
+    return problems.length ? problems.join('; ') : null
+  })
+
+  await check('tokens: 10,000 rows insert in one statement in under five seconds', async () => {
+    const col = await insertCollection(A.client)
+    if (!col.row) return `setup: ${describe(col.error)}`
+    const cid = col.row.id
+    const art = await insertArtCollection(A.client, cid, { size: 10_000 })
+    const uploadId = await insertUploadRow(A.client, cid)
+    const layer = await insertLayer(A.client, cid, art.row!.id)
+    const traits: string[] = []
+    for (let i = 0; i < 4; i++)
+      traits.push(
+        (
+          await insertTrait(A.client, cid, layer.row!.id, {
+            name: `T${i}`,
+            upload_id: uploadId,
+            position: i,
+            weight: 25,
+          })
+        ).row!.id,
+      )
+    const rows = Array.from({ length: 10_000 }, (_, i) => ({
+      collection_id: cid,
+      token_id: i + 1,
+      art_collection_id: art.row!.id,
+      dna: [traits[i % 4]!],
+    }))
+    const started = Date.now()
+    const { error } = await A.client.from('tokens').insert(rows)
+    const ms = Date.now() - started
+    if (error) return describe(error as DbError)
+    info(`10,000 tokens inserted in ${ms} ms`)
+    return ms < 5000 ? null : `took ${ms} ms`
   })
 }
 

@@ -585,7 +585,9 @@ create table public.render_jobs (
   payment_tx_hash text check (payment_tx_hash is null or payment_tx_hash ~ '^0x[0-9a-f]{64}$'),
   paid_at timestamptz,
   paid_amount_wei numeric(78, 0) check (paid_amount_wei is null or paid_amount_wei >= 0),
-  waived_by uuid references auth.users (id) on delete set null,
+  -- The waiver columns are checked as a pair, so a set null would trip the check when an admin
+  -- account is deleted. Restrict instead: a waiving admin cannot be deleted.
+  waived_by uuid references auth.users (id) on delete restrict,
   waived_reason text,
   batch_size integer not null default 100 check (batch_size between 1 and 1000),
   batches_total integer not null default 0 check (batches_total >= 0),
@@ -670,19 +672,27 @@ set search_path = ''
 as $$
 declare
   v_collection uuid;
+  v_locked timestamptz;
 begin
   if current_user not in ('anon', 'authenticated') then
     return case when tg_op = 'DELETE' then old else new end;
   end if;
   -- Both the row's current project and (on an update) the one it came from: neither may be locked.
-  v_collection := case when tg_op = 'DELETE' then old.collection_id else new.collection_id end;
-  if exists (select 1 from public.collections c where c.id = v_collection and c.art_locked_at is not null)
-    or (tg_op = 'UPDATE' and exists (
-      select 1 from public.collections c where c.id = old.collection_id and c.art_locked_at is not null
-    ))
-  then
-    raise exception 'The art is locked and cannot change.' using errcode = 'insufficient_privilege';
-  end if;
+  -- The collection row is read FOR SHARE, so a client write in flight holds the row until it
+  -- commits and the server's lock update (which needs a stronger lock on that row) waits for it;
+  -- once the lock is set, every later write sees it. No write can slip past the lock in a race.
+  foreach v_collection in array (
+    case
+      when tg_op = 'DELETE' then array[old.collection_id]
+      when tg_op = 'UPDATE' and old.collection_id <> new.collection_id then array[new.collection_id, old.collection_id]
+      else array[new.collection_id]
+    end
+  ) loop
+    select c.art_locked_at into v_locked from public.collections c where c.id = v_collection for share;
+    if v_locked is not null then
+      raise exception 'The art is locked and cannot change.' using errcode = 'insufficient_privilege';
+    end if;
+  end loop;
   return case when tg_op = 'DELETE' then old else new end;
 end;
 $$;
@@ -749,3 +759,27 @@ begin
   return new;
 end;
 $$;
+
+-- ---------------------------------------------------------------------------------------------
+-- Schema facts for the access checks: RLS on, policy count, grants to anon, per art table.
+-- Service role only.
+-- ---------------------------------------------------------------------------------------------
+create function public.art_table_facts()
+returns table (table_name text, rls boolean, policies integer, anon_grants integer)
+language sql
+security definer
+set search_path = ''
+stable
+as $$
+  select c.relname::text,
+    c.relrowsecurity,
+    (select count(*)::integer from pg_catalog.pg_policy p where p.polrelid = c.oid),
+    (select count(*)::integer from information_schema.role_table_grants g
+      where g.table_schema = 'public' and g.table_name = c.relname and g.grantee = 'anon')
+  from pg_catalog.pg_class c
+  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'public' and c.relkind = 'r'
+    and c.relname in ('art_collections', 'layers', 'traits', 'rules', 'at_least_one', 'tokens', 'uploads', 'render_jobs', 'render_batches');
+$$;
+
+revoke all on function public.art_table_facts() from public, anon, authenticated;

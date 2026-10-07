@@ -337,15 +337,15 @@ The script's final line must still read "N passed, 0 failed".
 
 ## 8. Acceptance criteria
 
-- [ ] `supabase db reset` applies the migration from a clean database with no errors.
-- [ ] `pnpm --filter @cobweb/web verify:local` passes with every check in section 7 present.
-- [ ] `pnpm typecheck && pnpm lint && pnpm test` pass at the root with the regenerated types.
-- [ ] Every new table has row-level security enabled, a policy that checks ownership through the
+- [x] `supabase db reset` applies the migration from a clean database with no errors.
+- [x] `pnpm --filter @cobweb/web verify:local` passes with every check in section 7 present.
+- [x] `pnpm typecheck && pnpm lint && pnpm test` pass at the root with the regenerated types.
+- [x] Every new table has row-level security enabled, a policy that checks ownership through the
       collection, and no grant to `anon` (checked by a query over `pg_policies` and
       `information_schema.role_table_grants` in the plan's last task).
-- [ ] No art table accepts a write from the creator once `art_locked_at` is set, and reads still
+- [x] No art table accepts a write from the creator once `art_locked_at` is set, and reads still
       work.
-- [ ] A 10,000-row token insert for one collection, in one statement, completes in under five
-      seconds locally (checked once by hand in the plan's last task).
-- [ ] `docs/MASTER_PLAN.md` Phase 3 names this sub-project as landed and the next one (layer and
+- [x] A 10,000-row token insert for one collection, in one statement, completes in under five
+      seconds locally (checked once by hand in the plan's last task) (3,941 ms locally, 8 October 2026; 3,531 ms on an earlier run).
+- [x] `docs/MASTER_PLAN.md` Phase 3 names this sub-project as landed and the next one (layer and
       asset upload); the creator flow spec's section 5 Phase 3 row names the tables.
