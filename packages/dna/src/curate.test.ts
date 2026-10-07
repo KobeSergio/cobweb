@@ -89,7 +89,7 @@ describe('changeTrait', () => {
     // Changing only the bypassed layer is always fine: the key does not see it.
     expect(changeTrait(hand, 1, 0, 'bg-sand', project, index).ok).toBe(true)
   })
-  it('explains a missing token or trait', () => {
+  it('explains a missing token or trait, and refuses a trait from another layer or collection', () => {
     expect(changeTrait(hand, 99, 0, 'bg-sand', project, index)).toEqual({
       ok: false,
       reason: 'This token no longer exists.',
@@ -98,6 +98,10 @@ describe('changeTrait', () => {
       ok: false,
       reason: 'That trait no longer exists.',
     })
+    const elsewhere = { ok: false, reason: 'That trait belongs to another layer.' }
+    expect(changeTrait(hand, 1, 0, 'acc-monocle', project, index)).toEqual(elsewhere)
+    expect(changeTrait(hand, 1, 1, 'ob-1', project, index)).toEqual(elsewhere)
+    expect(changeTrait(hand, 1, 9, 'eyes-gold', project, index)).toEqual(elsewhere)
   })
 })
 
@@ -112,10 +116,17 @@ describe('ids', () => {
       [2, 'acc-scarf'],
       [3, 'acc-none'],
     ])
-    const shuffled = shuffleIds(hand, new Set([1, 2, 3]), 5)
+    const seed = [1, 2, 3, 4, 5, 6, 7, 8].find(
+      (s) =>
+        shuffleIds(hand, new Set([1, 2, 3]), s)
+          .map((t) => t.id)
+          .join() !== '1,2,3,4',
+    )!
+    const shuffled = shuffleIds(hand, new Set([1, 2, 3]), seed)
+    expect(shuffled.map((t) => t.id)).not.toEqual([1, 2, 3, 4])
     expect([...shuffled.map((t) => t.id)].sort()).toEqual([1, 2, 3, 4])
     expect(shuffled.find((t) => t.dna === hand[3]!.dna)!.id).toBe(4)
-    expect(shuffleIds(hand, new Set([1, 2, 3]), 5)).toEqual(shuffled)
+    expect(shuffleIds(hand, new Set([1, 2, 3]), seed)).toEqual(shuffled)
     expect(hand.map((t) => t.id)).toEqual([1, 2, 3, 4])
   })
 })

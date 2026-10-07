@@ -73,6 +73,8 @@ export function changeTrait<T extends TokenCore>(
   const from = index.get(token.dna[layerIndex] ?? '')?.trait
   const to = index.get(traitId)?.trait
   if (!to) return { ok: false, reason: 'That trait no longer exists.' }
+  const own = layersOf(project.layers, token.collectionId)
+  if (own[layerIndex]?.id !== to.layerId) return { ok: false, reason: 'That trait belongs to another layer.' }
   if (to.constant && from?.id !== to.id) {
     const carrying = tokens.filter((t) => t.dna.includes(to.id)).length
     if (carrying >= to.constant)
@@ -89,7 +91,6 @@ export function changeTrait<T extends TokenCore>(
     constraintsOf(project.atLeastOne, token.collectionId),
   )
   if (broken) return { ok: false, reason: `That breaks a rule: ${broken}` }
-  const own = layersOf(project.layers, token.collectionId)
   const key = uniqueKey(dna, own)
   const twin = tokens.find(
     (t) => t.id !== tokenId && t.collectionId === token.collectionId && uniqueKey(t.dna, own) === key,
