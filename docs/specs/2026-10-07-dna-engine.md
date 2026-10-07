@@ -340,15 +340,21 @@ the web suite re-pointed.
 
 - [x] `@cobweb/dna` has no runtime dependencies and imports nothing from `react`, `next`, `node:*`
       or the DOM.
-- [x] `generateProject` on the fixture with seed 1 returns the same tokens on two runs, and the
-      same when run under Node and in the browser (checked by running the package test in the web
-      app's vitest environment once). (browser run deferred to the screen wiring sub-project)
-- [x] Every function leaves its arguments unchanged (fixture deep-frozen in tests).
+- [x] `generateProject` on the fixture with seed 1 returns the same tokens on two runs under Node
+      (generate.test.ts).
+- [ ] `generateProject` returns the same tokens when run in the browser (deferred to the screen
+      wiring sub-project, 7 October 2026).
+- [x] Every function leaves its arguments unchanged (deep-frozen fixture in the generate, lock and
+      metadata tests; curate and rank tokens checked by reading, 7 October 2026).
 - [x] The Generate, Rules and Layers screens behave as before on the sample project: same copy,
       same refusals, same conflict messages; only tier badges may move.
 - [x] `validateTokenList` reports each of the eight problem codes on a crafted list and accepts
-      the sample set. (sample set acceptance covered by the fixture's generated set; the Night Owls check lands with the lock server action)
-- [x] `hashTokenList` of the sample set is the same value from Node and from the browser. (browser value deferred to the screen wiring sub-project)
+      the sample set (each code in lock.test.ts; the Night Owls sample set accepted in
+      apps/web/src/lib/demo/data.test.ts, 7 October 2026).
+- [x] `hashTokenList` of the sample set gives the same value from Node, pinned in lock.test.ts and
+      in the sample pin in data.test.ts.
+- [ ] `hashTokenList` of the sample set gives the same value from the browser (deferred to the
+      screen wiring sub-project, 7 October 2026).
 - [x] `pnpm typecheck && pnpm lint && pnpm test` pass at the root.
 - [x] Section 5 of the creator flow spec is updated: the Phase 3 row names `@cobweb/dna` for the
       art types and the analyser, and the lock row names `validateTokenList` and `hashTokenList`.

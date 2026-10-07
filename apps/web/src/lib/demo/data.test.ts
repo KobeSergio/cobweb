@@ -1,8 +1,12 @@
+import { hashTokenList, validateTokenList } from '@cobweb/dna'
 import { describe, expect, it } from 'vitest'
 import {
   DEMO_AIRDROPS,
   DEMO_COLLECTION,
+  DEMO_COLLECTIONS,
+  DEMO_LAYERS,
   DEMO_MINT_GROUPS,
+  DEMO_RULES,
   DEMO_TOKENS,
   DEMO_TOTAL_MINTED,
   scaleSampleToSupply,
@@ -74,5 +78,17 @@ describe('sample tokens', () => {
       'owlets-accessory-scarf',
     ])
     expect(DEMO_TOKENS).toHaveLength(777)
+  })
+
+  it('hash to the value the pre-rendered art was drawn from', async () => {
+    // Every token's id, collection and DNA, so a change anywhere in the 777 fails here, not in the pictures.
+    expect(await hashTokenList(DEMO_TOKENS)).toBe(
+      '0xe426358adc8cfd2d378fe39124544b0eb728507e3dbe4de1258dd04c991685b4',
+    )
+  })
+
+  it('pass the lock validator as the sample project stands', () => {
+    const project = { layers: DEMO_LAYERS, rules: DEMO_RULES, collections: DEMO_COLLECTIONS }
+    expect(validateTokenList(project, DEMO_TOKENS, { allowDuplicates: false })).toEqual({ ok: true })
   })
 })
