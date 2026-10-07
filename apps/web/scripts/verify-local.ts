@@ -1077,6 +1077,12 @@ async function artFoundation(A: Creator, B: Creator): Promise<void> {
     })
     return expectError(error, CHECK, id ? [id] : null)
   })
+  await check('uploads: a key that climbs out of its folder is refused', async () => {
+    const { id, error } = await recordUpload(A.client, cid, {
+      storage_key: `${cid}/../${other.row!.id}/x.png`,
+    })
+    return expectError(error, CHECK, id ? [id] : null)
+  })
   await check('uploads: a non-square layer image is refused', async () => {
     const { id, error } = await recordUpload(A.client, cid, { width: 1000, height: 900 })
     return expectError(error, CHECK, id ? [id] : null)
@@ -1087,7 +1093,7 @@ async function artFoundation(A: Creator, B: Creator): Promise<void> {
     if (a.error) return `setup: ${describe(a.error)}`
     const { id, error } = await recordUpload(A.client, cid, {
       ...first,
-      storage_key: `${first.storage_key}-again`,
+      storage_key: String(first.storage_key).replace(/\.png$/, '-again.png'),
     })
     return expectError(error, UNIQUE, id ? [id] : null)
   })

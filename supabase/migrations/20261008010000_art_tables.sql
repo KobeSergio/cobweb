@@ -63,7 +63,11 @@ create table public.uploads (
   id uuid primary key default gen_random_uuid(),
   collection_id uuid not null references public.collections (id) on delete cascade,
   kind public.upload_kind not null,
-  storage_key text not null check (char_length(storage_key) between 1 and 512),
+  -- `<collection id>/<folder>/<name>[.<ext>]`, nothing else: no dots or slashes beyond that shape,
+  -- so a key can never climb out of its collection's prefix however it is later resolved.
+  storage_key text not null check (
+    storage_key ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[a-z_]+/[A-Za-z0-9_-]+(\.[a-z0-9]+)?$'
+  ),
   content_hash text not null check (content_hash ~ '^[0-9a-f]{64}$'),
   mime text not null check (mime in ('image/png', 'image/jpeg', 'image/webp', 'image/gif', 'video/mp4')),
   media_type public.media_type not null,
@@ -133,7 +137,8 @@ begin
   if v_locked is not null then
     raise exception 'The art is locked and cannot change.' using errcode = '42501';
   end if;
-  if p_storage_key is null or p_storage_key not like p_collection_id::text || '/%' then
+  -- The column's check gives the key its shape; this pins the prefix to the caller's collection.
+  if p_storage_key is null or split_part(p_storage_key, '/', 1) <> p_collection_id::text then
     raise exception 'The storage key must be under the collection''s own prefix.' using errcode = '23514';
   end if;
   insert into public.uploads (collection_id, kind, storage_key, content_hash, mime, media_type, bytes, width, height, file_name)
