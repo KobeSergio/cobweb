@@ -1711,10 +1711,16 @@ describe('rankTokens (sum of supply over attribute count)', () => {
     // Token 1: 4 + 4 + 4/3. Token 2: 2 + 4 + 4. Token 4: 4 + 2 + 4/3. Token 3: 2 + 2 + 4/3.
     const ranked = rankTokens(tokens, keyOf)
     expect(ranked.map((t) => [t.id, t.rank])).toEqual([[1, 2], [2, 1], [3, 4], [4, 3]])
-    const twins = [token(1, ['a:L1:a', 'a:L2:b', 'a:L3:c']), token(2, ['a:L1:c', 'a:L2:a', 'a:L3:b']), token(3, ['a:L1:a', 'a:L2:a', 'a:L3:a'])]
-    // Tokens 1 and 2 carry the same three attributes (counts 5, 2, 2 by trait name) in different layer
-    // orders. Summed in DNA order the floats can differ by one ulp; sorted first they are equal, so 1 before 2.
-    expect(rankTokens(twins, (id) => id.split(':')[2]!).map((t) => t.rank)).toEqual([1, 2, 3])
+    // Tokens 1, 2 and 3 each carry one attribute on three tokens (common) and two on one token, in
+    // different layer orders. Summed in DNA order, [4/3, 4, 4] and [4, 4, 4/3] differ by one ulp, so the
+    // old comparator put token 2 ahead of token 1; sorted first they tie and the ids decide.
+    const twins = [
+      token(1, ['a:L1:common', 'a:L2:v', 'a:L3:u']),
+      token(2, ['a:L1:w', 'a:L2:x', 'a:L3:common']),
+      token(3, ['a:L1:common', 'a:L2:y', 'a:L3:z']),
+      token(4, ['a:L1:p', 'a:L2:q', 'a:L3:r']),
+    ]
+    expect(rankTokens(twins, (id) => id.split(':')[2]!).map((t) => [t.id, t.rank])).toEqual([[1, 2], [2, 3], [3, 4], [4, 1]])
   })
 
   it('copes with mixed DNA lengths and unknown ids after a layer is deleted', () => {
