@@ -1974,10 +1974,12 @@ describe('validateTokenList', () => {
   })
 
   it('reports duplicates unless identical tokens are allowed (the key test in curate.test.ts covers bypass)', () => {
-    const twin = good.map((t) => (t.id === 2 ? { ...t, dna: [...good[0]!.dna] } : t))
+    // Copy one owl's DNA onto another, both without the capped Gold eyes, so only uniqueness breaks.
+    const [source, target] = good.filter((t) => t.collectionId === 'owls' && !t.dna.includes('eyes-gold'))
+    const twin = good.map((t) => (t.id === target!.id ? { ...t, dna: [...source!.dna] } : t))
     const result = validateTokenList(project, twin, strict)
     expect(codes(result)).toEqual(['duplicate'])
-    expect(problem(result, 'duplicate')!.tokenIds).toEqual([1, 2])
+    expect(problem(result, 'duplicate')!.tokenIds).toEqual([source!.id, target!.id])
     expect(validateTokenList(project, twin, { allowDuplicates: true })).toEqual({ ok: true })
   })
 
