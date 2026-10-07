@@ -1612,6 +1612,19 @@ async function artLockAndJobs(A: Creator, B: Creator): Promise<void> {
     )
   })
 
+  await check('render_batches: A cannot insert, update or delete', async () => {
+    const ins = await A.client
+      .from('render_batches')
+      .insert({ job_id: jobId, index: 1, state: 'queued', first_token_id: 1, last_token_id: 1 })
+    const upd = await A.client.from('render_batches').update({ state: 'done' }).eq('job_id', jobId)
+    const del = await A.client.from('render_batches').delete().eq('job_id', jobId)
+    return (
+      expectError(ins.error, PERMISSION, ins.data) ??
+      expectError(upd.error, PERMISSION, upd.data) ??
+      expectError(del.error, PERMISSION, del.data)
+    )
+  })
+
   await check('lock: the service role sets art_locked_at', async () => {
     const { error } = await admin
       .from('collections')
@@ -1672,7 +1685,15 @@ async function artLockAndJobs(A: Creator, B: Creator): Promise<void> {
     return expectError(error, LOCKED, id ? [id] : null)
   })
   await check('lock: A still reads every art row', async () => {
-    for (const table of ['art_collections', 'layers', 'traits', 'tokens', 'uploads']) {
+    for (const table of [
+      'art_collections',
+      'layers',
+      'traits',
+      'rules',
+      'at_least_one',
+      'tokens',
+      'uploads',
+    ]) {
       const { data, error } = await A.client.from(table).select('collection_id').eq('collection_id', cid)
       if (error) return `${table}: ${describe(error)}`
       if (!data?.length) return `${table}: no rows`

@@ -15,7 +15,7 @@ create type public.render_state as enum ('locked', 'payment_due', 'paid', 'waive
 create type public.batch_state as enum ('queued', 'running', 'done', 'failed');
 
 -- ---------------------------------------------------------------------------------------------
--- Ownership helper: one indexed lookup every art policy shares
+-- Ownership helper: the lookup every art policy shares; it runs once per row through the index
 -- ---------------------------------------------------------------------------------------------
 create function private.collection_owned(p_collection_id uuid)
 returns boolean
@@ -130,7 +130,7 @@ begin
     raise exception 'not allowed' using errcode = '42501';
   end if;
   select c.owner_id, c.art_locked_at into v_owner, v_locked
-  from public.collections c where c.id = p_collection_id;
+  from public.collections c where c.id = p_collection_id for share;
   if v_owner is null or v_owner <> v_uid then
     raise exception 'collection not found' using errcode = '42501';
   end if;
@@ -451,6 +451,8 @@ create table public.tokens (
   -- A token's own description after an edit; null means the project's token_description applies.
   description text check (description is null or char_length(description) <= 500),
   updated_at timestamptz not null default now(),
+  -- ON CONFLICT cannot use a deferrable key, so saving tokens is delete-and-insert or an update,
+  -- never an upsert.
   -- Deferrable, so a swap or a renumbering after a delete can run as one statement or one
   -- transaction without tripping over itself row by row.
   primary key (collection_id, token_id) deferrable initially immediate
@@ -645,7 +647,7 @@ create table public.render_batches (
 
 alter table public.render_batches enable row level security;
 
--- Ownership through the job's collection. The subquery is one indexed lookup per statement.
+-- Ownership through the job's collection. The subquery runs once per row through the index.
 create policy "render_batches: owner reads" on public.render_batches for select to authenticated
 using (
   exists (
@@ -681,6 +683,9 @@ begin
   -- The collection row is read FOR SHARE, so a client write in flight holds the row until it
   -- commits and the server's lock update (which needs a stronger lock on that row) waits for it;
   -- once the lock is set, every later write sees it. No write can slip past the lock in a race.
+  -- A transaction that writes an art row and then updates its own collections row would deadlock
+  -- against another doing the same; single-statement client calls never do that, and server code
+  -- must update collections before touching art.
   foreach v_collection in array (
     case
       when tg_op = 'DELETE' then array[old.collection_id]
@@ -689,6 +694,9 @@ begin
     end
   ) loop
     select c.art_locked_at into v_locked from public.collections c where c.id = v_collection for share;
+    if not found then
+      raise exception 'collection not found' using errcode = '42501';
+    end if;
     if v_locked is not null then
       raise exception 'The art is locked and cannot change.' using errcode = 'insufficient_privilege';
     end if;

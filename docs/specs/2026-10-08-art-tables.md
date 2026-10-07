@@ -192,6 +192,7 @@ engine computes it. Names are never stored; a token is called `token_name || ' #
 
 Expected size: a 10,000-token project is 10,000 rows of about 7 uuids each. The DNA trigger does
 one query per row; a 10,000-row insert must still finish in seconds (acceptance criterion).
+The primary key is deferrable so swaps and renumbering can run in one statement; as a consequence ON CONFLICT upserts are not available on this table.
 
 ### 4.8 `uploads`
 
@@ -346,6 +347,6 @@ The script's final line must still read "N passed, 0 failed".
 - [x] No art table accepts a write from the creator once `art_locked_at` is set, and reads still
       work.
 - [x] A 10,000-row token insert for one collection, in one statement, completes in under five
-      seconds locally (checked once by hand in the plan's last task) (3,941 ms locally, 8 October 2026; 3,531 ms on an earlier run).
+      seconds locally (checked by verify:local, which reports the time) (3,941 ms locally, 8 October 2026; 3,531 ms on an earlier run).
 - [x] `docs/MASTER_PLAN.md` Phase 3 names this sub-project as landed and the next one (layer and
       asset upload); the creator flow spec's section 5 Phase 3 row names the tables.
