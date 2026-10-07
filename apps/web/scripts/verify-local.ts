@@ -1036,6 +1036,7 @@ async function main(): Promise<void> {
   await artFoundation(A, B)
   await artTraitsAndRules(A, B)
   await artTokens(A, B)
+  await artLockAndJobs(A, B)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1505,9 +1506,210 @@ async function artTokens(A: Creator, B: Creator): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------------------------
+// 9d. Render jobs and the lock gate
+// ---------------------------------------------------------------------------------------------
+const createdJobIds = new Set<string>()
+
+async function artLockAndJobs(A: Creator, B: Creator): Promise<void> {
+  const col = await insertCollection(A.client)
+  if (!col.row) throw new Error(`setup: ${describe(col.error)}`)
+  const cid = col.row.id
+  const art = await insertArtCollection(A.client, cid, { size: 1 })
+  const uploadId = await insertUploadRow(A.client, cid)
+  const layer = await insertLayer(A.client, cid, art.row!.id)
+  const trait = (await insertTrait(A.client, cid, layer.row!.id, { upload_id: uploadId })).row!.id
+  // A second layer and trait, a valid rule and a valid constraint, so the lock checks have rows to update and delete.
+  const layer2 = await insertLayer(A.client, cid, art.row!.id, { name: 'Hat', position: 1 })
+  const trait2 = (await insertTrait(A.client, cid, layer2.row!.id, { name: 'Cap', upload_id: uploadId })).row!
+    .id
+  const ruleSetup = await A.client.from('rules').insert({
+    collection_id: cid,
+    kind: 'doesnt_mix_with',
+    trait_id: trait,
+    related_trait_ids: [trait2],
+    bidirectional: true,
+  })
+  if (ruleSetup.error) throw new Error(`setup: ${describe(ruleSetup.error as DbError)}`)
+  const aloSetup = await A.client
+    .from('at_least_one')
+    .insert({ collection_id: cid, art_collection_id: art.row!.id, trait_ids: [trait, trait2] })
+  if (aloSetup.error) throw new Error(`setup: ${describe(aloSetup.error as DbError)}`)
+  const tok = await A.client
+    .from('tokens')
+    .insert({ collection_id: cid, token_id: 1, art_collection_id: art.row!.id, dna: [trait, trait2] })
+  if (tok.error) throw new Error(`setup: ${describe(tok.error as DbError)}`)
+  const jobInput = {
+    collection_id: cid,
+    kind: 'real',
+    state: 'locked',
+    token_count: 1,
+    token_list_hash: `0x${HEX64(7)}`,
+    fee_per_token_wei: '0',
+    quote_total_wei: '0',
+  }
+
+  await check('render_jobs: A cannot insert a job', async () => {
+    const { data, error } = await A.client.from('render_jobs').insert(jobInput).select()
+    return expectError(error as DbError, PERMISSION, data)
+  })
+  let jobId = ''
+  await check('render_jobs: the service role inserts a job and A reads it', async () => {
+    const { data, error } = await admin.from('render_jobs').insert(jobInput).select().single()
+    if (error || !data) return describe(error as DbError)
+    jobId = (data as { id: string }).id
+    createdJobIds.add(jobId)
+    const mine = await A.client.from('render_jobs').select('id').eq('id', jobId)
+    return mine.data?.length === 1 ? null : `A sees ${mine.data?.length ?? 0} rows`
+  })
+  await check("render_jobs: B cannot read A's job; A cannot update or delete it", async () => {
+    const read = await B.client.from('render_jobs').select().eq('id', jobId)
+    const upd = await A.client.from('render_jobs').update({ state: 'paid' }).eq('id', jobId).select()
+    const del = await A.client.from('render_jobs').delete().eq('id', jobId).select()
+    return (
+      expectNothing(read.error, read.data) ??
+      expectError(upd.error as DbError, PERMISSION, upd.data) ??
+      expectError(del.error as DbError, PERMISSION, del.data)
+    )
+  })
+  await check('render_jobs: a second open job of the same kind is refused', async () => {
+    const { data, error } = await admin.from('render_jobs').insert(jobInput).select()
+    return expectError(error as DbError, UNIQUE, data)
+  })
+  await check(
+    'render_jobs: a placeholder job needs its upload; a paid state needs a payment or a zero quote',
+    async () => {
+      const noUpload = await admin
+        .from('render_jobs')
+        .insert({ ...jobInput, kind: 'placeholder' })
+        .select()
+      const unpaid = await admin
+        .from('render_jobs')
+        .insert({
+          ...jobInput,
+          kind: 'placeholder',
+          placeholder_upload_id: uploadId,
+          state: 'rendering',
+          quote_total_wei: '5',
+        })
+        .select()
+      return (
+        expectError(noUpload.error as DbError, CHECK, noUpload.data) ??
+        expectError(unpaid.error as DbError, CHECK, unpaid.data)
+      )
+    },
+  )
+  await check('render_batches: the service role inserts one, A reads it, B cannot', async () => {
+    const ins = await admin
+      .from('render_batches')
+      .insert({ job_id: jobId, index: 0, state: 'queued', first_token_id: 1, last_token_id: 1 })
+    if (ins.error) return describe(ins.error as DbError)
+    const mine = await A.client.from('render_batches').select('index').eq('job_id', jobId)
+    const theirs = await B.client.from('render_batches').select('index').eq('job_id', jobId)
+    return (
+      (mine.data?.length === 1 ? null : `A sees ${mine.data?.length ?? 0}`) ??
+      expectNothing(theirs.error, theirs.data)
+    )
+  })
+
+  await check('lock: the service role sets art_locked_at', async () => {
+    const { error } = await admin
+      .from('collections')
+      .update({ art_locked_at: new Date().toISOString() })
+      .eq('id', cid)
+    return error ? describe(error) : null
+  })
+  const LOCKED = ['42501']
+  const tables: [string, Record<string, unknown>, Record<string, unknown>][] = [
+    ['art_collections', { collection_id: cid, name: 'Late', size: 0, position: 9 }, { name: 'Renamed' }],
+    [
+      'layers',
+      { collection_id: cid, art_collection_id: art.row!.id, name: 'Late', position: 9 },
+      { name: 'Renamed' },
+    ],
+    [
+      'traits',
+      { collection_id: cid, layer_id: layer.row!.id, name: 'Late', weight: 0, blank: true, position: 9 },
+      { name: 'Renamed' },
+    ],
+    [
+      'rules',
+      {
+        collection_id: cid,
+        kind: 'doesnt_mix_with',
+        trait_id: trait,
+        related_trait_ids: [trait],
+        bidirectional: true,
+      },
+      { bidirectional: true },
+    ],
+    [
+      'at_least_one',
+      { collection_id: cid, art_collection_id: art.row!.id, trait_ids: [trait, trait] },
+      { trait_ids: [trait, trait] },
+    ],
+    [
+      'tokens',
+      { collection_id: cid, token_id: 2, art_collection_id: art.row!.id, dna: [trait, trait2] },
+      { description: 'late' },
+    ],
+    ['uploads', uploadInput(cid), { file_name: 'late.png' }],
+  ]
+  for (const [table, insert, update] of tables) {
+    await check(`lock: ${table} refuses insert, update and delete once the art is locked`, async () => {
+      const ins = await A.client.from(table).insert(insert).select()
+      const upd = await A.client.from(table).update(update).eq('collection_id', cid).select()
+      const del = await A.client.from(table).delete().eq('collection_id', cid).select()
+      return (
+        expectError(ins.error as DbError, LOCKED, ins.data) ??
+        expectError(upd.error as DbError, LOCKED, upd.data) ??
+        expectError(del.error as DbError, LOCKED, del.data)
+      )
+    })
+  }
+  await check('lock: record_upload refuses once the art is locked', async () => {
+    const { id, error } = await recordUpload(A.client, cid)
+    return expectError(error, LOCKED, id ? [id] : null)
+  })
+  await check('lock: A still reads every art row', async () => {
+    for (const table of ['art_collections', 'layers', 'traits', 'tokens', 'uploads']) {
+      const { data, error } = await A.client.from(table).select('collection_id').eq('collection_id', cid)
+      if (error) return `${table}: ${describe(error)}`
+      if (!data?.length) return `${table}: no rows`
+    }
+    return null
+  })
+  await check('lock: token_name cannot change after the lock; token_description still can', async () => {
+    const name = await A.client.from('collections').update({ token_name: 'Late Owls' }).eq('id', cid).select()
+    const desc = await A.client
+      .from('collections')
+      .update({ token_description: 'A late note.' })
+      .eq('id', cid)
+      .select()
+    return expectError(name.error, CHECK, name.data) ?? (desc.error ? describe(desc.error) : null)
+  })
+  await check('lock: A cannot clear art_locked_at', async () => {
+    const { data, error } = await A.client
+      .from('collections')
+      .update({ art_locked_at: null })
+      .eq('id', cid)
+      .select()
+    return expectError(error, PERMISSION, data)
+  })
+}
+
+// ---------------------------------------------------------------------------------------------
 // 10. Cleanup
 // ---------------------------------------------------------------------------------------------
 async function cleanup(): Promise<void> {
+  await check('cleanup: delete render jobs created by this run', async () => {
+    if (createdJobIds.size === 0) return null
+    const { error } = await admin
+      .from('render_jobs')
+      .delete()
+      .in('id', [...createdJobIds])
+    return error ? describe(error) : null
+  })
+
   await check('cleanup: delete collections created by this run', async () => {
     const owners = [...createdUserIds]
     const { error } = await admin.from('collections').delete().in('owner_id', owners)

@@ -565,3 +565,187 @@ $$;
 
 revoke all on function public.swap_token_ids_for_check(uuid, integer, integer) from public, anon;
 grant execute on function public.swap_token_ids_for_check(uuid, integer, integer) to authenticated;
+
+-- ---------------------------------------------------------------------------------------------
+-- Render jobs: created at lock, paid or waived, rendered. Clients read; server code writes.
+-- ---------------------------------------------------------------------------------------------
+create table public.render_jobs (
+  id uuid primary key default gen_random_uuid(),
+  collection_id uuid not null references public.collections (id) on delete restrict,
+  kind public.render_kind not null,
+  state public.render_state not null default 'locked',
+  token_count integer not null check (token_count >= 0),
+  token_list_hash text check (token_list_hash is null or token_list_hash ~ '^0x[0-9a-f]{64}$'),
+  allow_duplicates boolean not null default false,
+  fee_per_token_wei numeric(78, 0) not null check (fee_per_token_wei >= 0),
+  quote_total_wei numeric(78, 0) not null check (quote_total_wei >= 0),
+  quote_chain_id integer,
+  quote_payer text check (quote_payer is null or quote_payer ~ '^0x[0-9a-f]{40}$'),
+  quote_expires_at timestamptz,
+  payment_tx_hash text check (payment_tx_hash is null or payment_tx_hash ~ '^0x[0-9a-f]{64}$'),
+  paid_at timestamptz,
+  paid_amount_wei numeric(78, 0) check (paid_amount_wei is null or paid_amount_wei >= 0),
+  waived_by uuid references auth.users (id) on delete set null,
+  waived_reason text,
+  batch_size integer not null default 100 check (batch_size between 1 and 1000),
+  batches_total integer not null default 0 check (batches_total >= 0),
+  batches_done integer not null default 0 check (batches_done >= 0),
+  images_cid text,
+  metadata_cid text,
+  placeholder_upload_id uuid references public.uploads (id) on delete restrict,
+  error text,
+  created_at timestamptz not null default now(),
+  started_at timestamptz,
+  finished_at timestamptz,
+  updated_at timestamptz not null default now(),
+  constraint render_jobs_batches_done_within_total check (batches_done <= batches_total),
+  constraint render_jobs_placeholder_has_upload check (kind <> 'placeholder' or placeholder_upload_id is not null),
+  constraint render_jobs_waiver_complete check ((waived_by is null) = (waived_reason is null)),
+  -- Never render unpaid: a job past payment_due was paid, waived, or quoted at zero (the placeholder fee).
+  constraint render_jobs_render_only_when_paid check (
+    state in ('locked', 'payment_due', 'failed')
+    or payment_tx_hash is not null or waived_by is not null or quote_total_wei = 0
+  ),
+  constraint render_jobs_done_has_metadata check (state <> 'done' or metadata_cid is not null)
+);
+
+create index render_jobs_collection_id_idx on public.render_jobs (collection_id);
+create unique index render_jobs_one_open_per_kind on public.render_jobs (collection_id, kind)
+  where state not in ('done', 'failed');
+
+alter table public.render_jobs enable row level security;
+
+create policy "render_jobs: owner reads" on public.render_jobs for select to authenticated
+using ((select private.collection_owned(collection_id)));
+
+revoke all on public.render_jobs from anon, authenticated;
+grant select on public.render_jobs to authenticated;
+
+create trigger render_jobs_set_updated_at
+before update on public.render_jobs
+for each row execute function public.set_updated_at();
+
+-- ---------------------------------------------------------------------------------------------
+-- Render batches
+-- ---------------------------------------------------------------------------------------------
+create table public.render_batches (
+  job_id uuid not null references public.render_jobs (id) on delete cascade,
+  index integer not null check (index >= 0),
+  state public.batch_state not null default 'queued',
+  attempts integer not null default 0 check (attempts >= 0),
+  first_token_id integer not null check (first_token_id >= 1),
+  last_token_id integer not null check (last_token_id >= first_token_id),
+  images_cid text,
+  error text,
+  updated_at timestamptz not null default now(),
+  primary key (job_id, index)
+);
+
+alter table public.render_batches enable row level security;
+
+-- Ownership through the job's collection. The subquery is one indexed lookup per statement.
+create policy "render_batches: owner reads" on public.render_batches for select to authenticated
+using (
+  exists (
+    select 1 from public.render_jobs j
+    where j.id = job_id and (select private.collection_owned(j.collection_id))
+  )
+);
+
+revoke all on public.render_batches from anon, authenticated;
+grant select on public.render_batches to authenticated;
+
+create trigger render_batches_set_updated_at
+before update on public.render_batches
+for each row execute function public.set_updated_at();
+
+-- ---------------------------------------------------------------------------------------------
+-- The lock gate: once the real set is locked, a client role changes no art row
+-- ---------------------------------------------------------------------------------------------
+create function public.art_guard_lock()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_collection uuid;
+begin
+  if current_user not in ('anon', 'authenticated') then
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+  -- Both the row's current project and (on an update) the one it came from: neither may be locked.
+  v_collection := case when tg_op = 'DELETE' then old.collection_id else new.collection_id end;
+  if exists (select 1 from public.collections c where c.id = v_collection and c.art_locked_at is not null)
+    or (tg_op = 'UPDATE' and exists (
+      select 1 from public.collections c where c.id = old.collection_id and c.art_locked_at is not null
+    ))
+  then
+    raise exception 'The art is locked and cannot change.' using errcode = 'insufficient_privilege';
+  end if;
+  return case when tg_op = 'DELETE' then old else new end;
+end;
+$$;
+
+-- Named to sort first, so the lock is checked before any content guard.
+create trigger a_art_guard_lock before insert or update or delete on public.art_collections
+for each row execute function public.art_guard_lock();
+create trigger a_art_guard_lock before insert or update or delete on public.layers
+for each row execute function public.art_guard_lock();
+create trigger a_art_guard_lock before insert or update or delete on public.traits
+for each row execute function public.art_guard_lock();
+create trigger a_art_guard_lock before insert or update or delete on public.rules
+for each row execute function public.art_guard_lock();
+create trigger a_art_guard_lock before insert or update or delete on public.at_least_one
+for each row execute function public.art_guard_lock();
+create trigger a_art_guard_lock before insert or update or delete on public.tokens
+for each row execute function public.art_guard_lock();
+create trigger a_art_guard_lock before insert or update or delete on public.uploads
+for each row execute function public.art_guard_lock();
+
+-- ---------------------------------------------------------------------------------------------
+-- Collections: the frozen-field guard learns about the art lock
+-- ---------------------------------------------------------------------------------------------
+create or replace function public.collections_guard_frozen_fields()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if old.status <> 'draft' and (
+    new.max_supply is distinct from old.max_supply
+    or new.project_type is distinct from old.project_type
+  ) then
+    raise exception 'The token count and type cannot change after the art is locked.'
+      using errcode = 'check_violation';
+  end if;
+  if old.status = 'deployed' and (new.name <> old.name or new.symbol <> old.symbol) then
+    raise exception 'The name and symbol cannot change after deployment.'
+      using errcode = 'check_violation';
+  end if;
+  if new.slug is distinct from old.slug and current_user in ('anon', 'authenticated') then
+    raise exception 'The mint page link can only be set by reserving it.'
+      using errcode = 'insufficient_privilege';
+  end if;
+  if old.status <> 'deployed' and new.status = 'deployed'
+    and new.slug is not null and new.slug_reserved_at < now() - interval '3 days' then
+    new.slug = null;
+    new.slug_reserved_at = null;
+  end if;
+  -- The art lock (docs/specs/2026-10-08-art-tables.md): set only by server code; once set, what
+  -- was locked and paid for does not change.
+  if new.art_locked_at is distinct from old.art_locked_at and current_user in ('anon', 'authenticated') then
+    raise exception 'The art lock is set when the art is locked.' using errcode = 'insufficient_privilege';
+  end if;
+  if old.art_locked_at is not null and (
+    new.token_name is distinct from old.token_name
+    or new.show_blank_traits <> old.show_blank_traits
+    or new.generation_seed is distinct from old.generation_seed
+  ) then
+    raise exception 'The token name, blank traits option and seed cannot change after the art is locked.'
+      using errcode = 'check_violation';
+  end if;
+  return new;
+end;
+$$;
