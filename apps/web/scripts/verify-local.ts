@@ -286,6 +286,33 @@ async function insertLayer(
   return { row: data as { id: string } | null, error: error as DbError }
 }
 
+async function insertUploadRow(client: SupabaseClient, collectionId: string): Promise<string> {
+  const { id, error } = await recordUpload(client, collectionId)
+  if (error || !id) throw new Error(`upload setup: ${describe(error)}`)
+  return id
+}
+
+async function insertTrait(
+  client: SupabaseClient,
+  collectionId: string,
+  layerId: string,
+  overrides: Record<string, unknown> = {},
+) {
+  const { data, error } = await client
+    .from('traits')
+    .insert({
+      collection_id: collectionId,
+      layer_id: layerId,
+      name: 'Wide',
+      weight: 50,
+      position: ++nameCount,
+      ...overrides,
+    })
+    .select()
+    .single()
+  return { row: data as { id: string } | null, error: error as DbError }
+}
+
 const sameStoredRow = (before: Collection | null, after: Collection | null) =>
   before !== null && after !== null && JSON.stringify(before) === JSON.stringify(after)
 
@@ -1007,6 +1034,7 @@ async function main(): Promise<void> {
   }
 
   await artFoundation(A, B)
+  await artTraitsAndRules(A, B)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1204,3 +1232,169 @@ try {
 
 console.log(`\n${passed} passed, ${failed.length} failed`)
 process.exit(failed.length ? 1 : 0)
+
+// ---------------------------------------------------------------------------------------------
+// 9b. Traits, rules and constraints
+// ---------------------------------------------------------------------------------------------
+async function artTraitsAndRules(A: Creator, B: Creator): Promise<void> {
+  const col = await insertCollection(A.client)
+  if (!col.row) throw new Error(`setup: ${describe(col.error)}`)
+  const cid = col.row.id
+  const art = await insertArtCollection(A.client, cid)
+  const eyes = await insertLayer(A.client, cid, art.row!.id, { name: 'Eyes', position: 0 })
+  const hats = await insertLayer(A.client, cid, art.row!.id, { name: 'Hats', position: 1 })
+  const uploadId = await insertUploadRow(A.client, cid)
+  const other = await insertCollection(B.client)
+  const otherArt = await insertArtCollection(B.client, other.row!.id)
+  const otherLayer = await insertLayer(B.client, other.row!.id, otherArt.row!.id)
+  const otherUpload = await insertUploadRow(B.client, other.row!.id)
+  const otherTrait = await insertTrait(B.client, other.row!.id, otherLayer.row!.id, {
+    upload_id: otherUpload,
+  })
+
+  let wide = ''
+  let blank = ''
+  let cap = ''
+  await check('traits: A inserts a trait with an image and a blank without one', async () => {
+    const a = await insertTrait(A.client, cid, eyes.row!.id, { name: 'Wide', upload_id: uploadId })
+    const b = await insertTrait(A.client, cid, eyes.row!.id, { name: 'None', blank: true, weight: 50 })
+    if (a.error || b.error) return describe(a.error ?? b.error)
+    wide = a.row!.id
+    blank = b.row!.id
+    return null
+  })
+  await check('traits: a trait that is not blank needs an image', async () => {
+    const { error, row } = await insertTrait(A.client, cid, eyes.row!.id, { name: 'Bare' })
+    return expectError(error, CHECK, row ? [row] : null)
+  })
+  await check('traits: a second blank in one layer is refused', async () => {
+    const { error, row } = await insertTrait(A.client, cid, eyes.row!.id, { name: 'None 2', blank: true })
+    return expectError(error, UNIQUE, row ? [row] : null)
+  })
+  await check('traits: a capped trait has weight 0 and a cap from 1 to 10,000', async () => {
+    const bad = await insertTrait(A.client, cid, hats.row!.id, {
+      name: 'Gold',
+      upload_id: uploadId,
+      constant: 3,
+      weight: 10,
+    })
+    const good = await insertTrait(A.client, cid, hats.row!.id, {
+      name: 'Gold',
+      upload_id: uploadId,
+      constant: 3,
+      weight: 0,
+    })
+    if (good.error || !good.row) return `good refused: ${describe(good.error)}`
+    cap = good.row.id
+    return expectError(bad.error, CHECK, bad.row ? [bad.row] : null)
+  })
+  await check('traits: a trait whose layer is in another collection is refused', async () => {
+    const { error, row } = await insertTrait(A.client, cid, otherLayer.row!.id, { upload_id: uploadId })
+    return expectError(error, [...PERMISSION, ...CHECK], row ? [row] : null)
+  })
+  await check('traits: an image from another collection is refused', async () => {
+    const { error, row } = await insertTrait(A.client, cid, hats.row!.id, {
+      name: 'Stolen',
+      upload_id: otherUpload,
+    })
+    return expectError(error, CHECK, row ? [row] : null)
+  })
+  await check('traits: the 501st trait of a layer is refused with the cap message', async () => {
+    const layer = await insertLayer(A.client, cid, art.row!.id, { name: 'Many', position: 2 })
+    const rows = Array.from({ length: 500 }, (_, i) => ({
+      collection_id: cid,
+      layer_id: layer.row!.id,
+      name: `T${i}`,
+      weight: 0.2,
+      position: i,
+      upload_id: uploadId,
+    }))
+    const bulk = await A.client.from('traits').insert(rows)
+    if (bulk.error) return `setup: ${describe(bulk.error as DbError)}`
+    const { error, row } = await insertTrait(A.client, cid, layer.row!.id, {
+      name: 'T500',
+      upload_id: uploadId,
+      position: 500,
+    })
+    const problem = expectError(error, CHECK, row ? [row] : null)
+    if (problem) return problem
+    return error?.message.includes('at most 500 traits') ? null : `wrong message: ${error?.message}`
+  })
+  await check("traits: B cannot read A's", async () => {
+    const { data, error } = await B.client.from('traits').select().eq('id', wide)
+    return expectNothing(error, data)
+  })
+  await check('uploads: an image a trait uses cannot be deleted', async () => {
+    const { data, error } = await A.client.from('uploads').delete().eq('id', uploadId).select()
+    return expectError(error as DbError, ['23503'], data)
+  })
+
+  await check('rules: A inserts a doesnt_mix_with rule between two layers', async () => {
+    const { error } = await A.client.from('rules').insert({
+      collection_id: cid,
+      kind: 'doesnt_mix_with',
+      trait_id: wide,
+      related_trait_ids: [cap],
+      bidirectional: true,
+    })
+    return error ? describe(error as DbError) : null
+  })
+  await check('rules: bidirectional must match the kind', async () => {
+    const { data, error } = await A.client
+      .from('rules')
+      .insert({
+        collection_id: cid,
+        kind: 'must_pair_with',
+        trait_id: wide,
+        related_trait_ids: [cap],
+        bidirectional: true,
+      })
+      .select()
+    return expectError(error as DbError, CHECK, data)
+  })
+  await check('rules: a related trait in another collection is refused', async () => {
+    const { data, error } = await A.client
+      .from('rules')
+      .insert({
+        collection_id: cid,
+        kind: 'doesnt_mix_with',
+        trait_id: wide,
+        related_trait_ids: [otherTrait.row!.id],
+        bidirectional: true,
+      })
+      .select()
+    return expectError(error as DbError, CHECK, data)
+  })
+  await check('rules: related traits must share one layer', async () => {
+    const { data, error } = await A.client
+      .from('rules')
+      .insert({
+        collection_id: cid,
+        kind: 'doesnt_mix_with',
+        trait_id: cap,
+        related_trait_ids: [wide, blank, cap],
+        bidirectional: true,
+      })
+      .select()
+    return expectError(error as DbError, CHECK, data)
+  })
+
+  await check('at_least_one: A inserts one over two traits; one trait is refused', async () => {
+    const ok = await A.client
+      .from('at_least_one')
+      .insert({ collection_id: cid, art_collection_id: art.row!.id, trait_ids: [wide, blank] })
+    if (ok.error) return describe(ok.error as DbError)
+    const { data, error } = await A.client
+      .from('at_least_one')
+      .insert({ collection_id: cid, art_collection_id: art.row!.id, trait_ids: [wide] })
+      .select()
+    return expectError(error as DbError, CHECK, data)
+  })
+  await check('at_least_one: a trait of another collection is refused', async () => {
+    const { data, error } = await A.client
+      .from('at_least_one')
+      .insert({ collection_id: cid, art_collection_id: art.row!.id, trait_ids: [wide, otherTrait.row!.id] })
+      .select()
+    return expectError(error as DbError, CHECK, data)
+  })
+}

@@ -240,3 +240,195 @@ grant update (name, display_name, position, bypass_dna) on public.layers to auth
 create trigger layers_set_updated_at
 before update on public.layers
 for each row execute function public.set_updated_at();
+
+-- ---------------------------------------------------------------------------------------------
+-- Traits
+-- ---------------------------------------------------------------------------------------------
+create table public.traits (
+  id uuid primary key default gen_random_uuid(),
+  collection_id uuid not null references public.collections (id) on delete cascade,
+  layer_id uuid not null references public.layers (id) on delete cascade,
+  name text not null check (char_length(name) between 1 and 64),
+  weight numeric(5, 2) not null check (weight between 0 and 100),
+  constant integer check (constant is null or constant between 1 and 10000),
+  blank boolean not null default false,
+  in_metadata boolean not null default true,
+  -- A trait's image stays while the trait uses it (restrict); deleting the trait frees it.
+  upload_id uuid references public.uploads (id) on delete restrict,
+  position integer not null check (position >= 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (layer_id, position),
+  constraint traits_blank_or_image check (blank or upload_id is not null),
+  constraint traits_capped_have_no_weight check (constant is null or weight = 0)
+);
+
+create index traits_collection_id_idx on public.traits (collection_id);
+create index traits_layer_id_idx on public.traits (layer_id);
+create index traits_upload_id_idx on public.traits (upload_id);
+create unique index traits_one_blank_per_layer on public.traits (layer_id) where blank;
+
+-- The layer and the image must belong to this project, and a layer holds at most 500 traits
+-- (MASTER_PLAN, Art: storage limits).
+create function public.traits_guard()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  if not exists (
+    select 1 from public.layers l where l.id = new.layer_id and l.collection_id = new.collection_id
+  ) then
+    raise exception 'The layer belongs to another project.' using errcode = 'check_violation';
+  end if;
+  if new.upload_id is not null and not exists (
+    select 1 from public.uploads u
+    where u.id = new.upload_id and u.collection_id = new.collection_id and u.kind = 'layer_image'
+  ) then
+    raise exception 'The image is not a layer image of this project.' using errcode = 'check_violation';
+  end if;
+  if tg_op = 'INSERT' or new.layer_id <> old.layer_id then
+    if (select count(*) from public.traits t where t.layer_id = new.layer_id) >= 500 then
+      raise exception 'A layer can have at most 500 traits.' using errcode = 'check_violation';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger traits_guard
+before insert or update on public.traits
+for each row execute function public.traits_guard();
+
+alter table public.traits enable row level security;
+
+create policy "traits: owner all" on public.traits for all to authenticated
+using ((select private.collection_owned(collection_id)))
+with check ((select private.collection_owned(collection_id)));
+
+revoke all on public.traits from anon, authenticated;
+grant select, insert, delete on public.traits to authenticated;
+grant update (name, weight, constant, blank, in_metadata, upload_id, position) on public.traits to authenticated;
+
+create trigger traits_set_updated_at
+before update on public.traits
+for each row execute function public.set_updated_at();
+
+-- ---------------------------------------------------------------------------------------------
+-- Rules
+-- ---------------------------------------------------------------------------------------------
+create table public.rules (
+  id uuid primary key default gen_random_uuid(),
+  collection_id uuid not null references public.collections (id) on delete cascade,
+  kind public.rule_kind not null,
+  trait_id uuid not null references public.traits (id) on delete cascade,
+  related_trait_ids uuid[] not null check (cardinality(related_trait_ids) >= 1),
+  bidirectional boolean not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint rules_direction_matches_kind check (bidirectional = (kind <> 'must_pair_with'))
+);
+
+create index rules_collection_id_idx on public.rules (collection_id);
+create index rules_trait_id_idx on public.rules (trait_id);
+
+-- The source trait is in this project; every related trait is in this project, all in one layer,
+-- and that layer is in the source trait's art collection.
+create function public.rules_guard()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_source_art uuid;
+  v_related_layers integer;
+  v_related_found integer;
+  v_related_art uuid;
+begin
+  select l.art_collection_id into v_source_art
+  from public.traits t join public.layers l on l.id = t.layer_id
+  where t.id = new.trait_id and t.collection_id = new.collection_id;
+  if v_source_art is null then
+    raise exception 'The rule''s trait belongs to another project.' using errcode = 'check_violation';
+  end if;
+  select count(*), count(distinct l.id), min(l.art_collection_id::text)::uuid
+    into v_related_found, v_related_layers, v_related_art
+  from public.traits t join public.layers l on l.id = t.layer_id
+  where t.id = any(new.related_trait_ids) and t.collection_id = new.collection_id;
+  if v_related_found <> cardinality(new.related_trait_ids) then
+    raise exception 'A related trait belongs to another project.' using errcode = 'check_violation';
+  end if;
+  if v_related_layers <> 1 or v_related_art <> v_source_art then
+    raise exception 'Related traits must all be in one layer of the same collection.' using errcode = 'check_violation';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger rules_guard
+before insert or update on public.rules
+for each row execute function public.rules_guard();
+
+alter table public.rules enable row level security;
+
+create policy "rules: owner all" on public.rules for all to authenticated
+using ((select private.collection_owned(collection_id)))
+with check ((select private.collection_owned(collection_id)));
+
+revoke all on public.rules from anon, authenticated;
+grant select, insert, delete on public.rules to authenticated;
+grant update (kind, trait_id, related_trait_ids, bidirectional) on public.rules to authenticated;
+
+create trigger rules_set_updated_at
+before update on public.rules
+for each row execute function public.set_updated_at();
+
+-- ---------------------------------------------------------------------------------------------
+-- At-least-one constraints: every token of the art collection carries one of these traits
+-- ---------------------------------------------------------------------------------------------
+create table public.at_least_one (
+  id uuid primary key default gen_random_uuid(),
+  collection_id uuid not null references public.collections (id) on delete cascade,
+  art_collection_id uuid not null references public.art_collections (id) on delete cascade,
+  trait_ids uuid[] not null check (cardinality(trait_ids) >= 2),
+  created_at timestamptz not null default now()
+);
+
+create index at_least_one_collection_id_idx on public.at_least_one (collection_id);
+
+create function public.at_least_one_guard()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_found integer;
+begin
+  select count(*) into v_found
+  from public.traits t join public.layers l on l.id = t.layer_id
+  where t.id = any(new.trait_ids)
+    and t.collection_id = new.collection_id
+    and l.art_collection_id = new.art_collection_id;
+  if v_found <> cardinality(new.trait_ids) then
+    raise exception 'Every trait of the constraint must be in this collection.' using errcode = 'check_violation';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger at_least_one_guard
+before insert or update on public.at_least_one
+for each row execute function public.at_least_one_guard();
+
+alter table public.at_least_one enable row level security;
+
+create policy "at_least_one: owner all" on public.at_least_one for all to authenticated
+using ((select private.collection_owned(collection_id)))
+with check ((select private.collection_owned(collection_id)));
+
+revoke all on public.at_least_one from anon, authenticated;
+grant select, insert, delete on public.at_least_one to authenticated;
+grant update (trait_ids) on public.at_least_one to authenticated;
