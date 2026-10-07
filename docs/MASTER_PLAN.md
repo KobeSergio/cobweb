@@ -34,6 +34,9 @@ Build order and product decisions for Cobweb. [PLAN.md](PLAN.md) is the original
 - **Rarity tiers.** Five tiers (top 5%, 15%, 30%, 50%, the rest), with five tier colour tokens shared by Generate and the mint page.
 - **Render output.** One image CID per batch and one metadata CID.
 - **Compositor.** sharp is the only compositor. The render benchmark sets Lambda memory and batch size.
+- **Art fee** (decided 7 October 2026). $0.11 per token from token one, converted to the chain's native token at lock. No free allowance. Single asset projects pay nothing, as in the legacy app.
+- **Placeholder fee** (decided 7 October 2026). A deferred-art lock renders only the placeholder and costs nothing. The real set is quoted and paid when the art is finished and locked.
+- **Storage limits** (decided 7 October 2026). 5 GB of layer files per project and 500 traits per layer.
 
 ### Flow
 
@@ -97,10 +100,7 @@ The model is the TheSuits contract: [reference/TheSuits.sol](reference/TheSuits.
 | Decision                                                                                   | Needed by                                                    |
 | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
 | Mint fee: option A, B or C from [PLAN.md](PLAN.md)                                         | Phase 7, when fee values are set (the mechanism is the same) |
-| Art fee: $0.11 per token from token one, or 4,000 tokens free                              | Phase 3                                                      |
 | The logo: keep the Kingdomly crown or replace it                                           | Phase 7                                                      |
-| Storage limits: 5 GB of layer files per project and 500 traits per layer                   | Phase 3                                                      |
-| Placeholder fee for a deferred-art lock: nothing, one token's fee, or the single-asset fee | Phase 3                                                      |
 
 ## Phases
 
@@ -178,6 +178,8 @@ What exists:
 **Status:** not started.
 
 Source: [legacy/market-creator-flow.md](legacy/market-creator-flow.md), sections 2, 3, 4, 7 and 8.
+
+Built as five sub-projects, each with its own spec and plan: the DNA engine ([specs/2026-10-07-dna-engine.md](specs/2026-10-07-dna-engine.md)), the art tables, layer and asset upload, wiring the Art screens, then lock and pay.
 
 Data contract: [specs/2026-10-03-creator-flow-ui.md](specs/2026-10-03-creator-flow-ui.md) section 5 is the shape the Art, Lock and upload, Deploy, Manage and mint page screens already consume. Phase 3 implements it for the art tables and replaces the sample data behind each `Seam:` marker.
 
