@@ -98,7 +98,7 @@ revoke all on public.uploads from anon, authenticated;
 -- No client insert: a row is recorded only through record_upload below, which pins the storage
 -- key under the collection's own prefix. The creator edits only how a file is used.
 grant select, delete on public.uploads to authenticated;
-grant update (kind, file_name, position, quantity, attributes) on public.uploads to authenticated;
+grant update (file_name, position, quantity, attributes) on public.uploads to authenticated;
 
 -- Records an upload for the caller's own collection. Security definer, so it checks everything a
 -- policy would: the caller owns the collection, the art is not locked, and the key lives under
@@ -176,7 +176,9 @@ using ((select private.collection_owned(collection_id)))
 with check ((select private.collection_owned(collection_id)));
 
 revoke all on public.art_collections from anon, authenticated;
-grant select, insert, update, delete on public.art_collections to authenticated;
+grant select, insert, delete on public.art_collections to authenticated;
+-- Column-level update: a row never moves to another project, even one the creator also owns.
+grant update (name, size, position) on public.art_collections to authenticated;
 
 create trigger art_collections_set_updated_at
 before update on public.art_collections
@@ -232,7 +234,8 @@ using ((select private.collection_owned(collection_id)))
 with check ((select private.collection_owned(collection_id)));
 
 revoke all on public.layers from anon, authenticated;
-grant select, insert, update, delete on public.layers to authenticated;
+grant select, insert, delete on public.layers to authenticated;
+grant update (name, display_name, position, bypass_dna) on public.layers to authenticated;
 
 create trigger layers_set_updated_at
 before update on public.layers

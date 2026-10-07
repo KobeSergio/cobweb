@@ -1039,6 +1039,16 @@ async function artFoundation(A: Creator, B: Creator): Promise<void> {
     const del = await B.client.from('art_collections').delete().eq('id', artId).select()
     return expectNothing(upd.error, upd.data) ?? expectNothing(del.error, del.data)
   })
+  await check('art_collections: A cannot move one to another of their own collections', async () => {
+    const second = await insertCollection(A.client)
+    if (!second.row) return `setup: ${describe(second.error)}`
+    const { data, error } = await A.client
+      .from('art_collections')
+      .update({ collection_id: second.row.id })
+      .eq('id', artId)
+      .select()
+    return expectError(error as DbError, PERMISSION, data)
+  })
   await check('art_collections: a size above 10,000 is refused', async () => {
     const { error, row } = await insertArtCollection(A.client, cid, { position: 2, size: 10_001 })
     return expectError(error, CHECK, row ? [row] : null)
@@ -1093,7 +1103,7 @@ async function artFoundation(A: Creator, B: Creator): Promise<void> {
     if (a.error) return `setup: ${describe(a.error)}`
     const { id, error } = await recordUpload(A.client, cid, {
       ...first,
-      storage_key: String(first.storage_key).replace(/\.png$/, '-again.png'),
+      storage_key: `${(first.storage_key as string).replace(/\.png$/, '')}-again.png`,
     })
     return expectError(error, UNIQUE, id ? [id] : null)
   })
