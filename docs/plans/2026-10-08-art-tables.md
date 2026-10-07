@@ -43,7 +43,7 @@ Inputs the spec implies but no task's tests exercise. Each is pinned to the task
 
 **Interfaces:**
 
-- Produces: enums `public.upload_kind`, `public.media_type`; tables `public.uploads`, `public.art_collections`, `public.layers`; function `public.record_upload(...) returns uuid` (the only way a client records an upload); columns on `public.collections`: `art_deferred`, `art_locked_at`, `token_name`, `token_description`, `show_blank_traits`, `generation_seed`, `canvas_width`, `canvas_height`; function `private.collection_owned(uuid) returns boolean` (used by every later policy); verify-local helpers `uploadInput(collectionId, overrides)`, `recordUpload(client, collectionId, overrides)`, `insertArtCollection(client, collectionId, overrides)`, `insertLayer(client, collectionId, artCollectionId, overrides)`.
+- Produces (update grants are column-level everywhere: ids and parent keys are never client-updatable): enums `public.upload_kind`, `public.media_type`; tables `public.uploads`, `public.art_collections`, `public.layers`; function `public.record_upload(...) returns uuid` (the only way a client records an upload); columns on `public.collections`: `art_deferred`, `art_locked_at`, `token_name`, `token_description`, `show_blank_traits`, `generation_seed`, `canvas_width`, `canvas_height`; function `private.collection_owned(uuid) returns boolean` (used by every later policy); verify-local helpers `uploadInput(collectionId, overrides)`, `recordUpload(client, collectionId, overrides)`, `insertArtCollection(client, collectionId, overrides)`, `insertLayer(client, collectionId, artCollectionId, overrides)`.
 
 - [ ] **Step 1: Write the failing checks**
 
@@ -142,6 +142,12 @@ async function artFoundation(A: Creator, B: Creator): Promise<void> {
     const upd = await B.client.from('art_collections').update({ name: 'Hijacked' }).eq('id', artId).select()
     const del = await B.client.from('art_collections').delete().eq('id', artId).select()
     return expectNothing(upd.error, upd.data) ?? expectNothing(del.error, del.data)
+  })
+  await check('art_collections: A cannot move one to another of their own collections', async () => {
+    const second = await insertCollection(A.client)
+    if (!second.row) return `setup: ${describe(second.error)}`
+    const { data, error } = await A.client.from('art_collections').update({ collection_id: second.row.id }).eq('id', artId).select()
+    return expectError(error as DbError, PERMISSION, data)
   })
   await check('art_collections: a size above 10,000 is refused', async () => {
     const { error, row } = await insertArtCollection(A.client, cid, { position: 2, size: 10_001 })
@@ -338,7 +344,7 @@ revoke all on public.uploads from anon, authenticated;
 -- No client insert: a row is recorded only through record_upload below, which pins the storage
 -- key under the collection's own prefix. The creator edits only how a file is used.
 grant select, delete on public.uploads to authenticated;
-grant update (kind, file_name, position, quantity, attributes) on public.uploads to authenticated;
+grant update (file_name, position, quantity, attributes) on public.uploads to authenticated;
 
 -- Records an upload for the caller's own collection. Security definer, so it checks everything a
 -- policy would: the caller owns the collection, the art is not locked, and the key lives under
@@ -416,7 +422,9 @@ using ((select private.collection_owned(collection_id)))
 with check ((select private.collection_owned(collection_id)));
 
 revoke all on public.art_collections from anon, authenticated;
-grant select, insert, update, delete on public.art_collections to authenticated;
+grant select, insert, delete on public.art_collections to authenticated;
+-- Column-level update: a row never moves to another project, even one the creator also owns.
+grant update (name, size, position) on public.art_collections to authenticated;
 
 create trigger art_collections_set_updated_at
 before update on public.art_collections
@@ -472,7 +480,8 @@ using ((select private.collection_owned(collection_id)))
 with check ((select private.collection_owned(collection_id)));
 
 revoke all on public.layers from anon, authenticated;
-grant select, insert, update, delete on public.layers to authenticated;
+grant select, insert, delete on public.layers to authenticated;
+grant update (name, display_name, position, bypass_dna) on public.layers to authenticated;
 
 create trigger layers_set_updated_at
 before update on public.layers
@@ -739,7 +748,8 @@ using ((select private.collection_owned(collection_id)))
 with check ((select private.collection_owned(collection_id)));
 
 revoke all on public.traits from anon, authenticated;
-grant select, insert, update, delete on public.traits to authenticated;
+grant select, insert, delete on public.traits to authenticated;
+grant update (name, weight, constant, blank, in_metadata, upload_id, position) on public.traits to authenticated;
 
 create trigger traits_set_updated_at
 before update on public.traits
@@ -808,7 +818,8 @@ using ((select private.collection_owned(collection_id)))
 with check ((select private.collection_owned(collection_id)));
 
 revoke all on public.rules from anon, authenticated;
-grant select, insert, update, delete on public.rules to authenticated;
+grant select, insert, delete on public.rules to authenticated;
+grant update (kind, trait_id, related_trait_ids, bidirectional) on public.rules to authenticated;
 
 create trigger rules_set_updated_at
 before update on public.rules
@@ -859,7 +870,8 @@ using ((select private.collection_owned(collection_id)))
 with check ((select private.collection_owned(collection_id)));
 
 revoke all on public.at_least_one from anon, authenticated;
-grant select, insert, update, delete on public.at_least_one to authenticated;
+grant select, insert, delete on public.at_least_one to authenticated;
+grant update (trait_ids) on public.at_least_one to authenticated;
 ```
 
 - [ ] **Step 4: Reset and run, expect pass**
@@ -1044,7 +1056,9 @@ using ((select private.collection_owned(collection_id)))
 with check ((select private.collection_owned(collection_id)));
 
 revoke all on public.tokens from anon, authenticated;
-grant select, insert, update, delete on public.tokens to authenticated;
+grant select, insert, delete on public.tokens to authenticated;
+-- token_id stays updatable: swaps and renumbering after a delete change it.
+grant update (token_id, dna, description) on public.tokens to authenticated;
 
 create trigger tokens_set_updated_at
 before update on public.tokens
@@ -1350,8 +1364,13 @@ begin
   if current_user not in ('anon', 'authenticated') then
     return case when tg_op = 'DELETE' then old else new end;
   end if;
+  -- Both the row's current project and (on an update) the one it came from: neither may be locked.
   v_collection := case when tg_op = 'DELETE' then old.collection_id else new.collection_id end;
-  if exists (select 1 from public.collections c where c.id = v_collection and c.art_locked_at is not null) then
+  if exists (select 1 from public.collections c where c.id = v_collection and c.art_locked_at is not null)
+    or (tg_op = 'UPDATE' and exists (
+      select 1 from public.collections c where c.id = old.collection_id and c.art_locked_at is not null
+    ))
+  then
     raise exception 'The art is locked and cannot change.' using errcode = 'insufficient_privilege';
   end if;
   return case when tg_op = 'DELETE' then old else new end;
