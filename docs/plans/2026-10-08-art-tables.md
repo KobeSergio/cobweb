@@ -1315,7 +1315,8 @@ create table public.render_jobs (
   payment_tx_hash text check (payment_tx_hash is null or payment_tx_hash ~ '^0x[0-9a-f]{64}$'),
   paid_at timestamptz,
   paid_amount_wei numeric(78, 0) check (paid_amount_wei is null or paid_amount_wei >= 0),
-  waived_by uuid references auth.users (id) on delete set null,
+  -- Restrict, not set null: the waiver's two columns are checked as a pair, so clearing one would fail.
+  waived_by uuid references auth.users (id) on delete restrict,
   waived_reason text,
   batch_size integer not null default 100 check (batch_size between 1 and 1000),
   batches_total integer not null default 0 check (batches_total >= 0),
@@ -1558,7 +1559,9 @@ async function artInvariants(A: Creator): Promise<void> {
 Run: `pnpm --filter @cobweb/web verify:local 2>&1 | grep -E '^(FAIL|INFO|[0-9]+ passed)'`
 Expected: the schema check FAILs (`function public.art_table_facts() does not exist`); the timing check runs and passes or fails on time (note the INFO line either way).
 
-- [ ] **Step 3: Append the facts function to the migration**
+- [ ] **Step 3: Append the facts function to the migration, and fix the waiver key**
+
+In the `render_jobs` table definition earlier in the migration, change `waived_by uuid references auth.users (id) on delete set null` to `on delete restrict` with the comment the plan's Task 4 now shows: the waiver columns are checked as a pair, so a set-null would trip the check when an admin account is deleted. Then append:
 
 ```sql
 -- ---------------------------------------------------------------------------------------------
