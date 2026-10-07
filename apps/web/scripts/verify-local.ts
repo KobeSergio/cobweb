@@ -1035,6 +1035,7 @@ async function main(): Promise<void> {
 
   await artFoundation(A, B)
   await artTraitsAndRules(A, B)
+  await artTokens(A, B)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1355,6 +1356,126 @@ async function artTraitsAndRules(A: Creator, B: Creator): Promise<void> {
       .insert({ collection_id: cid, art_collection_id: art.row!.id, trait_ids: [wide, otherTrait.row!.id] })
       .select()
     return expectError(error as DbError, CHECK, data)
+  })
+}
+
+// ---------------------------------------------------------------------------------------------
+// 9c. Tokens
+// ---------------------------------------------------------------------------------------------
+async function artTokens(A: Creator, B: Creator): Promise<void> {
+  const col = await insertCollection(A.client)
+  if (!col.row) throw new Error(`setup: ${describe(col.error)}`)
+  const cid = col.row.id
+  const art = await insertArtCollection(A.client, cid, { size: 4 })
+  const uploadId = await insertUploadRow(A.client, cid)
+  const bg = await insertLayer(A.client, cid, art.row!.id, { name: 'Background', position: 0 })
+  const eyes = await insertLayer(A.client, cid, art.row!.id, { name: 'Eyes', position: 1 })
+  const ink = (
+    await insertTrait(A.client, cid, bg.row!.id, { name: 'Ink', upload_id: uploadId, position: 0 })
+  ).row!.id
+  const wide = (
+    await insertTrait(A.client, cid, eyes.row!.id, { name: 'Wide', upload_id: uploadId, position: 0 })
+  ).row!.id
+  const none = (await insertTrait(A.client, cid, eyes.row!.id, { name: 'None', blank: true, position: 1 }))
+    .row!.id
+  const token = (id: number, dna: string[]) => ({
+    collection_id: cid,
+    token_id: id,
+    art_collection_id: art.row!.id,
+    dna,
+  })
+  const DNA_MSG = 'Token DNA does not match the layers.'
+
+  await check('tokens: A inserts tokens whose DNA matches the layers, a blank included', async () => {
+    const { error } = await A.client.from('tokens').insert([token(1, [ink, wide]), token(2, [ink, none])])
+    return error ? describe(error as DbError) : null
+  })
+  await check('tokens: a DNA of the wrong length is refused with the DNA message', async () => {
+    const { data, error } = await A.client
+      .from('tokens')
+      .insert(token(3, [ink]))
+      .select()
+    const problem = expectError(error as DbError, CHECK, data)
+    return problem ?? (error?.message.includes(DNA_MSG) ? null : `wrong message: ${error?.message}`)
+  })
+  await check('tokens: a trait in the wrong layer position is refused', async () => {
+    const { data, error } = await A.client
+      .from('tokens')
+      .insert(token(3, [wide, ink]))
+      .select()
+    return expectError(error as DbError, CHECK, data)
+  })
+  await check('tokens: the same trait twice is refused', async () => {
+    const { data, error } = await A.client
+      .from('tokens')
+      .insert(token(3, [ink, ink]))
+      .select()
+    return expectError(error as DbError, CHECK, data)
+  })
+  await check('tokens: a token id above 100,000 or below 1 is refused', async () => {
+    const hi = await A.client
+      .from('tokens')
+      .insert(token(100_001, [ink, wide]))
+      .select()
+    const lo = await A.client
+      .from('tokens')
+      .insert(token(0, [ink, wide]))
+      .select()
+    return (
+      expectError(hi.error as DbError, CHECK, hi.data) ?? expectError(lo.error as DbError, CHECK, lo.data)
+    )
+  })
+  await check('tokens: A updates a DNA and the guard re-checks it', async () => {
+    const ok = await A.client
+      .from('tokens')
+      .update({ dna: [ink, none] })
+      .eq('collection_id', cid)
+      .eq('token_id', 1)
+      .select()
+    if (ok.error) return describe(ok.error as DbError)
+    const { data, error } = await A.client
+      .from('tokens')
+      .update({ dna: [none, ink] })
+      .eq('collection_id', cid)
+      .eq('token_id', 1)
+      .select()
+    return expectError(error as DbError, CHECK, data)
+  })
+  await check("tokens: B cannot read A's tokens", async () => {
+    const { data, error } = await B.client.from('tokens').select().eq('collection_id', cid)
+    return expectNothing(error, data)
+  })
+  await check('layers: a position change is refused while the art collection has tokens', async () => {
+    const { data, error } = await A.client
+      .from('layers')
+      .update({ position: 5 })
+      .eq('id', eyes.row!.id)
+      .select()
+    return expectError(error as DbError, CHECK, data)
+  })
+  await check('layers: a rename is still allowed while tokens exist', async () => {
+    const { error } = await A.client.from('layers').update({ name: 'Eyes 2' }).eq('id', eyes.row!.id)
+    return error ? describe(error as DbError) : null
+  })
+  await check('layers: deleting a layer is refused while the art collection has tokens', async () => {
+    const { data, error } = await A.client.from('layers').delete().eq('id', eyes.row!.id).select()
+    return expectError(error as DbError, CHECK, data)
+  })
+  await check('art_collections: deleting one removes its tokens by cascade', async () => {
+    const second = await insertArtCollection(A.client, cid, { name: 'Owlets', position: 1, size: 1 })
+    const layer = await insertLayer(A.client, cid, second.row!.id, { name: 'Body', position: 0 })
+    const barn = (
+      await insertTrait(A.client, cid, layer.row!.id, { name: 'Barn', upload_id: uploadId, position: 0 })
+    ).row!.id
+    const ins = await A.client
+      .from('tokens')
+      .insert({ collection_id: cid, token_id: 3, art_collection_id: second.row!.id, dna: [barn] })
+    if (ins.error) return `setup: ${describe(ins.error as DbError)}`
+    const del = await A.client.from('art_collections').delete().eq('id', second.row!.id)
+    if (del.error) return describe(del.error as DbError)
+    const { data } = await admin.from('tokens').select('token_id').eq('collection_id', cid).eq('token_id', 3)
+    // Ids are not renumbered here: that is the server action's job, with the engine's deleteTokens.
+    return data && data.length === 0 ? null : 'token 3 survived its art collection'
   })
 }
 

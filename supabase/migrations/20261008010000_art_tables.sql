@@ -437,3 +437,110 @@ with check ((select private.collection_owned(collection_id)));
 revoke all on public.at_least_one from anon, authenticated;
 grant select, insert, delete on public.at_least_one to authenticated;
 grant update (trait_ids) on public.at_least_one to authenticated;
+
+-- ---------------------------------------------------------------------------------------------
+-- Tokens: the generated and curated set, one row per token. Names and ranks are computed, never stored.
+-- ---------------------------------------------------------------------------------------------
+create table public.tokens (
+  collection_id uuid not null references public.collections (id) on delete cascade,
+  token_id integer not null check (token_id between 1 and 100000),
+  art_collection_id uuid not null references public.art_collections (id) on delete cascade,
+  -- One trait per layer of the art collection, bottom layer first.
+  dna uuid[] not null,
+  -- A token's own description after an edit; null means the project's token_description applies.
+  description text check (description is null or char_length(description) <= 500),
+  updated_at timestamptz not null default now(),
+  primary key (collection_id, token_id)
+);
+
+create index tokens_art_collection_id_idx on public.tokens (art_collection_id);
+
+-- The DNA must name exactly one trait of each layer of the art collection, in layer order
+-- (layers ordered by position; the position values need not be contiguous).
+create function public.tokens_guard_dna()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_layers integer;
+  v_bad integer;
+begin
+  if not exists (
+    select 1 from public.art_collections a
+    where a.id = new.art_collection_id and a.collection_id = new.collection_id
+  ) then
+    raise exception 'The art collection belongs to another project.' using errcode = 'check_violation';
+  end if;
+  select count(*) into v_layers from public.layers l where l.art_collection_id = new.art_collection_id;
+  if cardinality(new.dna) <> v_layers then
+    raise exception 'Token DNA does not match the layers.' using errcode = 'check_violation';
+  end if;
+  with ordered as (
+    select l.id, row_number() over (order by l.position) as pos
+    from public.layers l where l.art_collection_id = new.art_collection_id
+  ),
+  entries as (
+    select d.trait_id, d.pos from unnest(new.dna) with ordinality as d (trait_id, pos)
+  )
+  select count(*) into v_bad
+  from entries e
+  left join ordered o on o.pos = e.pos
+  left join public.traits t on t.id = e.trait_id and t.layer_id = o.id
+  where t.id is null;
+  if v_bad > 0 then
+    raise exception 'Token DNA does not match the layers.' using errcode = 'check_violation';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger tokens_guard_dna
+before insert or update on public.tokens
+for each row execute function public.tokens_guard_dna();
+
+alter table public.tokens enable row level security;
+
+create policy "tokens: owner all" on public.tokens for all to authenticated
+using ((select private.collection_owned(collection_id)))
+with check ((select private.collection_owned(collection_id)));
+
+revoke all on public.tokens from anon, authenticated;
+grant select, insert, delete on public.tokens to authenticated;
+-- token_id stays updatable: swaps and renumbering after a delete change it.
+grant update (token_id, dna, description) on public.tokens to authenticated;
+
+create trigger tokens_set_updated_at
+before update on public.tokens
+for each row execute function public.set_updated_at();
+
+-- Stored DNA is positional, so the layer stack cannot change shape under it: while an art
+-- collection has tokens, its layers keep their positions and are not deleted. The server action
+-- that reorders or removes a layer remaps or clears the tokens first, as the browser store does.
+create function public.layers_guard_tokens()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  -- A cascaded delete (the art collection or the project going away) takes the tokens with it;
+  -- only a direct layer delete or a reorder is refused while tokens exist.
+  if tg_op = 'DELETE' and pg_trigger_depth() > 1 then
+    return old;
+  end if;
+  if tg_op = 'UPDATE' and new.position = old.position and new.art_collection_id = old.art_collection_id then
+    return new;
+  end if;
+  if exists (select 1 from public.tokens t where t.art_collection_id = old.art_collection_id) then
+    raise exception 'The layers cannot be reordered or removed while the collection has tokens. Clear the tokens first.'
+      using errcode = 'check_violation';
+  end if;
+  return case when tg_op = 'DELETE' then old else new end;
+end;
+$$;
+
+create trigger layers_guard_tokens
+before update or delete on public.layers
+for each row execute function public.layers_guard_tokens();
