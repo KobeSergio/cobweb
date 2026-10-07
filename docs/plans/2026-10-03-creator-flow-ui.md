@@ -298,10 +298,10 @@ describe('deriveAction', () => {
 
 - Run only: `apps/web/scripts/verify-local.ts`
 
-- [ ] **Step 1: Start Supabase.** `supabase start` from the repo root (ports 5532x; never touch the 5432x project).
-- [ ] **Step 2: Run the checks.** `pnpm --filter @cobweb/web verify:local`. Expected: all checks pass.
-- [ ] **Step 3: If a check fails because of the `updateCollectionDetails` action**, read the failing check's message, fix the action in `apps/web/src/app/actions/collection-details.ts` (not the policy), and re-run.
-- [ ] **Step 4: Stop Supabase.** `supabase stop`. Tick the matching line in the spec's acceptance criteria.
+- [x] **Step 1: Start Supabase.** `supabase start` from the repo root (ports 5532x; never touch the 5432x project).
+- [x] **Step 2: Run the checks.** `pnpm --filter @cobweb/web verify:local`. Expected: all checks pass.
+- [x] **Step 3: If a check fails because of the `updateCollectionDetails` action**, read the failing check's message, fix the action in `apps/web/src/app/actions/collection-details.ts` (not the policy), and re-run.
+- [x] **Step 4: Stop Supabase.** `supabase stop`. Tick the matching line in the spec's acceptance criteria.
 
 ### Task 9: Tablet-width check of the creator screens
 
@@ -309,22 +309,26 @@ describe('deriveAction', () => {
 
 - Read: `apps/web/src/components/{art,upload,deploy,manage}/**`
 
-- [ ] **Step 1: Start services**: `supabase start`, `node apps/web/scripts/dev-wallet/signer.mjs` (background), `pnpm --filter @cobweb/web dev`.
-- [ ] **Step 2: Sign in and capture** at 768 x 1024 and 1024 x 768 with Playwright (`page.addInitScript({ path: '<repo>/apps/web/scripts/dev-wallet/inject.js' })`, Connect wallet, Dev Wallet, Sign in as), every route in spec section 3, to `.playwright-mcp/tablet/`.
-- [ ] **Step 3: Look at each screenshot** for clipped text, overlapping sticky footers, tables without horizontal scroll, and the Layers side-by-side layout between 640 and 1023 px.
-- [ ] **Step 4: Fix** each finding in the owning component; re-capture; `pnpm --filter @cobweb/web typecheck && pnpm --filter @cobweb/web lint`.
-- [ ] **Step 5: Stop services** and tick the acceptance line.
+- [x] **Step 1: Start services**: `supabase start`, `node apps/web/scripts/dev-wallet/signer.mjs` (background), `pnpm --filter @cobweb/web dev`.
+- [x] **Step 2: Sign in and capture** at 768 x 1024 and 1024 x 768 with Playwright (`page.addInitScript({ path: '<repo>/apps/web/scripts/dev-wallet/inject.js' })`, Connect wallet, Dev Wallet, Sign in as), every route in spec section 3, to `.playwright-mcp/tablet/`.
+- [x] **Step 3: Look at each screenshot** for clipped text, overlapping sticky footers, tables without horizontal scroll, and the Layers side-by-side layout between 640 and 1023 px.
+- [x] **Step 4: Fix** each finding in the owning component; re-capture; `pnpm --filter @cobweb/web typecheck && pnpm --filter @cobweb/web lint`.
+- [x] **Step 5: Stop services** and tick the acceptance line.
 
 ### Task 10: Upload assets screen in a browser
 
-- [ ] **Step 1: With services running (Task 9 step 1)**, create three collections through the dialog: type 1/1s, type Metadata, type Single asset.
-- [ ] **Step 2: Open `/collections/[id]/art/upload-assets`** for each and capture at 1440 x 900 to `.playwright-mcp/assets/`.
-- [ ] **Step 3: Try the validation**: drop a non-PNG, a non-square PNG, and for Metadata a JSON whose `name` number does not match its file; each must show a per-file error and the checklist must mark the failed rule.
-- [ ] **Step 4: Fix findings** in `apps/web/src/components/art/assets/**`; typecheck and lint; tick the acceptance line.
+- [x] **Step 1: With services running (Task 9 step 1)**, create three collections through the dialog: type 1/1s, type Metadata, type Single asset.
+- [x] **Step 2: Open `/collections/[id]/art/upload-assets`** for each and capture at 1440 x 900 to `.playwright-mcp/assets/`.
+- [x] **Step 3: Try the validation**: drop a non-PNG, a non-square PNG, and for Metadata a JSON whose `name` number does not match its file; each must show a per-file error and the checklist must mark the failed rule.
+- [x] **Step 4: Fix findings** in `apps/web/src/components/art/assets/**`; typecheck and lint; tick the acceptance line.
 
 ### Task 11: Land the work
 
-- [ ] **Step 1: Commit** in logical commits (foundation, flow and sample data, art, upload and deploy, manage, mint page, browser review), each ending with the attribution lines in use for this repo.
-- [ ] **Step 2: Open pull requests** into `main` in dependency order: contracts, then the web shell, then the creator flow UI. `gh` is not installed on this machine; open them on GitHub.
+- [x] **Step 1: Commit** in logical commits (foundation, flow and sample data, art, upload and deploy, manage, mint page, browser review), each ending with the attribution lines in use for this repo.
+- [ ] **Step 2: Open pull requests** into `main` in dependency order: contracts, then the web shell, then the creator flow UI. `gh` is not installed on this machine; open them on GitHub. Note (7 October 2026): the prior sessions merged the work straight into `main` (3adae66 and later) without pull requests, so steps 2 and 3 did not happen as written.
 - [ ] **Step 3: Watch CI** (`.github/workflows/ci.yml`: node job and contracts job) and fix any failure before merging.
-- [ ] **Step 4: After merge**, point the Phase 3 plan at `docs/specs/2026-10-03-creator-flow-ui.md` section 5 as the data contract to implement.
+- [x] **Step 4: After merge**, point the Phase 3 plan at `docs/specs/2026-10-03-creator-flow-ui.md` section 5 as the data contract to implement.
+
+## Completion note (7 October 2026)
+
+Tasks 8 to 10 ran against local Supabase with the dev wallet. Access checks: 82 passed. Tablet sweep: 30 captures in `.playwright-mcp/tablet/`, no horizontal scroll, clipped text or content hidden under a sticky footer on any route; Layers keeps its side-by-side layout at 768. Upload assets: captures in `.playwright-mcp/assets/`; a text file, a damaged PNG and a 21 MB PNG on 1/1s, and a text file and an 11 MB GIF on Single asset, each produced a per-file error with the reason. The Metadata project type no longer exists (spec section 4.1), so that case was dropped. Validation was adapted to the current asset rules (any shape, JPG and WebP allowed), since the plan's non-PNG and non-square cases describe layer uploads, not assets.

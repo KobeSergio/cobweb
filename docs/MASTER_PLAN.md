@@ -156,7 +156,7 @@ Source: [legacy/contracts.md](legacy/contracts.md), sections 2, 3, 8 and 9.
 
 ### Phase 2: Web shell, auth and schema
 
-**Status:** done locally. Not yet connected to a hosted Supabase project or tried with a real wallet extension. The remaining checks and unit tests are tracked in the [creator flow plan](plans/2026-10-03-creator-flow-ui.md).
+**Status:** done locally. Not yet connected to a hosted Supabase project or tried with a real wallet extension. The browser checks and unit tests from the [creator flow plan](plans/2026-10-03-creator-flow-ui.md) were completed on 7 October 2026.
 
 Source: [legacy/market-design-system.md](legacy/market-design-system.md), [legacy/market-mint-and-data.md](legacy/market-mint-and-data.md) sections 3 and 4.
 
@@ -178,6 +178,8 @@ What exists:
 **Status:** not started.
 
 Source: [legacy/market-creator-flow.md](legacy/market-creator-flow.md), sections 2, 3, 4, 7 and 8.
+
+Data contract: [specs/2026-10-03-creator-flow-ui.md](specs/2026-10-03-creator-flow-ui.md) section 5 is the shape the Art, Lock and upload, Deploy, Manage and mint page screens already consume. Phase 3 implements it for the art tables and replaces the sample data behind each `Seam:` marker.
 
 - `packages/dna`: lift `DNAGenerator`, make it pure (no input mutation), add a seeded PRNG, fix the rarity formula bug, add tests. A fixed quantity is a cap.
 - Art tables: layers, traits, rules, tokens, render jobs, batches, and a deferred-art flag on the collection. The render job carries an optional placeholder (`{ cid, mediaType }`).

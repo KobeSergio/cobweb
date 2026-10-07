@@ -350,9 +350,9 @@ A creator may deploy before the real art is finished:
       reading "Starting, waiting for the chain".
 - [x] Rule 2 holds: the wallet step begins only after the simulation step finishes.
 - [x] No hydration errors in the console on any screen.
-- [ ] `pnpm --filter @cobweb/web verify:local` passes with the Details action in place.
-- [ ] Creator screens hold up between 640 and 1023 px.
-- [ ] Upload assets screen (1/1s, metadata, single asset) checked in a browser.
+- [x] `pnpm --filter @cobweb/web verify:local` passes with the Details action in place.
+- [x] Creator screens hold up between 640 and 1023 px.
+- [x] Upload assets screen (1/1s, metadata, single asset) checked in a browser.
 
 ## 9. Review round 1 (4 October 2026)
 
