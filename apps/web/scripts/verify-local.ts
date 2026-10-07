@@ -213,6 +213,57 @@ async function expectRejectedInsert(
   return null
 }
 
+const HEX64 = (n: number) => n.toString(16).padStart(64, '0')
+
+function uploadInput(collectionId: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    collection_id: collectionId,
+    kind: 'layer_image',
+    storage_key: `layers/${runId}/${HEX64(++nameCount)}.png`,
+    content_hash: HEX64(nameCount),
+    mime: 'image/png',
+    media_type: 'image',
+    bytes: 1234,
+    width: 1000,
+    height: 1000,
+    file_name: 'trait.png',
+    ...overrides,
+  }
+}
+
+async function insertArtCollection(
+  client: SupabaseClient,
+  collectionId: string,
+  overrides: Record<string, unknown> = {},
+) {
+  const { data, error } = await client
+    .from('art_collections')
+    .insert({ collection_id: collectionId, name: 'Owls', size: 0, position: 0, ...overrides })
+    .select()
+    .single()
+  return { row: data as { id: string } | null, error: error as DbError }
+}
+
+async function insertLayer(
+  client: SupabaseClient,
+  collectionId: string,
+  artCollectionId: string,
+  overrides: Record<string, unknown> = {},
+) {
+  const { data, error } = await client
+    .from('layers')
+    .insert({
+      collection_id: collectionId,
+      art_collection_id: artCollectionId,
+      name: 'Eyes',
+      position: 0,
+      ...overrides,
+    })
+    .select()
+    .single()
+  return { row: data as { id: string } | null, error: error as DbError }
+}
+
 const sameStoredRow = (before: Collection | null, after: Collection | null) =>
   before !== null && after !== null && JSON.stringify(before) === JSON.stringify(after)
 
@@ -932,6 +983,138 @@ async function main(): Promise<void> {
       )
     }
   }
+
+  await artFoundation(A, B)
+}
+
+// ---------------------------------------------------------------------------------------------
+// 9a. Art foundation: uploads, art collections, layers, collection art columns
+// ---------------------------------------------------------------------------------------------
+async function artFoundation(A: Creator, B: Creator): Promise<void> {
+  const col = await insertCollection(A.client)
+  if (!col.row) throw new Error(`setup: ${describe(col.error)}`)
+  const cid = col.row.id
+  const other = await insertCollection(B.client)
+  if (!other.row) throw new Error(`setup: ${describe(other.error)}`)
+
+  let artId = ''
+  await check('art_collections: A inserts one under their collection', async () => {
+    const { row, error } = await insertArtCollection(A.client, cid)
+    if (error || !row) return describe(error)
+    artId = row.id
+    return null
+  })
+  await check("art_collections: B cannot insert into A's collection", async () => {
+    const { error, row } = await insertArtCollection(B.client, cid, { position: 1 })
+    return expectError(error, PERMISSION, row ? [row] : null)
+  })
+  await check("art_collections: B cannot read A's", async () => {
+    const { data, error } = await B.client.from('art_collections').select().eq('collection_id', cid)
+    return expectNothing(error, data)
+  })
+  await check("art_collections: B cannot update or delete A's", async () => {
+    const upd = await B.client.from('art_collections').update({ name: 'Hijacked' }).eq('id', artId).select()
+    const del = await B.client.from('art_collections').delete().eq('id', artId).select()
+    return expectNothing(upd.error, upd.data) ?? expectNothing(del.error, del.data)
+  })
+  await check('art_collections: a size above 10,000 is refused', async () => {
+    const { error, row } = await insertArtCollection(A.client, cid, { position: 2, size: 10_001 })
+    return expectError(error, CHECK, row ? [row] : null)
+  })
+
+  let layerId = ''
+  await check('layers: A inserts one under their art collection', async () => {
+    const { row, error } = await insertLayer(A.client, cid, artId)
+    if (error || !row) return describe(error)
+    layerId = row.id
+    return null
+  })
+  await check("layers: a layer naming B's collection with A's art collection is refused", async () => {
+    const { error, row } = await insertLayer(B.client, other.row!.id, artId, { position: 5 })
+    return expectError(error, [...PERMISSION, ...CHECK], row ? [row] : null)
+  })
+  await check("layers: B cannot read A's layer", async () => {
+    const { data, error } = await B.client.from('layers').select().eq('id', layerId)
+    return expectNothing(error, data)
+  })
+
+  let uploadId = ''
+  await check('uploads: A inserts a layer image row', async () => {
+    const { data, error } = await A.client.from('uploads').insert(uploadInput(cid)).select().single()
+    if (error || !data) return describe(error as DbError)
+    uploadId = (data as { id: string }).id
+    return null
+  })
+  await check('uploads: a non-square layer image is refused', async () => {
+    const { data, error } = await A.client
+      .from('uploads')
+      .insert(uploadInput(cid, { width: 1000, height: 900 }))
+      .select()
+    return expectError(error as DbError, CHECK, data)
+  })
+  await check('uploads: the same content hash twice for one kind is refused', async () => {
+    const first = uploadInput(cid)
+    const a = await A.client.from('uploads').insert(first).select()
+    if (a.error) return `setup: ${describe(a.error as DbError)}`
+    const { data, error } = await A.client
+      .from('uploads')
+      .insert({ ...first, storage_key: `${first.storage_key}-again` })
+      .select()
+    return expectError(error as DbError, UNIQUE, data)
+  })
+  await check('uploads: A cannot change the stored object description', async () => {
+    const { data, error } = await A.client
+      .from('uploads')
+      .update({ storage_key: 'moved' })
+      .eq('id', uploadId)
+      .select()
+    return expectError(error as DbError, PERMISSION, data)
+  })
+  await check("uploads: B cannot read or insert into A's collection", async () => {
+    const read = await B.client.from('uploads').select().eq('collection_id', cid)
+    const ins = await B.client.from('uploads').insert(uploadInput(cid)).select()
+    return expectNothing(read.error, read.data) ?? expectError(ins.error as DbError, PERMISSION, ins.data)
+  })
+
+  await check('collections: A sets the art columns while unlocked', async () => {
+    const { data, error } = await A.client
+      .from('collections')
+      .update({
+        token_name: 'Night Owls',
+        show_blank_traits: true,
+        canvas_width: 1000,
+        canvas_height: 1000,
+        art_deferred: true,
+      })
+      .eq('id', cid)
+      .select()
+    if (error) return describe(error)
+    return data?.length === 1 ? null : 'no row updated'
+  })
+  await check('collections: a non-square canvas is refused', async () => {
+    const { data, error } = await A.client
+      .from('collections')
+      .update({ canvas_width: 1000, canvas_height: 800 })
+      .eq('id', cid)
+      .select()
+    return expectError(error, CHECK, data)
+  })
+  await check('collections: a token name with # is refused', async () => {
+    const { data, error } = await A.client
+      .from('collections')
+      .update({ token_name: 'Owl #' })
+      .eq('id', cid)
+      .select()
+    return expectError(error, CHECK, data)
+  })
+  await check('collections: A cannot set art_locked_at', async () => {
+    const { data, error } = await A.client
+      .from('collections')
+      .update({ art_locked_at: new Date().toISOString() })
+      .eq('id', cid)
+      .select()
+    return expectError(error, PERMISSION, data)
+  })
 }
 
 // ---------------------------------------------------------------------------------------------
