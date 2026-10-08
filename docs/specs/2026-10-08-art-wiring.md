@@ -64,13 +64,13 @@ with the fifth.
 Each Art page is a server component that already calls `requireOwnedCollection`. It now also
 reads, under RLS with the request's session client:
 
-| Rows                                                                              | Store slice                                   |
-| --------------------------------------------------------------------------------- | --------------------------------------------- |
-| `art_collections` ordered by `position`                                           | `collections` (`id`, `name`, `size`)          |
-| `layers` ordered by `position`, with their `traits` ordered by `position`, joined to `uploads` for the image | `layers` (one `Layer` per row, `traits` inside) |
-| `rules`                                                                           | `rules`                                       |
-| `at_least_one`                                                                    | `atLeastOne` (new optional slice)             |
-| `tokens` ordered by `token_id`                                                    | `tokens` (`null` when none, never undefined on a loaded page) |
+| Rows                                                                                                                                      | Store slice                                                                           |
+| ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `art_collections` ordered by `position`                                                                                                   | `collections` (`id`, `name`, `size`)                                                  |
+| `layers` ordered by `position`, with their `traits` ordered by `position`, joined to `uploads` for the image                              | `layers` (one `Layer` per row, `traits` inside)                                       |
+| `rules`                                                                                                                                   | `rules`                                                                               |
+| `at_least_one`                                                                                                                            | `atLeastOne` (new optional slice)                                                     |
+| `tokens` ordered by `token_id`                                                                                                            | `tokens` (`null` when none, never undefined on a loaded page)                         |
 | `collections.token_name, token_description, show_blank_traits, generation_seed, canvas_width, canvas_height, art_deferred, art_locked_at` | `tokenName`, `tokenDescription`, `showBlankTraits`, `seed`, `canvas`, plus page props |
 
 Mapping rules, in one pure module `apps/web/src/lib/art/rows.ts` (`toProject(rows)` and the
@@ -124,17 +124,17 @@ collection could not be found.", other 42501 to the locked sentence, 23514 and 2
 database's own sentence when it is one of the guard sentences (section 7 lists them) and otherwise
 to "That change could not be saved. Reload the page and try again."
 
-| File                 | Actions                                                                                                                                                         |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `art-collections.ts` | `addArtCollection(name)`, `renameArtCollection(id, name)`, `setArtCollectionSize(id, size)`, `deleteArtCollection(id)` (function)                              |
-| `layers.ts`          | `addLayer(artCollectionId, name)`, `renameLayer(id, name, displayName)`, `moveLayer(id, position)`, `deleteLayer(id, clearTokens)` (function), `importLayers(payload)` (function) |
+| File                 | Actions                                                                                                                                                                                                                                |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `art-collections.ts` | `addArtCollection(name)`, `renameArtCollection(id, name)`, `setArtCollectionSize(id, size)`, `deleteArtCollection(id)` (function)                                                                                                      |
+| `layers.ts`          | `addLayer(artCollectionId, name)`, `renameLayer(id, name, displayName)`, `moveLayer(id, position)`, `deleteLayer(id, clearTokens)` (function), `importLayers(payload)` (function)                                                      |
 | `traits.ts`          | `addTraits(layerId, [{ name, uploadId }])`, `renameTrait(id, name)`, `setLayerWeights(layerId, [{ traitId, weight, constant }])` (function), `setBlank(layerId, on)`, `setTraitMetadata(id, inMetadata)`, `deleteTrait(id)` (function) |
-| `rules.ts`           | `addRule(kind, traitId, relatedTraitIds)`, `updateRule(id, kind, traitId, relatedTraitIds)`, `deleteRule(id)`                                                   |
-| `at-least-one.ts`    | `addAtLeastOne(artCollectionId, traitIds)`, `updateAtLeastOne(id, traitIds)`, `deleteAtLeastOne(id)`                                                            |
-| `tokens.ts`          | `saveTokens(tokens, seed)` (function), `updateTokens([{ tokenId, dna?, description? }])`, `swapTokens(a, b)` (existing function), `deleteTokens(ids)` (function), `appendTokens(tokens)`, `clearTokens()` |
-| `settings.ts`        | `updateArtSettings({ tokenName?, tokenDescription?, showBlankTraits?, artDeferred? })`                                                                          |
-| `assets.ts`          | `updateAsset(uploadId, { quantity?, attributes? })`, `setAssetOrder([{ uploadId, position }])`                                                                 |
-| `project.ts`         | `startOver()` (function, then deletes the layer-image objects best effort)                                                                                     |
+| `rules.ts`           | `addRule(kind, traitId, relatedTraitIds)`, `updateRule(id, kind, traitId, relatedTraitIds)`, `deleteRule(id)`                                                                                                                          |
+| `at-least-one.ts`    | `addAtLeastOne(artCollectionId, traitIds)`, `updateAtLeastOne(id, traitIds)`, `deleteAtLeastOne(id)`                                                                                                                                   |
+| `tokens.ts`          | `saveTokens(tokens, seed)` (function), `updateTokens([{ tokenId, dna?, description? }])`, `swapTokens(a, b)` (existing function), `deleteTokens(ids)` (function), `appendTokens(tokens)`, `clearTokens()`                              |
+| `settings.ts`        | `updateArtSettings({ tokenName?, tokenDescription?, showBlankTraits?, artDeferred? })`                                                                                                                                                 |
+| `assets.ts`          | `updateAsset(uploadId, { quantity?, attributes? })`, `setAssetOrder([{ uploadId, position }])`                                                                                                                                         |
+| `project.ts`         | `startOver()` (function, then deletes the layer-image objects best effort)                                                                                                                                                             |
 
 Rules the actions enforce before the database does, so the creator reads a sentence and not a
 constraint name: a weight is 0 to 100 with two decimals; a constant is 1 to 10,000 and forces the
@@ -156,16 +156,16 @@ takes the collection id first and locks that `collections` row `for share` where
 `owner_id = auth.uid()`, so a row the caller does not own is never locked and reads as
 "collection not found" (42501).
 
-| Function                                                             | What it does in one transaction                                                                                                                                             |
-| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `art_import_layers(collection, payload jsonb)`                       | Inserts art collections, layers and traits from the folder upload's structure (names, positions, even weights, `upload_id` per trait); refuses when the project already has layers for the target art collection. Returns the new ids in the same shape. |
-| `art_delete_layer(collection, layer, clear_tokens bool)`             | With `clear_tokens`, deletes the art collection's tokens first (the trigger refuses otherwise); deletes the layer (traits cascade); prunes `rules` and `at_least_one` arrays of its trait ids, dropping a rule or group left too small; closes the `position` gap. |
-| `art_delete_trait(collection, trait)`                                | Deletes the trait; prunes `related_trait_ids` and `trait_ids` of it; drops a rule whose `trait_id` it was (cascade does this) or whose related list is now empty, and a group with fewer than two traits; closes the position gap. The trait's upload row stays (allowed, see the upload spec). |
-| `art_delete_art_collection(collection, art_collection)`              | Deletes the art collection (layers, traits, rules via cascade, tokens via cascade), prunes groups and rules that referenced its traits, closes the position gap, and renumbers the remaining tokens from 1 in `token_id` order (deferrable PK, one statement). |
-| `art_set_layer_weights(collection, layer, rows jsonb)`               | Updates `weight` and `constant` for every trait in the layer from `[{ id, weight, constant }]`; enforces `constant implies weight 0`; refuses when the ids are not exactly the layer's non-blank traits. |
-| `art_save_tokens(collection, tokens jsonb, seed bigint)`             | Deletes the collection's tokens and inserts the new set from `[{ tokenId, artCollectionId, dna, description }]`; writes `generation_seed`. Up to 10,000 rows; the 9e timing check bounds it at five seconds. |
-| `art_delete_tokens(collection, ids int[])`                           | Deletes the ids and moves every later id up by the count of deleted ids below it, in one set-based update under the deferrable key.                                        |
-| `art_start_over(collection)`                                         | Deletes tokens, rules, groups, layers (traits cascade), art collections and the `layer_image` and matching `thumbnail` upload rows; sets `canvas_width`, `canvas_height` and `generation_seed` to null. Returns the storage keys of the deleted uploads so the action can delete the objects. |
+| Function                                                 | What it does in one transaction                                                                                                                                                                                                                                                                 |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `art_import_layers(collection, payload jsonb)`           | Inserts art collections, layers and traits from the folder upload's structure (names, positions, even weights, `upload_id` per trait); refuses when the project already has layers for the target art collection. Returns the new ids in the same shape.                                        |
+| `art_delete_layer(collection, layer, clear_tokens bool)` | With `clear_tokens`, deletes the art collection's tokens first (the trigger refuses otherwise); deletes the layer (traits cascade); prunes `rules` and `at_least_one` arrays of its trait ids, dropping a rule or group left too small; closes the `position` gap.                              |
+| `art_delete_trait(collection, trait)`                    | Deletes the trait; prunes `related_trait_ids` and `trait_ids` of it; drops a rule whose `trait_id` it was (cascade does this) or whose related list is now empty, and a group with fewer than two traits; closes the position gap. The trait's upload row stays (allowed, see the upload spec). |
+| `art_delete_art_collection(collection, art_collection)`  | Deletes the art collection (layers, traits, rules via cascade, tokens via cascade), prunes groups and rules that referenced its traits, closes the position gap, and renumbers the remaining tokens from 1 in `token_id` order (deferrable PK, one statement).                                  |
+| `art_set_layer_weights(collection, layer, rows jsonb)`   | Updates `weight` and `constant` for every trait in the layer from `[{ id, weight, constant }]`; enforces `constant implies weight 0`; refuses when the ids are not exactly the layer's non-blank traits.                                                                                        |
+| `art_save_tokens(collection, tokens jsonb, seed bigint)` | Deletes the collection's tokens and inserts the new set from `[{ tokenId, artCollectionId, dna, description }]`; writes `generation_seed`. Up to 100,000 rows (MAX_SUPPLY); 10,000 rows take under five seconds per the 9e timing check.                                                        |
+| `art_delete_tokens(collection, ids int[])`               | Deletes the ids and moves every later id up by the count of deleted ids below it, in one set-based update under the deferrable key.                                                                                                                                                             |
+| `art_start_over(collection)`                             | Deletes tokens, rules, groups, layers (traits cascade), art collections and the `layer_image` and matching `thumbnail` upload rows; sets `canvas_width`, `canvas_height` and `generation_seed` to null. Returns the storage keys of the deleted uploads so the action can delete the objects.   |
 
 Guard sentences that pass through to the creator unchanged: "The art is locked and cannot
 change.", "A layer can have at most 500 traits.", "Clear the tokens first." (from
@@ -177,19 +177,19 @@ The functions are re-validated by `verify:local` section 9f (section 12).
 
 ## 8. Token operations
 
-| Screen action                      | Store (unchanged pure logic)             | Persisted as                                               |
-| ---------------------------------- | ---------------------------------------- | ---------------------------------------------------------- |
-| Generate                           | `generateSet` with `newSeed()`           | `saveTokens(all, seed)`; then `setCollectionSupply` as today |
-| Re-roll selected                   | `regenerate`                             | `updateTokens` with the changed rows' `dna`                |
-| Change one trait                   | `changeTrait`                            | `updateTokens` (one row)                                   |
-| Describe one or all                | `setDescription`                         | `updateTokens` with `description`                          |
-| Swap two ids                       | `swapIds`                                | `swapTokens(a, b)`                                         |
-| Delete tokens                      | `deleteTokens`                           | `deleteTokens(ids)`                                        |
-| Shuffle ids                        | `shuffleIds`                             | `saveTokens(all, seed)` (same seed)                        |
-| Fill to size                       | `fillTo`                                 | `appendTokens(new rows)`                                   |
-| Rename tokens (token name)         | `renameTokens`                           | `updateArtSettings({ tokenName })`; names are not stored   |
-| Clear the set (structural edit)    | `tokens: null`                           | `clearTokens()`, or the `clearTokens` flag of `deleteLayer` |
-| Blank traits in metadata           | `showBlankTraits`                        | `updateArtSettings({ showBlankTraits })`                   |
+| Screen action                   | Store (unchanged pure logic)   | Persisted as                                                 |
+| ------------------------------- | ------------------------------ | ------------------------------------------------------------ |
+| Generate                        | `generateSet` with `newSeed()` | `saveTokens(all, seed)`; then `setCollectionSupply` as today |
+| Re-roll selected                | `regenerate`                   | `updateTokens` with the changed rows' `dna`                  |
+| Change one trait                | `changeTrait`                  | `updateTokens` (one row)                                     |
+| Describe one or all             | `setDescription`               | `updateTokens` with `description`                            |
+| Swap two ids                    | `swapIds`                      | `swapTokens(a, b)`                                           |
+| Delete tokens                   | `deleteTokens`                 | `deleteTokens(ids)`                                          |
+| Shuffle ids                     | `shuffleIds`                   | `saveTokens(all, seed)` (same seed)                          |
+| Fill to size                    | `fillTo`                       | `appendTokens(new rows)`                                     |
+| Rename tokens (token name)      | `renameTokens`                 | `updateArtSettings({ tokenName })`; names are not stored     |
+| Clear the set (structural edit) | `tokens: null`                 | `clearTokens()`, or the `clearTokens` flag of `deleteLayer`  |
+| Blank traits in metadata        | `showBlankTraits`              | `updateArtSettings({ showBlankTraits })`                     |
 
 The seed is saved with the set; the Generate screen shows "Generated from seed <n>" from the
 loaded value, which is new. A structural edit while tokens exist keeps today's confirmation dialog
