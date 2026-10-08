@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
-import type { ArtRule, Collection, GeneratedToken, Layer } from '@/lib/demo'
+import type { ArtRule, AtLeastOne, Collection, GeneratedToken, Layer } from '@/lib/demo'
 import { buildTraitIndex } from '../lib/trait-index'
 import { remapDna } from './layer-edits'
 import { deleteTokens } from './token-logic'
@@ -11,8 +11,8 @@ import { deleteTokens } from './token-logic'
  * browser for the session and shared between Layers, Rules and Generate so an edit on one shows
  * on the others.
  *
- * Seam: this whole module is replaced by the art tables and server actions (Phase 3). Each
- * `update` call below becomes a server action; the screens already treat it as the only writer.
+ * The pages seed it from the art tables (`lib/art/rows.ts`); every edit goes through `useArtSync()`
+ * (`art-sync.tsx`), which saves it with a server action unless the page is in sample mode.
  */
 export type ArtProject = {
   /** The project's collections, in order (token ids run on across them). Undefined until seeded. */
@@ -22,6 +22,8 @@ export type ArtProject = {
   /** Every collection's layers, grouped by collection. Undefined until a screen that has them mounts. */
   layers?: Layer[]
   rules?: ArtRule[]
+  /** Every token of a collection carries one of these traits. Loaded and honoured by generation; no screen edits them yet. */
+  atLeastOne?: AtLeastOne[]
   /** Undefined until seeded; null once cleared by a structural change ("generate again"). */
   tokens?: GeneratedToken[] | null
   /** The pixel size every layer image must match, set by the first upload. */
@@ -40,7 +42,7 @@ export type ArtProject = {
   /**
    * Whether blank traits are written into the metadata (legacy `show_blank_traits`, off by
    * default): on, a token without a hat says "Headwear: None"; off, the attribute is left out.
-   * Seam: stored on the project and read by the render job at lock (Phase 4).
+   * Stored as `collections.show_blank_traits`; the render job reads it at lock (Phase 4).
    */
   showBlankTraits: boolean
 }

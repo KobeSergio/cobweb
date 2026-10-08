@@ -1,8 +1,10 @@
 'use server'
 
 import { getVerifiedUser } from '@/lib/auth'
+import { ownedUnlocked } from '@/lib/art/owned'
+import { LOCKED, NOT_FOUND, SIGNED_OUT } from '@/lib/art/result'
 import { createClient } from '@/lib/supabase/server'
-import { admissionProblem, capProblem, type Canvas } from '@/lib/storage/admission'
+import { admissionProblem, capProblem } from '@/lib/storage/admission'
 import { mediaTypeFor, storageKey } from '@/lib/storage/keys'
 import { deleteObjects, headObject, presignPut } from '@/lib/storage/objects'
 import {
@@ -15,32 +17,7 @@ import {
   type UploadRow,
 } from '@/lib/storage/uploads-service'
 
-const SIGNED_OUT = 'Your session has ended. Sign in again to continue.'
-const NOT_FOUND = 'This collection could not be found.'
-const LOCKED = 'The art is locked and cannot change.'
 const ROW_COLUMNS = 'id, kind, file_name, mime, media_type, bytes, width, height, content_hash'
-
-/** The collection, only if the signed-in creator owns it and its art is not locked. */
-async function ownedUnlocked(
-  collectionId: string,
-): Promise<
-  | { error: string }
-  | { error?: undefined; supabase: Awaited<ReturnType<typeof createClient>>; canvas: Canvas }
-> {
-  const user = await getVerifiedUser()
-  if (!user) return { error: SIGNED_OUT }
-  const supabase = await createClient()
-  const { data } = await supabase
-    .from('collections')
-    .select('id, owner_id, art_locked_at, canvas_width, canvas_height')
-    .eq('id', collectionId)
-    .maybeSingle()
-  if (!data || data.owner_id !== user.id) return { error: NOT_FOUND }
-  if (data.art_locked_at) return { error: LOCKED }
-  const canvas =
-    data.canvas_width && data.canvas_height ? { width: data.canvas_width, height: data.canvas_height } : null
-  return { supabase, canvas }
-}
 
 async function thumbnailRowFor(
   supabase: Awaited<ReturnType<typeof createClient>>,

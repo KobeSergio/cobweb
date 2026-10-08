@@ -20,6 +20,8 @@ export type Trait = {
   imageUrl: string | null
   /** The `uploads` row behind `imageUrl`, once the image is stored. Sample traits have none. */
   uploadId?: string
+  /** A small preview of `imageUrl` for grids and chips, once the image is stored. The full image is the fallback. */
+  thumbnailUrl?: string
   /** `false` leaves this trait out of the token's metadata attributes. */
   metadata?: false
 }
