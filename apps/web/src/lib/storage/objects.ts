@@ -26,7 +26,11 @@ export async function presignGet(key: string, expiresSeconds = 3600): Promise<st
   return getSignedUrl(s3(), new GetObjectCommand({ Bucket: bucket, Key: key }), { expiresIn: expiresSeconds })
 }
 
-/** Size and type of a stored object, or null when there is none. */
+/**
+ * Size and type of a stored object. Null means "no object at this key". A missing bucket also
+ * HEADs as 404, so a wrongly configured bucket looks like a missing object; callers that treat
+ * null as "not uploaded yet" should know that.
+ */
 export async function headObject(key: string): Promise<{ bytes: number; mime: string | null } | null> {
   const { bucket } = storageConfig()
   try {
@@ -42,7 +46,14 @@ export async function headObject(key: string): Promise<{ bytes: number; mime: st
 export async function deleteObjects(keys: string[]): Promise<void> {
   if (keys.length === 0) return
   const { bucket } = storageConfig()
-  await s3().send(
-    new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: keys.map((Key) => ({ Key })) } }),
-  )
+  for (let i = 0; i < keys.length; i += 1000) {
+    const batch = keys.slice(i, i + 1000)
+    const response = await s3().send(
+      new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: batch.map((Key) => ({ Key })) } }),
+    )
+    if (response.Errors?.length) {
+      const failed = response.Errors.map((e) => `${e.Key ?? '?'} (${e.Code ?? 'unknown'})`).join(', ')
+      throw new Error(`Storage refused to delete ${response.Errors.length} object(s): ${failed}.`)
+    }
+  }
 }

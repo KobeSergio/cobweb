@@ -49,7 +49,7 @@ process.env.ART_S3_ACCESS_KEY_ID = config('ART_S3_ACCESS_KEY_ID', ['S3_PROTOCOL_
 process.env.ART_S3_SECRET_ACCESS_KEY = config('ART_S3_SECRET_ACCESS_KEY', ['S3_PROTOCOL_ACCESS_KEY_SECRET'])
 process.env.ART_S3_FORCE_PATH_STYLE = '1'
 const endpoint = process.env.ART_S3_ENDPOINT
-if (!/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/)/.test(endpoint)) {
+if (!['localhost', '127.0.0.1'].includes(new URL(endpoint).hostname)) {
   console.error(`Refusing to run: ART_S3_ENDPOINT is "${endpoint}", not a local Supabase storage endpoint.`)
   process.exit(2)
 }
@@ -84,15 +84,20 @@ const hash = createHash('sha256').update(PNG).digest('hex')
 const scratch = '00000000-0000-4000-8000-000000000001'
 const key = storageKey(scratch, 'layer_image', hash, 'image/png')
 
+let firstPutOk = false
 await check('storage: a presigned PUT stores the object', async () => {
   const url = await presignPut(key, 'image/png', PNG.byteLength)
   const res = await fetch(url, { method: 'PUT', body: PNG, headers: { 'Content-Type': 'image/png' } })
-  return res.ok ? null : `PUT ${res.status} ${await res.text()}`
+  if (!res.ok) return `PUT ${res.status} ${await res.text()}`
+  firstPutOk = true
+  return null
 })
 await check('storage: a PUT with a different length is refused', async () => {
+  if (!firstPutOk) return 'first PUT did not succeed'
   const url = await presignPut(key, 'image/png', PNG.byteLength + 5)
   const res = await fetch(url, { method: 'PUT', body: PNG, headers: { 'Content-Type': 'image/png' } })
-  return res.ok ? 'accepted a body of the wrong length' : null
+  if (res.ok) return 'accepted a body of the wrong length'
+  return res.status === 400 || res.status === 403 ? null : `refused with ${res.status}, expected 400 or 403`
 })
 await check('storage: HEAD reports the size and type', async () => {
   const head = await headObject(key)
