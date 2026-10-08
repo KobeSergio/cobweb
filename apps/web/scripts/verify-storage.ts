@@ -12,6 +12,10 @@ import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createClient } from '@supabase/supabase-js'
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
+import { createSiweMessage, generateSiweNonce } from 'viem/siwe'
+import { capProblem, PROJECT_CAP_BYTES } from '../src/lib/storage/admission.ts'
 import { storageKey } from '../src/lib/storage/keys.ts'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
@@ -53,6 +57,12 @@ if (!['localhost', '127.0.0.1'].includes(new URL(endpoint).hostname)) {
   console.error(`Refusing to run: ART_S3_ENDPOINT is "${endpoint}", not a local Supabase storage endpoint.`)
   process.exit(2)
 }
+
+const url = config('NEXT_PUBLIC_SUPABASE_URL', ['API_URL'])
+const publishableKey = config('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY', ['PUBLISHABLE_KEY', 'ANON_KEY'])
+const serviceKey = config('SUPABASE_SERVICE_ROLE_KEY', ['SERVICE_ROLE_KEY', 'SECRET_KEY'])
+const clientOptions = { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } }
+const admin = createClient(url, serviceKey, clientOptions)
 
 // Imported after the environment is set, so the storage client sees the local values.
 const { deleteObjects, headObject, presignGet, presignPut } = await import('../src/lib/storage/objects.ts')
@@ -115,7 +125,115 @@ await check('storage: delete removes the object', async () => {
   return (await headObject(key)) === null ? null : 'still there'
 })
 
-// ROWS (Task 3 appends the uploads checks here)
+// Rows: record_upload as the actions call it, the duplicate that the action turns into reuse, and
+// the project cap, with a throwaway wallet that is deleted at the end.
+type Hex = `0x${string}`
+const account = privateKeyToAccount(generatePrivateKey())
+const creator = createClient(url, publishableKey, clientOptions)
+let userId: string | null = null
+let collectionId: string | null = null
+
+await check('sign-in: a creator signs in with a wallet', async () => {
+  const message = createSiweMessage({
+    address: account.address,
+    chainId: 1,
+    domain: 'localhost:3000',
+    nonce: generateSiweNonce(),
+    uri: 'http://localhost:3000',
+    version: '1',
+    statement: 'Sign in to Cobweb.',
+    issuedAt: new Date(),
+  })
+  const signature: Hex = await account.signMessage({ message })
+  const { data, error } = await creator.auth.signInWithWeb3({ chain: 'ethereum', message, signature })
+  userId = data?.user?.id ?? null
+  return error || !userId ? `sign-in failed: ${error?.message ?? 'no user'}` : null
+})
+await check('collections: the creator makes a collection for this run', async () => {
+  const { data, error } = await creator
+    .from('collections')
+    .insert({ name: `Storage ${Date.now()}`, symbol: 'STO', project_type: 'generative' })
+    .select('id')
+    .single()
+  collectionId = (data as { id: string } | null)?.id ?? null
+  return error || !collectionId ? `insert failed: ${error?.message ?? 'no row'}` : null
+})
+
+const recordInput = (cid: string, storage_key: string) => ({
+  p_collection_id: cid,
+  p_kind: 'layer_image' as const,
+  p_storage_key: storage_key,
+  p_content_hash: hash,
+  p_mime: 'image/png',
+  p_media_type: 'image' as const,
+  p_bytes: PNG.byteLength,
+  p_width: 1,
+  p_height: 1,
+  p_file_name: 'dot.png',
+})
+
+let recorded: string | null = null
+await check('uploads: record_upload stores a row for a stored object', async () => {
+  if (!collectionId) return 'no collection'
+  recorded = storageKey(collectionId, 'layer_image', hash, 'image/png')
+  const put = await fetch(await presignPut(recorded, 'image/png', PNG.byteLength), {
+    method: 'PUT',
+    body: PNG,
+    headers: { 'Content-Type': 'image/png' },
+  })
+  if (!put.ok) return `PUT ${put.status}`
+  const { data, error } = await creator.rpc('record_upload', recordInput(collectionId, recorded))
+  return error ? `${error.code} ${error.message}` : data ? null : 'no id'
+})
+await check(
+  'uploads: the same hash recorded twice is a 23505, which confirmUpload turns into reuse',
+  async () => {
+    if (!collectionId || !recorded) return 'no row'
+    const { error } = await creator.rpc('record_upload', recordInput(collectionId, recorded))
+    return error?.code === '23505' ? null : `expected 23505, got ${error?.code ?? 'success'}`
+  },
+)
+await check('uploads: the cap refuses a file once the project holds 5 GB', async () => {
+  if (!collectionId) return 'no collection'
+  // Rows that sum past the cap, written by the service role: nothing near 5 GB is uploaded.
+  const big = 50 * 1024 * 1024
+  const rows = Array.from({ length: Math.ceil(PROJECT_CAP_BYTES / big) }, (_, i) => {
+    const fakeHash = i.toString(16).padStart(64, '0')
+    return {
+      collection_id: collectionId as string,
+      kind: 'asset' as const,
+      storage_key: `${collectionId}/assets/${fakeHash}.mp4`,
+      content_hash: fakeHash,
+      mime: 'video/mp4',
+      media_type: 'video' as const,
+      bytes: big,
+      file_name: `big-${i}.mp4`,
+    }
+  })
+  const { error } = await admin.from('uploads').insert(rows)
+  if (error) return `setup: ${error.code} ${error.message}`
+  const { data: used } = await admin.from('uploads').select('bytes').eq('collection_id', collectionId)
+  const usedBytes = (used ?? []).reduce((sum, row) => sum + Number(row.bytes), 0)
+  return capProblem(usedBytes, 1) ? null : `cap not reached at ${usedBytes} bytes`
+})
+await check('cleanup: the run leaves no user, rows or object behind', async () => {
+  if (recorded) await deleteObjects([recorded])
+  // collections.owner_id is on delete restrict, so the collection (and its uploads) go first.
+  if (collectionId) {
+    const { error } = await admin.from('collections').delete().eq('id', collectionId)
+    if (error) return `collection: ${error.message}`
+  }
+  if (userId) {
+    const { error } = await admin.auth.admin.deleteUser(userId)
+    if (error) return error.message
+  }
+  if (recorded && (await headObject(recorded)) !== null) return 'object remains'
+  if (collectionId) {
+    const { data } = await admin.from('uploads').select('id').eq('collection_id', collectionId)
+    if (data && data.length > 0) return `${data.length} upload rows remain`
+  }
+  return null
+})
 
 console.log(`\n${passed} passed, ${failed.length} failed`)
 process.exit(failed.length ? 1 : 0)
