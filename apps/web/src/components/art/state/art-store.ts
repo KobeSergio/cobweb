@@ -56,6 +56,25 @@ function fromSeed(seed: ArtSeed): ArtProject {
   return { ...seed, canvas: null, seed: 0x0a7115, staleNote: null, showBlankTraits: false }
 }
 
+/** The project as the store holds it now, for the sync queue, which works outside React. */
+export function readProject(key: string): ArtProject {
+  return projects.get(key) ?? fromSeed({})
+}
+
+/** Replaces the project and tells every screen showing it. */
+export function writeProject(key: string, project: ArtProject): void {
+  projects.set(key, project)
+  listeners.get(key)?.forEach((listener) => listener())
+}
+
+/**
+ * Seeds the project from the loaded rows, once per browser session: a later visit keeps the
+ * session's state, which every edit has already saved.
+ */
+export function seedProject(key: string, project: ArtProject): void {
+  if (!projects.has(key)) projects.set(key, project)
+}
+
 /** Fills in the slices this screen knows about that the shared project does not have yet. */
 function ensure(key: string, seed: ArtSeed): ArtProject {
   const current = projects.get(key)
@@ -119,11 +138,7 @@ export function useArtProject(key: string, seed: ArtSeed) {
   )
 
   const update = useCallback(
-    (change: (project: ArtProject) => ArtProject) => {
-      const next = change(projects.get(key) ?? fallback)
-      projects.set(key, next)
-      listeners.get(key)?.forEach((listener) => listener())
-    },
+    (change: (project: ArtProject) => ArtProject) => writeProject(key, change(projects.get(key) ?? fallback)),
     [key, fallback],
   )
 

@@ -1,3 +1,4 @@
+import { ArtSyncProvider } from '@/components/art/state/art-sync'
 import { ArtLiveNotice } from '@/components/shell/art-live-notice'
 import { ArtRail } from '@/components/shell/art-rail'
 import { requireOwnedCollection } from '@/lib/auth'
@@ -25,12 +26,17 @@ export default async function ArtLayout({ children, params }: Props) {
       artDeferred={artDeferred}
     />
   )
+  const content = (
+    <ArtSyncProvider collectionId={collection.id} demo={demo}>
+      {children}
+    </ArtSyncProvider>
+  )
 
   if (artSubSteps(collection.project_type).length < 2) {
     return (
       <>
         {notice}
-        {children}
+        {content}
       </>
     )
   }
@@ -45,7 +51,7 @@ export default async function ArtLayout({ children, params }: Props) {
           demo={demo}
           artDeferred={artDeferred}
         />
-        <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+        <div className="flex min-w-0 flex-1 flex-col">{content}</div>
       </div>
     </>
   )
