@@ -108,10 +108,11 @@ const CANVAS_SENTENCE = /^Every layer image must be \d+ x \d+ in this project\.$
 
 /** An error from `record_upload`, by SQLSTATE, in the creator's words. 23505 is handled by callers. */
 function recordError(error: { code?: string; message: string }): string {
-  if (error.code === '42501') return LOCKED
+  if (error.code === '42501') return error.message === 'collection not found' ? NOT_FOUND : LOCKED
   if (error.code === '23514') {
     if (error.message.startsWith('This project has reached')) return CAP_SENTENCE
     if (CANVAS_SENTENCE.test(error.message)) return error.message
+    return 'This file cannot be stored.'
   }
   return INCOMPLETE
 }
@@ -228,7 +229,19 @@ export async function deleteUpload(uploadId: string): Promise<{ ok: true } | { e
     .eq('id', uploadId)
     .maybeSingle()
   if (!row) return { error: 'This file could not be found.' }
-  const thumb = await thumbnailRowFor(supabase, row.collection_id, row.content_hash)
+  // The same file can be an asset and a placeholder; they share one thumbnail, so it stays while another row uses it.
+  const { data: sharing } = await supabase
+    .from('uploads')
+    .select('id')
+    .eq('collection_id', row.collection_id)
+    .eq('content_hash', row.content_hash)
+    .neq('kind', 'thumbnail')
+    .neq('id', row.id)
+    .limit(1)
+  const thumb =
+    row.kind === 'thumbnail' || (sharing ?? []).length > 0
+      ? null
+      : await thumbnailRowFor(supabase, row.collection_id, row.content_hash)
   // One statement, so a failure leaves both rows and both objects for a retry.
   const { error } = await supabase
     .from('uploads')

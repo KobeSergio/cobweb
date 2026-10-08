@@ -50,6 +50,20 @@ describe('admissionProblem', () => {
       admissionProblem('placeholder', { mime: 'image/gif', bytes: 1 * MB, width: 10, height: 10 }, null),
     ).toBeNull()
   })
+  it('refuses assets and placeholders over 8192 pixels on a side', () => {
+    expect(admissionProblem('asset', { mime: 'image/png', bytes: 1, width: 9000, height: 100 }, null)).toBe(
+      'At most 8192 x 8192: 9000 x 100.',
+    )
+    expect(
+      admissionProblem('placeholder', { mime: 'image/jpeg', bytes: 1, width: 100, height: 8193 }, null),
+    ).toBe('At most 8192 x 8192: 100 x 8193.')
+    expect(admissionProblem('asset', { mime: 'image/gif', bytes: 1, width: 8193, height: 10 }, null)).toBe(
+      'At most 8192 x 8192: 8193 x 10.',
+    )
+    expect(
+      admissionProblem('asset', { mime: 'image/webp', bytes: 1, width: 8192, height: 8192 }, null),
+    ).toBeNull()
+  })
   it('limits thumbnails to small WebP files', () => {
     expect(
       admissionProblem('thumbnail', { mime: 'image/webp', bytes: 200_000, width: 256, height: 180 }, null),

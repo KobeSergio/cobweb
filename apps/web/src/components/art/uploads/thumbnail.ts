@@ -1,6 +1,6 @@
 /**
  * Reads an image's pixel size and draws its 256 px WebP thumbnail in the browser, so the Layers
- * and Assets screens never load a full-size file for a grid. Videos and unreadable files report
+ * and Assets grids can show small images once they read `thumbnailUrl` (the next sub-project). Videos and unreadable files report
  * nulls; the server then stores no thumbnail row and the route falls back to the original.
  */
 

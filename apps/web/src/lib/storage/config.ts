@@ -24,6 +24,14 @@ let client: S3Client | null = null
 export function s3(): S3Client {
   if (client) return client
   const { region, endpoint, forcePathStyle, credentials } = storageConfig()
-  client = new S3Client({ region, endpoint, forcePathStyle, credentials })
+  client = new S3Client({
+    region,
+    endpoint,
+    forcePathStyle,
+    credentials,
+    // The SDK's default checksums would sign the CRC of an empty body into every presigned PUT URL, which AWS S3 rejects.
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
+  })
   return client
 }

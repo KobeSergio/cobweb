@@ -108,7 +108,11 @@ export function uploaderWith(options: UploaderOptions, deps: UploaderDeps): Star
           thumbnail,
         }
         return { input, thumbnailBlob: seen.thumbnail?.blob ?? null }
-      })())
+      })().catch((e) => {
+        // A failed read is not kept, so retry reads the file again.
+        prepared = null
+        throw e
+      }))
 
     const run = async () => {
       const mine = ++generation

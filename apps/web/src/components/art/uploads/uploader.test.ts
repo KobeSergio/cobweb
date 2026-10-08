@@ -135,6 +135,21 @@ describe('uploaderWith', () => {
     expect(h.admitCalls).toHaveLength(2)
   })
 
+  it('reads the file again on retry when hashing failed', async () => {
+    let calls = 0
+    const h = harness({
+      hash: async (blob) => {
+        if (++calls === 1) throw new Error('read failed')
+        return blob.type === 'image/webp' ? THUMB_HASH : FILE_HASH
+      },
+    })
+    await until(() => h.latest().state === 'failed')
+    expect(h.latest().error).toBe(STOPPED)
+    h.handle.retry()
+    await until(() => h.admitCalls.length === 1)
+    expect(h.latest().state).toBe('uploading')
+  })
+
   it('pause aborts the PUT and resume starts it again from zero', async () => {
     const h = harness()
     await until(() => h.puts.length === 1)

@@ -109,6 +109,13 @@ await check('storage: a PUT with a different length is refused', async () => {
   if (res.ok) return 'accepted a body of the wrong length'
   return res.status === 400 || res.status === 403 ? null : `refused with ${res.status}, expected 400 or 403`
 })
+await check('storage: a PUT with a different content type is refused', async () => {
+  if (!firstPutOk) return 'first PUT did not succeed'
+  const url = await presignPut(key, 'image/png', PNG.byteLength)
+  const res = await fetch(url, { method: 'PUT', body: PNG, headers: { 'Content-Type': 'image/jpeg' } })
+  if (res.ok) return 'accepted a different content type'
+  return res.status === 400 || res.status === 403 ? null : `refused with ${res.status}, expected 400 or 403`
+})
 await check('storage: HEAD reports the size and type', async () => {
   const head = await headObject(key)
   if (!head) return 'missing'
@@ -131,6 +138,7 @@ type Hex = `0x${string}`
 const account = privateKeyToAccount(generatePrivateKey())
 const creator = createClient(url, publishableKey, clientOptions)
 let userId: string | null = null
+let otherUserId: string | null = null
 let collectionId: string | null = null
 
 await check('sign-in: a creator signs in with a wallet', async () => {
@@ -207,6 +215,21 @@ await check('uploads: a layer image of another size is refused with the canvas s
     ? null
     : `expected 23514 "${want}", got ${error?.code ?? 'success'} ${error?.message ?? ''}`
 })
+await check('uploads: record_upload accepts a video asset with no size', async () => {
+  if (!collectionId) return 'no collection'
+  const videoHash = 'e'.repeat(64)
+  const { data, error } = await creator.rpc('record_upload', {
+    ...recordInput(collectionId, `${collectionId}/assets/${videoHash}.mp4`),
+    p_kind: 'asset' as const,
+    p_content_hash: videoHash,
+    p_mime: 'video/mp4',
+    p_media_type: 'video' as const,
+    p_width: null as unknown as number,
+    p_height: null as unknown as number,
+    p_file_name: 'clip.mp4',
+  })
+  return error ? `${error.code} ${error.message}` : data ? null : 'no id'
+})
 await check('uploads: the cap refuses a file once the project holds 5 GB', async () => {
   if (!collectionId) return 'no collection'
   // Rows that sum past the cap, written by the service role: nothing near 5 GB is uploaded.
@@ -240,6 +263,28 @@ await check('uploads: the cap refuses a file once the project holds 5 GB', async
     ? null
     : `record_upload expected 23514 "${want}", got ${refused?.code ?? 'success'} ${refused?.message ?? ''}`
 })
+await check("uploads: another creator cannot see the first creator's rows", async () => {
+  if (!collectionId) return 'no collection'
+  const other = createClient(url, publishableKey, clientOptions)
+  const otherAccount = privateKeyToAccount(generatePrivateKey())
+  const message = createSiweMessage({
+    address: otherAccount.address,
+    chainId: 1,
+    domain: 'localhost:3000',
+    nonce: generateSiweNonce(),
+    uri: 'http://localhost:3000',
+    version: '1',
+    statement: 'Sign in to Cobweb.',
+    issuedAt: new Date(),
+  })
+  const signature: Hex = await otherAccount.signMessage({ message })
+  const signedIn = await other.auth.signInWithWeb3({ chain: 'ethereum', message, signature })
+  otherUserId = signedIn.data?.user?.id ?? null
+  if (signedIn.error || !otherUserId) return `sign-in failed: ${signedIn.error?.message ?? 'no user'}`
+  const { data, error } = await other.from('uploads').select('id').eq('collection_id', collectionId)
+  if (error) return `select failed: ${error.message}`
+  return (data ?? []).length === 0 ? null : `saw ${(data ?? []).length} rows`
+})
 await check('cleanup: the run leaves no user, rows or object behind', async () => {
   if (recorded) await deleteObjects([recorded])
   // collections.owner_id is on delete restrict, so the collection (and its uploads) go first.
@@ -249,6 +294,10 @@ await check('cleanup: the run leaves no user, rows or object behind', async () =
   }
   if (userId) {
     const { error } = await admin.auth.admin.deleteUser(userId)
+    if (error) return error.message
+  }
+  if (otherUserId) {
+    const { error } = await admin.auth.admin.deleteUser(otherUserId)
     if (error) return error.message
   }
   if (recorded && (await headObject(recorded)) !== null) return 'object remains'

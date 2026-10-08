@@ -59,6 +59,14 @@ begin
       using errcode = '23514';
   end if;
 
+  -- With no layer images left the canvas is unset, so deleting the last one frees it.
+  if v_cw is not null and not exists (
+    select 1 from public.uploads u where u.collection_id = p_collection_id and u.kind = 'layer_image'
+  ) then
+    v_cw := null;
+    v_ch := null;
+  end if;
+
   if p_kind = 'layer_image' then
     if v_cw is null then
       update public.collections set canvas_width = p_width, canvas_height = p_height

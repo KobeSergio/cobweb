@@ -1,18 +1,19 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { getVerifiedUser } from '@/lib/auth'
+import { getSessionUser } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
 import { storageKey } from '@/lib/storage/keys'
 import { presignGet } from '@/lib/storage/objects'
 
 /**
- * Serves a creator's stored file: checks the session, reads the row under RLS (so another
+ * Serves a creator's stored file: checks the session (verified locally; row-level security does the
+ * access control), reads the row under RLS (so another
  * creator's file is a 404, not a 403), and redirects to a signed URL good for an hour. With
  * `?variant=thumb` it serves the browser-made thumbnail when there is one, else the original.
  */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   if (!/^[0-9a-f-]{36}$/i.test(id)) return new NextResponse(null, { status: 404 })
-  const user = await getVerifiedUser()
+  const user = await getSessionUser()
   if (!user) return new NextResponse(null, { status: 404 })
   const supabase = await createClient()
   const { data: row } = await supabase

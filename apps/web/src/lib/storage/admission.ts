@@ -42,11 +42,18 @@ export function admissionProblem(kind: UploadKind, file: FileFacts, canvas: Canv
   }
   // asset and placeholder
   if (mime === 'video/mp4') return sizeProblem(bytes, 50 * MB, ' for an MP4 video')
-  if (mime === 'image/gif') return sizeProblem(bytes, 10 * MB, ' for a GIF')
+  if (mime === 'image/gif') {
+    const size = sizeProblem(bytes, 10 * MB, ' for a GIF')
+    if (size) return size
+    if (width !== null && height !== null && (width > 8192 || height > 8192))
+      return `At most 8192 x 8192: ${width} x ${height}.`
+    return null
+  }
   if (mime === 'image/png' || mime === 'image/jpeg' || mime === 'image/webp') {
     const size = sizeProblem(bytes, 20 * MB)
     if (size) return size
     if (width === null || height === null) return 'This image could not be read. It may be damaged.'
+    if (width > 8192 || height > 8192) return `At most 8192 x 8192: ${width} x ${height}.`
     return null
   }
   return 'Not a PNG, JPG, WebP, GIF or MP4 file.'

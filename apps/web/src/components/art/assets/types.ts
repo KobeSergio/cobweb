@@ -37,7 +37,7 @@ export const ASSET_IMAGE_RULES: ImageRules = {
   types: ['image/png', 'image/jpeg', 'image/webp'],
   typesLabel: 'PNG, JPG or WebP',
   maxBytes: ASSET_MAX_BYTES,
-  maxSide: null,
+  maxSide: 8192,
   square: false,
 }
 

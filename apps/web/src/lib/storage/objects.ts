@@ -17,7 +17,11 @@ export async function presignPut(
 ): Promise<string> {
   const { bucket } = storageConfig()
   const command = new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: mime, ContentLength: bytes })
-  return getSignedUrl(s3(), command, { expiresIn: expiresSeconds })
+  // Signing content-type makes the type part of the URL, next to content-length and host.
+  return getSignedUrl(s3(), command, {
+    expiresIn: expiresSeconds,
+    signableHeaders: new Set(['content-type']),
+  })
 }
 
 /** A GET URL for one object, valid an hour by default. */
