@@ -1,6 +1,8 @@
 import {
+  CHANGED_ELSEWHERE,
   CLEAR_FIRST,
   DNA_MISMATCH,
+  EMPTY_SET,
   IMPORT_REFUSED,
   LOCKED,
   NOT_FOUND,
@@ -13,7 +15,15 @@ import {
 export type DbError = { code?: string; message: string } | null
 
 /** Sentences the database raises that the creator reads as they are (spec section 7). */
-const PASS_THROUGH = new Set([LOCKED, TRAIT_CAP, DNA_MISMATCH, IMPORT_REFUSED, UPLOAD_CAP])
+const PASS_THROUGH = new Set([
+  LOCKED,
+  TRAIT_CAP,
+  DNA_MISMATCH,
+  IMPORT_REFUSED,
+  UPLOAD_CAP,
+  CHANGED_ELSEWHERE,
+  EMPTY_SET,
+])
 /** The database's token cap sentence, shown as the longer one the browser shows before a save. */
 const DB_SAVE_CAP = 'A project can have at most 100,000 tokens.'
 const CANVAS = /^Every layer image must be \d+ x \d+ in this project\.$/

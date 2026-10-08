@@ -22,7 +22,9 @@ export async function artWrite<T>(
   try {
     const outcome = await write({ supabase: owned.supabase, collection: owned.collection, collectionId })
     return 'error' in outcome ? fail(artWriteError(outcome.error)) : { ok: true, data: outcome.data }
-  } catch {
+  } catch (error) {
+    // The creator reads a plain sentence; the cause goes to the server log.
+    console.error('An art write threw.', error)
     return fail(THROWN)
   }
 }

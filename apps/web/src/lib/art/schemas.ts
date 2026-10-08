@@ -50,6 +50,7 @@ export const weightTable = z
       .transform((row) => (row.constant === null ? row : { ...row, weight: 0 })),
   )
   .max(501, UNSAVED)
+  .refine((rows) => new Set(rows.map((row) => row.traitId.toLowerCase())).size === rows.length, UNSAVED)
 
 export const ruleInput = z.object({
   kind: z.enum(["doesn't mix with", 'always pairs with', 'must pair with'], { error: UNSAVED }),

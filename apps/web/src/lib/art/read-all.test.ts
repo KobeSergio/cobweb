@@ -14,10 +14,20 @@ describe('readAll', () => {
       [0, 999],
       [1000, 1999],
       [2000, 2999],
+      [2500, 3499],
     ])
   })
 
-  it('stops after an exact multiple with one empty page, and throws on an error', async () => {
+  it('is not cut short when the server returns fewer rows than asked for (a lower max_rows)', async () => {
+    const rows = Array.from({ length: 1_300 }, (_, i) => i)
+    const all = await readAll(async (from, to) => ({
+      data: rows.slice(from, Math.min(to + 1, from + 400)),
+      error: null,
+    }))
+    expect(all).toEqual(rows)
+  })
+
+  it('stops at the first empty page, and throws on an error', async () => {
     const rows = Array.from({ length: 1_000 }, (_, i) => i)
     let calls = 0
     const all = await readAll(async (from, to) => {

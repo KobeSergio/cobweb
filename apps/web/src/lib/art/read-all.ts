@@ -12,10 +12,12 @@ export async function readAll<T>(
   size = PAGE_SIZE,
 ): Promise<T[]> {
   const rows: T[] = []
-  for (let from = 0; ; from += size) {
+  // A short page is not the last one: the server may cap a page below `size`. Only an empty page ends it.
+  for (let from = 0; ;) {
     const { data, error } = await page(from, from + size - 1)
     if (error) throw new Error(`The art could not be loaded: ${error.message}`)
-    rows.push(...(data ?? []))
-    if (!data || data.length < size) return rows
+    if (!data || data.length === 0) return rows
+    rows.push(...data)
+    from += data.length
   }
 }

@@ -34,6 +34,25 @@ describe('the input rules of spec section 6, one failing row each', () => {
     )
   })
 
+  it('a weight table names each trait once', () => {
+    expect(
+      error(
+        parse(weightTable, [
+          { traitId: id, weight: 10, constant: null },
+          { traitId: id, weight: 20, constant: null },
+        ]),
+      ),
+    ).toBe(UNSAVED)
+    expect(
+      error(
+        parse(weightTable, [
+          { traitId: id, weight: 10, constant: null },
+          { traitId: other, weight: 20, constant: null },
+        ]),
+      ),
+    ).toBeNull()
+  })
+
   it('a constant is 1 to 10,000 and forces the weight to 0', () => {
     expect(error(parse(weightTable, [{ traitId: id, weight: 0, constant: 0 }]))).toBe(
       'A fixed quantity is a whole number from 1 to 10,000.',
@@ -111,6 +130,8 @@ describe('the input rules of spec section 6, one failing row each', () => {
 
   it('every array input has a count cap that reads the reload sentence', () => {
     const ids = (n: number) => Array.from({ length: n }, () => id)
+    const distinct = (n: number) =>
+      Array.from({ length: n }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`)
     expect(
       error(
         parse(
@@ -127,7 +148,7 @@ describe('the input rules of spec section 6, one failing row each', () => {
       error(
         parse(
           weightTable,
-          Array.from({ length: 502 }, () => ({ traitId: id, weight: 0, constant: null })),
+          distinct(502).map((traitId) => ({ traitId, weight: 0, constant: null })),
         ),
       ),
     ).toBe(UNSAVED)
@@ -135,7 +156,7 @@ describe('the input rules of spec section 6, one failing row each', () => {
       error(
         parse(
           weightTable,
-          Array.from({ length: 501 }, () => ({ traitId: id, weight: 0, constant: null })),
+          distinct(501).map((traitId) => ({ traitId, weight: 0, constant: null })),
         ),
       ),
     ).toBeNull()

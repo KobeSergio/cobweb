@@ -1,4 +1,3 @@
-import { countTraits } from '@cobweb/dna'
 import { redirect } from 'next/navigation'
 import { GenerateScreen } from '@/components/art/generate-screen'
 import { StagePage } from '@/components/shell/stage-page'
@@ -41,8 +40,9 @@ export default async function Page({
         collections={project ? (project.collections ?? []) : DEMO_COLLECTIONS}
         layers={project ? (project.layers ?? []) : DEMO_LAYERS}
         rules={project ? (project.rules ?? []) : DEMO_RULES}
-        tokens={project ? (project.tokens ?? null) : DEMO_TOKENS}
-        traitCounts={project ? countTraits(project.tokens ?? []) : DEMO_TRAIT_COUNTS}
+        // A real collection's tokens reach the screen once, through the store the layout seeds.
+        tokens={project ? null : DEMO_TOKENS}
+        traitCounts={project ? {} : DEMO_TRAIT_COUNTS}
         readOnly={ctx.readOnly}
         artDeferred={ctx.artDeferred}
       />

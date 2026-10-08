@@ -18,6 +18,8 @@ describe('artWriteError', () => {
       'This collection already has layers. Start over to replace them.',
       'This project has reached its 5 GB of files. Delete some files to upload more.',
       'Every layer image must be 1000 x 1000 in this project.',
+      'Some tokens were changed elsewhere. Reload the page.',
+      'The set is empty.',
     ])
       expect(artWriteError({ code: '23514', message: sentence })).toBe(sentence)
   })
