@@ -2157,6 +2157,90 @@ async function artEdits(A: Creator, B: Creator): Promise<void> {
     return expectSentence(bad.error, CHECK, 'Token DNA does not match the layers.')
   })
 
+  await check(
+    'art_update_tokens and art_delete_tokens: refuse an id that is not there and change nothing',
+    async () => {
+      const before = await countRows('tokens', 'collection_id', s.cid)
+      const update = await callArt(A.client, 'art_update_tokens', {
+        p_collection_id: s.cid,
+        p_rows: [
+          { tokenId: 1, description: 'Rolled back' },
+          { tokenId: 99_999, description: 'Nowhere' },
+        ],
+      })
+      const problemUpdate = expectSentence(
+        update.error,
+        CHECK,
+        'Some tokens were changed elsewhere. Reload the page.',
+      )
+      if (problemUpdate) return `update: ${problemUpdate}`
+      const { data } = await admin
+        .from('tokens')
+        .select('description')
+        .eq('collection_id', s.cid)
+        .eq('token_id', 1)
+        .single()
+      if (data?.description !== 'First light') return `description ${data?.description}`
+      const removal = await callArt(A.client, 'art_delete_tokens', {
+        p_collection_id: s.cid,
+        p_ids: [1, 99_999],
+      })
+      const problemDelete = expectSentence(
+        removal.error,
+        CHECK,
+        'Some tokens were changed elsewhere. Reload the page.',
+      )
+      if (problemDelete) return `delete: ${problemDelete}`
+      const after = await countRows('tokens', 'collection_id', s.cid)
+      return after === before ? null : `count ${before} became ${after}`
+    },
+  )
+
+  await check('art_save_tokens: an empty or missing set is refused and the stored set stays', async () => {
+    const before = await countRows('tokens', 'collection_id', s.cid)
+    for (const tokens of [[], null]) {
+      const { error } = await callArt(A.client, 'art_save_tokens', {
+        p_collection_id: s.cid,
+        p_tokens: tokens,
+        p_seed: 1,
+      })
+      const problem = expectSentence(error, CHECK, 'The set is empty.')
+      if (problem) return `${JSON.stringify(tokens)}: ${problem}`
+    }
+    const after = await countRows('tokens', 'collection_id', s.cid)
+    return after === before ? null : `count ${before} became ${after}`
+  })
+
+  await check('timings at a realistic shape: 10 layers of 3 traits, 10,000 tokens (INFO only)', async () => {
+    const wide = await importedProject(A.client, [
+      [...Array.from({ length: 10 }, (): string[] => ['a', 'b', 'c'])],
+    ])
+    const tokens = Array.from({ length: 10_000 }, (_, i) => ({
+      tokenId: i + 1,
+      artCollectionId: wide.art(),
+      dna: Array.from({ length: 10 }, (_, l) => wide.trait(0, l, (i + l) % 3)),
+      description: null,
+    }))
+    const saveStarted = Date.now()
+    const saved = await callArt(A.client, 'art_save_tokens', {
+      p_collection_id: wide.cid,
+      p_tokens: tokens,
+      p_seed: 9,
+    })
+    const saveMs = Date.now() - saveStarted
+    if (saved.error) return describe(saved.error)
+    const deleteStarted = Date.now()
+    const removed = await callArt(A.client, 'art_delete_tokens', {
+      p_collection_id: wide.cid,
+      p_ids: [1],
+    })
+    const deleteMs = Date.now() - deleteStarted
+    if (removed.error) return describe(removed.error)
+    info(`art_save_tokens, 10 layers x 3 traits, 10,000 tokens: ${saveMs} ms`)
+    info(`art_delete_tokens, token 1 of 10,000 (renumbers 9,999): ${deleteMs} ms`)
+    return (await countRows('tokens', 'collection_id', wide.cid)) === 9_999 ? null : 'wrong count'
+  })
+
   await check("art_set_asset_order: writes the positions of the project's assets", async () => {
     const col = await insertCollection(A.client, { project_type: 'one_of_one' })
     if (!col.row) return `setup: ${describe(col.error)}`

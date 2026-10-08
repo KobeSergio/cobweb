@@ -401,7 +401,7 @@ before insert or update of dna, art_collection_id, collection_id on public.token
 for each row execute function public.tokens_guard_dna();
 
 -- Replaces the whole set from [{ tokenId, artCollectionId, dna, description }] and records its
--- seed. Delete then insert: the deferrable key rules out an upsert. The collections row is written
+-- seed. An empty or missing set is refused: starting over is art_start_over, not an empty save. Delete then insert: the deferrable key rules out an upsert. The collections row is written
 -- first, as the lock trigger's note asks.
 create function public.art_save_tokens(p_collection_id uuid, p_tokens jsonb, p_seed bigint)
 returns void
@@ -411,6 +411,9 @@ set search_path = ''
 as $$
 begin
   perform private.art_lock_owned(p_collection_id, true);
+  if p_tokens is null or jsonb_typeof(p_tokens) <> 'array' or jsonb_array_length(p_tokens) = 0 then
+    raise exception 'The set is empty.' using errcode = '23514';
+  end if;
   if jsonb_array_length(p_tokens) > 100000 then
     raise exception 'A project can have at most 100,000 tokens.' using errcode = '23514';
   end if;
@@ -426,15 +429,21 @@ revoke all on function public.art_save_tokens(uuid, jsonb, bigint) from public, 
 grant execute on function public.art_save_tokens(uuid, jsonb, bigint) to authenticated;
 
 -- Writes the DNA and descriptions of some tokens from [{ tokenId, dna?, description? }] in one
--- statement. A key left out keeps its column; the DNA guard checks every new DNA.
+-- statement. A key left out keeps its column; the DNA guard checks every new DNA. Fewer rows
+-- written than token ids sent means the set changed elsewhere, and the call is refused.
+-- Takes the collection row's no key update lock, so two tabs' token writes run one after the other.
 create function public.art_update_tokens(p_collection_id uuid, p_rows jsonb)
 returns void
 language plpgsql
 security invoker
 set search_path = ''
 as $$
+declare
+  v_expected integer;
+  v_updated integer;
 begin
-  perform private.art_lock_owned(p_collection_id);
+  perform private.art_lock_owned(p_collection_id, true);
+  select count(distinct (e.x ->> 'tokenId')::integer) into v_expected from jsonb_array_elements(p_rows) as e(x);
   update public.tokens t
   set dna = case
       when e.x ? 'dna' then array(
@@ -445,6 +454,11 @@ begin
     description = case when e.x ? 'description' then e.x ->> 'description' else t.description end
   from jsonb_array_elements(p_rows) as e(x)
   where t.collection_id = p_collection_id and t.token_id = (e.x ->> 'tokenId')::integer;
+  get diagnostics v_updated = row_count;
+  -- A token another tab deleted or renumbered is not there to write: say so, and roll the rest back.
+  if v_updated < v_expected then
+    raise exception 'Some tokens were changed elsewhere. Reload the page.' using errcode = '23514';
+  end if;
 end;
 $$;
 
@@ -452,7 +466,8 @@ revoke all on function public.art_update_tokens(uuid, jsonb) from public, anon;
 grant execute on function public.art_update_tokens(uuid, jsonb) to authenticated;
 
 -- Deletes tokens and moves every later id up by the number of deleted ids below it, in one
--- set-based update under the deferrable primary key, so ids stay 1 to N.
+-- set-based update under the deferrable primary key, so ids stay 1 to N. An id that is not there
+-- (another tab deleted it) refuses the call. Takes the collection row's no key update lock.
 create function public.art_delete_tokens(p_collection_id uuid, p_ids integer[])
 returns void
 language plpgsql
@@ -461,14 +476,20 @@ set search_path = ''
 as $$
 declare
   v_gone integer[];
+  v_expected integer;
 begin
-  perform private.art_lock_owned(p_collection_id);
+  perform private.art_lock_owned(p_collection_id, true);
+  select count(distinct i) into v_expected from unnest(p_ids) as u(i);
   with gone as (
     delete from public.tokens t
     where t.collection_id = p_collection_id and t.token_id = any (p_ids)
     returning t.token_id
   )
   select coalesce(array_agg(gone.token_id), '{}') into v_gone from gone;
+  -- An id another tab already removed means the ids on screen are stale: refuse, and roll back.
+  if cardinality(v_gone) < v_expected then
+    raise exception 'Some tokens were changed elsewhere. Reload the page.' using errcode = '23514';
+  end if;
   if cardinality(v_gone) = 0 then
     return;
   end if;
@@ -494,7 +515,7 @@ security invoker
 set search_path = ''
 as $$
 begin
-  perform private.art_lock_owned(p_collection_id);
+  perform private.art_lock_owned(p_collection_id, true);
   update public.uploads u
   set position = (e.x ->> 'position')::integer
   from jsonb_array_elements(p_rows) as e(x)
