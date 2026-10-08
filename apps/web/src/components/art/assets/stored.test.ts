@@ -14,6 +14,7 @@ const item = (key: string, uploadId: string | null = null): AssetItem => ({
   bytes: 10,
   owned: true,
   uploadId,
+  addedAt: 0,
 })
 const queued = (id: string, state: QueueItem['state'], uploadId?: string): QueueItem => ({
   id,

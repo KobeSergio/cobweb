@@ -57,6 +57,8 @@ export type UploadedAsset = {
   /** Editions of this artwork (1/1s); 1 otherwise. */
   quantity: number
   attributes: { traitType: string; value: string }[]
+  /** When the file was added (ms since 1970), which "In file order" sorts by. Sample data counts by id. */
+  addedAt?: number
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -1,8 +1,8 @@
 import type { ArtProject } from '@/components/art/state/art-store'
 import { finalise, type Draft } from '@/components/art/state/generation'
 import { buildTraitIndex } from '@/components/art/lib/trait-index'
-import type { Enums, Tables } from '@/lib/database.types'
-import type { ArtRule, AtLeastOne, Layer, RuleKind, Trait } from '@/lib/demo'
+import type { Enums, Json, Tables } from '@/lib/database.types'
+import type { ArtRule, AtLeastOne, Layer, RuleKind, Trait, UploadedAsset } from '@/lib/demo'
 import { servedUrl } from '@/lib/storage/uploads-service'
 
 /**
@@ -172,4 +172,44 @@ export function weightRows(layer: Layer): WeightRow[] {
     weight: trait.constant ? 0 : trait.weight,
     constant: trait.constant ?? null,
   }))
+}
+
+export type AssetRow = Pick<
+  Tables<'uploads'>,
+  'id' | 'file_name' | 'media_type' | 'quantity' | 'attributes' | 'position' | 'created_at'
+>
+
+/** The `[{ traitType, value }]` the Assets screen saved; anything else in the column is left out. */
+function attributesOf(value: Json): { traitType: string; value: string }[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((entry) =>
+    entry !== null &&
+    typeof entry === 'object' &&
+    !Array.isArray(entry) &&
+    typeof entry.traitType === 'string' &&
+    typeof entry.value === 'string'
+      ? [{ traitType: entry.traitType, value: entry.value }]
+      : [],
+  )
+}
+
+/** A 1/1 or single asset project's files, in their saved order (spec section 9). */
+export function toAssets(rows: AssetRow[]): UploadedAsset[] {
+  const unplaced = Number.MAX_SAFE_INTEGER
+  return [...rows]
+    .sort(
+      (a, b) =>
+        (a.position ?? unplaced) - (b.position ?? unplaced) ||
+        Date.parse(a.created_at) - Date.parse(b.created_at),
+    )
+    .map((row, index) => ({
+      id: index + 1,
+      fileName: row.file_name,
+      imageUrl: servedUrl(row.id),
+      uploadId: row.id,
+      mediaType: row.media_type,
+      quantity: row.quantity,
+      attributes: attributesOf(row.attributes),
+      addedAt: Date.parse(row.created_at),
+    }))
 }

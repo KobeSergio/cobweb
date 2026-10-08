@@ -1,11 +1,14 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { setAssetOrder, updateAsset } from '@/app/actions/art/assets'
 import type { UploadedAsset } from '@/lib/demo'
 import { checkImageFiles, releaseChecked, type CheckedFile } from '../lib/image-checks'
+import { useArtSync } from '../state/art-sync'
 import type { QueueItem } from '../uploads/upload-queue'
 import { adoptRecords } from './stored'
 import { checkMediaFile, type CheckedMedia } from './media'
+import { needsDetails, orderRows } from './saves'
 import {
   attributesForReplacement,
   fileNameAttribute,
@@ -38,6 +41,7 @@ export function fromSample(asset: UploadedAsset): AssetItem {
     bytes: null,
     owned: false,
     uploadId: asset.uploadId ?? null,
+    addedAt: asset.addedAt ?? asset.id,
   }
 }
 
@@ -53,6 +57,7 @@ export function fromChecked(entry: CheckedFile, nameAttribute = true): AssetItem
     bytes: entry.file.size,
     owned: true,
     uploadId: null,
+    addedAt: Date.now(),
   }
 }
 
@@ -68,6 +73,7 @@ export function fromMedia(entry: CheckedMedia, attributes: Attribute[]): AssetIt
     bytes: entry.file.size,
     owned: true,
     uploadId: null,
+    addedAt: Date.now(),
   }
 }
 
@@ -95,10 +101,12 @@ let repeatCounter = 0
  * and a file already in the list (same name and size) is refused.
  *
  * Finished uploads are adopted from `queueItems`: the item switches to its served URL and upload id,
- * and removing it deletes the row and the object. The next sub-project saves the list itself as
- * token rows.
+ * and removing it deletes the row and the object. Editions, attributes and the list order are saved
+ * as they change, 250 ms after the last edit of an item; an edit made while a file uploads is saved
+ * once its row exists.
  */
 export function useAssetItems(
+  collectionId: string,
   initial: UploadedAsset[],
   announce: (text: string) => void,
   uploads: AssetUploads,
@@ -108,6 +116,66 @@ export function useAssetItems(
   const [rejected, setRejected] = useState<RejectedFile[]>([])
   const [checking, setChecking] = useState(0)
   const latest = useRef(items)
+  const sync = useArtSync()
+  /** The values each stored row holds, for a rollback when a save fails. */
+  const saved = useRef(
+    new Map<string, { quantity: number; attributes: Attribute[] }>(
+      initial.flatMap((asset) =>
+        asset.uploadId
+          ? [[asset.uploadId, { quantity: asset.quantity, attributes: asset.attributes }] as const]
+          : [],
+      ),
+    ),
+  )
+  /** Upload ids already in the list, so a newly stored file can be told apart. */
+  const known = useRef(new Set(initial.flatMap((asset) => (asset.uploadId ? [asset.uploadId] : []))))
+
+  /** Saves one item's editions and attributes 250 ms after its last edit; a file still uploading waits. */
+  const saveDetails = useCallback(
+    (key: string) =>
+      sync.debounce.schedule(`asset:${key}`, () => {
+        const item = latest.current.find((candidate) => candidate.key === key)
+        if (!item?.uploadId) return
+        const uploadId = item.uploadId
+        const patch = { quantity: item.quantity, attributes: item.attributes }
+        void sync
+          .run({ apply: (p) => p, persist: () => updateAsset(collectionId, uploadId, patch) })
+          .then((ok) => {
+            if (ok) {
+              saved.current.set(uploadId, patch)
+              return
+            }
+            const back = saved.current.get(uploadId)
+            if (back)
+              setItems((current) =>
+                current.map((other) => (other.uploadId === uploadId ? { ...other, ...back } : other)),
+              )
+          })
+      }),
+    [collectionId, sync],
+  )
+
+  /** Saves the list order 250 ms after the last change to it. */
+  const saveOrder = useCallback(
+    () =>
+      sync.debounce.schedule('asset-order', () => {
+        const rows = orderRows(latest.current)
+        if (rows.length) void sync.run({ apply: (p) => p, persist: () => setAssetOrder(collectionId, rows) })
+      }),
+    [collectionId, sync],
+  )
+
+  // A file that has just been stored: its place in the list, and any edit made while it uploaded.
+  useEffect(() => {
+    const fresh = items.filter((item) => item.uploadId && !known.current.has(item.uploadId))
+    if (fresh.length === 0) return
+    for (const item of fresh) {
+      known.current.add(item.uploadId!)
+      saved.current.set(item.uploadId!, { quantity: 1, attributes: [] })
+      if (needsDetails(item)) saveDetails(item.key)
+    }
+    saveOrder()
+  }, [items, saveDetails, saveOrder])
 
   useEffect(() => {
     latest.current = items
@@ -172,7 +240,7 @@ export function useAssetItems(
    * video (MASTER_PLAN, Art: media types), so it goes through the media checks.
    */
   const replace = useCallback(
-    async (file: File | undefined) => {
+    async (file: File | undefined, keepQuantity?: number) => {
       if (!file) return
       setChecking((count) => count + 1)
       let checked: CheckedMedia
@@ -202,7 +270,8 @@ export function useAssetItems(
       }
       setItems((current) => {
         revoke(current)
-        return [fromMedia(checked, attributes)]
+        // The single asset keeps its quantity when the file is replaced.
+        return [{ ...fromMedia(checked, attributes), quantity: keepQuantity ?? 1 }]
       })
       uploads.add([{ id: checked.key, file, label: file.name }])
       announce(previous ? `Replaced the artwork with ${file.name}.` : `Added ${file.name}.`)
@@ -233,10 +302,23 @@ export function useAssetItems(
   )
   const remove = useCallback((key: string) => removeMany([key]), [removeMany])
 
-  const update = useCallback((keys: string[], change: (item: AssetItem) => AssetItem) => {
-    const target = new Set(keys)
-    setItems((current) => current.map((item) => (target.has(item.key) ? change(item) : item)))
-  }, [])
+  const update = useCallback(
+    (keys: string[], change: (item: AssetItem) => AssetItem) => {
+      const target = new Set(keys)
+      setItems((current) => current.map((item) => (target.has(item.key) ? change(item) : item)))
+      for (const key of keys) saveDetails(key)
+    },
+    [saveDetails],
+  )
+
+  /** Puts the list in a new order and saves it (the token ids follow the saved order). */
+  const reorder = useCallback(
+    (order: (items: AssetItem[]) => AssetItem[]) => {
+      setItems((current) => order(current))
+      saveOrder()
+    },
+    [saveOrder],
+  )
 
   const setQuantity = useCallback(
     (key: string, quantity: number) => update([key], (item) => ({ ...item, quantity })),
@@ -274,6 +356,7 @@ export function useAssetItems(
     replace,
     remove,
     removeMany,
+    reorder,
     setQuantity,
     setQuantityMany,
     setAttributes,

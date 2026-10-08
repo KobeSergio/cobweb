@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Layer } from '@/lib/demo'
-import { ruleKindFromDb, ruleKindToDb, toProject, weightRows, type ArtRows } from './rows'
+import { ruleKindFromDb, ruleKindToDb, toAssets, toProject, weightRows, type ArtRows } from './rows'
 
 const collection: ArtRows['collection'] = {
   name: 'Night Owls',
@@ -225,5 +225,51 @@ describe('the inverse pieces', () => {
       { traitId: 'wide', weight: 90, constant: null },
       { traitId: 'rare', weight: 0, constant: 3 },
     ])
+  })
+})
+
+describe('toAssets', () => {
+  it('orders by saved position, then by when the file was added, and keeps only well formed attributes', () => {
+    const assets = toAssets([
+      {
+        id: 'u-late',
+        file_name: 'late.png',
+        media_type: 'image',
+        quantity: 1,
+        attributes: [],
+        position: null,
+        created_at: '2026-10-08T10:00:03Z',
+      },
+      {
+        id: 'u-second',
+        file_name: 'second.png',
+        media_type: 'image',
+        quantity: 4,
+        attributes: [{ traitType: 'Name', value: 'Second' }, { broken: true }],
+        position: 1,
+        created_at: '2026-10-08T10:00:01Z',
+      },
+      {
+        id: 'u-first',
+        file_name: 'first.gif',
+        media_type: 'gif',
+        quantity: 1,
+        attributes: 'not a list',
+        position: 0,
+        created_at: '2026-10-08T10:00:02Z',
+      },
+    ])
+    expect(assets.map((asset) => asset.uploadId)).toEqual(['u-first', 'u-second', 'u-late'])
+    expect(assets[1]).toEqual({
+      id: 2,
+      fileName: 'second.png',
+      imageUrl: '/api/uploads/u-second',
+      uploadId: 'u-second',
+      mediaType: 'image',
+      quantity: 4,
+      attributes: [{ traitType: 'Name', value: 'Second' }],
+      addedAt: Date.parse('2026-10-08T10:00:01Z'),
+    })
+    expect(assets[0]!.attributes).toEqual([])
   })
 })

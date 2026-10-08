@@ -129,6 +129,25 @@ export const tokenPatches = capped(
   z.object({ tokenId, dna: dna.optional(), description: tokenDescription.optional() }),
 )
 export const tokenIds = capped(tokenId)
-/** The asset order of an art collection: trait ids in the new order. */
-export const assetOrder = z.array(uuid).max(10_000, UNSAVED)
 export const seed = z.number().int(UNSAVED).min(0, UNSAVED).max(4_294_967_295, UNSAVED)
+
+const EDITIONS = 'Editions are a whole number from 1 to 10,000.'
+const ATTRIBUTE = 'An attribute needs a trait type and a value of 1 to 64 characters each.'
+const attributeText = z.string().trim().min(1, ATTRIBUTE).max(64, ATTRIBUTE)
+
+export const assetPatch = z
+  .object({
+    quantity: z.number().int(EDITIONS).min(1, EDITIONS).max(10_000, EDITIONS).optional(),
+    attributes: z
+      .array(z.object({ traitType: attributeText, value: attributeText }))
+      .max(32, UNSAVED)
+      .optional(),
+  })
+  .strict()
+export type AssetPatch = z.input<typeof assetPatch>
+
+/** The list order of a 1/1 or single asset project's files: each stored file and its place. */
+export const assetOrder = z
+  .array(z.object({ uploadId: uuid, position: z.number().int(UNSAVED).min(0, UNSAVED) }))
+  .max(10_000, UNSAVED)
+export type AssetOrderRow = z.infer<typeof assetOrder>[number]

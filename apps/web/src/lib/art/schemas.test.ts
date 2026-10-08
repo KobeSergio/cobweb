@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   artName,
   assetOrder,
+  assetPatch,
   artSettings,
   groupTraits,
   newTraits,
@@ -138,7 +139,23 @@ describe('the input rules of spec section 6, one failing row each', () => {
         ),
       ),
     ).toBeNull()
-    expect(error(parse(assetOrder, ids(10_001)))).toBe(UNSAVED)
+    const row = { uploadId: id, position: 0 }
+    expect(
+      error(
+        parse(
+          assetOrder,
+          Array.from({ length: 10_001 }, () => row),
+        ),
+      ),
+    ).toBe(UNSAVED)
+    expect(
+      error(
+        parse(
+          assetOrder,
+          Array.from({ length: 10_000 }, () => row),
+        ),
+      ),
+    ).toBeNull()
     const trait = { name: 'A', uploadId: id }
     const layer = (n: number) => ({ name: 'L', traits: Array.from({ length: n }, () => trait) })
     const collection = (layers: number, traits = 1) => ({
@@ -152,5 +169,30 @@ describe('the input rules of spec section 6, one failing row each', () => {
     expect(error(parse(importPayload, payload([collection(51)])))).toBe(UNSAVED)
     expect(error(parse(importPayload, payload([collection(1, 501)])))).toBe(UNSAVED)
     expect(error(parse(importPayload, payload([collection(50, 500)])))).toBeNull()
+  })
+})
+
+describe('the asset rules of spec section 6', () => {
+  it('editions are 1 to 10,000; attributes need a trait type and a value of 1 to 64 characters', () => {
+    expect(
+      error(parse(assetPatch, { quantity: 1, attributes: [{ traitType: 'Name', value: 'Moon' }] })),
+    ).toBeNull()
+    expect(error(parse(assetPatch, { quantity: 0 }))).toBe('Editions are a whole number from 1 to 10,000.')
+    expect(error(parse(assetPatch, { quantity: 10_001 }))).toBe(
+      'Editions are a whole number from 1 to 10,000.',
+    )
+    const sentence = 'An attribute needs a trait type and a value of 1 to 64 characters each.'
+    expect(error(parse(assetPatch, { attributes: [{ traitType: ' ', value: 'Moon' }] }))).toBe(sentence)
+    expect(error(parse(assetPatch, { attributes: [{ traitType: 'Name', value: 'x'.repeat(65) }] }))).toBe(
+      sentence,
+    )
+  })
+
+  it('at most 32 attributes', () => {
+    const attribute = { traitType: 'Name', value: 'Moon' }
+    expect(error(parse(assetPatch, { attributes: Array.from({ length: 32 }, () => attribute) }))).toBeNull()
+    expect(error(parse(assetPatch, { attributes: Array.from({ length: 33 }, () => attribute) }))).toBe(
+      UNSAVED,
+    )
   })
 })

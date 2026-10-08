@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { AssetsScreen } from '@/components/art/assets-screen'
 import { StageFooter } from '@/components/shell/stage-footer'
 import { StagePage } from '@/components/shell/stage-page'
+import { loadAssets } from '@/lib/art/load'
 import { requireOwnedCollection } from '@/lib/auth'
 import { DEMO_ASSETS } from '@/lib/demo'
 import { artSubSteps, hasArtSubStep, stageHref } from '@/lib/steps'
@@ -16,7 +17,7 @@ const DESCRIPTION = {
 
 /**
  * Art for 1/1s and single asset projects: one upload screen, where the supply is set. Creating
- * either type lands here. Sample assets in sample-data mode; a real collection starts empty.
+ * either type lands here. A real collection shows its stored files; sample-data mode shows the sample assets.
  */
 export default async function Page({ params }: { params: CollectionParams }) {
   const { id } = await params
@@ -35,7 +36,11 @@ export default async function Page({ params }: { params: CollectionParams }) {
       width="wide"
       footer={<StageFooter previous={ctx.previous} next={ctx.next} />}
     >
-      <AssetsScreen collection={collection} assets={ctx.demo ? DEMO_ASSETS : []} readOnly={ctx.readOnly} />
+      <AssetsScreen
+        collection={collection}
+        assets={ctx.demo ? DEMO_ASSETS : await loadAssets(collection.id)}
+        readOnly={ctx.readOnly}
+      />
     </StagePage>
   )
 }

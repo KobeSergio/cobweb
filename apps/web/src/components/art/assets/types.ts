@@ -20,6 +20,8 @@ export type AssetItem = {
   owned: boolean
   /** The `uploads` row once the file is stored; null while uploading and for sample data. */
   uploadId: string | null
+  /** When the file was added (ms since 1970), which "In file order" sorts by. */
+  addedAt: number
 }
 
 /** A file that failed its checks and was not added. */

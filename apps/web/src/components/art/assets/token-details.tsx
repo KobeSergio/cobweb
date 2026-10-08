@@ -30,7 +30,8 @@ export function newSeed(): number {
  * may have their ids shuffled; a single asset's tokens all carry the name as is (its `tokenURI` is
  * the same for every id, MASTER_PLAN, Contracts).
  *
- * Seam: saved with the token list at lock (Phase 3); until then it lives in the screen.
+ * The name and description are saved on the collection as they change. "Shuffled" reorders the files
+ * from the seed and saves that order, so the ids always follow the saved list.
  */
 export function TokenDetailsPanel({
   details,
@@ -129,7 +130,7 @@ export function TokenDetailsPanel({
           <FieldDescription>
             {details.order === 'upload'
               ? 'Ids follow the file order, editions of a file in a row.'
-              : 'Ids are shuffled across every edition, so collectors cannot tell which id is which artwork.'}
+              : 'Ids follow a shuffled file order, so collectors cannot tell which file is which id. Editions of a file stay in a row.'}
           </FieldDescription>
         </Field>
       )}
