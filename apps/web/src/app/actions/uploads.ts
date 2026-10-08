@@ -229,7 +229,11 @@ export async function deleteUpload(uploadId: string): Promise<{ ok: true } | { e
     .maybeSingle()
   if (!row) return { error: 'This file could not be found.' }
   const thumb = await thumbnailRowFor(supabase, row.collection_id, row.content_hash)
-  const { error } = await supabase.from('uploads').delete().eq('id', row.id)
+  // One statement, so a failure leaves both rows and both objects for a retry.
+  const { error } = await supabase
+    .from('uploads')
+    .delete()
+    .in('id', thumb ? [row.id, thumb.id] : [row.id])
   if (error) {
     if (error.code === '23503')
       return {
@@ -242,11 +246,7 @@ export async function deleteUpload(uploadId: string): Promise<{ ok: true } | { e
     return { error: 'The file could not be deleted. Try again.' }
   }
   const keys = [row.storage_key]
-  if (thumb) {
-    const { error: thumbError } = await supabase.from('uploads').delete().eq('id', thumb.id)
-    if (thumbError) return { error: 'The file could not be deleted. Try again.' }
-    keys.push(storageKey(row.collection_id, 'thumbnail', row.content_hash, 'image/webp'))
-  }
+  if (thumb) keys.push(storageKey(row.collection_id, 'thumbnail', row.content_hash, 'image/webp'))
   try {
     await deleteObjects(keys)
   } catch {

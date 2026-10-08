@@ -32,8 +32,9 @@ begin
   end if;
   select c.owner_id, c.art_locked_at, c.canvas_width, c.canvas_height
   into v_owner, v_locked, v_cw, v_ch
-  from public.collections c where c.id = p_collection_id for update;
-  if v_owner is null or v_owner <> v_uid then
+  from public.collections c where c.id = p_collection_id and c.owner_id = v_uid for update;
+  -- Only the caller's own row is ever locked; the owner test is in the select above.
+  if v_owner is null then
     raise exception 'collection not found' using errcode = '42501';
   end if;
   if v_locked is not null then
@@ -42,6 +43,14 @@ begin
   -- The column's check gives the key its shape; this pins the prefix to the caller's collection.
   if p_storage_key is null or split_part(p_storage_key, '/', 1) <> p_collection_id::text then
     raise exception 'The storage key must be under the collection''s own prefix.' using errcode = '23514';
+  end if;
+
+  -- A duplicate is reported before the cap, so a second tab at the cap reuses the file.
+  if exists (
+    select 1 from public.uploads u
+    where u.collection_id = p_collection_id and u.content_hash = p_content_hash and u.kind = p_kind
+  ) then
+    raise unique_violation using message = 'This file is already in the project.';
   end if;
 
   select coalesce(sum(u.bytes), 0) into v_used from public.uploads u where u.collection_id = p_collection_id;
