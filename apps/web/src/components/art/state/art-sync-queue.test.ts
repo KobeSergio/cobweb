@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { LOCKED, THROWN, type ActionResult } from '@/lib/art/result'
 import type { ArtProject } from './art-store'
-import { ArtSyncQueue } from './art-sync-queue'
+import { ArtSyncQueue, getQueue } from './art-sync-queue'
 
 function setup(demo = false) {
   let project: ArtProject = {
@@ -200,5 +200,82 @@ describe('ArtSyncQueue', () => {
     await created
     await saving
     expect(payload).toBe('uuid-1')
+  })
+
+  it('applies nothing for a refused create and cancels the edits queued behind it', async () => {
+    const s = setup()
+    const created = s.queue.create<{ id: string }>({
+      persist: async () => refused,
+      apply: (project, data) => named(data?.id ?? 'sample')(project),
+    })
+    const persist = vi.fn(async () => saved)
+    const behind = s.queue.run({ apply: named('x'), persist })
+    expect(await created).toBe(false)
+    expect(await behind).toBe(false)
+    expect(persist).not.toHaveBeenCalled()
+    expect(s.names()).toEqual([])
+  })
+
+  it('applies undo on top of the edits queued behind the failed one', async () => {
+    const s = setup()
+    const a = s.queue.run({
+      apply: named('a'),
+      persist: async () => refused,
+      undo: (project) => ({
+        ...project,
+        collections: (project.collections ?? []).filter((c) => c.id !== 'a'),
+      }),
+    })
+    const b = s.queue.run({ apply: named('b'), persist: async () => saved })
+    expect(s.names()).toEqual(['a', 'b'])
+    expect(await a).toBe(false)
+    expect(await b).toBe(false)
+    expect(s.names()).toEqual([])
+  })
+})
+
+describe('getQueue', () => {
+  it('shares one chain per collection', async () => {
+    let project: ArtProject = {
+      collections: [],
+      canvas: null,
+      seed: 1,
+      staleNote: null,
+      showBlankTraits: false,
+    }
+    const options = {
+      demo: false,
+      read: () => project,
+      write: (next: ArtProject) => {
+        project = next
+      },
+      notify: () => {},
+      onLocked: () => {},
+    }
+    const first = getQueue('shared', options)
+    const second = getQueue('shared', options)
+    expect(second).toBe(first)
+    const slow = later<ActionResult>()
+    const calls: string[] = []
+    const a = first.run({
+      apply: (p) => p,
+      persist: () => {
+        calls.push('first')
+        return slow.promise
+      },
+    })
+    const b = second.run({
+      apply: (p) => p,
+      persist: async () => {
+        calls.push('second')
+        return saved
+      },
+    })
+    await tick()
+    expect(calls).toEqual(['first'])
+    slow.resolve(saved)
+    await a
+    await b
+    expect(calls).toEqual(['first', 'second'])
   })
 })

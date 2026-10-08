@@ -1,4 +1,4 @@
-import { SAVE_INCOMPLETE, fail, type ActionResult } from '@/lib/art/result'
+import { LOCKED, SAVE_INCOMPLETE, fail, type ActionResult } from '@/lib/art/result'
 import { TOKEN_CHUNK } from '@/lib/art/token-ops'
 import type { GeneratedToken } from '@/lib/demo'
 
@@ -10,8 +10,9 @@ export type TokenSaveDeps = {
 
 /**
  * Saves a generated set in chunks of `TOKEN_CHUNK`: the first replaces the stored set (and sets the
- * seed), the rest append in order. If a later chunk fails the partial set is cleared, so the
- * database never holds half a generation.
+ * seed), the rest append in order. If a later chunk fails, `clearTokens` is attempted; if it also
+ * fails, a partial set may remain and the next Generate replaces it. A lock refusal is returned
+ * unchanged so the queue turns the screens read only.
  */
 export async function saveTokenSet(
   tokens: GeneratedToken[],
@@ -33,7 +34,7 @@ export async function saveTokenSet(
       } catch {
         // The sentence below already tells the creator to generate again.
       }
-      return fail(SAVE_INCOMPLETE)
+      return !result.ok && result.error === LOCKED ? result : fail(SAVE_INCOMPLETE)
     }
   }
   return first

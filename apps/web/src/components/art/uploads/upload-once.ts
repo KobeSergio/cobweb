@@ -13,7 +13,13 @@ export function uploadOnce(start: StartUpload, file: File): Promise<Uploaded> {
       unsubscribe?.()
       resolve(result)
     }
-    const handle = start(file)
+    let handle: ReturnType<StartUpload>
+    try {
+      handle = start(file)
+    } catch {
+      finish({ error: STOPPED })
+      return
+    }
     unsubscribe = handle.progress$.subscribe((progress) => {
       if (progress.state === 'done' && progress.record) finish({ record: progress.record })
       else if (progress.state === 'failed') finish({ error: progress.error ?? STOPPED })

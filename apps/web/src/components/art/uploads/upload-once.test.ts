@@ -51,4 +51,14 @@ describe('uploadAll', () => {
       { record: record('c') },
     ])
   })
+
+  it('settles a file whose start throws as stopped', async () => {
+    const start: StartUpload = () => {
+      throw new Error('boom')
+    }
+    const files = [new File([new Uint8Array(10)], 'a.png')]
+    expect(await uploadAll(start, files)).toEqual([
+      { error: 'The upload stopped. Retry to upload it again.' },
+    ])
+  })
 })

@@ -38,7 +38,7 @@ type Entry = {
  * (no React), so it is tested under Node with fake actions.
  */
 export class ArtSyncQueue {
-  private readonly options: QueueOptions
+  private options: QueueOptions
   private tail: Promise<unknown> = Promise.resolve()
   /** Edits not yet saved or rolled back, oldest first. */
   private waiting: Entry[] = []
@@ -46,6 +46,15 @@ export class ArtSyncQueue {
 
   constructor(options: QueueOptions) {
     this.options = options
+  }
+
+  /** A remounted provider points the shared queue at its own `demo` flag and lock callback. */
+  configure(options: QueueOptions): void {
+    this.options = options
+  }
+
+  isLocked(): boolean {
+    return this.locked
   }
 
   run(edit: SyncEdit): Promise<boolean> {
@@ -132,4 +141,22 @@ export class ArtSyncQueue {
     }
     return result
   }
+}
+
+const queues = new Map<string, ArtSyncQueue>()
+
+/**
+ * The one queue of a collection, shared by every mount of the Art layout so a save still in flight
+ * when the creator leaves and returns stays ahead of the new edits. Each call re-points it at the
+ * caller's options.
+ */
+export function getQueue(collectionId: string, options: QueueOptions): ArtSyncQueue {
+  const existing = queues.get(collectionId)
+  if (existing) {
+    existing.configure(options)
+    return existing
+  }
+  const created = new ArtSyncQueue(options)
+  queues.set(collectionId, created)
+  return created
 }

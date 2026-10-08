@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { readProject, seedProject, writeProject, type ArtProject } from './art-store'
-import { ArtSyncQueue, type SyncCreate, type SyncEdit } from './art-sync-queue'
+import { getQueue, type SyncCreate, type SyncEdit } from './art-sync-queue'
 import { EDIT_DEBOUNCE_MS, KeyedDebounce } from './keyed-debounce'
 
 export type ArtSync = {
@@ -24,6 +24,11 @@ export type ArtSync = {
    * create has been saved and applied. A save that depends on the store (the weight table of a
    * layer, which a trait create changes) must read `read()` inside `persist`, never when the
    * timer fires or the edit is made.
+   *
+   * Rollback: a failed save restores the project as it was when the edit joined the chain. An edit
+   * whose optimistic value was applied outside `run` (a keystroke saved later by the debounce)
+   * should pass `undo` or capture the pre-edit value. `apply` and `undo` must be pure and never
+   * throw.
    */
   debounce: KeyedDebounce
 }
@@ -34,6 +39,16 @@ const ArtSyncContext = createContext<ArtSync | null>(null)
  * Wraps the Art screens of one collection: seeds the browser store from the loaded rows and saves
  * every edit through `ArtSyncQueue` (spec section 5). Errors show as toasts.
  */
+function queueOptions(collectionId: string, demo: boolean, setLocked: (locked: boolean) => void) {
+  return {
+    demo,
+    read: () => readProject(collectionId),
+    write: (project: ArtProject) => writeProject(collectionId, project),
+    notify: (message: string) => toast.error(message),
+    onLocked: () => setLocked(true),
+  }
+}
+
 export function ArtSyncProvider({
   collectionId,
   demo,
@@ -50,14 +65,13 @@ export function ArtSyncProvider({
   const [queue] = useState(() => {
     // The store is module state; seed it in the browser only, never on the server.
     if (initial && typeof window !== 'undefined') seedProject(collectionId, initial)
-    return new ArtSyncQueue({
-      demo,
-      read: () => readProject(collectionId),
-      write: (project) => writeProject(collectionId, project),
-      notify: (message) => toast.error(message),
-      onLocked: () => setLocked(true),
-    })
+    return getQueue(collectionId, queueOptions(collectionId, demo, setLocked))
   })
+  // A queue that locked in an earlier mount stays locked.
+  useEffect(() => {
+    queue.configure(queueOptions(collectionId, demo, setLocked))
+    if (queue.isLocked()) setLocked(true)
+  }, [queue, collectionId, demo])
   const [debounce] = useState(() => new KeyedDebounce(EDIT_DEBOUNCE_MS))
   // Leaving the Art stage saves what is still waiting.
   useEffect(() => () => debounce.flushAll(), [debounce])
