@@ -15,7 +15,7 @@ import {
 import type { Tables } from '@/lib/database.types'
 import { satisfiesRules, seededRandom } from '@cobweb/dna'
 import type { Collection, Layer, TraitCounts } from '@/lib/demo'
-import { flowNeighbours } from '@/lib/steps'
+import { flowNeighbours, isDeployed } from '@/lib/steps'
 import { StageFooter } from '@/components/shell/stage-footer'
 import { CollectionSwitcher } from './collections/collection-switcher'
 import { useCollections } from './collections/use-collections'
@@ -139,7 +139,13 @@ export function LayersScreen({
     <div className="flex flex-1 flex-col gap-6">
       {readOnly && <ReadOnlyNotice what="the layers and their rarity" />}
       <CollectionSwitcher control={collections} readOnly={readOnly} onStartOver={collections.askStartOver} />
-      {artDeferred && <DeferredArtNotice collectionId={collection.id} />}
+      {artDeferred && (
+        <DeferredArtNotice
+          collectionId={collection.id}
+          demo={sync.demo}
+          deployed={isDeployed(collection.status)}
+        />
+      )}
       {!readOnly && editor.staleNote && (
         <Alert variant="warning">
           <RefreshCwIcon aria-hidden="true" />
@@ -241,7 +247,7 @@ export function LayersScreen({
       <NameDialog request={editor.naming} onClose={editor.closeNaming} />
       <StageFooter
         previous={previous}
-        next={artDeferred && next ? { ...next, href: `${next.href}?art=deferred` } : next}
+        next={artDeferred && sync.demo && next ? { ...next, href: `${next.href}?art=deferred` } : next}
       />
     </div>
   )

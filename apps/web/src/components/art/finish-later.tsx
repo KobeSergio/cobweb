@@ -14,6 +14,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@cobweb/ui/components/dialog'
+import { updateArtSettings } from '@/app/actions/art/settings'
+import { THROWN } from '@/lib/art/result'
 import { collectionHref } from '@/lib/steps'
 
 const STEPS = [
@@ -40,12 +42,39 @@ const STEPS = [
  * (`StageNav`), only while the Art stage is shown and the art is not deferred; nowhere else. Confirming marks the
  * art as deferred and opens Lock and upload with "Reveal later" on and the real set's lock off.
  *
- * Seam: the deferred flag is the sample scenario in the URL (`?art=deferred`) until Phase 3 adds
- * the collection's column; then confirming calls a server action that sets it.
+ * Confirming saves `art_deferred` on the collection; sample mode keeps the scenario in the URL
+ * (`?art=deferred`).
  */
-export function FinishLaterAction({ collectionId }: { collectionId: string }) {
+export function FinishLaterAction({ collectionId, demo }: { collectionId: string; demo: boolean }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const confirm = async () => {
+    const upload = collectionHref(collectionId, 'upload')
+    if (demo) {
+      setOpen(false)
+      router.push(`${upload}?art=deferred`)
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      const result = await updateArtSettings(collectionId, { artDeferred: true })
+      if (!result.ok) {
+        setError(result.error)
+        return
+      }
+      setOpen(false)
+      router.push(upload)
+      router.refresh()
+    } catch {
+      setError(THROWN)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <>
@@ -79,16 +108,16 @@ export function FinishLaterAction({ collectionId }: { collectionId: string }) {
               </li>
             ))}
           </ol>
+          {error && (
+            <p role="alert" className="text-destructive-foreground text-sm">
+              {error}
+            </p>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>
               Keep working
             </Button>
-            <Button
-              onClick={() => {
-                setOpen(false)
-                router.push(`${collectionHref(collectionId, 'upload')}?art=deferred`)
-              }}
-            >
+            <Button onClick={() => void confirm()} disabled={saving}>
               Finish later
             </Button>
           </DialogFooter>
@@ -102,12 +131,19 @@ export function FinishLaterAction({ collectionId }: { collectionId: string }) {
  * At the top of an Art screen while the art is deferred and the contract is not deployed yet: what
  * is left to do, and where. Once deployed the Art layout's one-line `ArtLiveNotice` says it instead,
  * so this stays away (sample mode: `?state=deployed`).
- *
- * Seam: a deployed row with deferred art also hides it once Phase 3 adds the deferred-art column.
  */
-export function DeferredArtNotice({ collectionId }: { collectionId: string }) {
+export function DeferredArtNotice({
+  collectionId,
+  demo,
+  deployed,
+}: {
+  collectionId: string
+  demo: boolean
+  deployed: boolean
+}) {
   const searchParams = useSearchParams()
-  if (searchParams.get('state') === 'deployed') return null
+  if (deployed || (demo && searchParams.get('state') === 'deployed')) return null
+  const upload = collectionHref(collectionId, 'upload')
   return (
     <Alert>
       <ClockIcon aria-hidden="true" />
@@ -119,7 +155,7 @@ export function DeferredArtNotice({ collectionId }: { collectionId: string }) {
           Settings.
         </p>
         <Link
-          href={`${collectionHref(collectionId, 'upload')}?art=deferred`}
+          href={demo ? `${upload}?art=deferred` : upload}
           className="text-foreground underline underline-offset-4"
         >
           View the placeholder upload

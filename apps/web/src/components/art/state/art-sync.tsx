@@ -38,6 +38,10 @@ const ArtSyncContext = createContext<ArtSync | null>(null)
 /**
  * Wraps the Art screens of one collection: seeds the browser store from the loaded rows and saves
  * every edit through `ArtSyncQueue` (spec section 5). Errors show as toasts.
+ *
+ * Decision: a store entry that already holds the project is never reseeded (`seedProject`), so a
+ * remount cannot overwrite edits still queued or waiting on the debounce; a hard reload is what
+ * refreshes the project from the server.
  */
 function queueOptions(collectionId: string, demo: boolean, setLocked: (locked: boolean) => void) {
   return {

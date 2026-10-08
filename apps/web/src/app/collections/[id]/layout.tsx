@@ -51,7 +51,7 @@ export default async function CollectionLayout({ children, params }: Props) {
             status={collection.status}
             projectType={collection.project_type}
             demo={demo}
-            artDeferred={demo ? sampleArtDeferred(undefined) : false}
+            artDeferred={demo ? sampleArtDeferred(undefined) : collection.art_deferred}
           />
         </div>
         <main className="flex flex-1 flex-col">{children}</main>

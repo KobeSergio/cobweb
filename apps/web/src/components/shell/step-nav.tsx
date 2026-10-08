@@ -51,13 +51,9 @@ export function StageNav({ collectionId, status, projectType, demo, artDeferred 
   const deferred = artDeferred || sampleDeferred
   const withScenario = (href: string) => (sampleDeferred ? `${href}?art=deferred` : href)
   const currentRef = useRef<HTMLAnchorElement>(null)
-  // Seam: confirming only sets the sample scenario until Phase 3 adds the collection's column, so the
-  // button shows in sample mode only, as it did in the Art screens' headers.
+  // Shown while the Art stage is open for editing and the art is not deferred yet.
   const finishLater =
-    demo &&
-    selectedStage === 'art' &&
-    !deferred &&
-    !isStageReadOnly(status, 'art', { demo, artDeferred: deferred })
+    selectedStage === 'art' && !deferred && !isStageReadOnly(status, 'art', { demo, artDeferred: deferred })
 
   // On narrow screens the row scrolls; keep the stage being viewed in sight.
   useEffect(() => {
@@ -116,7 +112,7 @@ export function StageNav({ collectionId, status, projectType, demo, artDeferred 
       </nav>
       {finishLater && (
         <div className="shrink-0">
-          <FinishLaterAction collectionId={collectionId} />
+          <FinishLaterAction collectionId={collectionId} demo={demo} />
         </div>
       )}
     </div>

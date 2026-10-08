@@ -11,7 +11,7 @@ import { Stat, StatGroup } from '@cobweb/ui/components/stat'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@cobweb/ui/components/tabs'
 import type { Tables } from '@/lib/database.types'
 import type { ArtRule, Collection, GeneratedToken, Layer, TraitCounts } from '@/lib/demo'
-import { artSubStepHref, flowNeighbours } from '@/lib/steps'
+import { artSubStepHref, flowNeighbours, isDeployed } from '@/lib/steps'
 import { ConfirmDialog, type ConfirmRequest } from './confirm-dialog'
 import { DeferredArtNotice } from './finish-later'
 import { Composite } from './composite'
@@ -104,7 +104,13 @@ export function GenerateScreen({
   return (
     <div className="flex flex-1 flex-col gap-6">
       {readOnly && <ReadOnlyNotice what="the generated tokens" />}
-      {artDeferred && <DeferredArtNotice collectionId={collection.id} />}
+      {artDeferred && (
+        <DeferredArtNotice
+          collectionId={collection.id}
+          demo={sync.demo}
+          deployed={isDeployed(collection.status)}
+        />
+      )}
 
       {/* The control strip: where the set stands, and the one generate action. */}
       <section aria-label="Generation" className="bg-card overflow-hidden rounded-xl border shadow-raised">
@@ -314,7 +320,11 @@ export function GenerateScreen({
 
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
       <GenerateFooter
-        previous={artDeferred && previous ? { ...previous, href: `${previous.href}?art=deferred` } : previous}
+        previous={
+          artDeferred && sync.demo && previous
+            ? { ...previous, href: `${previous.href}?art=deferred` }
+            : previous
+        }
         // Deferred: continuing locks the real set, the second Lock and upload run.
         next={next}
         blockedReason={readOnly ? null : blockedReason}

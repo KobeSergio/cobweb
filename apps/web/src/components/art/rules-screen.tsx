@@ -17,7 +17,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from '@cobweb/ui/components/toggle-group'
 import type { Tables } from '@/lib/database.types'
 import type { ArtRule, Collection, Layer, RuleConflict, RuleKind } from '@/lib/demo'
-import { artSubStepHref, flowNeighbours } from '@/lib/steps'
+import { artSubStepHref, flowNeighbours, isDeployed } from '@/lib/steps'
 import { StageFooter } from '@/components/shell/stage-footer'
 import { CollectionSwitcher } from './collections/collection-switcher'
 import { useCollections } from './collections/use-collections'
@@ -80,7 +80,8 @@ export function RulesScreen({
   const [highlighted, setHighlighted] = useState<string[]>([])
   const timer = useRef<number | undefined>(undefined)
   const { previous, next } = flowNeighbours(collection.id, collection.project_type, 'art/rules')
-  const deferredNext = artDeferred && next ? { ...next, href: `${next.href}?art=deferred` } : next
+  const deferredNext =
+    artDeferred && sync.demo && next ? { ...next, href: `${next.href}?art=deferred` } : next
 
   const inConflict = new Set(conflicts.flatMap((conflict) => conflict.ruleIds))
   const shown = filter === 'all' ? rules : rules.filter((rule) => rule.kind === filter)
@@ -134,7 +135,13 @@ export function RulesScreen({
   return (
     <div className="flex flex-1 flex-col gap-6">
       {readOnly && <ReadOnlyNotice what="the rules" />}
-      {artDeferred && <DeferredArtNotice collectionId={collection.id} />}
+      {artDeferred && (
+        <DeferredArtNotice
+          collectionId={collection.id}
+          demo={sync.demo}
+          deployed={isDeployed(collection.status)}
+        />
+      )}
       <CollectionSwitcher control={collections} readOnly={readOnly} />
       {!readOnly && editor.breaking.length > 0 && (
         <Alert variant="warning">
@@ -269,7 +276,11 @@ export function RulesScreen({
       />
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
       <StageFooter
-        previous={artDeferred && previous ? { ...previous, href: `${previous.href}?art=deferred` } : previous}
+        previous={
+          artDeferred && sync.demo && previous
+            ? { ...previous, href: `${previous.href}?art=deferred` }
+            : previous
+        }
         // While a conflict exists, Continue opens the conflict dialog first (in `ConflictWarning`).
         next={conflicts.length > 0 ? undefined : deferredNext}
         extra={

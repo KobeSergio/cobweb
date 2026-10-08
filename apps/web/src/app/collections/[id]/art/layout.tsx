@@ -1,6 +1,7 @@
 import { ArtSyncProvider } from '@/components/art/state/art-sync'
 import { ArtLiveNotice } from '@/components/shell/art-live-notice'
 import { ArtRail } from '@/components/shell/art-rail'
+import { loadArtProject } from '@/lib/art/load'
 import { requireOwnedCollection } from '@/lib/auth'
 import { sampleArtDeferred } from '@/lib/demo'
 import { artSubSteps, isDemoMode, isDeployed } from '@/lib/steps'
@@ -17,7 +18,7 @@ export default async function ArtLayout({ children, params }: Props) {
   const { id } = await params
   const collection = await requireOwnedCollection(id)
   const demo = isDemoMode()
-  const artDeferred = demo ? sampleArtDeferred(undefined) : false
+  const artDeferred = demo ? sampleArtDeferred(undefined) : collection.art_deferred
   const notice = (
     <ArtLiveNotice
       collectionId={collection.id}
@@ -26,8 +27,12 @@ export default async function ArtLayout({ children, params }: Props) {
       artDeferred={artDeferred}
     />
   )
+  // A real generative project seeds the browser store from its rows; sample mode seeds each screen
+  // from the sample data, and 1/1 and single asset projects keep their files on the Assets screen.
+  const initial =
+    !demo && collection.project_type === 'generative' ? await loadArtProject(collection) : undefined
   const content = (
-    <ArtSyncProvider collectionId={collection.id} demo={demo}>
+    <ArtSyncProvider collectionId={collection.id} demo={demo} initial={initial}>
       {children}
     </ArtSyncProvider>
   )

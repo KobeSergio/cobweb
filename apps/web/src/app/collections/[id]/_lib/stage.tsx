@@ -25,9 +25,10 @@ export type SearchParams = Promise<Record<string, string | string[] | undefined>
  * already called `requireOwnedCollection`). `path` is the screen's path under the collection,
  * e.g. `art/rules`.
  *
- * `artDeferred` ("Finish the art later", MASTER_PLAN, Flow: pre-reveal) comes from the sample data in sample mode,
- * where `sample.art` (the page's `?art=` param) can pick the deferred scenario. Outside sample
- * mode it is false until Phase 3 adds the collection's column.
+ * `artDeferred` ("Finish the art later", MASTER_PLAN, Flow: pre-reveal) is the collection's
+ * `art_deferred`; in sample mode it comes from the sample data, where `sample.art` (the page's
+ * `?art=` param) picks the deferred scenario. The Art screens are read only once the art is locked
+ * (`art_locked_at`), whatever the status says.
  */
 export function stageContext(
   collection: Tables<'collections'>,
@@ -36,12 +37,16 @@ export function stageContext(
   sample: { art?: string } = {},
 ) {
   const demo = isDemoMode()
-  const artDeferred = demo ? sampleArtDeferred(sample.art) : false
+  const artDeferred = demo ? sampleArtDeferred(sample.art) : collection.art_deferred
+  const readOnly =
+    !demo && stage === 'art'
+      ? collection.art_locked_at !== null
+      : isStageReadOnly(collection.status, stage, { demo, artDeferred })
   return {
     demo,
     artDeferred,
     access: stageAccess(collection.status, stage, { demo, artDeferred }),
-    readOnly: isStageReadOnly(collection.status, stage, { demo, artDeferred }),
+    readOnly,
     /** "Stage 2 of 4" for a build stage; none for Manage drop, which is not a stage. */
     eyebrow: stageIndex(stage) === -1 ? undefined : `Stage ${stageIndex(stage) + 1} of ${STAGES.length}`,
     ...flowNeighbours(collection.id, collection.project_type, path),
