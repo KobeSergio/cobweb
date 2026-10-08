@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run --passWithNoTests",
-    "verify:local": "node scripts/verify-local.ts"
+    "verify:local": "node scripts/verify-local.ts",
+    "verify:storage": "node --conditions=react-server scripts/verify-storage.ts"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
