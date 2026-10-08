@@ -28,6 +28,7 @@ import { ConflictWarning } from './rules/conflict-warning'
 import { RuleDialog, type RuleDialogState } from './rules/rule-dialog'
 import { RuleRow } from './rules/rule-row'
 import { useRulesEditor } from './rules/use-rules-editor'
+import { useArtSync } from './state/art-sync'
 import { collectionOfTrait, rulesOf } from './state/collection-edits'
 import { layersOf } from './state/layer-edits'
 import { RULE_KINDS, ruleSentence } from './state/rule-logic'
@@ -59,9 +60,11 @@ export function RulesScreen({
   layers,
   rules: seedRules,
   conflicts: seedConflicts,
-  readOnly,
+  readOnly: readOnlyProp,
   artDeferred = false,
 }: RulesScreenProps) {
+  const sync = useArtSync()
+  const readOnly = readOnlyProp || sync.locked
   const collections = useCollections(collection.id, collection.name, {
     collections: seedCollections,
     layers,
@@ -256,9 +259,11 @@ export function RulesScreen({
             saved('Rule saved', editor.edit(id, draft))
             highlight([id])
           } else {
-            const added = editor.add(draft)
-            highlight([added.id])
-            saved('Rule added', added.broken)
+            void editor.add(draft).then((added) => {
+              if (!added) return
+              highlight([added.id])
+              saved('Rule added', added.broken)
+            })
           }
         }}
       />

@@ -1,18 +1,25 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
+import { addRule, deleteRule, updateRule } from '@/app/actions/art/rules'
+import type { ActionResult } from '@/lib/art/result'
 import type { ArtRule, Layer, RuleConflict } from '@/lib/demo'
 import { buildTraitIndex } from '../lib/trait-index'
 import { useArtProject } from '../state/art-store'
+import { useArtSync } from '../state/art-sync'
 import { pruneRules } from '../state/layer-edits'
 import { activeRules, analyseRules, isBidirectional } from '../state/rule-logic'
 import { tokensBreakingRules } from '../state/token-logic'
 
 export type RuleDraft = Omit<ArtRule, 'id' | 'bidirectional'>
 
+/** Sample mode names new rules itself; saved rules take the database's id. */
+let sampleRules = 0
+
 /**
  * The rules of the project and what the analyser says about them. Until anything changes, the
  * conflicts are the ones the page was given; after an edit they are recomputed in the browser.
+ * Every edit is saved through `useArtSync()`; a new rule shows once the database has given it its id.
  */
 export function useRulesEditor(
   collectionId: string,
@@ -20,7 +27,8 @@ export function useRulesEditor(
   seedRules: ArtRule[],
   seedConflicts: RuleConflict[],
 ) {
-  const [project, update] = useArtProject(collectionId, { layers: seedLayers, rules: seedRules })
+  const sync = useArtSync()
+  const [project] = useArtProject(collectionId, { layers: seedLayers, rules: seedRules })
   const layers = project.layers ?? seedLayers
   const index = useMemo(() => buildTraitIndex(layers), [layers])
   // Rules pointing at traits deleted on the Layers step are dropped here.
@@ -33,7 +41,6 @@ export function useRulesEditor(
     () => (untouched ? seedConflicts : analyseRules(layers, rules, index)),
     [untouched, seedConflicts, layers, rules, index],
   )
-  const [counter, setCounter] = useState(1)
   const tokens = project.tokens ?? null
 
   /**
@@ -48,10 +55,10 @@ export function useRulesEditor(
     [tokens, rules, conflicts],
   )
 
-  /** Saves the rules and returns how many generated tokens break them afterwards. */
-  const write = (next: ArtRule[]) => {
-    update((p) => ({ ...p, rules: next }))
-    return breakingWith(next).length
+  /** Shows the rules at once, saves the change, and returns how many generated tokens break them. */
+  const write = (next: (current: ArtRule[]) => ArtRule[], persist: () => Promise<ActionResult<unknown>>) => {
+    void sync.run({ apply: (p) => ({ ...p, rules: next(p.rules ?? seedRules) }), persist })
+    return breakingWith(next(rules)).length
   }
 
   return {
@@ -62,21 +69,33 @@ export function useRulesEditor(
     hasTokens: !!tokens,
     /** Ids of generated tokens that break the current rules. */
     breaking,
-    /** Adds a rule; returns its id and how many generated tokens now break the rules. */
-    add: (draft: RuleDraft) => {
-      const id = `rule-new-${Date.now().toString(36)}-${counter}`
-      setCounter((n) => n + 1)
-      const broken = write([...rules, { ...draft, id, bidirectional: isBidirectional(draft.kind) }])
-      return { id, broken }
+    /** Adds a rule once it is saved; its id and how many generated tokens then break the rules, or null. */
+    add: async (draft: RuleDraft): Promise<{ id: string; broken: number } | null> => {
+      let id = ''
+      const added = await sync.create<{ id: string }>({
+        persist: () => addRule(collectionId, draft),
+        apply: (p, data) => {
+          id = data?.id ?? `rule-new-${Date.now().toString(36)}-${++sampleRules}`
+          const rule: ArtRule = { ...draft, id, bidirectional: isBidirectional(draft.kind) }
+          return { ...p, rules: [...(p.rules ?? seedRules), rule] }
+        },
+      })
+      return added ? { id, broken: breakingWith(sync.read().rules ?? []).length } : null
     },
     /** Saves a rule; returns how many generated tokens now break the rules. */
     edit: (id: string, draft: RuleDraft) =>
       write(
-        rules.map((rule) =>
-          rule.id === id ? { ...rule, ...draft, bidirectional: isBidirectional(draft.kind) } : rule,
-        ),
+        (current) =>
+          current.map((rule) =>
+            rule.id === id ? { ...rule, ...draft, bidirectional: isBidirectional(draft.kind) } : rule,
+          ),
+        () => updateRule(collectionId, id, draft),
       ),
-    remove: (id: string) => write(rules.filter((rule) => rule.id !== id)),
+    remove: (id: string) =>
+      write(
+        (current) => current.filter((rule) => rule.id !== id),
+        () => deleteRule(collectionId, id),
+      ),
   }
 }
 

@@ -1,4 +1,4 @@
-import type { TraitIndex } from '@cobweb/dna'
+import type { Trait, TraitIndex } from '@cobweb/dna'
 
 export {
   attributeCounts,
@@ -38,4 +38,10 @@ export function formatPercent(value: number): string {
 
 export function formatCount(value: number): string {
   return Math.round(value).toLocaleString('en-US')
+}
+
+/** The image a trait grid or chip shows: the thumbnail when there is one, else the full image. */
+export function traitThumbUrls(trait: Pick<Trait, 'imageUrl' | 'thumbnailUrl'>): string[] {
+  const url = trait.thumbnailUrl ?? trait.imageUrl
+  return url ? [url] : []
 }

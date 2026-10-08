@@ -6,7 +6,7 @@ import { layersOf, slug, uniqueId } from './layer-edits'
  * Pure edits on the project's collections (legacy "multi-collection": for example male and female).
  * Each collection has its own layers, rules and size; token ids run on across collections.
  *
- * Seam: in Phase 3 each becomes a server action on the project's collection rows.
+ * The hooks apply them through `useArtSync()`; saved collections take the database's ids.
  */
 
 /** Size a new collection starts at; the creator sets the real one on Generate. */
@@ -20,9 +20,13 @@ export function supplyOf(collections: Collection[]): number {
 export function addCollection(
   collections: Collection[],
   name: string,
+  id?: string,
 ): { collections: Collection[]; id: string } {
-  const id = uniqueId(slug(name), new Set(collections.map((collection) => collection.id)))
-  return { collections: [...collections, { id, name, size: NEW_COLLECTION_SIZE }], id }
+  const collectionId = id ?? uniqueId(slug(name), new Set(collections.map((collection) => collection.id)))
+  return {
+    collections: [...collections, { id: collectionId, name, size: NEW_COLLECTION_SIZE }],
+    id: collectionId,
+  }
 }
 
 export function renameCollection(collections: Collection[], id: string, name: string): Collection[] {

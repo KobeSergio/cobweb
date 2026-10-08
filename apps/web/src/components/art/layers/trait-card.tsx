@@ -15,7 +15,7 @@ import { Slider } from '@cobweb/ui/components/slider'
 import { cn } from '@cobweb/ui/lib/utils'
 import type { Trait } from '@/lib/demo'
 import { Composite } from '../composite'
-import { formatCount } from '../lib/trait-index'
+import { formatCount, traitThumbUrls } from '../lib/trait-index'
 
 type Props = {
   trait: Trait
@@ -105,7 +105,7 @@ export function TraitCard({
         className="focus-visible:ring-ring relative block outline-none focus-visible:ring-2 focus-visible:ring-inset"
       >
         <Composite
-          urls={trait.imageUrl ? [trait.imageUrl] : []}
+          urls={traitThumbUrls(trait)}
           alt={trait.blank ? 'Blank: this layer is left out' : trait.name}
           seed={trait.id}
           label={trait.blank ? 'Blank' : undefined}

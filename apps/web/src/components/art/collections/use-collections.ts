@@ -1,11 +1,14 @@
 'use client'
 
 import { useState } from 'react'
+import { addArtCollection, deleteArtCollection, renameArtCollection } from '@/app/actions/art/art-collections'
+import { startOver } from '@/app/actions/art/project'
 import type { Collection } from '@/lib/demo'
 import type { ConfirmRequest } from '../confirm-dialog'
 import { buildTraitIndex } from '../lib/trait-index'
 import type { NameRequest } from '../name-dialog'
 import { useArtProject, type ArtSeed } from '../state/art-store'
+import { useArtSync } from '../state/art-sync'
 import { addCollection, renameCollection, rulesOf } from '../state/collection-edits'
 import { layersOf, pruneRules } from '../state/layer-edits'
 import { deleteTokens } from '../state/token-logic'
@@ -17,12 +20,14 @@ function plural(count: number, one: string, many = `${one}s`) {
 /**
  * The project's collections and the one Layers and Rules are showing. Adding, renaming and
  * deleting a collection ask first; deleting removes its layers, its rules and its generated tokens
- * (the later ids move up, so ids stay 1 to N).
+ * (the later ids move up, so ids stay 1 to N). "Start over" empties the project's art. Every change
+ * is saved through `useArtSync()`; a new collection shows once the database has given it its id.
  *
  * `projectKey` is the Cobweb collection id the art belongs to; `tokenName` names the tokens.
  */
 export function useCollections(projectKey: string, tokenName: string, seed: ArtSeed) {
-  const [project, update] = useArtProject(projectKey, seed)
+  const sync = useArtSync()
+  const [project] = useArtProject(projectKey, seed)
   const collections: Collection[] = project.collections ?? seed.collections ?? []
   const activeId = collections.some((c) => c.id === project.activeCollectionId)
     ? project.activeCollectionId!
@@ -33,19 +38,25 @@ export function useCollections(projectKey: string, tokenName: string, seed: ArtS
   const [naming, setNaming] = useState<NameRequest | null>(null)
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
 
-  const select = (id: string) => update((p) => ({ ...p, activeCollectionId: id }))
+  const select = (id: string) => void sync.run({ apply: (p) => ({ ...p, activeCollectionId: id }) })
+
+  /** Adds a collection once it is saved and shows it; its id, or null when it could not be saved. */
+  const add = async (name: string): Promise<string | null> => {
+    let id = ''
+    const added = await sync.create<{ id: string }>({
+      persist: () => addArtCollection(projectKey, name),
+      apply: (p, data) => {
+        const result = addCollection(p.collections ?? collections, name, data?.id)
+        id = result.id
+        return { ...p, collections: result.collections, activeCollectionId: result.id }
+      },
+    })
+    return added ? id : null
+  }
 
   /** The shown collection's id, creating one named after the project when there is none yet. */
-  const ensureOne = (name: string): string => {
-    if (activeId) return activeId
-    let id = ''
-    update((p) => {
-      const result = addCollection(p.collections ?? collections, name)
-      id = result.id
-      return { ...p, collections: result.collections, activeCollectionId: result.id }
-    })
-    return id
-  }
+  const ensureOne = (name: string): Promise<string | null> =>
+    activeId ? Promise.resolve(activeId) : add(name)
 
   return {
     collections,
@@ -68,11 +79,7 @@ export function useCollections(projectKey: string, tokenName: string, seed: ArtS
         initial: '',
         confirmLabel: 'Add collection',
         taken: collections.map((c) => c.name),
-        onSubmit: (name) =>
-          update((p) => {
-            const result = addCollection(p.collections ?? collections, name)
-            return { ...p, collections: result.collections, activeCollectionId: result.id }
-          }),
+        onSubmit: (name) => void add(name),
       }),
 
     askRename: (collection: Collection) =>
@@ -83,10 +90,13 @@ export function useCollections(projectKey: string, tokenName: string, seed: ArtS
         confirmLabel: 'Save name',
         taken: collections.filter((c) => c.id !== collection.id).map((c) => c.name),
         onSubmit: (name) =>
-          update((p) => ({
-            ...p,
-            collections: renameCollection(p.collections ?? collections, collection.id, name),
-          })),
+          void sync.run({
+            apply: (p) => ({
+              ...p,
+              collections: renameCollection(p.collections ?? collections, collection.id, name),
+            }),
+            persist: () => renameArtCollection(projectKey, collection.id, name),
+          }),
       }),
 
     askDelete: (collection: Collection) => {
@@ -112,29 +122,70 @@ export function useCollections(projectKey: string, tokenName: string, seed: ArtS
         confirmLabel: 'Delete collection',
         destructive: true,
         onConfirm: () =>
-          update((p) => {
-            const allLayers = p.layers ?? seed.layers ?? []
-            const keptLayers = allLayers.filter((layer) => layer.collectionId !== collection.id)
-            const keptIds = new Set(keptLayers.flatMap((layer) => layer.traits.map((trait) => trait.id)))
-            const current = p.tokens === undefined ? seed.tokens : p.tokens
-            const drop = new Set(
-              (current ?? []).filter((t) => t.collectionId === collection.id).map((t) => t.id),
-            )
-            const nextCollections = (p.collections ?? collections).filter((c) => c.id !== collection.id)
-            return {
-              ...p,
-              collections: nextCollections,
-              activeCollectionId: nextCollections[0]?.id,
-              layers: keptLayers,
-              rules: pruneRules(p.rules ?? seed.rules ?? [], keptIds),
-              tokens: current
-                ? deleteTokens(current, drop, {
-                    tokenName: p.tokenName ?? tokenName,
-                    index: buildTraitIndex(keptLayers),
-                  })
-                : current,
-            }
+          void sync.run({
+            apply: (p) => {
+              const allLayers = p.layers ?? seed.layers ?? []
+              const keptLayers = allLayers.filter((layer) => layer.collectionId !== collection.id)
+              const keptIds = new Set(keptLayers.flatMap((layer) => layer.traits.map((trait) => trait.id)))
+              const current = p.tokens === undefined ? seed.tokens : p.tokens
+              const drop = new Set(
+                (current ?? []).filter((t) => t.collectionId === collection.id).map((t) => t.id),
+              )
+              const nextCollections = (p.collections ?? collections).filter((c) => c.id !== collection.id)
+              return {
+                ...p,
+                collections: nextCollections,
+                activeCollectionId: nextCollections[0]?.id,
+                layers: keptLayers,
+                rules: pruneRules(p.rules ?? seed.rules ?? [], keptIds),
+                atLeastOne: (p.atLeastOne ?? []).filter((group) => group.collectionId !== collection.id),
+                tokens: current
+                  ? deleteTokens(current, drop, {
+                      tokenName: p.tokenName ?? tokenName,
+                      index: buildTraitIndex(keptLayers),
+                    })
+                  : current,
+              }
+            },
+            persist: () => deleteArtCollection(projectKey, collection.id),
           }),
+      })
+    },
+
+    /** Deletes every collection, layer, trait image, rule and token of the project, and frees the canvas. */
+    askStartOver: () => {
+      const allLayers = project.layers ?? seed.layers ?? []
+      const images = allLayers.reduce(
+        (n, layer) => n + layer.traits.filter((trait) => !trait.blank).length,
+        0,
+      )
+      const tokens = (project.tokens === undefined ? seed.tokens : project.tokens)?.length ?? 0
+      setConfirm({
+        title: 'Start over?',
+        body: [
+          `Every collection, its ${plural(allLayers.length, 'layer')} and ${plural(images, 'trait image')} are deleted, with the rules${tokens ? ` and the ${plural(tokens, 'generated token')}` : ''}. This cannot be undone.`,
+          'Layers then opens on the folder upload, and the images can be any size again.',
+        ],
+        confirmLabel: 'Delete everything',
+        destructive: true,
+        // The art disappears once the database has deleted it, not before.
+        onConfirm: () => {
+          sync.debounce.flushAll()
+          void sync.create<undefined>({
+            persist: () => startOver(projectKey),
+            apply: (p) => ({
+              ...p,
+              collections: [],
+              activeCollectionId: undefined,
+              layers: [],
+              rules: [],
+              atLeastOne: [],
+              tokens: null,
+              canvas: null,
+              staleNote: null,
+            }),
+          })
+        },
       })
     },
   }

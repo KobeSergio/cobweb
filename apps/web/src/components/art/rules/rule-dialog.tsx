@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@cobweb/ui/lib/utils'
 import type { ArtRule, Layer, RuleKind, Trait } from '@/lib/demo'
 import { Composite } from '../composite'
-import { joinOr, traitName, type TraitIndex } from '../lib/trait-index'
+import { joinOr, traitName, traitThumbUrls, type TraitIndex } from '../lib/trait-index'
 import { findDuplicate, RULE_KINDS, ruleSentence } from '../state/rule-logic'
 import type { RuleDraft } from './use-rules-editor'
 
@@ -55,7 +55,7 @@ function TraitPicker({
               )}
             >
               <Composite
-                urls={trait.imageUrl ? [trait.imageUrl] : []}
+                urls={traitThumbUrls(trait)}
                 alt=""
                 seed={trait.id}
                 label={trait.blank ? 'Blank' : undefined}

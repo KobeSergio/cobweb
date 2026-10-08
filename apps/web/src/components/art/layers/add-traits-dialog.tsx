@@ -40,6 +40,9 @@ function nameProblem(name: string, taken: string[], batch: string[]): string | n
 
 type Canvas = { width: number; height: number } | null
 
+/** A trait image picked here: its name, its preview URL and the file, which the editor uploads. */
+export type NewTrait = { name: string; imageUrl: string; file: File }
+
 /** The upload rules, said where the creator uploads. */
 export function UploadRules({ canvas, className }: { canvas: Canvas; className?: string }) {
   return (
@@ -131,7 +134,7 @@ export function AddTraitsDialog({
   /** Files dropped on the grid before the dialog opened. */
   initialFiles: File[]
   canvas: Canvas
-  onAdd: (items: { name: string; imageUrl: string }[], canvas: Canvas) => void
+  onAdd: (items: NewTrait[], canvas: Canvas) => void
 }) {
   const [checked, setChecked] = useState<CheckedFile[]>([])
   const [names, setNames] = useState<Record<string, string>>({})
@@ -303,7 +306,11 @@ export function AddTraitsDialog({
               onClick={() => {
                 const first = valid[0]
                 onAdd(
-                  valid.map((entry) => ({ name: names[entry.key]!.trim(), imageUrl: entry.url })),
+                  valid.map((entry) => ({
+                    name: names[entry.key]!.trim(),
+                    imageUrl: entry.url,
+                    file: entry.file,
+                  })),
                   first?.width ? { width: first.width, height: first.height! } : null,
                 )
                 releaseChecked(checked.filter((entry) => entry.errors.length > 0))

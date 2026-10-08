@@ -1,8 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { importLayers } from '@/app/actions/art/layers'
+import type { ImportResult } from '@/lib/art/schemas'
 import { checkImageFiles, LAYER_IMAGE_RULES } from '../../lib/image-checks'
-import { useArtProject } from '../../state/art-store'
+import { useArtSync } from '../../state/art-sync'
 import { createUploader } from '../../uploads/create-uploader'
 import { queueTotals, useUploadQueue } from '../../uploads/upload-queue'
 import {
@@ -12,7 +14,7 @@ import {
   type DetectedProject,
   type PathedFile,
 } from './folder-tree'
-import { mergeUpload, type UploadedImage } from './to-layers'
+import { applyImport, importPayload, mergeUpload, type UploadedImage } from './to-layers'
 
 /** One image's checks: the preview URL, its pixel size and any reasons it cannot be used. */
 export type TraitCheck = { url: string; errors: string[] }
@@ -28,7 +30,7 @@ const CHECK_BATCH = 40
  * to the Art screens (the shared art project, keyed by `collectionId`).
  */
 export function useFolderUpload(collectionId: string, projectName: string, activeCollectionId?: string) {
-  const [, update] = useArtProject(collectionId, {})
+  const sync = useArtSync()
   const uploader = useMemo(() => createUploader({ collectionId, kind: 'layer_image' }), [collectionId])
   const { queue, items } = useUploadQueue(4, uploader)
   const [phase, setPhase] = useState<FolderPhase>('pick')
@@ -36,6 +38,7 @@ export function useFolderUpload(collectionId: string, projectName: string, activ
   const [checks, setChecks] = useState<ReadonlyMap<string, TraitCheck>>(new Map())
   const [checked, setChecked] = useState(0)
   const [canvas, setCanvas] = useState<{ width: number; height: number } | null>(null)
+  const [saving, setSaving] = useState(false)
   const urls = useRef<string[]>([])
   const run = useRef(0)
 
@@ -117,8 +120,11 @@ export function useFolderUpload(collectionId: string, projectName: string, activ
   const totals = queueTotals(items)
   const complete = phase === 'uploading' && totals.complete
 
-  /** Hands the uploaded layers to the Art screens; the Layers screen then replaces this upload. */
-  const finish = useCallback(() => {
+  /**
+   * Saves the uploaded layers in one transaction, then shows them with the ids the database gave
+   * them; the Layers screen then replaces this upload. A refused save keeps the review on screen.
+   */
+  const finish = useCallback(async () => {
     if (!detected) return
     const names = new Map(
       detected.collections.flatMap((c) =>
@@ -134,14 +140,22 @@ export function useFolderUpload(collectionId: string, projectName: string, activ
         uploadId: item.record.id,
       })
     }
+    const payload = importPayload(detected, images, activeCollectionId)
+    setSaving(true)
+    const saved = await sync.create<ImportResult>({
+      persist: () => importLayers(collectionId, payload),
+      apply: (project, data) => ({
+        ...project,
+        ...(data
+          ? applyImport(project, payload, data)
+          : mergeUpload(project, detected, images, activeCollectionId)),
+        canvas: project.canvas ?? canvas,
+      }),
+    })
+    setSaving(false)
     // The traits now point at the stored files, so the previews can go.
-    release()
-    update((project) => ({
-      ...project,
-      ...mergeUpload(project, detected, images, activeCollectionId),
-      canvas: project.canvas ?? canvas,
-    }))
-  }, [detected, items, release, update, activeCollectionId, canvas])
+    if (saved) release()
+  }, [detected, items, release, sync, collectionId, activeCollectionId, canvas])
 
   const rejected = detected ? countTraits(detected) - valid.length : 0
   return {
@@ -150,6 +164,7 @@ export function useFolderUpload(collectionId: string, projectName: string, activ
     checks,
     checked,
     canvas,
+    saving,
     valid: valid.length,
     rejected,
     queue,

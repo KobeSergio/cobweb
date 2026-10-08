@@ -1,11 +1,12 @@
 'use client'
 
-import { EllipsisIcon, PencilIcon, PlusIcon, Trash2Icon } from 'lucide-react'
+import { EllipsisIcon, PencilIcon, PlusIcon, RotateCcwIcon, Trash2Icon } from 'lucide-react'
 import { Button } from '@cobweb/ui/components/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@cobweb/ui/components/dropdown-menu'
 import {
@@ -29,14 +30,17 @@ const ADD = '__add-collection'
  * it to rename or delete the shown collection.
  *
  * Hidden until the project has layers: on a first visit the folder upload decides the collections
- * from the folder structure, as the legacy app did.
+ * from the folder structure, as the legacy app did. On Layers the menu also offers "Start over",
+ * which empties the project's art after a confirmation.
  */
 export function CollectionSwitcher({
   control,
   readOnly,
+  onStartOver,
 }: {
   control: CollectionsControl
   readOnly: boolean
+  onStartOver?: () => void
 }) {
   const { collections, activeId, active, hasLayers } = control
   if (!hasLayers || collections.length === 0) return null
@@ -99,6 +103,15 @@ export function CollectionSwitcher({
                 <Trash2Icon />
                 {several ? `Delete ${active.name}` : 'A project keeps at least one collection'}
               </DropdownMenuItem>
+              {onStartOver && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onSelect={onStartOver}>
+                    <RotateCcwIcon />
+                    Start over
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         )}

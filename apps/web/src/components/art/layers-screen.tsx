@@ -31,6 +31,7 @@ import { useLayersEditor } from './layers/use-layers-editor'
 import { buildTraitIndex, compositeUrls, weightedTraits } from './lib/trait-index'
 import { NameDialog } from './name-dialog'
 import { ReadOnlyNotice } from './read-only-notice'
+import { useArtSync } from './state/art-sync'
 import { newSeed } from './state/token-logic'
 
 export type LayersScreenProps = {
@@ -77,9 +78,12 @@ export function LayersScreen({
   collections: seedCollections,
   layers: seedLayers,
   traitCounts,
-  readOnly,
+  readOnly: readOnlyProp,
   artDeferred = false,
 }: LayersScreenProps) {
+  const sync = useArtSync()
+  // A save that came back locked turns every control read only at once.
+  const readOnly = readOnlyProp || sync.locked
   const collections = useCollections(collection.id, collection.name, {
     collections: seedCollections,
     layers: seedLayers,
@@ -134,7 +138,7 @@ export function LayersScreen({
   return (
     <div className="flex flex-1 flex-col gap-6">
       {readOnly && <ReadOnlyNotice what="the layers and their rarity" />}
-      <CollectionSwitcher control={collections} readOnly={readOnly} />
+      <CollectionSwitcher control={collections} readOnly={readOnly} onStartOver={collections.askStartOver} />
       {artDeferred && <DeferredArtNotice collectionId={collection.id} />}
       {!readOnly && editor.staleNote && (
         <Alert variant="warning">
@@ -149,7 +153,7 @@ export function LayersScreen({
           collectionId={collection.id}
           projectName={collection.name}
           activeCollectionId={collections.hasLayers ? collections.activeId : undefined}
-          onAddLayer={() => editor.askAddLayer(setSelectedId, collections.ensureOne(collection.name))}
+          onAddLayer={() => editor.askAddLayer(setSelectedId, () => collections.ensureOne(collection.name))}
         />
       ) : layers.length === 0 ? (
         <Empty className="bg-card border py-16">
@@ -231,7 +235,7 @@ export function LayersScreen({
         layer={layers.find((layer) => layer.id === upload?.layerId) ?? null}
         initialFiles={upload?.files ?? []}
         canvas={editor.canvas}
-        onAdd={(items, canvas) => upload && editor.addTraits(upload.layerId, items, canvas)}
+        onAdd={(items, canvas) => upload && void editor.addTraits(upload.layerId, items, canvas)}
       />
       <ConfirmDialog request={editor.confirm} onClose={editor.closeConfirm} />
       <NameDialog request={editor.naming} onClose={editor.closeNaming} />

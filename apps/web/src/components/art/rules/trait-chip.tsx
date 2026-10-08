@@ -1,5 +1,5 @@
 import { cn } from '@cobweb/ui/lib/utils'
-import type { TraitEntry } from '../lib/trait-index'
+import { traitThumbUrls, type TraitEntry } from '../lib/trait-index'
 import { Composite } from '../composite'
 
 /** A trait as it reads inside a sentence: a small thumbnail and its name. */
@@ -21,7 +21,7 @@ export function TraitChip({
       )}
     >
       <Composite
-        urls={entry?.trait.imageUrl ? [entry.trait.imageUrl] : []}
+        urls={entry ? traitThumbUrls(entry.trait) : []}
         alt=""
         seed={entry?.trait.id ?? name}
         className="size-7 shrink-0 rounded-sm"

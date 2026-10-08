@@ -192,7 +192,7 @@ export function FolderUpload({
               traits to any layer later.
             </p>
           )}
-          <Button onClick={upload.finish}>
+          <Button onClick={() => void upload.finish()} disabled={upload.saving}>
             Set up layers
             <ArrowRightIcon />
           </Button>

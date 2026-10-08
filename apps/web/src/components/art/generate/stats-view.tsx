@@ -9,7 +9,7 @@ import { cn } from '@cobweb/ui/lib/utils'
 import { cappedShortfalls } from '@cobweb/dna'
 import type { Collection, GeneratedToken, Layer, TraitCounts } from '@/lib/demo'
 import { Composite } from '../composite'
-import { expectedCount, formatCount } from '../lib/trait-index'
+import { expectedCount, formatCount, traitThumbUrls } from '../lib/trait-index'
 
 /** Off by more than this share of the expected count, and by at least 3 tokens, reads as a deviation. */
 const TOLERANCE = 0.25
@@ -174,7 +174,7 @@ export function StatsView({
                         <th scope="row" className="py-2 pl-5 text-left font-normal">
                           <span className="flex min-w-0 items-center gap-2.5">
                             <Composite
-                              urls={trait.imageUrl ? [trait.imageUrl] : []}
+                              urls={traitThumbUrls(trait)}
                               alt=""
                               seed={trait.id}
                               className="size-7 shrink-0 rounded-sm border"

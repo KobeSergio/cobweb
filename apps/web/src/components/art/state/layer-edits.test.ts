@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { DEMO_LAYERS, DEMO_RULES, type Layer } from '@/lib/demo'
 import { roundWeight, weightsValid, weightTotal } from '../lib/trait-index'
-import { addTraits, deleteTrait, evenOut, evenWeights, pruneRules, setBlank } from './layer-edits'
+import {
+  addLayer,
+  addTraits,
+  deleteTrait,
+  evenOut,
+  evenWeights,
+  pruneGroups,
+  pruneRules,
+  restoreWeights,
+  setBlank,
+  setConstant,
+} from './layer-edits'
 
 function layer(weights: number[], extra: Partial<Layer> = {}): Layer {
   return {
@@ -109,6 +120,60 @@ describe('deleting a trait that rules refer to', () => {
     expect(rules.find((r) => r.id === 'rule-monocle-eyes')!.relatedTraitIds).toEqual([
       'eyes-sleepy',
       'eyes-squint',
+    ])
+  })
+})
+
+describe('server ids and rollbacks (art wiring)', () => {
+  it('takes the ids the database made for a new layer, its traits and its blank', () => {
+    const added = addLayer([layer([100])], 'c', 'Hats', 'uuid-hats')
+    expect(added.id).toBe('uuid-hats')
+    expect(added.layers.map((l) => l.id)).toEqual(['eyes', 'uuid-hats'])
+    const traits = addTraits(
+      added.layers,
+      'uuid-hats',
+      [
+        {
+          name: 'Cap',
+          imageUrl: '/api/uploads/u1',
+          thumbnailUrl: '/api/uploads/u1?variant=thumb',
+          uploadId: 'u1',
+        },
+      ],
+      ['uuid-cap'],
+    )
+    expect(traits.ids).toEqual(['uuid-cap'])
+    expect(traits.layers[1]!.traits[0]).toEqual({
+      id: 'uuid-cap',
+      layerId: 'uuid-hats',
+      name: 'Cap',
+      weight: 0,
+      blank: false,
+      imageUrl: '/api/uploads/u1',
+      thumbnailUrl: '/api/uploads/u1?variant=thumb',
+      uploadId: 'u1',
+    })
+    expect(setBlank(traits.layers, 'uuid-hats', true, 'uuid-none')[1]!.traits[0]!.id).toBe('uuid-none')
+  })
+
+  it('drops deleted traits from "at least one" groups, and a group left with one trait', () => {
+    const groups = [
+      { id: 'g1', collectionId: 'c', traitIds: ['a', 'b', 'c'] },
+      { id: 'g2', collectionId: 'c', traitIds: ['a', 'd'] },
+    ]
+    expect(pruneGroups(groups, new Set(['a', 'b']))).toEqual([
+      { id: 'g1', collectionId: 'c', traitIds: ['a', 'b'] },
+    ])
+  })
+
+  it('puts weights and constants back after a failed save', () => {
+    const base = layer([70, 30])
+    base.traits[1] = { ...base.traits[1]!, weight: 0, constant: 4 }
+    const changed = setConstant(evenOut([base], 'eyes'), 'eyes-1', null)
+    const restored = restoreWeights(changed, 'eyes', base.traits)
+    expect(restored[0]!.traits.map((t) => [t.weight, t.constant])).toEqual([
+      [70, undefined],
+      [0, 4],
     ])
   })
 })

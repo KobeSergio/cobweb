@@ -1,12 +1,12 @@
-import type { GeneratedToken, Layer, Trait } from '@/lib/demo'
+import type { AtLeastOne, GeneratedToken, Layer, Trait } from '@/lib/demo'
 
 /**
  * Pure edits on the layer stack. Every function returns new arrays and never touches the other
  * traits' weights: adding a trait starts it at 0%, deleting one leaves its share unassigned, and
  * only "Even out" redistributes (the legacy tool reset every weight on add or delete).
  *
- * Seam: in Phase 3 each of these becomes a server action on the layer and trait rows; the
- * screens keep calling them through `useArtProject().update`.
+ * The hooks apply them through `useArtSync()`, which saves each edit with its server action; ids
+ * made here are for sample mode, saved rows take the database's ids.
  */
 
 export function slug(name: string): string {
@@ -80,14 +80,15 @@ export function renameLayer(layers: Layer[], layerId: string, name: string): Lay
   return mapLayer(layers, layerId, (layer) => ({ ...layer, name }))
 }
 
-/** Adds a layer on top of one collection's stack. Its id is unique in the project. */
+/** Adds a layer on top of one collection's stack. `id` is the database's; sample mode makes one from the name. */
 export function addLayer(
   layers: Layer[],
   collectionId: string,
   name: string,
+  id?: string,
 ): { layers: Layer[]; id: string } {
-  const id = uniqueId(slug(name), new Set(layers.map((layer) => layer.id)))
-  const layer: Layer = { id, collectionId, name, position: 0, traits: [] }
+  const layerId = id ?? uniqueId(slug(name), new Set(layers.map((layer) => layer.id)))
+  const layer: Layer = { id: layerId, collectionId, name, position: 0, traits: [] }
   // Keep the collection's layers together: insert after its last layer.
   let last = -1
   layers.forEach((other, i) => {
@@ -95,7 +96,7 @@ export function addLayer(
   })
   const next = [...layers]
   next.splice(last === -1 ? layers.length : last + 1, 0, layer)
-  return { layers: positioned(next), id }
+  return { layers: positioned(next), id: layerId }
 }
 
 export function deleteLayer(layers: Layer[], layerId: string): Layer[] {
@@ -130,27 +131,39 @@ export function setConstant(layers: Layer[], traitId: string, count: number | nu
   }))
 }
 
-/** Adds traits to a layer at 0%, so the other weights stay as the creator set them. */
+export type TraitImage = { name: string; imageUrl: string; thumbnailUrl?: string; uploadId?: string }
+
+/** Adds traits to a layer at 0%, so the other weights stay as the creator set them. `ids` are the database's. */
 export function addTraits(
   layers: Layer[],
   layerId: string,
-  items: { name: string; imageUrl: string }[],
+  items: TraitImage[],
+  ids?: string[],
 ): { layers: Layer[]; ids: string[] } {
   const taken = new Set(layers.flatMap((layer) => layer.traits.map((trait) => trait.id)))
-  const ids: string[] = []
+  const made: string[] = []
   const next = mapLayer(layers, layerId, (layer) => ({
     ...layer,
     traits: [
       ...layer.traits,
-      ...items.map((item): Trait => {
-        const id = uniqueId(`${layer.id}-${slug(item.name)}`, taken)
+      ...items.map((item, i): Trait => {
+        const id = ids?.[i] ?? uniqueId(`${layer.id}-${slug(item.name)}`, taken)
         taken.add(id)
-        ids.push(id)
-        return { id, layerId: layer.id, name: item.name, weight: 0, blank: false, imageUrl: item.imageUrl }
+        made.push(id)
+        return {
+          id,
+          layerId: layer.id,
+          name: item.name,
+          weight: 0,
+          blank: false,
+          imageUrl: item.imageUrl,
+          ...(item.thumbnailUrl ? { thumbnailUrl: item.thumbnailUrl } : {}),
+          ...(item.uploadId ? { uploadId: item.uploadId } : {}),
+        }
       }),
     ],
   }))
-  return { layers: next, ids }
+  return { layers: next, ids: made }
 }
 
 export function deleteTrait(layers: Layer[], traitId: string): Layer[] {
@@ -184,14 +197,14 @@ export function evenOut(layers: Layer[], layerId: string): Layer[] {
   })
 }
 
-/** Adds the blank trait (at 0%, so nothing changes until it gets a share) or removes it. */
-export function setBlank(layers: Layer[], layerId: string, on: boolean): Layer[] {
+/** Adds the blank trait (at 0%, so nothing changes until it gets a share) or removes it. `id` is the database's. */
+export function setBlank(layers: Layer[], layerId: string, on: boolean, id?: string): Layer[] {
   const taken = new Set(layers.flatMap((layer) => layer.traits.map((trait) => trait.id)))
   return mapLayer(layers, layerId, (layer) => {
     if (!on) return { ...layer, traits: layer.traits.filter((trait) => !trait.blank) }
     if (layer.traits.some((trait) => trait.blank)) return layer
     const blank: Trait = {
-      id: uniqueId(`${layer.id}-none`, taken),
+      id: id ?? uniqueId(`${layer.id}-none`, taken),
       layerId: layer.id,
       name: 'None',
       weight: 0,
@@ -199,6 +212,37 @@ export function setBlank(layers: Layer[], layerId: string, on: boolean): Layer[]
       imageUrl: null,
     }
     return { ...layer, traits: [blank, ...layer.traits] }
+  })
+}
+
+/** The layer a trait belongs to. */
+export function layerOfTrait(layers: Layer[], traitId: string): Layer | undefined {
+  return layers.find((layer) => layer.traits.some((trait) => trait.id === traitId))
+}
+
+/** Puts a layer's weights and constants back as they were before a weight save that failed. */
+export function restoreWeights(layers: Layer[], layerId: string, traits: Trait[]): Layer[] {
+  const saved = new Map(traits.map((trait) => [trait.id, trait]))
+  return mapLayer(layers, layerId, (layer) => ({
+    ...layer,
+    traits: layer.traits.map((trait) => {
+      const was = saved.get(trait.id)
+      if (!was) return trait
+      const { constant: _dropped, ...rest } = trait
+      void _dropped
+      return was.constant === undefined
+        ? { ...rest, weight: was.weight }
+        : { ...rest, weight: was.weight, constant: was.constant }
+    }),
+  }))
+}
+
+/** Drops deleted traits from "at least one" groups, and groups left with fewer than two (as `art_prune` does). */
+export function pruneGroups(groups: AtLeastOne[], traitIds: ReadonlySet<string>): AtLeastOne[] {
+  return groups.flatMap((group) => {
+    const kept = group.traitIds.filter((id) => traitIds.has(id))
+    if (kept.length < 2) return []
+    return [kept.length === group.traitIds.length ? group : { ...group, traitIds: kept }]
   })
 }
 
