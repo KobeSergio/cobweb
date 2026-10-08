@@ -41,10 +41,35 @@ export async function saveTokenSet(
       } catch {
         // The sentence below already tells the creator to generate again.
       }
-      return { ...(result.error === LOCKED ? result : fail(SAVE_INCOMPLETE)), cleared: true }
+      // A lock refusal also refuses the clear, so the first chunk stays stored: not `cleared`, and the
+      // screen restores its snapshot and turns read only.
+      return result.error === LOCKED ? result : { ...fail(SAVE_INCOMPLETE), cleared: true }
     }
   }
   return first
+}
+
+/** The project token description as the database holds it. A null token description reads back as this. */
+export type StoredDescription = { current: string }
+
+/**
+ * Runs `next` after making the stored token description equal `wanted`. Tokens whose text is the
+ * project's are saved as null, which reads back as the stored description, so it must be stored
+ * first or those tokens would read back empty. A refusal of the description save is returned and
+ * `next` does not run.
+ */
+export async function afterStoringDescription<R extends ActionResult<unknown>>(
+  stored: StoredDescription,
+  wanted: string,
+  save: (description: string) => Promise<ActionResult<unknown>>,
+  next: () => Promise<R>,
+): Promise<R | { ok: false; error: string }> {
+  if (stored.current !== wanted) {
+    const result = await save(wanted)
+    if (!result.ok) return fail(result.error)
+    stored.current = wanted
+  }
+  return next()
 }
 
 /**

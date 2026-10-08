@@ -60,6 +60,8 @@ describe('token operations', () => {
   it('sends a null description when it equals the project description', () => {
     expect(tokenInput(token(1, ['a'], 'Same'), 'Same').description).toBeNull()
     expect(tokenInput(token(1, ['a'], 'Other'), 'Same').description).toBe('Other')
+    // Only the exact stored value stands for null.
+    expect(tokenInput(token(1, ['a'], 'Same'), 'Same ').description).toBe('Same')
     expect(tokenInputs([token(1, ['a'], 'Same')], 'Same')[0]!.description).toBeNull()
     expect(appendedTokens([], [token(1, ['a'], 'Same')], 'Same')[0]!.description).toBeNull()
   })
@@ -88,6 +90,20 @@ describe('chunkRowsByBytes', () => {
       expect(JSON.stringify(chunk).length).toBeLessThan(CHUNK_BUDGET_BYTES)
       expect(chunk.length).toBeLessThanOrEqual(TOKEN_CHUNK)
     }
+  })
+
+  it('measures UTF-8 bytes: 500 character CJK descriptions stay under the budget in bytes', () => {
+    const rows = Array.from({ length: 10_000 }, (_, i) => ({
+      tokenId: i + 1,
+      artCollectionId: uuid(1),
+      dna: Array.from({ length: 10 }, (_, l) => uuid(l * 7 + (i % 5))),
+      description: '字'.repeat(500),
+    }))
+    const encoder = new TextEncoder()
+    const chunks = chunkRowsByBytes(rows, CHUNK_BUDGET_BYTES)
+    expect(chunks.flat()).toEqual(rows)
+    for (const chunk of chunks)
+      expect(encoder.encode(JSON.stringify(chunk)).length).toBeLessThan(CHUNK_BUDGET_BYTES)
   })
 
   it('splits at TOKEN_CHUNK rows however small the rows are', () => {

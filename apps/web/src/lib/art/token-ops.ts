@@ -25,12 +25,13 @@ export type TokenInput = {
 export type TokenPatch = { tokenId: number; dna?: string[]; description?: string | null }
 
 /**
- * The description to store: null when it is the project's own, since a null row reads back as the
- * project description (`toProject` in rows.ts) and 500 characters per token would otherwise travel.
+ * The description to store: null when it is exactly the project's stored description, since a null
+ * row reads back as `collections.token_description` (`toProject` in rows.ts) and 500 characters per
+ * token would otherwise travel. `project` must be the value the database holds, not a draft.
  */
 export function sentDescription(description: string | undefined | null, project: string | undefined) {
   if (description === undefined || description === null) return null
-  if (project !== undefined && (description === project || description === project.trim())) return null
+  if (project !== undefined && description === project) return null
   return description
 }
 
@@ -48,7 +49,7 @@ export function tokenInputs(tokens: GeneratedToken[], projectDescription?: strin
 }
 
 /**
- * Cuts rows into chunks whose `JSON.stringify` stays under `budget` characters and that never hold
+ * Cuts rows into chunks whose `JSON.stringify` stays under `budget` UTF-8 bytes and that never hold
  * more than `TOKEN_CHUNK` rows; every chunk has at least one row. `wire` maps a row to what is
  * sent, when that differs from the row.
  */
@@ -61,8 +62,10 @@ export function chunkRowsByBytes<T>(
   let current: T[] = []
   // Brackets, plus a comma between rows.
   let size = 2
+  const encoder = new TextEncoder()
   for (const row of rows) {
-    const length = JSON.stringify(wire(row)).length
+    // UTF-8 bytes, which is what travels: CJK text is three bytes a character, emoji four.
+    const length = encoder.encode(JSON.stringify(wire(row))).length
     const added = length + (current.length > 0 ? 1 : 0)
     if (current.length > 0 && (size + added >= budget || current.length >= TOKEN_CHUNK)) {
       chunks.push(current)

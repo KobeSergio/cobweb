@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { CHUNK_BUDGET_BYTES, TOKEN_CHUNK } from '@/lib/art/token-ops'
 import { LOCKED, SAVE_INCOMPLETE, done, fail, type ActionResult } from '@/lib/art/result'
 import type { GeneratedToken } from '@/lib/demo'
-import { deleteInChunks, saveTokenSet } from './token-save'
+import { tokenInputs } from '@/lib/art/token-ops'
+import { afterStoringDescription, deleteInChunks, saveTokenSet } from './token-save'
 
 const tokens = (count: number) =>
   Array.from({ length: count }, (_, id) => ({ id }) as unknown as GeneratedToken)
@@ -76,10 +77,10 @@ describe('saveTokenSet', () => {
     })
   })
 
-  it('returns the lock sentence from a later chunk unchanged, after trying to clear', async () => {
+  it('returns the lock sentence from a later chunk unchanged and not as cleared, after trying to clear', async () => {
     const d = deps()
     d.appendTokens.mockResolvedValueOnce(fail(LOCKED))
-    expect(await saveTokenSet(tokens(TOKEN_CHUNK + 1), 7, d)).toEqual({ ...fail(LOCKED), cleared: true })
+    expect(await saveTokenSet(tokens(TOKEN_CHUNK + 1), 7, d)).toEqual(fail(LOCKED))
     expect(d.clearTokens).toHaveBeenCalledTimes(1)
   })
 })
@@ -126,5 +127,57 @@ describe('deleteInChunks', () => {
     )
     expect(result.ok).toBe(false)
     expect(calls).toBe(1)
+  })
+})
+
+describe('afterStoringDescription', () => {
+  const generated = (description: string) =>
+    [1, 2].map((id) => ({
+      id,
+      collectionId: 'art-1',
+      dna: ['a'],
+      name: `Owl #${id}`,
+      rank: id,
+      previewUrl: null,
+      description: id === 1 ? description : 'Its own',
+    })) as GeneratedToken[]
+
+  it('stores an unset description first, then saves rows that carry null for it and text for the rest', async () => {
+    const stored = { current: '' }
+    const calls: string[] = []
+    const sent: unknown[] = []
+    const result = await afterStoringDescription(
+      stored,
+      'A watchful owl.',
+      async (description) => {
+        calls.push(`description:${description}`)
+        return done
+      },
+      async () => {
+        calls.push('tokens')
+        return saveTokenSet(generated('A watchful owl.'), 7, {
+          saveTokens: async (rows) => {
+            sent.push(...tokenInputs(rows, stored.current))
+            return done
+          },
+          appendTokens: async () => done,
+          clearTokens: async () => done,
+        })
+      },
+    )
+    expect(result).toEqual(done)
+    expect(calls).toEqual(['description:A watchful owl.', 'tokens'])
+    expect(stored.current).toBe('A watchful owl.')
+    expect(sent.map((row) => (row as { description: string | null }).description)).toEqual([null, 'Its own'])
+  })
+
+  it('does not store again when it is already stored, and stops when the description is refused', async () => {
+    const save = vi.fn(async (): Promise<ActionResult> => done)
+    await afterStoringDescription({ current: 'x' }, 'x', save, async () => done)
+    expect(save).not.toHaveBeenCalled()
+    const next = vi.fn(async (): Promise<ActionResult> => done)
+    const refused = await afterStoringDescription({ current: '' }, 'x', async () => fail('No.'), next)
+    expect(refused).toEqual(fail('No.'))
+    expect(next).not.toHaveBeenCalled()
   })
 })
