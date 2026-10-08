@@ -74,7 +74,7 @@ export function AssetsScreen({ collection, assets, readOnly: readOnlyProp }: Ass
     [queue],
   )
   const files = useAssetItems(collection.id, assets, announce, sink, uploads)
-  const [singleQuantity, setSingleQuantity] = useState(() =>
+  const [pendingQuantity, setPendingQuantity] = useState(() =>
     assets[0]?.uploadId ? assets[0].quantity : (collection.max_supply ?? assets[0]?.quantity ?? 1),
   )
   // Nothing saved yet: the collection's own name and description.
@@ -112,7 +112,7 @@ export function AssetsScreen({ collection, assets, readOnly: readOnlyProp }: Ass
 
   const changeDetails = (next: TokenDetails) => {
     if (next.order === 'shuffled' && (details.order !== 'shuffled' || next.seed !== details.seed))
-      files.reorder((items) => shuffledOrder(items, next.seed))
+      files.reorder((items) => shuffledOrder(addedOrder(items), next.seed))
     else if (next.order === 'upload' && details.order !== 'upload') files.reorder(addedOrder)
     setDetails(next)
     if (next.name !== details.name && !tokenNameError(next.name)) saveText('tokenName', next.name.trim())
@@ -142,6 +142,8 @@ export function AssetsScreen({ collection, assets, readOnly: readOnlyProp }: Ass
   }
 
   const single = files.items[0]
+  // Once the file exists its quantity is the one on screen, so a refused save shows the saved value again.
+  const singleQuantity = single ? single.quantity : pendingQuantity
   const tokens =
     type === 'single_asset'
       ? single
@@ -218,7 +220,7 @@ export function AssetsScreen({ collection, assets, readOnly: readOnlyProp }: Ass
           readOnly={readOnly}
           onReplace={(file) => void files.replace(file, singleQuantity)}
           onQuantity={(quantity) => {
-            setSingleQuantity(quantity)
+            setPendingQuantity(quantity)
             if (single) files.setQuantity(single.key, quantity)
           }}
           onAttributes={(attributes) => single && files.setAttributes(single.key, attributes)}

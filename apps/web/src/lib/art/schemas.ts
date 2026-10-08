@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { tokenNameProblem } from '@/components/art/state/generation'
 import { TOKEN_CHUNK } from './token-ops'
+import { MAX_ATTRIBUTES } from './limits'
 import { UNSAVED } from './result'
 
 /**
@@ -140,7 +141,7 @@ export const assetPatch = z
     quantity: z.number().int(EDITIONS).min(1, EDITIONS).max(10_000, EDITIONS).optional(),
     attributes: z
       .array(z.object({ traitType: attributeText, value: attributeText }))
-      .max(32, UNSAVED)
+      .max(MAX_ATTRIBUTES, UNSAVED)
       .optional(),
   })
   .strict()

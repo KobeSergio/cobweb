@@ -15,6 +15,8 @@
  * validates it and stores it (MASTER_PLAN, Art: assignment integrity at lock).
  */
 
+import { MAX_ATTRIBUTES } from '@/lib/art/limits'
+
 export type Attribute = { traitType: string; value: string }
 
 /** What these functions need from an artwork. */
@@ -46,7 +48,7 @@ export type OneOfOneToken = {
 export const TOKEN_NAME_MAX = 40
 export const TOKEN_DESCRIPTION_MAX = 500
 export const ATTRIBUTE_TEXT_MAX = 60
-export const MAX_ATTRIBUTES = 40
+export { MAX_ATTRIBUTES }
 /** The legacy default attribute: the file name, under this trait type. */
 export const FILE_NAME_TRAIT = 'Name'
 /** Files are checked and added this many at a time, as legacy uploaded metadata images. */

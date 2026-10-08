@@ -188,10 +188,10 @@ describe('the asset rules of spec section 6', () => {
     )
   })
 
-  it('at most 32 attributes', () => {
+  it('at most 40 attributes', () => {
     const attribute = { traitType: 'Name', value: 'Moon' }
-    expect(error(parse(assetPatch, { attributes: Array.from({ length: 32 }, () => attribute) }))).toBeNull()
-    expect(error(parse(assetPatch, { attributes: Array.from({ length: 33 }, () => attribute) }))).toBe(
+    expect(error(parse(assetPatch, { attributes: Array.from({ length: 40 }, () => attribute) }))).toBeNull()
+    expect(error(parse(assetPatch, { attributes: Array.from({ length: 41 }, () => attribute) }))).toBe(
       UNSAVED,
     )
   })
