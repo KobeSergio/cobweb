@@ -193,6 +193,20 @@ await check(
     return error?.code === '23505' ? null : `expected 23505, got ${error?.code ?? 'success'}`
   },
 )
+await check('uploads: a layer image of another size is refused with the canvas sentence', async () => {
+  if (!collectionId) return 'no collection'
+  const otherHash = 'b'.repeat(64)
+  const { error } = await creator.rpc('record_upload', {
+    ...recordInput(collectionId, storageKey(collectionId, 'layer_image', otherHash, 'image/png')),
+    p_content_hash: otherHash,
+    p_width: 2,
+    p_height: 2,
+  })
+  const want = 'Every layer image must be 1 x 1 in this project.'
+  return error?.code === '23514' && error.message === want
+    ? null
+    : `expected 23514 "${want}", got ${error?.code ?? 'success'} ${error?.message ?? ''}`
+})
 await check('uploads: the cap refuses a file once the project holds 5 GB', async () => {
   if (!collectionId) return 'no collection'
   // Rows that sum past the cap, written by the service role: nothing near 5 GB is uploaded.
@@ -214,7 +228,17 @@ await check('uploads: the cap refuses a file once the project holds 5 GB', async
   if (error) return `setup: ${error.code} ${error.message}`
   const { data: used } = await admin.from('uploads').select('bytes').eq('collection_id', collectionId)
   const usedBytes = (used ?? []).reduce((sum, row) => sum + Number(row.bytes), 0)
-  return capProblem(usedBytes, 1) ? null : `cap not reached at ${usedBytes} bytes`
+  if (!capProblem(usedBytes, 1)) return `cap not reached at ${usedBytes} bytes`
+  const smallHash = 'd'.repeat(64)
+  const { error: refused } = await creator.rpc('record_upload', {
+    ...recordInput(collectionId as string, `${collectionId}/assets/${smallHash}.png`),
+    p_kind: 'asset' as const,
+    p_content_hash: smallHash,
+  })
+  const want = 'This project has reached its 5 GB of files. Delete some files to upload more.'
+  return refused?.code === '23514' && refused.message === want
+    ? null
+    : `record_upload expected 23514 "${want}", got ${refused?.code ?? 'success'} ${refused?.message ?? ''}`
 })
 await check('cleanup: the run leaves no user, rows or object behind', async () => {
   if (recorded) await deleteObjects([recorded])

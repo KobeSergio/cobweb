@@ -103,11 +103,24 @@ export async function admitUpload(input: AdmitInput): Promise<AdmitResult | { er
 }
 
 const INCOMPLETE = 'The upload did not arrive in full. Try again.'
+const CAP_SENTENCE = 'This project has reached its 5 GB of files. Delete some files to upload more.'
+const CANVAS_SENTENCE = /^Every layer image must be \d+ x \d+ in this project\.$/
+
+/** An error from `record_upload`, by SQLSTATE, in the creator's words. 23505 is handled by callers. */
+function recordError(error: { code?: string; message: string }): string {
+  if (error.code === '42501') return LOCKED
+  if (error.code === '23514') {
+    if (error.message.startsWith('This project has reached')) return CAP_SENTENCE
+    if (CANVAS_SENTENCE.test(error.message)) return error.message
+  }
+  return INCOMPLETE
+}
 
 /**
  * Records an upload after its PUT. The server checks what it can see (the object exists with the
  * declared size and type); the content hash is the client's word, which only affects dedupe inside
- * this creator's own project. A row is written only through `record_upload`.
+ * this creator's own project. A row is written only through `record_upload`, which also enforces
+ * the 5 GB cap and the shared canvas size under the collection's row lock.
  */
 export async function confirmUpload(
   input: ConfirmInput,
@@ -124,13 +137,26 @@ export async function confirmUpload(
   if (input.key !== expectedKey) return { error: INCOMPLETE }
   const head = await headObject(input.key)
   if (!head || head.bytes !== input.bytes || head.mime !== input.mime) return { error: INCOMPLETE }
-  let thumbHead: { bytes: number; mime: string | null } | null = null
+
+  // A thumbnail that did not arrive in full is dropped; the original is still recorded without it.
+  let thumbnail: ConfirmInput['thumbnail'] = null
   if (input.thumbnail && input.thumbnailKey) {
-    if (input.thumbnailKey !== storageKey(input.collectionId, 'thumbnail', input.contentHash, 'image/webp'))
-      return { error: INCOMPLETE }
-    thumbHead = await headObject(input.thumbnailKey)
-    if (!thumbHead || thumbHead.bytes !== input.thumbnail.bytes) return { error: INCOMPLETE }
+    const thumbKey = storageKey(input.collectionId, 'thumbnail', input.contentHash, 'image/webp')
+    if (input.thumbnailKey === thumbKey) {
+      const thumbHead = await headObject(thumbKey)
+      if (thumbHead && thumbHead.bytes === input.thumbnail.bytes && thumbHead.mime === 'image/webp')
+        thumbnail = input.thumbnail
+    }
   }
+
+  // The readable path; record_upload enforces the same cap under a lock.
+  const { data: used } = await supabase
+    .from('uploads')
+    .select('bytes')
+    .eq('collection_id', input.collectionId)
+  const usedBytes = (used ?? []).reduce((sum, row) => sum + Number(row.bytes), 0)
+  const cap = capProblem(usedBytes, input.bytes)
+  if (cap) return { error: cap }
 
   const record = (
     kind: AdmitInput['kind'] | 'thumbnail',
@@ -139,13 +165,13 @@ export async function confirmUpload(
     bytes: number,
     width: number | null,
     height: number | null,
-    hash: string,
   ) =>
     supabase.rpc('record_upload', {
       p_collection_id: input.collectionId,
       p_kind: kind,
       p_storage_key: key,
-      p_content_hash: hash,
+      // The thumbnail shares its original's hash, so the unique index pairs the two.
+      p_content_hash: input.contentHash,
       p_mime: mime,
       p_media_type: mediaTypeFor(mime),
       p_bytes: bytes,
@@ -155,20 +181,11 @@ export async function confirmUpload(
       p_file_name: input.fileName,
     })
 
-  const main = await record(
-    input.kind,
-    input.key,
-    input.mime,
-    input.bytes,
-    input.width,
-    input.height,
-    input.contentHash,
-  )
+  const main = await record(input.kind, input.key, input.mime, input.bytes, input.width, input.height)
   let id = main.data as string | null
   if (main.error) {
+    if (main.error.code !== '23505') return { error: recordError(main.error) }
     // Two tabs admitted the same file: the first one's row wins and this one reuses it.
-    if (main.error.code !== '23505')
-      return { error: main.error.message.includes('locked') ? LOCKED : INCOMPLETE }
     const { data } = await supabase
       .from('uploads')
       .select('id')
@@ -179,27 +196,25 @@ export async function confirmUpload(
     id = data?.id ?? null
   }
   if (!id) return { error: INCOMPLETE }
-  // The first layer image fixes the project's canvas; later ones were checked against it above.
-  if (input.kind === 'layer_image' && !canvas && input.width && input.height)
-    await supabase
-      .from('collections')
-      .update({ canvas_width: input.width, canvas_height: input.height })
-      .eq('id', input.collectionId)
 
   let hasThumbnail = false
-  if (input.thumbnail && input.thumbnailKey && thumbHead) {
+  if (thumbnail && input.thumbnailKey) {
     const thumb = await record(
       'thumbnail',
       input.thumbnailKey,
       'image/webp',
-      input.thumbnail.bytes,
-      input.thumbnail.width,
-      input.thumbnail.height,
-      input.thumbnail.contentHash,
+      thumbnail.bytes,
+      thumbnail.width,
+      thumbnail.height,
     )
     hasThumbnail = !thumb.error || thumb.error.code === '23505'
   }
-  const { data: row } = await supabase.from('uploads').select(ROW_COLUMNS).eq('id', id).single()
+  const { data: row, error: rowError } = await supabase
+    .from('uploads')
+    .select(ROW_COLUMNS)
+    .eq('id', id)
+    .single()
+  if (rowError || !row) return { error: INCOMPLETE }
   return { upload: toRecord(row as UploadRow, hasThumbnail) }
 }
 
@@ -216,13 +231,20 @@ export async function deleteUpload(uploadId: string): Promise<{ ok: true } | { e
   const thumb = await thumbnailRowFor(supabase, row.collection_id, row.content_hash)
   const { error } = await supabase.from('uploads').delete().eq('id', row.id)
   if (error) {
-    if (error.code === '23503') return { error: 'This image is used by a trait. Remove the trait first.' }
+    if (error.code === '23503')
+      return {
+        error:
+          row.kind === 'layer_image'
+            ? 'This image is used by a trait. Remove the trait first.'
+            : 'This file is still in use. Remove it from where it is used first.',
+      }
     if (error.code === '42501') return { error: LOCKED }
     return { error: 'The file could not be deleted. Try again.' }
   }
   const keys = [row.storage_key]
   if (thumb) {
-    await supabase.from('uploads').delete().eq('id', thumb.id)
+    const { error: thumbError } = await supabase.from('uploads').delete().eq('id', thumb.id)
+    if (thumbError) return { error: 'The file could not be deleted. Try again.' }
     keys.push(storageKey(row.collection_id, 'thumbnail', row.content_hash, 'image/webp'))
   }
   try {
