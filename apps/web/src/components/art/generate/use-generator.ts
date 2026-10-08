@@ -17,8 +17,10 @@ import { done, type ActionResult } from '@/lib/art/result'
 import {
   appendedTokens,
   changedTokens,
+  chunkRowsByBytes,
   saveLimitProblem,
-  TOKEN_CHUNK,
+  sentDescription,
+  tokenInput,
   tokenInputs,
 } from '@/lib/art/token-ops'
 import { UNSET_SEED } from '@/lib/art/rows'
@@ -49,11 +51,11 @@ const MIN_GENERATE_MS = 900
 
 type Save = () => Promise<ActionResult<unknown>>
 
-/** Saves `rows` in order in chunks of `TOKEN_CHUNK` (the most one token action takes), stopping at the first failure. */
+/** Saves `rows` in order in chunks sized by their JSON (`chunkRowsByBytes`), stopping at the first failure. */
 function inChunks<T>(rows: T[], step: (chunk: T[]) => Promise<ActionResult<unknown>>): Save {
   return async () => {
-    for (let at = 0; at < rows.length; at += TOKEN_CHUNK) {
-      const result = await step(rows.slice(at, at + TOKEN_CHUNK))
+    for (const chunk of chunkRowsByBytes(rows)) {
+      const result = await step(chunk)
       if (!result.ok) return result
     }
     return done
@@ -118,8 +120,12 @@ export function useGenerator(
   const savedDescription = useRef(tokenDescription)
 
   /** Shows a new set at once and saves it with `persist`, in order with every other edit. */
-  const setTokens = (next: GeneratedToken[] | null, persist?: Save, extra: Partial<ArtProject> = {}) =>
-    void sync.run({ apply: (p) => ({ ...p, tokens: next, ...extra }), persist })
+  const setTokens = (
+    next: GeneratedToken[] | null,
+    persist?: Save,
+    extra: Partial<ArtProject> = {},
+    undo?: (project: ArtProject, snapshot: ArtProject) => ArtProject,
+  ) => void sync.run({ apply: (p) => ({ ...p, tokens: next, ...extra }), persist, undo })
 
   /** The supply is set at Generate: the sum of the collections' sizes. */
   const saveSupply = async (total: number) => {
@@ -135,10 +141,29 @@ export function useGenerator(
   /** Replaces the stored set (in chunks) and keeps the seed it came from. */
   const saveSet = (set: GeneratedToken[], seed: number) =>
     saveTokenSet(set, seed, {
-      saveTokens: (rows, seed) => saveTokens(collectionId, tokenInputs(rows), seed),
-      appendTokens: (rows) => appendTokens(collectionId, tokenInputs(rows)),
+      saveTokens: (rows, seed) => saveTokens(collectionId, tokenInputs(rows, tokenDescription), seed),
+      appendTokens: (rows) => appendTokens(collectionId, tokenInputs(rows, tokenDescription)),
       clearTokens: () => clearTokens(collectionId),
+      wire: (row) => tokenInput(row, tokenDescription),
     })
+
+  /**
+   * A whole-set save and the undo that goes with it: a failure after the first chunk leaves nothing
+   * stored, so the screen shows no tokens; a failure of the first chunk leaves the previous set.
+   */
+  const wholeSet = (set: GeneratedToken[], seed: number, then?: (saved: ActionResult) => Promise<void>) => {
+    let cleared = false
+    return {
+      persist: async (): Promise<ActionResult> => {
+        const saved = await saveSet(set, seed)
+        cleared = !saved.ok && 'cleared' in saved
+        if (then) await then(saved)
+        return saved
+      },
+      undo: (p: ArtProject, snapshot: ArtProject): ArtProject =>
+        cleared ? { ...p, tokens: null } : snapshot,
+    }
+  }
 
   const generate = () => {
     const problem = nameProblem ?? saveLimitProblem(supply)
@@ -164,15 +189,10 @@ export function useGenerator(
           window.setTimeout(() => {
             setProgress(100)
             if (outcome.ok) {
-              setTokens(
-                outcome.tokens,
-                async () => {
-                  const saved = await saveSet(outcome.tokens, seed)
-                  if (saved.ok) await saveSupply(outcome.tokens.length)
-                  return saved
-                },
-                { seed, staleNote: null },
-              )
+              const save = wholeSet(outcome.tokens, seed, async (saved) => {
+                if (saved.ok) await saveSupply(outcome.tokens.length)
+              })
+              setTokens(outcome.tokens, save.persist, { seed, staleNote: null }, save.undo)
             } else setProblems(outcome.problems)
             setGenerating(false)
           }, wait),
@@ -291,7 +311,9 @@ export function useGenerator(
         void sync.run({
           apply: (p) => p,
           persist: async () => {
-            const result = await updateTokens(collectionId, [{ tokenId, description }])
+            const result = await updateTokens(collectionId, [
+              { tokenId, description: sentDescription(description, tokenDescription) },
+            ])
             if (result.ok) describedBefore.current.delete(tokenId)
             return result
           },
@@ -308,7 +330,7 @@ export function useGenerator(
       sync.debounce.flushAll()
       setTokens(
         next,
-        inChunks(changedTokens(tokens, next), (rows) => updateTokens(collectionId, rows)),
+        inChunks(changedTokens(tokens, next, tokenDescription), (rows) => updateTokens(collectionId, rows)),
       )
     },
 
@@ -319,7 +341,7 @@ export function useGenerator(
         sync.debounce.flushAll()
         setTokens(
           next,
-          inChunks(changedTokens(tokens, next), (rows) => updateTokens(collectionId, rows)),
+          inChunks(changedTokens(tokens, next, tokenDescription), (rows) => updateTokens(collectionId, rows)),
         )
       }
       return !!next
@@ -330,7 +352,9 @@ export function useGenerator(
       if (next)
         setTokens(
           next,
-          inChunks(appendedTokens(tokens, next), (rows) => appendTokens(collectionId, rows)),
+          inChunks(appendedTokens(tokens, next, tokenDescription), (rows) =>
+            appendTokens(collectionId, rows),
+          ),
         )
       return !!next
     },
@@ -345,7 +369,8 @@ export function useGenerator(
       if (!tokens) return
       const next = shuffleIds(tokens, ids, ctx)
       sync.debounce.flushAll()
-      setTokens(next, () => saveSet(next, project.seed))
+      const save = wholeSet(next, project.seed)
+      setTokens(next, save.persist, {}, save.undo)
     },
     swap: (a: number, b: number) => {
       if (!tokens) return
@@ -356,7 +381,9 @@ export function useGenerator(
       if (!tokens) return { ok: false as const, reason: 'Nothing is generated yet.' }
       const outcome = changeTrait(tokens, tokenId, layerIndex, traitId, active, ctx)
       if (outcome.ok)
-        setTokens(outcome.tokens, () => updateTokens(collectionId, changedTokens(tokens, outcome.tokens)))
+        setTokens(outcome.tokens, () =>
+          updateTokens(collectionId, changedTokens(tokens, outcome.tokens, tokenDescription)),
+        )
       return outcome
     },
   }

@@ -5,7 +5,10 @@ const nextConfig: NextConfig = {
   transpilePackages: ['@cobweb/ui', '@cobweb/dna'],
   poweredByHeader: false,
   experimental: {
-    // A token action carries at most one chunk (TOKEN_CHUNK, 10,000 rows, about 4 MB); the default is 1 MB.
+    // A token action carries one chunk of at most CHUNK_BUDGET_BYTES (3.5 MB of JSON, and at most
+    // TOKEN_CHUNK, 10,000 rows) in the token-ops module. Vercel caps a request body at 4.5 MB, so
+    // that is the real limit; this 8 MB is only headroom over the 1 MB default for the action
+    // framing and a few large non-token payloads.
     serverActions: { bodySizeLimit: '8mb' },
   },
   async headers() {

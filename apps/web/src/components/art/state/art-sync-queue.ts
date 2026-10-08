@@ -3,11 +3,14 @@ import type { ArtProject } from './art-store'
 
 export type Persist<T = unknown> = () => Promise<ActionResult<T>>
 
-/** An edit shown at once and then saved. `undo` replaces the snapshot when the snapshot would be stale. */
+/**
+ * An edit shown at once and then saved. `undo` replaces the snapshot when the snapshot would be
+ * stale; it also gets the snapshot, to choose between restoring it and something else.
+ */
 export type SyncEdit = {
   apply: (project: ArtProject) => ArtProject
   persist?: Persist
-  undo?: (project: ArtProject) => ArtProject
+  undo?: (project: ArtProject, snapshot: ArtProject) => ArtProject
 }
 
 /** An edit that needs the id the server makes: applied once the action returns it (`data` is null in sample mode). */
@@ -27,7 +30,7 @@ export type QueueOptions = {
 type Entry = {
   /** The project when the edit joined the queue. */
   snapshot: ArtProject
-  undo?: (project: ArtProject) => ArtProject
+  undo?: (project: ArtProject, snapshot: ArtProject) => ArtProject
   cancelled: boolean
 }
 
@@ -100,6 +103,11 @@ export class ArtSyncQueue {
     })
   }
 
+  /** Anything queued or in flight: leaving the page now would lose an edit. */
+  pending(): boolean {
+    return this.waiting.length > 0
+  }
+
   /** Resolves once every queued edit has been saved or rolled back. */
   idle(): Promise<void> {
     return this.tail.then(() => undefined)
@@ -122,7 +130,7 @@ export class ArtSyncQueue {
     for (const later of behind) later.cancelled = true
     if (at !== -1) this.waiting = this.waiting.slice(0, at)
     const base = behind[0]?.snapshot ?? this.options.read()
-    this.options.write(entry.undo ? entry.undo(base) : entry.snapshot)
+    this.options.write(entry.undo ? entry.undo(base, entry.snapshot) : entry.snapshot)
   }
 
   private async call<T>(persist: Persist<T>): Promise<ActionResult<T>> {

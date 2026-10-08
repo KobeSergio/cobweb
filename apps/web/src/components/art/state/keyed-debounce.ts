@@ -20,6 +20,11 @@ export class KeyedDebounce {
     this.jobs.set(key, { timer, job })
   }
 
+  /** Whether any job is still waiting for its timer. */
+  pending(): boolean {
+    return this.jobs.size > 0
+  }
+
   /** Runs the job waiting for `key` now, if any (a create flushes the weights of its layer first). */
   flush(key: string): void {
     const current = this.jobs.get(key)

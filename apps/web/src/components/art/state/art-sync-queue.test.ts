@@ -50,6 +50,35 @@ const refused: ActionResult = { ok: false, error: 'No.' }
 const tick = () => new Promise((settle) => setTimeout(settle, 0))
 
 describe('ArtSyncQueue', () => {
+  it('pending() is true while an edit is queued or in flight and false once it is saved or rolled back', async () => {
+    const s = setup()
+    expect(s.queue.pending()).toBe(false)
+    const slow = later<ActionResult>()
+    const a = s.queue.run({ apply: named('a'), persist: () => slow.promise })
+    expect(s.queue.pending()).toBe(true)
+    slow.resolve(saved)
+    await a
+    expect(s.queue.pending()).toBe(false)
+    const b = s.queue.run({ apply: named('b'), persist: async () => refused })
+    expect(s.queue.pending()).toBe(true)
+    await b
+    expect(s.queue.pending()).toBe(false)
+  })
+
+  it('gives undo the snapshot, so it can choose to restore it', async () => {
+    const s = setup()
+    let seen: string[] = []
+    await s.queue.run({
+      apply: named('a'),
+      persist: async () => refused,
+      undo: (p, snapshot) => {
+        seen = (snapshot.collections ?? []).map((c) => c.name)
+        return p
+      },
+    })
+    expect(seen).toEqual([])
+  })
+
   it('applies at once and saves in the order the edits were made', async () => {
     const s = setup()
     const first = later<ActionResult>()

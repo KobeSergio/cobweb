@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { TOKEN_CHUNK } from '@/lib/art/token-ops'
+import { CHUNK_BUDGET_BYTES, TOKEN_CHUNK } from '@/lib/art/token-ops'
 import { LOCKED, SAVE_INCOMPLETE, done, fail, type ActionResult } from '@/lib/art/result'
 import type { GeneratedToken } from '@/lib/demo'
 import { deleteInChunks, saveTokenSet } from './token-save'
@@ -41,12 +41,15 @@ describe('saveTokenSet', () => {
 
   it('clears the set when a later chunk fails', async () => {
     const d = deps(1)
-    expect(await saveTokenSet(tokens(TOKEN_CHUNK * 3), 7, d)).toEqual(fail(SAVE_INCOMPLETE))
+    expect(await saveTokenSet(tokens(TOKEN_CHUNK * 3), 7, d)).toEqual({
+      ...fail(SAVE_INCOMPLETE),
+      cleared: true,
+    })
     expect(d.appendTokens).toHaveBeenCalledTimes(1)
     expect(d.clearTokens).toHaveBeenCalledTimes(1)
   })
 
-  it('returns the first chunk error unchanged without clearing', async () => {
+  it('returns the first chunk error unchanged without clearing, and not as cleared', async () => {
     const d = deps()
     d.saveTokens.mockResolvedValueOnce(fail('Locked.'))
     expect(await saveTokenSet(tokens(TOKEN_CHUNK * 2), 7, d)).toEqual(fail('Locked.'))
@@ -57,21 +60,39 @@ describe('saveTokenSet', () => {
   it('treats a thrown append as a failed chunk and clears', async () => {
     const d = deps()
     d.appendTokens.mockRejectedValueOnce(new Error('offline'))
-    expect(await saveTokenSet(tokens(TOKEN_CHUNK + 1), 7, d)).toEqual(fail(SAVE_INCOMPLETE))
+    expect(await saveTokenSet(tokens(TOKEN_CHUNK + 1), 7, d)).toEqual({
+      ...fail(SAVE_INCOMPLETE),
+      cleared: true,
+    })
     expect(d.clearTokens).toHaveBeenCalledTimes(1)
   })
 
   it('still reports the incomplete set when clearTokens throws', async () => {
     const d = deps(1)
     d.clearTokens.mockRejectedValueOnce(new Error('offline'))
-    expect(await saveTokenSet(tokens(TOKEN_CHUNK + 1), 7, d)).toEqual(fail(SAVE_INCOMPLETE))
+    expect(await saveTokenSet(tokens(TOKEN_CHUNK + 1), 7, d)).toEqual({
+      ...fail(SAVE_INCOMPLETE),
+      cleared: true,
+    })
   })
 
   it('returns the lock sentence from a later chunk unchanged, after trying to clear', async () => {
     const d = deps()
     d.appendTokens.mockResolvedValueOnce(fail(LOCKED))
-    expect(await saveTokenSet(tokens(TOKEN_CHUNK + 1), 7, d)).toEqual(fail(LOCKED))
+    expect(await saveTokenSet(tokens(TOKEN_CHUNK + 1), 7, d)).toEqual({ ...fail(LOCKED), cleared: true })
     expect(d.clearTokens).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('saveTokenSet by bytes', () => {
+  it('cuts chunks by their serialized size when the rows are large', async () => {
+    const d = deps()
+    const big = Array.from({ length: 10 }, (_, id) => ({ id, text: 'x'.repeat(1_000_000) }) as never)
+    expect(await saveTokenSet(big, 7, d)).toEqual(done)
+    // 1 MB rows under a 3.5 MB budget: three rows, three rows, three rows, one row.
+    expect(d.saveTokens.mock.calls[0]).toEqual([big.slice(0, 3), 7])
+    expect(d.appendTokens).toHaveBeenCalledTimes(3)
+    expect(CHUNK_BUDGET_BYTES).toBe(3_500_000)
   })
 })
 

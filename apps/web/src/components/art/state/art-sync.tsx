@@ -79,6 +79,22 @@ export function ArtSyncProvider({
   const [debounce] = useState(() => new KeyedDebounce(EDIT_DEBOUNCE_MS))
   // Leaving the Art stage saves what is still waiting.
   useEffect(() => () => debounce.flushAll(), [debounce])
+  // Closing the tab or reloading with edits unsaved asks first, and a hidden page saves what waits.
+  useEffect(() => {
+    if (demo) return
+    const warn = (event: BeforeUnloadEvent) => {
+      if (!queue.pending() && !debounce.pending()) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    const flush = () => debounce.flushAll()
+    window.addEventListener('beforeunload', warn)
+    window.addEventListener('pagehide', flush)
+    return () => {
+      window.removeEventListener('beforeunload', warn)
+      window.removeEventListener('pagehide', flush)
+    }
+  }, [queue, debounce, demo])
 
   const value = useMemo<ArtSync>(
     () => ({
