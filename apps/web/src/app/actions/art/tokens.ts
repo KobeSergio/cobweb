@@ -1,12 +1,16 @@
 'use server'
 
 import { z } from 'zod'
-import { done, type ActionResult } from '@/lib/art/result'
+import type { ActionResult } from '@/lib/art/result'
 import { parse, seed as seedSchema, tokenIds, tokenPatches, tokenSet } from '@/lib/art/schemas'
 import type { TokenInput, TokenPatch } from '@/lib/art/token-ops'
 import { artWrite, ran } from '@/lib/art/write'
 
-/** Replaces the whole set and records its seed (Generate, Shuffle). */
+/**
+ * Replaces the whole set and records its seed (Generate, Shuffle). One call carries at most
+ * TOKEN_CHUNK rows; a set larger than one chunk is saved as `saveTokens(first chunk)` followed by
+ * `appendTokens` for the rest, which the sync layer does.
+ */
 export async function saveTokens(
   collectionId: string,
   tokens: TokenInput[],
@@ -29,10 +33,10 @@ export async function saveTokens(
 export async function updateTokens(collectionId: string, rows: TokenPatch[]): Promise<ActionResult> {
   const input = parse(tokenPatches, rows)
   if (!input.ok) return input
-  if (input.data.length === 0) return done
-  return artWrite(collectionId, ({ supabase }) =>
-    ran(supabase.rpc('art_update_tokens', { p_collection_id: collectionId, p_rows: input.data })),
-  )
+  return artWrite(collectionId, async ({ supabase }) => {
+    if (input.data.length === 0) return { data: undefined }
+    return ran(supabase.rpc('art_update_tokens', { p_collection_id: collectionId, p_rows: input.data }))
+  })
 }
 
 /** Swaps two token ids in one statement under the deferrable key. */
@@ -53,13 +57,16 @@ export async function deleteTokens(collectionId: string, ids: number[]): Promise
   )
 }
 
-/** Adds tokens after the last id (Fill to size). */
+/**
+ * Adds tokens after the last id (Fill to size). At most TOKEN_CHUNK rows per call: the rest of a
+ * larger set follows `saveTokens(first chunk)` as further `appendTokens` calls, which the sync layer does.
+ */
 export async function appendTokens(collectionId: string, tokens: TokenInput[]): Promise<ActionResult> {
   const input = parse(tokenSet, tokens)
   if (!input.ok) return input
-  if (input.data.length === 0) return done
-  return artWrite(collectionId, ({ supabase }) =>
-    ran(
+  return artWrite(collectionId, async ({ supabase }) => {
+    if (input.data.length === 0) return { data: undefined }
+    return ran(
       supabase.from('tokens').insert(
         input.data.map((token) => ({
           collection_id: collectionId,
@@ -69,8 +76,8 @@ export async function appendTokens(collectionId: string, tokens: TokenInput[]): 
           description: token.description,
         })),
       ),
-    ),
-  )
+    )
+  })
 }
 
 /** Clears the generated set before a structural edit. */

@@ -4,7 +4,7 @@ import { z } from 'zod'
 import type { ActionResult } from '@/lib/art/result'
 import type { WeightRow } from '@/lib/art/rows'
 import { newTraits, parse, traitName, uuid, weightTable, type NewTraitInput } from '@/lib/art/schemas'
-import { artWrite, created, one, ran } from '@/lib/art/write'
+import { artWrite, created, lookupFailed, nextPosition, one, ran } from '@/lib/art/write'
 
 /** Adds stored images to a layer as traits at 0%, after its last trait. Returns their ids in order. */
 export async function addTraits(
@@ -15,14 +15,14 @@ export async function addTraits(
   const input = parse(z.object({ layerId: uuid, items: newTraits }), { layerId, items })
   if (!input.ok) return input
   return artWrite<{ ids: string[] }>(collectionId, async ({ supabase }) => {
-    const { data: top } = await supabase
+    const { data: top, error: lookup } = await supabase
       .from('traits')
       .select('position')
       .eq('layer_id', input.data.layerId)
       .order('position', { ascending: false })
       .limit(1)
-      .maybeSingle()
-    const first = (top?.position ?? -1) + 1
+    if (lookup) return lookupFailed(lookup)
+    const first = nextPosition(top)
     const { data, error } = await supabase
       .from('traits')
       .insert(
@@ -84,12 +84,14 @@ export async function setBlank(
   const input = parse(z.object({ layerId: uuid, on: z.boolean() }), { layerId, on })
   if (!input.ok) return input
   return artWrite(collectionId, async ({ supabase }) => {
-    const { data: blank } = await supabase
+    const { data: blanks, error: blankLookup } = await supabase
       .from('traits')
       .select('id')
       .eq('layer_id', input.data.layerId)
       .eq('blank', true)
-      .maybeSingle()
+      .limit(1)
+    if (blankLookup) return lookupFailed(blankLookup)
+    const blank = blanks[0]
     if (!input.data.on) {
       if (!blank) return { data: { id: null } }
       const { error } = await supabase.rpc('art_delete_trait', {
@@ -99,13 +101,13 @@ export async function setBlank(
       return error ? { error } : { data: { id: null } }
     }
     if (blank) return { data: { id: blank.id } }
-    const { data: top } = await supabase
+    const { data: top, error: lookup } = await supabase
       .from('traits')
       .select('position')
       .eq('layer_id', input.data.layerId)
       .order('position', { ascending: false })
       .limit(1)
-      .maybeSingle()
+    if (lookup) return lookupFailed(lookup)
     return created(
       supabase
         .from('traits')
@@ -115,7 +117,7 @@ export async function setBlank(
           name: 'None',
           weight: 0,
           blank: true,
-          position: (top?.position ?? -1) + 1,
+          position: nextPosition(top),
         })
         .select('id')
         .single(),

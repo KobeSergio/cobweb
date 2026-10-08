@@ -1,7 +1,7 @@
 'use server'
 
 import type { TablesUpdate } from '@/lib/database.types'
-import { done, type ActionResult } from '@/lib/art/result'
+import type { ActionResult } from '@/lib/art/result'
 import { artSettings, parse, type ArtSettingsPatch } from '@/lib/art/schemas'
 import { artWrite, one } from '@/lib/art/write'
 
@@ -17,8 +17,8 @@ export async function updateArtSettings(
   if (input.data.tokenDescription !== undefined) change.token_description = input.data.tokenDescription
   if (input.data.showBlankTraits !== undefined) change.show_blank_traits = input.data.showBlankTraits
   if (input.data.artDeferred !== undefined) change.art_deferred = input.data.artDeferred
-  if (Object.keys(change).length === 0) return done
-  return artWrite(collectionId, ({ supabase }) =>
-    one(supabase.from('collections').update(change).eq('id', collectionId).select('id')),
-  )
+  return artWrite(collectionId, async ({ supabase }) => {
+    if (Object.keys(change).length === 0) return { data: undefined }
+    return one(supabase.from('collections').update(change).eq('id', collectionId).select('id'))
+  })
 }

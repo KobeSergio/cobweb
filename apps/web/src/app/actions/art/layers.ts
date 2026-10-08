@@ -3,7 +3,7 @@
 import { z } from 'zod'
 import type { ActionResult } from '@/lib/art/result'
 import { artName, importPayload, parse, uuid, type ImportPayload, type ImportResult } from '@/lib/art/schemas'
-import { artWrite, created, one, ran } from '@/lib/art/write'
+import { artWrite, created, lookupFailed, nextPosition, one, ran } from '@/lib/art/write'
 
 /** Adds a layer on top of an art collection's stack. The database refuses while that collection has tokens. */
 export async function addLayer(
@@ -14,13 +14,13 @@ export async function addLayer(
   const input = parse(z.object({ artCollectionId: uuid, name: artName }), { artCollectionId, name })
   if (!input.ok) return input
   return artWrite(collectionId, async ({ supabase }) => {
-    const { data: top } = await supabase
+    const { data: top, error } = await supabase
       .from('layers')
       .select('position')
       .eq('art_collection_id', input.data.artCollectionId)
       .order('position', { ascending: false })
       .limit(1)
-      .maybeSingle()
+    if (error) return lookupFailed(error)
     return created(
       supabase
         .from('layers')
@@ -28,7 +28,7 @@ export async function addLayer(
           collection_id: collectionId,
           art_collection_id: input.data.artCollectionId,
           name: input.data.name,
-          position: (top?.position ?? -1) + 1,
+          position: nextPosition(top),
         })
         .select('id')
         .single(),

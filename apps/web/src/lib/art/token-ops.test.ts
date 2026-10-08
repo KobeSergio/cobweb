@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { GeneratedToken } from '@/lib/demo'
-import { appendedTokens, changedTokens, saveLimitProblem, tokenInputs } from './token-ops'
+import { TOKEN_CHUNK, appendedTokens, changedTokens, saveLimitProblem, tokenInputs } from './token-ops'
 
 const token = (id: number, dna: string[], description?: string): GeneratedToken => ({
   id,
@@ -35,6 +35,10 @@ describe('token operations', () => {
     expect(appendedTokens(before, after)).toEqual([
       { tokenId: 3, artCollectionId: 'art-1', dna: ['c'], description: null },
     ])
+  })
+
+  it('has a chunk of 10,000 rows per call', () => {
+    expect(TOKEN_CHUNK).toBe(10_000)
   })
 
   it('refuses more than 100,000 tokens before anything is generated', () => {

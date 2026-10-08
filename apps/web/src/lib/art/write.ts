@@ -1,7 +1,7 @@
 import 'server-only'
 import { artWriteError } from './db-error'
 import { ownedUnlocked, type ArtClient, type OwnedCollection } from './owned'
-import { fail, type ActionResult } from './result'
+import { fail, THROWN, type ActionResult } from './result'
 
 type WriteError = { code?: string; message: string }
 export type Outcome<T> = { data: T } | { error: WriteError }
@@ -19,8 +19,22 @@ export async function artWrite<T>(
 ): Promise<ActionResult<T>> {
   const owned = await ownedUnlocked(collectionId)
   if (owned.error !== undefined) return fail(owned.error)
-  const outcome = await write({ supabase: owned.supabase, collection: owned.collection, collectionId })
-  return 'error' in outcome ? fail(artWriteError(outcome.error)) : { ok: true, data: outcome.data }
+  try {
+    const outcome = await write({ supabase: owned.supabase, collection: owned.collection, collectionId })
+    return 'error' in outcome ? fail(artWriteError(outcome.error)) : { ok: true, data: outcome.data }
+  } catch {
+    return fail(THROWN)
+  }
+}
+
+/** A failed lookup before a write. It carries no SQLSTATE, so the creator reads the reload sentence. */
+export function lookupFailed(error: { message: string }): { error: WriteError } {
+  return { error: { message: error.message } }
+}
+
+/** The position after the last row of a lookup ordered by position, highest first, limited to one. */
+export function nextPosition(rows: { position: number }[] | null): number {
+  return (rows?.[0]?.position ?? -1) + 1
 }
 
 /** An insert that returns its new row (`.select(...).single()`). */

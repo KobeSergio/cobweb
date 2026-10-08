@@ -5,8 +5,8 @@ const nextConfig: NextConfig = {
   transpilePackages: ['@cobweb/ui', '@cobweb/dna'],
   poweredByHeader: false,
   experimental: {
-    // A save is about 400 bytes per token, so 100,000 tokens (MAX_SUPPLY) is about 40 MB; the default is 1 MB.
-    serverActions: { bodySizeLimit: '64mb' },
+    // A token action carries at most one chunk (TOKEN_CHUNK, 10,000 rows, about 4 MB); the default is 1 MB.
+    serverActions: { bodySizeLimit: '8mb' },
   },
   async headers() {
     return [

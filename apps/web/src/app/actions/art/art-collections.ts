@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { NEW_COLLECTION_SIZE } from '@/components/art/state/collection-edits'
 import type { ActionResult } from '@/lib/art/result'
 import { artCollectionSize, artName, parse, uuid } from '@/lib/art/schemas'
-import { artWrite, created, one, ran } from '@/lib/art/write'
+import { artWrite, created, lookupFailed, nextPosition, one, ran } from '@/lib/art/write'
 
 /** Adds an art collection after the last one. */
 export async function addArtCollection(
@@ -14,13 +14,13 @@ export async function addArtCollection(
   const input = parse(artName, name)
   if (!input.ok) return input
   return artWrite(collectionId, async ({ supabase }) => {
-    const { data: last } = await supabase
+    const { data: last, error } = await supabase
       .from('art_collections')
       .select('position')
       .eq('collection_id', collectionId)
       .order('position', { ascending: false })
       .limit(1)
-      .maybeSingle()
+    if (error) return lookupFailed(error)
     return created(
       supabase
         .from('art_collections')
@@ -28,7 +28,7 @@ export async function addArtCollection(
           collection_id: collectionId,
           name: input.data,
           size: NEW_COLLECTION_SIZE,
-          position: (last?.position ?? -1) + 1,
+          position: nextPosition(last),
         })
         .select('id')
         .single(),

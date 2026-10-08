@@ -6,6 +6,9 @@ import { SAVE_CAP } from './result'
  * How the Generate screen's edits on the set become token rows (spec section 8). Names and ranks
  * are computed, never stored, so only ids, art collections, DNA and descriptions travel.
  */
+/** Most rows one token action carries; a larger set is saved in chunks. */
+export const TOKEN_CHUNK = 10_000
+
 export type TokenInput = {
   tokenId: number
   artCollectionId: string

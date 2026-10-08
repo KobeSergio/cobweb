@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   artName,
+  assetOrder,
   artSettings,
   groupTraits,
+  newTraits,
   importPayload,
   parse,
   ruleInput,
@@ -10,7 +12,9 @@ import {
   traitName,
   weightTable,
 } from './schemas'
+import { TOKEN_CHUNK } from './token-ops'
 
+const UNSAVED = 'That change could not be saved. Reload the page and try again.'
 const id = '0f4a0f3e-2f5e-4e3a-9d1c-1b2c3d4e5f60'
 const other = '1f4a0f3e-2f5e-4e3a-9d1c-1b2c3d4e5f61'
 const error = (result: { ok: boolean; error?: string }) => (result.ok ? null : result.error)
@@ -76,17 +80,17 @@ describe('the input rules of spec section 6, one failing row each', () => {
     )
   })
 
-  it('a save carries at most 100,000 tokens', () => {
+  it('a save carries at most one chunk of tokens', () => {
     const token = (tokenId: number) => ({ tokenId, artCollectionId: id, dna: [other], description: null })
     expect(error(parse(tokenSet, [token(1)]))).toBeNull()
     expect(
       error(
         parse(
           tokenSet,
-          Array.from({ length: 100_001 }, (_, i) => token(i + 1)),
+          Array.from({ length: TOKEN_CHUNK + 1 }, (_, i) => token(i + 1)),
         ),
       ),
-    ).toBe('A project can have at most 100,000 tokens. Lower the collection sizes.')
+    ).toBe(UNSAVED)
   })
 
   it('an import needs at least one collection and a stored image per trait', () => {
@@ -102,5 +106,51 @@ describe('the input rules of spec section 6, one failing row each', () => {
     expect(error(parse(importPayload, payload))).toBe(
       'That change could not be saved. Reload the page and try again.',
     )
+  })
+
+  it('every array input has a count cap that reads the reload sentence', () => {
+    const ids = (n: number) => Array.from({ length: n }, () => id)
+    expect(
+      error(
+        parse(
+          newTraits,
+          Array.from({ length: 501 }, () => ({ name: 'A', uploadId: id })),
+        ),
+      ),
+    ).toBe(UNSAVED)
+    expect(error(parse(ruleInput, { kind: 'must pair with', traitId: id, relatedTraitIds: ids(501) }))).toBe(
+      UNSAVED,
+    )
+    expect(error(parse(groupTraits, ids(501)))).toBe(UNSAVED)
+    expect(
+      error(
+        parse(
+          weightTable,
+          Array.from({ length: 502 }, () => ({ traitId: id, weight: 0, constant: null })),
+        ),
+      ),
+    ).toBe(UNSAVED)
+    expect(
+      error(
+        parse(
+          weightTable,
+          Array.from({ length: 501 }, () => ({ traitId: id, weight: 0, constant: null })),
+        ),
+      ),
+    ).toBeNull()
+    expect(error(parse(assetOrder, ids(10_001)))).toBe(UNSAVED)
+    const trait = { name: 'A', uploadId: id }
+    const layer = (n: number) => ({ name: 'L', traits: Array.from({ length: n }, () => trait) })
+    const collection = (layers: number, traits = 1) => ({
+      name: 'C',
+      layers: Array.from({ length: layers }, () => layer(traits)),
+    })
+    const payload = (collections: unknown[]) => ({ collections, activeCollectionId: null })
+    expect(error(parse(importPayload, payload(Array.from({ length: 21 }, () => collection(1)))))).toBe(
+      UNSAVED,
+    )
+    expect(error(parse(importPayload, payload([collection(51)])))).toBe(UNSAVED)
+    expect(error(parse(importPayload, payload([collection(1, 501)])))).toBe(UNSAVED)
+    expect(error(parse(importPayload, payload([collection(50, 500)])))).toBeNull()
   })
 })

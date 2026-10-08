@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { tokenNameProblem } from '@/components/art/state/generation'
-import { MAX_SUPPLY } from '@/lib/collections'
-import { SAVE_CAP, TRAIT_CAP, UNSAVED } from './result'
+import { TOKEN_CHUNK } from './token-ops'
+import { UNSAVED } from './result'
 
 /**
  * The input rules the Art actions check before the database does, so the creator reads a sentence
@@ -48,21 +48,24 @@ export const weightTable = z
       // A constant is a cap on a number of tokens, not a share.
       .transform((row) => (row.constant === null ? row : { ...row, weight: 0 })),
   )
-  .max(500, TRAIT_CAP)
+  .max(501, UNSAVED)
 
 export const ruleInput = z.object({
   kind: z.enum(["doesn't mix with", 'always pairs with', 'must pair with'], { error: UNSAVED }),
   traitId: uuid,
-  relatedTraitIds: z.array(uuid).min(1, 'A rule needs at least one related trait.'),
+  relatedTraitIds: z.array(uuid).min(1, 'A rule needs at least one related trait.').max(500, UNSAVED),
 })
 export type RuleInput = z.infer<typeof ruleInput>
 
-export const groupTraits = z.array(uuid).min(2, 'An "at least one" group needs at least two traits.')
+export const groupTraits = z
+  .array(uuid)
+  .min(2, 'An "at least one" group needs at least two traits.')
+  .max(500, UNSAVED)
 
 export const newTraits = z
   .array(z.object({ name: traitName, uploadId: uuid }))
   .min(1, UNSAVED)
-  .max(500, TRAIT_CAP)
+  .max(500, UNSAVED)
 export type NewTraitInput = z.infer<typeof newTraits>[number]
 
 export const tokenName = z
@@ -89,18 +92,21 @@ export const importPayload = z.object({
     .array(
       z.object({
         name: artName,
-        layers: z.array(
-          z.object({
-            name: artName,
-            traits: z
-              .array(z.object({ name: traitName, uploadId: uuid }))
-              .min(1, UNSAVED)
-              .max(500, TRAIT_CAP),
-          }),
-        ),
+        layers: z
+          .array(
+            z.object({
+              name: artName,
+              traits: z
+                .array(z.object({ name: traitName, uploadId: uuid }))
+                .min(1, UNSAVED)
+                .max(500, UNSAVED),
+            }),
+          )
+          .max(50, UNSAVED),
       }),
     )
-    .min(1, 'The folder has no layers to import.'),
+    .min(1, 'The folder has no layers to import.')
+    .max(20, UNSAVED),
   activeCollectionId: uuid.nullable(),
 })
 export type ImportPayload = z.infer<typeof importPayload>
@@ -112,9 +118,9 @@ const tokenId = z.number().int(UNSAVED).min(1, UNSAVED).max(100_000, UNSAVED)
 const dna = z.array(uuid).max(200, UNSAVED)
 const tokenDescription = z.string().max(500, DESCRIPTION).nullable()
 
-/** The length is checked first, so an oversized save reads the cap sentence and not a row's. */
+/** One call carries at most one chunk; a larger set is saved chunk by chunk (see `TOKEN_CHUNK`). */
 const capped = <T extends z.ZodType>(item: T) =>
-  z.array(z.unknown()).max(MAX_SUPPLY, SAVE_CAP).pipe(z.array(item))
+  z.array(z.unknown()).max(TOKEN_CHUNK, UNSAVED).pipe(z.array(item))
 
 export const tokenSet = capped(
   z.object({ tokenId, artCollectionId: uuid, dna, description: tokenDescription }),
@@ -123,4 +129,6 @@ export const tokenPatches = capped(
   z.object({ tokenId, dna: dna.optional(), description: tokenDescription.optional() }),
 )
 export const tokenIds = capped(tokenId)
+/** The asset order of an art collection: trait ids in the new order. */
+export const assetOrder = z.array(uuid).max(10_000, UNSAVED)
 export const seed = z.number().int(UNSAVED).min(0, UNSAVED).max(4_294_967_295, UNSAVED)
