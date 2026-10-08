@@ -69,8 +69,8 @@ export function TokenNaming({ generator, readOnly }: { generator: Generator; rea
           maxLength={500}
         />
         <p id="token-description-help" className="text-muted-foreground text-xs">
-          Optional. In every token’s metadata; you can change one token’s description in its detail panel.{' '}
-          <span className="numeric">{tokenDescription.length}/500</span>
+          Optional. In every token’s metadata. A token with its own description keeps it; tokens using this
+          one follow it when it changes. <span className="numeric">{tokenDescription.length}/500</span>
         </p>
         {differing > 0 && (
           <Button variant="link" size="sm" className="h-auto p-0" onClick={generator.describeAll}>

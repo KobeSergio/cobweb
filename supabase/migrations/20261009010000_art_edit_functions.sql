@@ -393,12 +393,165 @@ grant execute on function public.art_set_layer_weights(uuid, uuid, jsonb) to aut
 -- Tokens
 -- ---------------------------------------------------------------------------------------------
 
--- The DNA guard reads the layers for every row it checks. Renumbering after a delete changes only
--- token_id, so the guard now runs when the DNA or the art collection is written.
+-- Statement-level guards on tokens. A row-level trigger ran a membership check and a share lock for
+-- every one of 10,000 rows (8 s for a save at 10 layers); these run once per statement over
+-- transition tables. Transition tables allow one event per trigger and no column list, so insert,
+-- update and delete each get a trigger, and the update trigger only checks DNA that is new: a
+-- renumbering after a delete rewrites token_id alone and its (collection, art collection, DNA)
+-- triples are all in the old rows.
 drop trigger tokens_guard_dna on public.tokens;
-create trigger tokens_guard_dna
-before insert or update of dna, art_collection_id, collection_id on public.tokens
-for each row execute function public.tokens_guard_dna();
+drop trigger a_art_guard_lock on public.tokens;
+
+create or replace function public.tokens_guard_dna()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_bad integer;
+begin
+  if tg_op = 'INSERT' then
+    with cands as (select distinct n.collection_id, n.art_collection_id, n.dna from inserted n),
+      layer_counts as (
+        select l.art_collection_id, count(*) as n
+        from public.layers l
+        where l.art_collection_id in (select c.art_collection_id from cands c)
+        group by l.art_collection_id
+      )
+    select count(*) into v_bad
+    from cands c
+    left join layer_counts lc on lc.art_collection_id = c.art_collection_id
+    where cardinality(c.dna) is distinct from coalesce(lc.n, 0);
+    if v_bad > 0 then
+      raise exception 'Token DNA does not match the layers.' using errcode = 'check_violation';
+    end if;
+    with cands as (select distinct n.collection_id, n.art_collection_id, n.dna from inserted n),
+      ordered as (
+        select l.id, l.art_collection_id, row_number() over (partition by l.art_collection_id order by l.position) as pos
+        from public.layers l
+        where l.art_collection_id in (select c.art_collection_id from cands c)
+      )
+    select count(*) into v_bad
+    from cands c
+    cross join lateral unnest(c.dna) with ordinality as d (trait_id, pos)
+    left join ordered o on o.art_collection_id = c.art_collection_id and o.pos = d.pos
+    left join public.traits t on t.id = d.trait_id and t.layer_id = o.id
+    where t.id is null;
+    if v_bad > 0 then
+      raise exception 'Token DNA does not match the layers.' using errcode = 'check_violation';
+    end if;
+    with cands as (select distinct n.collection_id, n.art_collection_id, n.dna from inserted n)
+    select count(*) into v_bad
+    from cands c
+    where not exists (
+      select 1 from public.art_collections a where a.id = c.art_collection_id and a.collection_id = c.collection_id
+    );
+    if v_bad > 0 then
+      raise exception 'The art collection belongs to another project.' using errcode = 'check_violation';
+    end if;
+  else
+    with cands as (select n.collection_id, n.art_collection_id, n.dna from inserted n except select r.collection_id, r.art_collection_id, r.dna from removed r),
+      layer_counts as (
+        select l.art_collection_id, count(*) as n
+        from public.layers l
+        where l.art_collection_id in (select c.art_collection_id from cands c)
+        group by l.art_collection_id
+      )
+    select count(*) into v_bad
+    from cands c
+    left join layer_counts lc on lc.art_collection_id = c.art_collection_id
+    where cardinality(c.dna) is distinct from coalesce(lc.n, 0);
+    if v_bad > 0 then
+      raise exception 'Token DNA does not match the layers.' using errcode = 'check_violation';
+    end if;
+    with cands as (select n.collection_id, n.art_collection_id, n.dna from inserted n except select r.collection_id, r.art_collection_id, r.dna from removed r),
+      ordered as (
+        select l.id, l.art_collection_id, row_number() over (partition by l.art_collection_id order by l.position) as pos
+        from public.layers l
+        where l.art_collection_id in (select c.art_collection_id from cands c)
+      )
+    select count(*) into v_bad
+    from cands c
+    cross join lateral unnest(c.dna) with ordinality as d (trait_id, pos)
+    left join ordered o on o.art_collection_id = c.art_collection_id and o.pos = d.pos
+    left join public.traits t on t.id = d.trait_id and t.layer_id = o.id
+    where t.id is null;
+    if v_bad > 0 then
+      raise exception 'Token DNA does not match the layers.' using errcode = 'check_violation';
+    end if;
+    with cands as (select n.collection_id, n.art_collection_id, n.dna from inserted n except select r.collection_id, r.art_collection_id, r.dna from removed r)
+    select count(*) into v_bad
+    from cands c
+    where not exists (
+      select 1 from public.art_collections a where a.id = c.art_collection_id and a.collection_id = c.collection_id
+    );
+    if v_bad > 0 then
+      raise exception 'The art collection belongs to another project.' using errcode = 'check_violation';
+    end if;
+  end if;
+  return null;
+end;
+$$;
+
+create trigger tokens_guard_dna_insert after insert on public.tokens
+referencing new table as inserted
+for each statement execute function public.tokens_guard_dna();
+create trigger tokens_guard_dna_update after update on public.tokens
+referencing old table as removed new table as inserted
+for each statement execute function public.tokens_guard_dna();
+
+-- The lock gate for tokens, once per statement: for anon and authenticated, no affected row's
+-- project (before or after an update) may be locked. The distinct collection rows are read FOR SHARE
+-- in id order, as art_guard_lock reads one.
+create function public.art_guard_lock_tokens()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_ids uuid[];
+  v_found integer;
+  v_locked integer;
+begin
+  if current_user not in ('anon', 'authenticated') then
+    return null;
+  end if;
+  if tg_op = 'INSERT' then
+    select coalesce(array_agg(distinct n.collection_id), '{}') into v_ids from inserted n;
+  elsif tg_op = 'DELETE' then
+    select coalesce(array_agg(distinct r.collection_id), '{}') into v_ids from removed r;
+  else
+    select coalesce(array_agg(u.collection_id), '{}') into v_ids
+    from (select n.collection_id from inserted n union select r.collection_id from removed r) u;
+  end if;
+  if cardinality(v_ids) = 0 then
+    return null;
+  end if;
+  select count(*), count(*) filter (where c.art_locked_at is not null) into v_found, v_locked
+  from (
+    select x.art_locked_at from public.collections x where x.id = any (v_ids) order by x.id for share
+  ) c;
+  if v_found < cardinality(v_ids) then
+    raise exception 'collection not found' using errcode = '42501';
+  end if;
+  if v_locked > 0 then
+    raise exception 'The art is locked and cannot change.' using errcode = 'insufficient_privilege';
+  end if;
+  return null;
+end;
+$$;
+
+create trigger a_art_guard_lock_insert after insert on public.tokens
+referencing new table as inserted
+for each statement execute function public.art_guard_lock_tokens();
+create trigger a_art_guard_lock_update after update on public.tokens
+referencing old table as removed new table as inserted
+for each statement execute function public.art_guard_lock_tokens();
+create trigger a_art_guard_lock_delete after delete on public.tokens
+referencing old table as removed
+for each statement execute function public.art_guard_lock_tokens();
 
 -- Replaces the whole set from [{ tokenId, artCollectionId, dna, description }] and records its
 -- seed. An empty or missing set is refused: starting over is art_start_over, not an empty save. Delete then insert: the deferrable key rules out an upsert. The collections row is written

@@ -279,7 +279,7 @@ export function useGenerator(
         })
       })
     },
-    /** The description new tokens get. Tokens already generated keep theirs; regenerate to apply it. */
+    /** The description new tokens get. A token with its own description keeps it; the rest follow this one once saved. */
     setTokenDescription: (description: string) => {
       void sync.run({ apply: (p) => ({ ...p, tokenDescription: description }) })
       sync.debounce.schedule('tokenDescription', () => {
