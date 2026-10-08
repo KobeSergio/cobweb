@@ -23,6 +23,7 @@ import { TokenNaming } from './generate/token-naming'
 import { useGenerator } from './generate/use-generator'
 import { ReadOnlyNotice } from './read-only-notice'
 import { compositeUrls } from './lib/trait-index'
+import { useArtSync } from './state/art-sync'
 
 export type GenerateScreenProps = {
   collection: Tables<'collections'>
@@ -31,8 +32,8 @@ export type GenerateScreenProps = {
   /** Every collection's layers. */
   layers: Layer[]
   rules: ArtRule[]
-  /** The generated set, ranked (1 is rarest). Tokens 1 to 24 have `previewUrl`; stack `tokenLayerUrls(dna)` for others. */
-  tokens: GeneratedToken[]
+  /** The generated set, ranked (1 is rarest); null before the first generation. Tokens 1 to 24 have `previewUrl`; stack `tokenLayerUrls(dna)` for others. */
+  tokens: GeneratedToken[] | null
   traitCounts: TraitCounts
   readOnly: boolean
   /** "Finish the art later" is on (MASTER_PLAN, Flow: pre-reveal): the contract starts on a placeholder. */
@@ -53,9 +54,12 @@ export function GenerateScreen({
   layers,
   rules,
   tokens: seedTokens,
-  readOnly,
+  readOnly: readOnlyProp,
   artDeferred = false,
 }: GenerateScreenProps) {
+  const sync = useArtSync()
+  // A save that came back locked turns every control read only at once.
+  const readOnly = readOnlyProp || sync.locked
   const generator = useGenerator(collection.id, collection, {
     collections,
     layers,
@@ -112,7 +116,16 @@ export function GenerateScreen({
             className="hidden size-20 shrink-0 rounded-lg border sm:block"
           />
           <StatGroup className="flex-1 gap-x-8">
-            <Stat label="Tokens" value={n(count)} suffix={`/ ${n(supply)}`} />
+            <Stat
+              label="Tokens"
+              value={n(count)}
+              suffix={`/ ${n(supply)}`}
+              hint={
+                generator.generatedFrom === null
+                  ? undefined
+                  : `Generated from seed ${generator.generatedFrom}`
+              }
+            />
             <Stat label="Layers" value={n(generator.layers.length)} />
             <Stat
               label="Rules applied"

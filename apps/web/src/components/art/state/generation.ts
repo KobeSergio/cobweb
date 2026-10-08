@@ -8,7 +8,7 @@ import {
   regenerate as regenerateWith,
   type Project,
 } from '@cobweb/dna'
-import type { ArtRule, Collection, GeneratedToken, Layer } from '@/lib/demo'
+import type { ArtRule, AtLeastOne, Collection, GeneratedToken, Layer } from '@/lib/demo'
 import { attributeKeyOf, type TraitIndex } from '../lib/trait-index'
 
 /**
@@ -22,8 +22,8 @@ export { dnaKey, MAX_COLLECTION_SIZE, newSeed } from '@cobweb/dna'
 
 export type Draft = Omit<GeneratedToken, 'rank' | 'previewUrl'>
 
-/** What names and ranks depend on: the token name chosen at Generate and the current layers. */
-export type SetContext = { tokenName: string; index: TraitIndex; layers?: Layer[] }
+/** What names and ranks depend on: the token name chosen at Generate and the current layers; generation also honours `atLeastOne`. */
+export type SetContext = { tokenName: string; index: TraitIndex; layers?: Layer[]; atLeastOne?: AtLeastOne[] }
 
 /** Characters the legacy tool refused in a token name: `#` marks the id, quotes broke its metadata. */
 const NAME_FORBIDDEN = /[#'"`]/
@@ -67,7 +67,7 @@ export function generateSet(
 ): GenerateOutcome {
   const problems = generationProblems(layers, collections)
   if (problems.length) return { ok: false, problems }
-  const project: Project = { layers, rules, collections }
+  const project: Project = { layers, rules, collections, atLeastOne: ctx.atLeastOne }
   const { tokens, made } = generateProject(project, seed)
   const short = made
     .filter((m) => m.made < m.wanted)
@@ -93,7 +93,7 @@ export function regenerate(
   rules: ArtRule[],
   ctx: SetContext,
 ): GeneratedToken[] | null {
-  const next = regenerateWith(tokens, ids, { layers, rules }, newSeed())
+  const next = regenerateWith(tokens, ids, { layers, rules, atLeastOne: ctx.atLeastOne }, newSeed())
   return next && finalise(next, ctx)
 }
 
@@ -106,14 +106,19 @@ export function fillTo(
   ctx: SetContext,
   description: string,
 ): GeneratedToken[] | null {
-  const next = fillToWith(tokens, { layers, rules, collections }, newSeed(), (id, collectionId, dna) => ({
-    id,
-    collectionId,
-    dna,
-    name: '',
-    description,
-    rank: 0,
-    previewUrl: null,
-  }))
+  const next = fillToWith(
+    tokens,
+    { layers, rules, collections, atLeastOne: ctx.atLeastOne },
+    newSeed(),
+    (id, collectionId, dna) => ({
+      id,
+      collectionId,
+      dna,
+      name: '',
+      description,
+      rank: 0,
+      previewUrl: null,
+    }),
+  )
   return next && finalise(next, ctx)
 }

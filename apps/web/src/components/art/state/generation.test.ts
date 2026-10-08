@@ -49,3 +49,42 @@ describe('generate (legacy auto-populate)', () => {
     expect(outcome.problems[0]).toMatch(/10,000 tries/)
   })
 })
+
+describe('"at least one" groups (art wiring)', () => {
+  const eyes: Layer = {
+    id: 'eyes',
+    collectionId: 'c',
+    name: 'Eyes',
+    position: 0,
+    traits: 'abcdefghij'.split('').map((id) => ({
+      id,
+      layerId: 'eyes',
+      name: id.toUpperCase(),
+      weight: 10,
+      blank: false,
+      imageUrl: `/${id}.png`,
+    })),
+  }
+  const make = (seed: number) =>
+    generateSet(
+      [eyes],
+      [],
+      [{ id: 'c', name: 'C', size: 2 }],
+      seed,
+      {
+        tokenName: 'Owl',
+        index: buildTraitIndex([eyes]),
+        atLeastOne: [{ id: 'g', collectionId: 'c', traitIds: ['a', 'b'] }],
+      },
+      '',
+    )
+
+  it('generates only tokens that carry one of the group traits, whatever the seed', () => {
+    for (let seed = 1; seed <= 30; seed++) {
+      const outcome = make(seed)
+      expect(outcome.ok).toBe(true)
+      if (!outcome.ok) return
+      expect(outcome.tokens.map((token) => token.dna[0]).sort()).toEqual(['a', 'b'])
+    }
+  })
+})

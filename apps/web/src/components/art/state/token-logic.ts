@@ -48,7 +48,14 @@ export function changeTrait(
   ctx: SetContext,
 ): ChangeOutcome {
   const layers = ctx.layers ?? layersOfIndex(ctx.index)
-  const result = changeTraitWith(tokens, tokenId, layerIndex, traitId, { layers, rules }, ctx.index)
+  const result = changeTraitWith(
+    tokens,
+    tokenId,
+    layerIndex,
+    traitId,
+    { layers, rules, atLeastOne: ctx.atLeastOne },
+    ctx.index,
+  )
   return result.ok ? { ok: true, tokens: finalise(result.tokens, ctx) } : result
 }
 
