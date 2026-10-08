@@ -708,6 +708,51 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      art_delete_art_collection: {
+        Args: { p_art_collection_id: string; p_collection_id: string }
+        Returns: undefined
+      }
+      art_delete_layer: {
+        Args: {
+          p_clear_tokens: boolean
+          p_collection_id: string
+          p_layer_id: string
+        }
+        Returns: undefined
+      }
+      art_delete_tokens: {
+        Args: { p_collection_id: string; p_ids: number[] }
+        Returns: undefined
+      }
+      art_delete_trait: {
+        Args: { p_collection_id: string; p_trait_id: string }
+        Returns: undefined
+      }
+      art_import_layers: {
+        Args: { p_collection_id: string; p_payload: Json }
+        Returns: Json
+      }
+      art_move_layer: {
+        Args: {
+          p_collection_id: string
+          p_layer_id: string
+          p_position: number
+        }
+        Returns: undefined
+      }
+      art_save_tokens: {
+        Args: { p_collection_id: string; p_seed: number; p_tokens: Json }
+        Returns: undefined
+      }
+      art_set_asset_order: {
+        Args: { p_collection_id: string; p_rows: Json }
+        Returns: undefined
+      }
+      art_set_layer_weights: {
+        Args: { p_collection_id: string; p_layer_id: string; p_rows: Json }
+        Returns: undefined
+      }
+      art_start_over: { Args: { p_collection_id: string }; Returns: string[] }
       art_table_facts: {
         Args: never
         Returns: {
@@ -716,6 +761,10 @@ export type Database = {
           rls: boolean
           table_name: string
         }[]
+      }
+      art_update_tokens: {
+        Args: { p_collection_id: string; p_rows: Json }
+        Returns: undefined
       }
       record_upload: {
         Args: {

@@ -1038,6 +1038,7 @@ async function main(): Promise<void> {
   await artTokens(A, B)
   await artLockAndJobs(A, B)
   await artInvariants(A)
+  await artEdits(A, B)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1780,6 +1781,478 @@ async function artInvariants(A: Creator): Promise<void> {
     if (error) return describe(error as DbError)
     info(`10,000 tokens inserted in ${ms} ms`)
     return ms < 5000 ? null : `took ${ms} ms`
+  })
+}
+
+// ---------------------------------------------------------------------------------------------
+// 9f. Art edits: the database functions behind the Art screens (docs/specs/2026-10-08-art-wiring.md)
+// ---------------------------------------------------------------------------------------------
+type ImportedIds = { collections: { id: string; layers: { id: string; traits: { id: string }[] }[] }[] }
+type ImportPayloadInput = {
+  collections: { name: string; layers: { name: string; traits: { name: string; uploadId: string }[] }[] }[]
+  activeCollectionId: string | null
+}
+
+async function callArt(client: SupabaseClient, fn: string, args: Record<string, unknown>) {
+  const { data, error } = await client.rpc(fn, args)
+  return { data: data as unknown, error: error as DbError }
+}
+
+function expectSentence(error: DbError, codes: string[], sentence: string): string | null {
+  const problem = expectError(error, codes)
+  if (problem) return problem
+  return error?.message.includes(sentence) ? null : `wrong message: ${error?.message}`
+}
+
+async function countRows(table: string, column: string, value: string): Promise<number> {
+  const { count, error } = await admin
+    .from(table)
+    .select('*', { count: 'exact', head: true })
+    .eq(column, value)
+  if (error) throw new Error(`count ${table}: ${describe(error as DbError)}`)
+  return count ?? 0
+}
+
+/**
+ * A project imported through art_import_layers. `shape` lists trait names per layer per art
+ * collection; every trait gets its own layer image row.
+ */
+async function importedProject(client: SupabaseClient, shape: string[][][]) {
+  const col = await insertCollection(client)
+  if (!col.row) throw new Error(`setup: ${describe(col.error)}`)
+  const cid = col.row.id
+  const payload: ImportPayloadInput = { collections: [], activeCollectionId: null }
+  for (const [c, layers] of shape.entries()) {
+    const collection: ImportPayloadInput['collections'][number] = { name: `Collection ${c}`, layers: [] }
+    for (const [l, traits] of layers.entries()) {
+      const layer: ImportPayloadInput['collections'][number]['layers'][number] = {
+        name: `Layer ${c}.${l}`,
+        traits: [],
+      }
+      for (const name of traits) layer.traits.push({ name, uploadId: await insertUploadRow(client, cid) })
+      collection.layers.push(layer)
+    }
+    payload.collections.push(collection)
+  }
+  const { data, error } = await callArt(client, 'art_import_layers', {
+    p_collection_id: cid,
+    p_payload: payload,
+  })
+  if (error) throw new Error(`import: ${describe(error)}`)
+  const ids = data as ImportedIds
+  return {
+    cid,
+    art: (c = 0) => ids.collections[c]!.id,
+    layer: (c: number, l: number) => ids.collections[c]!.layers[l]!.id,
+    trait: (c: number, l: number, t: number) => ids.collections[c]!.layers[l]!.traits[t]!.id,
+  }
+}
+
+const tokenRow = (cid: string, art: string, tokenId: number, dna: string[]) => ({
+  collection_id: cid,
+  token_id: tokenId,
+  art_collection_id: art,
+  dna,
+})
+
+async function artEdits(A: Creator, B: Creator): Promise<void> {
+  // A project with Background (Ink, Dusk) under Eyes (Wide, Sleepy, Wink).
+  const p = await importedProject(A.client, [
+    [
+      ['Ink', 'Dusk'],
+      ['Wide', 'Sleepy', 'Wink'],
+    ],
+  ])
+  const [ink, dusk] = [p.trait(0, 0, 0), p.trait(0, 0, 1)]
+  const [wide, sleepy, wink] = [p.trait(0, 1, 0), p.trait(0, 1, 1), p.trait(0, 1, 2)]
+
+  await check(
+    'art_import_layers: a two-layer folder becomes one art collection, two layers, even weights',
+    async () => {
+      if ((await countRows('art_collections', 'collection_id', p.cid)) !== 1) return 'not one art collection'
+      const { data: layers } = await admin
+        .from('layers')
+        .select('id, position')
+        .eq('collection_id', p.cid)
+        .order('position')
+      if (layers?.map((layer) => layer.position).join() !== '0,1') return `layers ${JSON.stringify(layers)}`
+      const { data: traits } = await admin.from('traits').select('weight').eq('layer_id', p.layer(0, 1))
+      const weights = (traits ?? []).map((trait) => Number(trait.weight)).sort((a, b) => b - a)
+      return weights.join() === '33.34,33.33,33.33' ? null : `eyes weights ${weights.join()}`
+    },
+  )
+
+  await check('art_import_layers: a second import into the same art collection is refused', async () => {
+    const uploadId = await insertUploadRow(A.client, p.cid)
+    const payload: ImportPayloadInput = {
+      collections: [{ name: 'Again', layers: [{ name: 'Hat', traits: [{ name: 'Cap', uploadId }] }] }],
+      activeCollectionId: p.art(),
+    }
+    const { error } = await callArt(A.client, 'art_import_layers', {
+      p_collection_id: p.cid,
+      p_payload: payload,
+    })
+    return expectSentence(error, CHECK, 'This collection already has layers. Start over to replace them.')
+  })
+
+  await check(
+    'art_delete_trait: prunes two rules and a group, drops the empty ones, closes positions',
+    async () => {
+      const rules = await A.client
+        .from('rules')
+        .insert([
+          {
+            collection_id: p.cid,
+            kind: 'doesnt_mix_with',
+            trait_id: ink,
+            related_trait_ids: [wide],
+            bidirectional: true,
+          },
+          {
+            collection_id: p.cid,
+            kind: 'must_pair_with',
+            trait_id: dusk,
+            related_trait_ids: [wide, sleepy],
+            bidirectional: false,
+          },
+        ])
+        .select('id')
+      if (rules.error) return `setup: ${describe(rules.error as DbError)}`
+      const group = await A.client
+        .from('at_least_one')
+        .insert({ collection_id: p.cid, art_collection_id: p.art(), trait_ids: [wide, wink] })
+      if (group.error) return `setup: ${describe(group.error as DbError)}`
+      const { error } = await callArt(A.client, 'art_delete_trait', {
+        p_collection_id: p.cid,
+        p_trait_id: wide,
+      })
+      if (error) return describe(error)
+      const { data: left } = await admin
+        .from('rules')
+        .select('trait_id, related_trait_ids')
+        .eq('collection_id', p.cid)
+      if (left?.length !== 1 || left[0]!.trait_id !== dusk || left[0]!.related_trait_ids.join() !== sleepy)
+        return `rules ${JSON.stringify(left)}`
+      if ((await countRows('at_least_one', 'collection_id', p.cid)) !== 0)
+        return 'the group of one is still there'
+      const { data: eyes } = await admin
+        .from('traits')
+        .select('id, position')
+        .eq('layer_id', p.layer(0, 1))
+        .order('position')
+      return eyes?.map((trait) => trait.position).join() === '0,1' && eyes[0]!.id === sleepy
+        ? null
+        : `positions ${JSON.stringify(eyes)}`
+    },
+  )
+
+  await check('art_set_layer_weights: a constant forces the weight to 0', async () => {
+    const { error } = await callArt(A.client, 'art_set_layer_weights', {
+      p_collection_id: p.cid,
+      p_layer_id: p.layer(0, 1),
+      p_rows: [
+        { traitId: sleepy, weight: 30, constant: 5 },
+        { traitId: wink, weight: 70, constant: null },
+      ],
+    })
+    if (error) return describe(error)
+    const { data } = await admin.from('traits').select('weight, constant').eq('id', sleepy).single()
+    return Number(data?.weight) === 0 && data?.constant === 5 ? null : `stored ${JSON.stringify(data)}`
+  })
+
+  await check("art_set_layer_weights: a table missing one of the layer's traits is refused", async () => {
+    const { error } = await callArt(A.client, 'art_set_layer_weights', {
+      p_collection_id: p.cid,
+      p_layer_id: p.layer(0, 1),
+      p_rows: [{ traitId: sleepy, weight: 100, constant: null }],
+    })
+    return expectError(error, CHECK)
+  })
+
+  await check(
+    'art_delete_layer: refused with the trigger sentence while tokens exist and the flag is off',
+    async () => {
+      const ins = await A.client
+        .from('tokens')
+        .insert([tokenRow(p.cid, p.art(), 1, [ink, sleepy]), tokenRow(p.cid, p.art(), 2, [dusk, wink])])
+      if (ins.error) return `setup: ${describe(ins.error as DbError)}`
+      const { error } = await callArt(A.client, 'art_delete_layer', {
+        p_collection_id: p.cid,
+        p_layer_id: p.layer(0, 0),
+        p_clear_tokens: false,
+      })
+      return expectSentence(error, CHECK, 'Clear the tokens first.')
+    },
+  )
+
+  await check(
+    'art_delete_layer: with the flag the tokens go, then the layer, and positions close',
+    async () => {
+      const { error } = await callArt(A.client, 'art_delete_layer', {
+        p_collection_id: p.cid,
+        p_layer_id: p.layer(0, 0),
+        p_clear_tokens: true,
+      })
+      if (error) return describe(error)
+      if ((await countRows('tokens', 'collection_id', p.cid)) !== 0) return 'tokens left'
+      const { data } = await admin.from('layers').select('id, position').eq('collection_id', p.cid)
+      return data?.length === 1 && data[0]!.id === p.layer(0, 1) && data[0]!.position === 0
+        ? null
+        : `layers ${JSON.stringify(data)}`
+    },
+  )
+
+  // Three layers, for moves.
+  const m = await importedProject(A.client, [[['A1'], ['B1'], ['C1']]])
+  await check('art_move_layer: moves the top layer to the bottom and renumbers the stack', async () => {
+    const { error } = await callArt(A.client, 'art_move_layer', {
+      p_collection_id: m.cid,
+      p_layer_id: m.layer(0, 2),
+      p_position: 0,
+    })
+    if (error) return describe(error)
+    const { data } = await admin
+      .from('layers')
+      .select('id, position')
+      .eq('collection_id', m.cid)
+      .order('position')
+    const order = (data ?? []).map((layer) => layer.id).join()
+    return order === [m.layer(0, 2), m.layer(0, 0), m.layer(0, 1)].join()
+      ? null
+      : `order ${JSON.stringify(data)}`
+  })
+  await check('art_move_layer: refused with the trigger sentence while tokens exist', async () => {
+    const ins = await A.client
+      .from('tokens')
+      .insert(tokenRow(m.cid, m.art(), 1, [m.trait(0, 2, 0), m.trait(0, 0, 0), m.trait(0, 1, 0)]))
+    if (ins.error) return `setup: ${describe(ins.error as DbError)}`
+    const { error } = await callArt(A.client, 'art_move_layer', {
+      p_collection_id: m.cid,
+      p_layer_id: m.layer(0, 1),
+      p_position: 0,
+    })
+    return expectSentence(error, CHECK, 'Clear the tokens first.')
+  })
+
+  // Two art collections with one layer each, for the collection delete.
+  const r = await importedProject(A.client, [[['X1', 'X2']], [['Y1', 'Y2']]])
+  await check(
+    'art_delete_art_collection: the rest of the tokens renumber from 1 and positions close',
+    async () => {
+      const ins = await A.client
+        .from('tokens')
+        .insert([
+          tokenRow(r.cid, r.art(0), 1, [r.trait(0, 0, 0)]),
+          tokenRow(r.cid, r.art(0), 2, [r.trait(0, 0, 1)]),
+          tokenRow(r.cid, r.art(1), 3, [r.trait(1, 0, 0)]),
+          tokenRow(r.cid, r.art(1), 4, [r.trait(1, 0, 1)]),
+        ])
+      if (ins.error) return `setup: ${describe(ins.error as DbError)}`
+      const { error } = await callArt(A.client, 'art_delete_art_collection', {
+        p_collection_id: r.cid,
+        p_art_collection_id: r.art(0),
+      })
+      if (error) return describe(error)
+      const { data: tokens } = await admin
+        .from('tokens')
+        .select('token_id, dna')
+        .eq('collection_id', r.cid)
+        .order('token_id')
+      const ids = (tokens ?? []).map((token) => `${token.token_id}:${token.dna[0]}`).join()
+      if (ids !== `1:${r.trait(1, 0, 0)},2:${r.trait(1, 0, 1)}`) return `tokens ${ids}`
+      const { data: arts } = await admin
+        .from('art_collections')
+        .select('id, position')
+        .eq('collection_id', r.cid)
+      return arts?.length === 1 && arts[0]!.id === r.art(1) && arts[0]!.position === 0
+        ? null
+        : `art collections ${JSON.stringify(arts)}`
+    },
+  )
+
+  // One layer of four traits, for the whole-set save.
+  const s = await importedProject(A.client, [[['T0', 'T1', 'T2', 'T3']]])
+  const t = [0, 1, 2, 3].map((i) => s.trait(0, 0, i))
+  await check(
+    'art_save_tokens then art_delete_tokens: 10,000 saved, 3 deleted, ids close up, under five seconds',
+    async () => {
+      const tokens = Array.from({ length: 10_000 }, (_, i) => ({
+        tokenId: i + 1,
+        artCollectionId: s.art(),
+        dna: [t[i % 4]!],
+        description: null,
+      }))
+      const started = Date.now()
+      const saved = await callArt(A.client, 'art_save_tokens', {
+        p_collection_id: s.cid,
+        p_tokens: tokens,
+        p_seed: 42,
+      })
+      if (saved.error) return describe(saved.error)
+      const deleted = await callArt(A.client, 'art_delete_tokens', {
+        p_collection_id: s.cid,
+        p_ids: [2, 500, 9_999],
+      })
+      const ms = Date.now() - started
+      if (deleted.error) return describe(deleted.error)
+      info(`10,000 tokens saved and 3 deleted in ${ms} ms`)
+      const total = await countRows('tokens', 'collection_id', s.cid)
+      const { data: last } = await admin
+        .from('tokens')
+        .select('token_id, dna')
+        .eq('collection_id', s.cid)
+        .order('token_id', { ascending: false })
+        .limit(1)
+        .single()
+      const { data: second } = await admin
+        .from('tokens')
+        .select('dna')
+        .eq('collection_id', s.cid)
+        .eq('token_id', 2)
+        .single()
+      const { data: seeded } = await admin
+        .from('collections')
+        .select('generation_seed')
+        .eq('id', s.cid)
+        .single()
+      if (total !== 9_997 || last?.token_id !== 9_997) return `count ${total}, last id ${last?.token_id}`
+      if (second?.dna[0] !== t[2]) return 'token 3 did not become token 2'
+      if (last.dna[0] !== t[3]) return 'the last token did not move up by three'
+      if (Number(seeded?.generation_seed) !== 42) return `seed ${seeded?.generation_seed}`
+      return ms < 5000 ? null : `took ${ms} ms`
+    },
+  )
+
+  await check('art_update_tokens: writes a description, and refuses a DNA that does not match', async () => {
+    const good = await callArt(A.client, 'art_update_tokens', {
+      p_collection_id: s.cid,
+      p_rows: [{ tokenId: 1, description: 'First light' }],
+    })
+    if (good.error) return describe(good.error)
+    const { data } = await admin
+      .from('tokens')
+      .select('description')
+      .eq('collection_id', s.cid)
+      .eq('token_id', 1)
+      .single()
+    if (data?.description !== 'First light') return `description ${data?.description}`
+    const bad = await callArt(A.client, 'art_update_tokens', {
+      p_collection_id: s.cid,
+      p_rows: [{ tokenId: 1, dna: [t[0], t[1]] }],
+    })
+    return expectSentence(bad.error, CHECK, 'Token DNA does not match the layers.')
+  })
+
+  await check("art_set_asset_order: writes the positions of the project's assets", async () => {
+    const col = await insertCollection(A.client, { project_type: 'one_of_one' })
+    if (!col.row) return `setup: ${describe(col.error)}`
+    const cid = col.row.id
+    const asset = async () => {
+      const hash = HEX64(++nameCount)
+      const { id, error } = await recordUpload(A.client, cid, {
+        kind: 'asset',
+        storage_key: `${cid}/assets/${hash}.png`,
+        content_hash: hash,
+        width: 800,
+        height: 600,
+      })
+      if (error || !id) throw new Error(`asset setup: ${describe(error)}`)
+      return id
+    }
+    const [first, second] = [await asset(), await asset()]
+    const { error } = await callArt(A.client, 'art_set_asset_order', {
+      p_collection_id: cid,
+      p_rows: [
+        { uploadId: second, position: 0 },
+        { uploadId: first, position: 1 },
+      ],
+    })
+    if (error) return describe(error)
+    const { data } = await admin.from('uploads').select('id').eq('collection_id', cid).order('position')
+    return (data ?? []).map((row) => row.id).join() === [second, first].join()
+      ? null
+      : `order ${JSON.stringify(data)}`
+  })
+
+  await check(
+    'art_start_over: no art rows, no layer uploads, canvas and seed cleared, keys returned',
+    async () => {
+      const z = await importedProject(A.client, [[['Z1', 'Z2']]])
+      const saved = await callArt(A.client, 'art_save_tokens', {
+        p_collection_id: z.cid,
+        p_tokens: [{ tokenId: 1, artCollectionId: z.art(), dna: [z.trait(0, 0, 0)], description: null }],
+        p_seed: 7,
+      })
+      if (saved.error) return `setup: ${describe(saved.error)}`
+      const { data, error } = await callArt(A.client, 'art_start_over', { p_collection_id: z.cid })
+      if (error) return describe(error)
+      const keys = data as string[]
+      for (const table of ['art_collections', 'layers', 'traits', 'rules', 'at_least_one', 'tokens'])
+        if ((await countRows(table, 'collection_id', z.cid)) !== 0) return `${table} left`
+      const { data: images } = await admin
+        .from('uploads')
+        .select('id')
+        .eq('collection_id', z.cid)
+        .eq('kind', 'layer_image')
+      if (images?.length) return `${images.length} layer images left`
+      const { data: row } = await admin
+        .from('collections')
+        .select('canvas_width, canvas_height, generation_seed')
+        .eq('id', z.cid)
+        .single()
+      if (row?.canvas_width !== null || row?.canvas_height !== null || row?.generation_seed !== null)
+        return `collection ${JSON.stringify(row)}`
+      return keys.length === 2 && keys.every((key) => key.startsWith(`${z.cid}/layers/`))
+        ? null
+        : `keys ${JSON.stringify(keys)}`
+    },
+  )
+
+  // Every function, refused for another creator and after the lock.
+  const w = await importedProject(A.client, [[['W1', 'W2']]])
+  const everyFunction: [string, Record<string, unknown>][] = [
+    [
+      'art_import_layers',
+      { p_collection_id: w.cid, p_payload: { collections: [], activeCollectionId: null } },
+    ],
+    ['art_move_layer', { p_collection_id: w.cid, p_layer_id: w.layer(0, 0), p_position: 0 }],
+    ['art_delete_layer', { p_collection_id: w.cid, p_layer_id: w.layer(0, 0), p_clear_tokens: true }],
+    ['art_delete_trait', { p_collection_id: w.cid, p_trait_id: w.trait(0, 0, 0) }],
+    ['art_delete_art_collection', { p_collection_id: w.cid, p_art_collection_id: w.art() }],
+    ['art_set_layer_weights', { p_collection_id: w.cid, p_layer_id: w.layer(0, 0), p_rows: [] }],
+    ['art_save_tokens', { p_collection_id: w.cid, p_tokens: [], p_seed: 1 }],
+    ['art_update_tokens', { p_collection_id: w.cid, p_rows: [] }],
+    ['art_delete_tokens', { p_collection_id: w.cid, p_ids: [1] }],
+    ['art_set_asset_order', { p_collection_id: w.cid, p_rows: [] }],
+    ['art_start_over', { p_collection_id: w.cid }],
+  ]
+  await check(
+    "art functions: B calling any of them on A's collection is refused and nothing changes",
+    async () => {
+      const problems: string[] = []
+      for (const [fn, args] of everyFunction) {
+        const { error } = await callArt(B.client, fn, args)
+        const problem = expectSentence(error, PERMISSION, 'collection not found')
+        if (problem) problems.push(`${fn}: ${problem}`)
+      }
+      if ((await countRows('traits', 'collection_id', w.cid)) !== 2) problems.push('traits changed')
+      if ((await countRows('layers', 'collection_id', w.cid)) !== 1) problems.push('layers changed')
+      return problems.length ? problems.join('; ') : null
+    },
+  )
+  await check('art functions: every one is refused after the lock', async () => {
+    const lock = await admin
+      .from('collections')
+      .update({ art_locked_at: new Date().toISOString() })
+      .eq('id', w.cid)
+    if (lock.error) return `setup: ${describe(lock.error as DbError)}`
+    const problems: string[] = []
+    for (const [fn, args] of everyFunction) {
+      const { error } = await callArt(A.client, fn, args)
+      const problem = expectSentence(error, PERMISSION, 'The art is locked and cannot change.')
+      if (problem) problems.push(`${fn}: ${problem}`)
+    }
+    return problems.length ? problems.join('; ') : null
   })
 }
 
