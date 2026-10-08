@@ -25,7 +25,7 @@ const RULES = [
 /**
  * Layers, before there are any (generative): upload the project as one folder, as the legacy app
  * did. Drop or choose it, see what was found (collections, layers, trait counts) with each image
- * checked, upload the good ones through the resumable queue (pause, resume, retry), and finish on a
+ * checked, upload the good ones through the upload queue (pause, resume, retry), and finish on a
  * summary that opens the Layers screen.
  *
  * Writes the result into the shared art project for `collectionId`; once it has layers, the Layers

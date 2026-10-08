@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { checkImageFiles, LAYER_IMAGE_RULES } from '../../lib/image-checks'
 import { useArtProject } from '../../state/art-store'
+import { createUploader } from '../../uploads/create-uploader'
 import { queueTotals, useUploadQueue } from '../../uploads/upload-queue'
 import {
   countTraits,
@@ -23,12 +24,13 @@ const CHECK_BATCH = 40
 
 /**
  * The folder upload for a generative project with no layers: read the folder, check every image
- * against the layer rules, upload the good ones through the resumable queue, then hand the result
+ * against the layer rules, upload the good ones through the upload queue, then hand the result
  * to the Art screens (the shared art project, keyed by `collectionId`).
  */
 export function useFolderUpload(collectionId: string, projectName: string, activeCollectionId?: string) {
   const [, update] = useArtProject(collectionId, {})
-  const { queue, items } = useUploadQueue(4)
+  const uploader = useMemo(() => createUploader({ collectionId, kind: 'layer_image' }), [collectionId])
+  const { queue, items } = useUploadQueue(4, uploader)
   const [phase, setPhase] = useState<FolderPhase>('pick')
   const [detected, setDetected] = useState<DetectedProject | null>(null)
   const [checks, setChecks] = useState<ReadonlyMap<string, TraitCheck>>(new Map())

@@ -23,6 +23,7 @@ import { SupplySave } from './assets/supply-save'
 import { TokenDetailsPanel } from './assets/token-details'
 import { TOKEN_DESCRIPTION_MAX, TOKEN_NAME_MAX, type TokenDetails } from './assets/token-list'
 import { useAnnouncer, useAssetItems, type AssetUploads } from './assets/use-assets'
+import { createUploader } from './uploads/create-uploader'
 import { UploadQueuePanel } from './uploads/upload-queue-panel'
 import { queueTotals, useUploadQueue } from './uploads/upload-queue'
 
@@ -35,10 +36,9 @@ export type AssetsScreenProps = {
 
 /**
  * Art for 1/1s and single asset projects, as in the legacy app: upload finished files, each
- * checked in the browser and then sent through the resumable upload queue (pause, resume, retry),
+ * checked in the browser and then sent through the upload queue (pause, resume, retry),
  * and review the list. The supply comes from here: files times editions for 1/1s, the quantity for
- * a single asset, saved with `setCollectionSupply`. Uploads are simulated until storage exists
- * (the seam is `uploads/resumable-upload.ts`). The token name and description start from the
+ * a single asset, saved with `setCollectionSupply`. The token name and description start from the
  * collection's and are written into every token (legacy asked for them in the 1/1 and single
  * asset modals). The legacy parity audit is section 12 of the creator flow spec.
  *
@@ -47,7 +47,11 @@ export type AssetsScreenProps = {
 export function AssetsScreen({ collection, assets, readOnly }: AssetsScreenProps) {
   const type = collection.project_type
   const { message, announce } = useAnnouncer()
-  const { queue, items: uploads } = useUploadQueue(3)
+  const uploader = useMemo(
+    () => createUploader({ collectionId: collection.id, kind: 'asset' }),
+    [collection.id],
+  )
+  const { queue, items: uploads } = useUploadQueue(3, uploader)
   const sink = useMemo<AssetUploads>(
     () => ({ add: (entries) => queue.add(entries), remove: (id) => queue.remove(id) }),
     [queue],

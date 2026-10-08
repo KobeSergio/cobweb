@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import { startUpload, type StartUpload, type UploadHandle, type UploadState } from './resumable-upload'
+import type { StartUpload, UploadHandle, UploadRecord, UploadState } from './uploader'
 
 /** A file in the queue. `queued` has not started; a paused file that never started has no handle. */
 export type QueueItem = {
@@ -14,6 +14,8 @@ export type QueueItem = {
   totalBytes: number
   error?: string
   url?: string
+  uploadId?: string
+  record?: UploadRecord
 }
 
 export type QueueTotals = {
@@ -29,7 +31,7 @@ export type QueueTotals = {
 }
 
 /**
- * Uploads files a few at a time, each through `startUpload` (the resumable upload seam). Held
+ * Uploads files a few at a time, each through `startUpload` (see `uploader.ts`). Held
  * outside React so a file's progress can change many times a second without re-running effects;
  * screens read it with `useUploadQueue`.
  */
@@ -39,8 +41,8 @@ export class UploadQueue {
   private readonly listeners = new Set<() => void>()
 
   constructor(
-    private readonly concurrency = 3,
-    private readonly start: StartUpload = startUpload,
+    private readonly concurrency: number,
+    private readonly start: StartUpload,
   ) {}
 
   subscribe = (listener: () => void) => {
@@ -171,8 +173,8 @@ export function queueTotals(items: QueueItem[]): QueueTotals {
 const EMPTY: QueueItem[] = []
 
 /** A queue for the life of the screen, and its items. Uploads stop when the screen unmounts. */
-export function useUploadQueue(concurrency = 3) {
-  const [queue] = useState(() => new UploadQueue(concurrency))
+export function useUploadQueue(concurrency: number, start: StartUpload) {
+  const [queue] = useState(() => new UploadQueue(concurrency, start))
   useEffect(() => () => queue.dispose(), [queue])
   const items = useSyncExternalStore(queue.subscribe, queue.getSnapshot, () => EMPTY)
   return { queue, items }

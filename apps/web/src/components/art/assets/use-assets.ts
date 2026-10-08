@@ -74,7 +74,7 @@ function plural(count: number, word: string) {
   return `${count.toLocaleString('en-US')} ${word}${count === 1 ? '' : 's'}`
 }
 
-/** Where accepted files go to be uploaded (the resumable queue), and how a removed one is dropped. */
+/** Where accepted files go to be uploaded (the upload queue), and how a removed one is dropped. */
 export type AssetUploads = {
   add: (entries: { id: string; file: File; label: string }[]) => void
   remove: (id: string) => void
@@ -85,7 +85,7 @@ let repeatCounter = 0
 /**
  * The artworks for a 1/1 or single asset project, and the checks on files being added. Files are
  * checked 25 at a time; each batch that passes is listed at once (previewed from object URLs) and
- * handed to `uploads`, the resumable upload queue, under the item's key. Hidden files are skipped
+ * handed to `uploads`, the upload queue, under the item's key. Hidden files are skipped
  * and a file already in the list (same name and size) is refused.
  *
  * Seam: replace with the uploads table (Phase 3). `items` becomes the rows, and `remove` deletes
