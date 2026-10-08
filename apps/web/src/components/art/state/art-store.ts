@@ -1,5 +1,6 @@
 'use client'
 
+import { UNSET_SEED } from '@/lib/art/rows'
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import type { ArtRule, AtLeastOne, Collection, GeneratedToken, Layer } from '@/lib/demo'
 import { buildTraitIndex } from '../lib/trait-index'
@@ -53,7 +54,7 @@ const projects = new Map<string, ArtProject>()
 const listeners = new Map<string, Set<() => void>>()
 
 function fromSeed(seed: ArtSeed): ArtProject {
-  return { ...seed, canvas: null, seed: 0x0a7115, staleNote: null, showBlankTraits: false }
+  return { ...seed, canvas: null, seed: UNSET_SEED, staleNote: null, showBlankTraits: false }
 }
 
 /** The project as the store holds it now, for the sync queue, which works outside React. */

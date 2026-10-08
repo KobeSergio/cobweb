@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { TOKEN_CHUNK } from '@/lib/art/token-ops'
 import { LOCKED, SAVE_INCOMPLETE, done, fail, type ActionResult } from '@/lib/art/result'
 import type { GeneratedToken } from '@/lib/demo'
-import { saveTokenSet } from './token-save'
+import { deleteInChunks, saveTokenSet } from './token-save'
 
 const tokens = (count: number) =>
   Array.from({ length: count }, (_, id) => ({ id }) as unknown as GeneratedToken)
@@ -72,5 +72,38 @@ describe('saveTokenSet', () => {
     d.appendTokens.mockResolvedValueOnce(fail(LOCKED))
     expect(await saveTokenSet(tokens(TOKEN_CHUNK + 1), 7, d)).toEqual(fail(LOCKED))
     expect(d.clearTokens).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('deleteInChunks', () => {
+  it('ends with the same set as one delete, over three chunks, when the database renumbers', async () => {
+    const labels = Array.from({ length: 12 }, (_, i) => `t${i + 1}`)
+    const model = [...labels]
+    const ids = new Set([2, 11, 5, 7, 3, 9, 1])
+    const calls: number[][] = []
+    const result = await deleteInChunks(
+      ids,
+      async (chunk) => {
+        calls.push(chunk)
+        // The database removes these ids and renumbers the later tokens.
+        for (const id of [...chunk].sort((a, b) => b - a)) model.splice(id - 1, 1)
+        return { ok: true, data: undefined }
+      },
+      3,
+    )
+    expect(result.ok).toBe(true)
+    expect(calls).toHaveLength(3)
+    expect(model).toEqual(labels.filter((_, i) => !ids.has(i + 1)))
+  })
+
+  it('stops at the first failure', async () => {
+    let calls = 0
+    const result = await deleteInChunks(
+      [1, 2, 3, 4],
+      async () => (++calls === 1 ? { ok: false, error: 'no' } : { ok: true, data: undefined }),
+      2,
+    )
+    expect(result.ok).toBe(false)
+    expect(calls).toBe(1)
   })
 })

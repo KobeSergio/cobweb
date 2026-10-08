@@ -39,7 +39,7 @@ export type ArtRows = {
 }
 
 /** The store's seed before the first generation (`fromSeed` in art-store.ts). */
-const UNSET_SEED = 0x0a7115
+export const UNSET_SEED = 0x0a7115
 
 const KIND_FROM_DB: Record<Enums<'rule_kind'>, RuleKind> = {
   doesnt_mix_with: "doesn't mix with",

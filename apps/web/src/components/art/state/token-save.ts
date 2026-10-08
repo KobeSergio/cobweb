@@ -39,3 +39,21 @@ export async function saveTokenSet(
   }
   return first
 }
+
+/**
+ * Deletes token ids in chunks of `chunk`, highest id first: the database renumbers every later
+ * token after each call, so deleting from the top leaves the lower ids in a later chunk unchanged.
+ * Stops at the first failure.
+ */
+export async function deleteInChunks(
+  ids: Iterable<number>,
+  remove: (chunk: number[]) => Promise<ActionResult<unknown>>,
+  chunk: number = TOKEN_CHUNK,
+): Promise<ActionResult<unknown>> {
+  const sorted = [...ids].sort((a, b) => b - a)
+  for (let at = 0; at < sorted.length; at += chunk) {
+    const result = await remove(sorted.slice(at, at + chunk))
+    if (!result.ok) return result
+  }
+  return { ok: true, data: undefined }
+}

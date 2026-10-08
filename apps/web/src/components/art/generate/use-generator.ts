@@ -21,6 +21,7 @@ import {
   TOKEN_CHUNK,
   tokenInputs,
 } from '@/lib/art/token-ops'
+import { UNSET_SEED } from '@/lib/art/rows'
 import type { ArtRule, Collection, GeneratedToken, Layer } from '@/lib/demo'
 import { attributeCounts, attributeKeyOf, buildTraitIndex } from '../lib/trait-index'
 import { useArtProject, type ArtProject } from '../state/art-store'
@@ -29,7 +30,7 @@ import { setCollectionSize, supplyOf } from '../state/collection-edits'
 import { fillTo, generateSet, newSeed, regenerate, tokenNameProblem } from '../state/generation'
 import { layersOf, pruneRules } from '../state/layer-edits'
 import { activeRules, analyseRules } from '../state/rule-logic'
-import { saveTokenSet } from '../state/token-save'
+import { deleteInChunks, saveTokenSet } from '../state/token-save'
 import {
   changeTrait,
   countByCollection,
@@ -65,6 +66,10 @@ function inChunks<T>(rows: T[], step: (chunk: T[]) => Promise<ActionResult<unkno
  * `{ ok: false, reason }`, and a bulk re-roll that cannot finish returns false. The supply is the
  * sum of the collections' sizes; a successful generation saves the set with its seed (in chunks), then
  * the supply.
+ *
+ * A chunked save that half-succeeds (a re-roll, describe all, fill or shuffle over 10,000 tokens)
+ * can leave the stored rows ahead of the screen until the next Generate. Generate's own failure
+ * clears the stored set, so a partial set is never kept.
  */
 export function useGenerator(
   collectionId: string,
@@ -95,7 +100,10 @@ export function useGenerator(
   const attributes = useMemo(() => attributeCounts(tokens ?? [], index), [tokens, index])
   const keyOf = useMemo(() => attributeKeyOf(index), [index])
   const perCollection = useMemo(() => countByCollection(tokens ?? []), [tokens])
-  const breaking = useMemo(() => (tokens ? tokensBreakingRules(tokens, active) : []), [tokens, active])
+  const breaking = useMemo(
+    () => (tokens ? tokensBreakingRules(tokens, active, project.atLeastOne) : []),
+    [tokens, active, project.atLeastOne],
+  )
 
   const [generating, setGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -104,6 +112,8 @@ export function useGenerator(
   useEffect(() => () => timers.current.forEach((id) => window.clearTimeout(id)), [])
   /** The sizes, token name and description last saved, for a rollback when a debounced save fails. */
   const sizesBefore = useRef(new Map<string, number>())
+  /** Each token's description as last saved, for a rollback when its debounced save fails. */
+  const describedBefore = useRef(new Map<number, string>())
   const savedName = useRef(tokenName)
   const savedDescription = useRef(tokenDescription)
 
@@ -125,7 +135,7 @@ export function useGenerator(
   /** Replaces the stored set (in chunks) and keeps the seed it came from. */
   const saveSet = (set: GeneratedToken[], seed: number) =>
     saveTokenSet(set, seed, {
-      saveTokens: (rows, at) => saveTokens(collectionId, tokenInputs(rows), at),
+      saveTokens: (rows, seed) => saveTokens(collectionId, tokenInputs(rows), seed),
       appendTokens: (rows) => appendTokens(collectionId, tokenInputs(rows)),
       clearTokens: () => clearTokens(collectionId),
     })
@@ -212,7 +222,7 @@ export function useGenerator(
     breaking,
     staleNote: project.staleNote,
     /** The seed the set on screen was generated from, or null before the first generation. */
-    generatedFrom: tokens && tokens.length > 0 ? project.seed : null,
+    generatedFrom: tokens && tokens.length > 0 && project.seed !== UNSET_SEED ? project.seed : null,
     generating,
     progress,
     problems,
@@ -269,17 +279,28 @@ export function useGenerator(
     showBlankTraits: project.showBlankTraits,
     describe: (tokenId: number, description: string) => {
       if (!tokens) return
+      if (!describedBefore.current.has(tokenId)) {
+        const was = sync.read().tokens?.find((token) => token.id === tokenId)
+        describedBefore.current.set(tokenId, was?.description ?? '')
+      }
       void sync.run({
         apply: (p) => ({ ...p, tokens: p.tokens && setDescription(p.tokens, tokenId, description) }),
       })
-      sync.debounce.schedule(
-        `describe:${tokenId}`,
-        () =>
-          void sync.run({
-            apply: (p) => p,
-            persist: () => updateTokens(collectionId, [{ tokenId, description }]),
-          }),
-      )
+      sync.debounce.schedule(`describe:${tokenId}`, () => {
+        const before = describedBefore.current.get(tokenId) ?? ''
+        void sync.run({
+          apply: (p) => p,
+          persist: async () => {
+            const result = await updateTokens(collectionId, [{ tokenId, description }])
+            if (result.ok) describedBefore.current.delete(tokenId)
+            return result
+          },
+          undo: (p) => {
+            describedBefore.current.delete(tokenId)
+            return { ...p, tokens: p.tokens && setDescription(p.tokens, tokenId, before) }
+          },
+        })
+      })
     },
     describeAll: () => {
       if (!tokens) return
@@ -316,9 +337,8 @@ export function useGenerator(
     remove: (ids: ReadonlySet<number>) => {
       if (!tokens) return
       sync.debounce.flushAll()
-      setTokens(
-        deleteTokens(tokens, ids, ctx),
-        inChunks([...ids], (chunk) => saveDeleted(collectionId, chunk)),
+      setTokens(deleteTokens(tokens, ids, ctx), () =>
+        deleteInChunks(ids, (chunk) => saveDeleted(collectionId, chunk)),
       )
     },
     shuffle: (ids: ReadonlySet<number>) => {
