@@ -20,5 +20,5 @@ export const CLEAR_FIRST = 'Clear the generated tokens first, then change the la
 export const IMPORT_REFUSED = 'This collection already has layers. Start over to replace them.'
 export const TRAIT_CAP = 'A layer can have at most 500 traits.'
 export const DNA_MISMATCH = 'Token DNA does not match the layers.'
-export const SAVE_CAP = 'A project can have at most 100,000 tokens.'
+export const SAVE_CAP = 'A project can have at most 100,000 tokens. Lower the collection sizes.'
 export const UPLOAD_CAP = 'This project has reached its 5 GB of files. Delete some files to upload more.'

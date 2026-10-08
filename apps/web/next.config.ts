@@ -4,6 +4,10 @@ const nextConfig: NextConfig = {
   // The UI and DNA packages ship TypeScript source, so Next compiles it with the app.
   transpilePackages: ['@cobweb/ui', '@cobweb/dna'],
   poweredByHeader: false,
+  experimental: {
+    // A save is about 400 bytes per token, so 100,000 tokens (MAX_SUPPLY) is about 40 MB; the default is 1 MB.
+    serverActions: { bodySizeLimit: '64mb' },
+  },
   async headers() {
     return [
       {
