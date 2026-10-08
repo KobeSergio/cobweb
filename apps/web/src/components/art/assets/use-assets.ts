@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { UploadedAsset } from '@/lib/demo'
 import { checkImageFiles, releaseChecked, type CheckedFile } from '../lib/image-checks'
+import type { QueueItem } from '../uploads/upload-queue'
+import { adoptRecords } from './stored'
 import { checkMediaFile, type CheckedMedia } from './media'
 import {
   attributesForReplacement,
@@ -35,6 +37,7 @@ export function fromSample(asset: UploadedAsset): AssetItem {
     attributes: asset.attributes,
     bytes: null,
     owned: false,
+    uploadId: asset.uploadId ?? null,
   }
 }
 
@@ -49,6 +52,7 @@ export function fromChecked(entry: CheckedFile, nameAttribute = true): AssetItem
     attributes: nameAttribute ? [fileNameAttribute(entry.file.name)] : [],
     bytes: entry.file.size,
     owned: true,
+    uploadId: null,
   }
 }
 
@@ -63,6 +67,7 @@ export function fromMedia(entry: CheckedMedia, attributes: Attribute[]): AssetIt
     attributes,
     bytes: entry.file.size,
     owned: true,
+    uploadId: null,
   }
 }
 
@@ -74,10 +79,11 @@ function plural(count: number, word: string) {
   return `${count.toLocaleString('en-US')} ${word}${count === 1 ? '' : 's'}`
 }
 
-/** Where accepted files go to be uploaded (the upload queue), and how a removed one is dropped. */
+/** Where accepted files go to be uploaded (the upload queue), how a removed one is dropped, and how a stored one is deleted. */
 export type AssetUploads = {
   add: (entries: { id: string; file: File; label: string }[]) => void
   remove: (id: string) => void
+  deleteStored: (uploadId: string) => Promise<{ ok: true } | { error: string }>
 }
 
 let repeatCounter = 0
@@ -88,13 +94,15 @@ let repeatCounter = 0
  * handed to `uploads`, the upload queue, under the item's key. Hidden files are skipped
  * and a file already in the list (same name and size) is refused.
  *
- * Seam: replace with the uploads table (Phase 3). `items` becomes the rows, and `remove` deletes
- * the row and the stored object as well as cancelling the upload.
+ * Finished uploads are adopted from `queueItems`: the item switches to its served URL and upload id,
+ * and removing it deletes the row and the object. The next sub-project saves the list itself as
+ * token rows.
  */
 export function useAssetItems(
   initial: UploadedAsset[],
   announce: (text: string) => void,
   uploads: AssetUploads,
+  queueItems: readonly QueueItem[],
 ) {
   const [items, setItems] = useState<AssetItem[]>(() => initial.map(fromSample))
   const [rejected, setRejected] = useState<RejectedFile[]>([])
@@ -105,6 +113,15 @@ export function useAssetItems(
     latest.current = items
   }, [items])
   useEffect(() => () => revoke(latest.current), [])
+  useEffect(() => {
+    setItems((current) => {
+      const change = adoptRecords(current, queueItems)
+      if (!change) return current
+      // Revoking twice (StrictMode runs updaters twice) is harmless.
+      for (const url of change.revoke) URL.revokeObjectURL(url)
+      return change.items
+    })
+  }, [queueItems])
 
   const reject = useCallback((entries: RejectedFile[]) => {
     if (entries.length > 0) setRejected((current) => [...current, ...entries])
@@ -176,7 +193,13 @@ export function useAssetItems(
         previous?.fileName ?? null,
         file.name,
       )
-      for (const item of latest.current) uploads.remove(item.key)
+      for (const item of latest.current) {
+        uploads.remove(item.key)
+        if (item.uploadId)
+          void uploads.deleteStored(item.uploadId).then((result) => {
+            if ('error' in result) announce(result.error)
+          })
+      }
       setItems((current) => {
         revoke(current)
         return [fromMedia(checked, attributes)]
@@ -194,7 +217,13 @@ export function useAssetItems(
       const gone = latest.current.filter((item) => drop.has(item.key))
       if (gone.length === 0) return
       revoke(gone)
-      for (const item of gone) uploads.remove(item.key)
+      for (const item of gone) {
+        uploads.remove(item.key)
+        if (item.uploadId)
+          void uploads.deleteStored(item.uploadId).then((result) => {
+            if ('error' in result) announce(result.error)
+          })
+      }
       setItems((current) => current.filter((item) => !drop.has(item.key)))
       announce(
         gone.length === 1 ? `Removed ${gone[0]!.fileName}.` : `Removed ${plural(gone.length, 'file')}.`,

@@ -18,6 +18,8 @@ export type Trait = {
   blank: boolean
   /** Full-size layer image, or null for a blank. */
   imageUrl: string | null
+  /** The `uploads` row behind `imageUrl`, once the image is stored. Sample traits have none. */
+  uploadId?: string
   /** `false` leaves this trait out of the token's metadata attributes. */
   metadata?: false
 }

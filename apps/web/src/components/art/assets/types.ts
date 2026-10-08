@@ -18,6 +18,8 @@ export type AssetItem = {
   bytes: number | null
   /** The URL is an object URL made here, so it must be revoked on removal. */
   owned: boolean
+  /** The `uploads` row once the file is stored; null while uploading and for sample data. */
+  uploadId: string | null
 }
 
 /** A file that failed its checks and was not added. */

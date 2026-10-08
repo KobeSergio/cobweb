@@ -51,6 +51,8 @@ export type UploadedAsset = {
   fileName: string
   /** The file's URL. For a video this is the MP4, not a still. */
   imageUrl: string
+  /** The `uploads` row behind the file. Sample data has none; sample mode never uploads. */
+  uploadId?: string
   mediaType: MediaType
   /** Editions of this artwork (1/1s); 1 otherwise. */
   quantity: number

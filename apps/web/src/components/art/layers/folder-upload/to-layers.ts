@@ -5,7 +5,7 @@ import { evenWeights } from '../../state/layer-edits'
 import type { DetectedProject } from './folder-tree'
 
 /** What the upload produced for one trait: where the image is now. */
-export type UploadedImage = { url: string; name: string }
+export type UploadedImage = { url: string; name: string; uploadId: string }
 
 function slug(name: string): string {
   return (
@@ -64,6 +64,7 @@ export function mergeUpload(
         weight: weights[index]!,
         blank: false,
         imageUrl: images.get(trait.key)!.url,
+        uploadId: images.get(trait.key)!.uploadId,
       }))
       if (traits.length > 0)
         layers.push({ id: layerId, collectionId: id, name: sourceLayer.name, position: position++, traits })

@@ -127,19 +127,21 @@ export function useFolderUpload(collectionId: string, projectName: string, activ
     )
     const images = new Map<string, UploadedImage>()
     for (const item of items) {
-      if (item.state !== 'done') continue
-      // Seam: `item.url` is the stored object once storage exists; the preview URL stands in for it.
-      const url = checks.get(item.id)?.url
-      if (url) images.set(item.id, { url, name: names.get(item.id) ?? traitNameFromFile(item.file.name) })
+      if (item.state !== 'done' || !item.record) continue
+      images.set(item.id, {
+        url: item.record.url,
+        name: names.get(item.id) ?? traitNameFromFile(item.file.name),
+        uploadId: item.record.id,
+      })
     }
-    // The previews now belong to the art project, so they are not revoked when this unmounts.
-    urls.current = []
+    // The traits now point at the stored files, so the previews can go.
+    release()
     update((project) => ({
       ...project,
       ...mergeUpload(project, detected, images, activeCollectionId),
       canvas: project.canvas ?? canvas,
     }))
-  }, [detected, items, checks, update, activeCollectionId, canvas])
+  }, [detected, items, release, update, activeCollectionId, canvas])
 
   const rejected = detected ? countTraits(detected) - valid.length : 0
   return {

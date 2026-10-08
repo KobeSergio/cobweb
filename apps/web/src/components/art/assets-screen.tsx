@@ -12,6 +12,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@cobweb/ui/components/empty'
+import { deleteUpload } from '@/app/actions/uploads'
 import type { Tables } from '@/lib/database.types'
 import type { UploadedAsset } from '@/lib/demo'
 import { MAX_SUPPLY } from '@/lib/collections'
@@ -53,10 +54,14 @@ export function AssetsScreen({ collection, assets, readOnly }: AssetsScreenProps
   )
   const { queue, items: uploads } = useUploadQueue(3, uploader)
   const sink = useMemo<AssetUploads>(
-    () => ({ add: (entries) => queue.add(entries), remove: (id) => queue.remove(id) }),
+    () => ({
+      add: (entries) => queue.add(entries),
+      remove: (id) => queue.remove(id),
+      deleteStored: deleteUpload,
+    }),
     [queue],
   )
-  const files = useAssetItems(assets, announce, sink)
+  const files = useAssetItems(assets, announce, sink, uploads)
   const [singleQuantity, setSingleQuantity] = useState(
     () => collection.max_supply ?? assets[0]?.quantity ?? 1,
   )
