@@ -112,7 +112,7 @@ layout's client tree) and `useArtSync()`.
   and returns at once. The existing hooks therefore keep one code path: each method builds the pure
   edit and the matching action call; the provider decides whether the action runs.
 
-The result type every action returns is `type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string }`.
+The result type every action returns is `type ActionResult<T = undefined> = { ok: true; data: T } | { ok: false; error: string }`. The sync queue is one per collection in a module-level map; a remount does not re-seed a store entry that already exists (a hard reload refreshes from the server).
 
 ## 6. Server actions
 
@@ -127,14 +127,16 @@ to "That change could not be saved. Reload the page and try again."
 | File                 | Actions                                                                                                                                                                                                                                |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `art-collections.ts` | `addArtCollection(name)`, `renameArtCollection(id, name)`, `setArtCollectionSize(id, size)`, `deleteArtCollection(id)` (function)                                                                                                      |
-| `layers.ts`          | `addLayer(artCollectionId, name)`, `renameLayer(id, name, displayName)`, `moveLayer(id, position)`, `deleteLayer(id, clearTokens)` (function), `importLayers(payload)` (function)                                                      |
+| `layers.ts`          | `addLayer(artCollectionId, name)`, `renameLayer(id, name, displayName)`, `moveLayer(id, position)` (function), `deleteLayer(id, clearTokens)` (function), `importLayers(payload)` (function)                                           |
 | `traits.ts`          | `addTraits(layerId, [{ name, uploadId }])`, `renameTrait(id, name)`, `setLayerWeights(layerId, [{ traitId, weight, constant }])` (function), `setBlank(layerId, on)`, `setTraitMetadata(id, inMetadata)`, `deleteTrait(id)` (function) |
 | `rules.ts`           | `addRule(kind, traitId, relatedTraitIds)`, `updateRule(id, kind, traitId, relatedTraitIds)`, `deleteRule(id)`                                                                                                                          |
 | `at-least-one.ts`    | `addAtLeastOne(artCollectionId, traitIds)`, `updateAtLeastOne(id, traitIds)`, `deleteAtLeastOne(id)`                                                                                                                                   |
-| `tokens.ts`          | `saveTokens(tokens, seed)` (function), `updateTokens([{ tokenId, dna?, description? }])`, `swapTokens(a, b)` (existing function), `deleteTokens(ids)` (function), `appendTokens(tokens)`, `clearTokens()`                              |
+| `tokens.ts`          | `saveTokens(tokens, seed)` (function), `updateTokens([{ tokenId, dna?, description? }])` (function), `swapTokens(a, b)` (existing function), `deleteTokens(ids)` (function), `appendTokens(tokens)`, `clearTokens()`                   |
 | `settings.ts`        | `updateArtSettings({ tokenName?, tokenDescription?, showBlankTraits?, artDeferred? })`                                                                                                                                                 |
-| `assets.ts`          | `updateAsset(uploadId, { quantity?, attributes? })`, `setAssetOrder([{ uploadId, position }])`                                                                                                                                         |
+| `assets.ts`          | `updateAsset(uploadId, { quantity?, attributes? })`, `setAssetOrder([{ uploadId, position }])` (function)                                                                                                                              |
 | `project.ts`         | `startOver()` (function, then deletes the layer-image objects best effort)                                                                                                                                                             |
+
+Every action takes the collection id as its first argument.
 
 Rules the actions enforce before the database does, so the creator reads a sentence and not a
 constraint name: a weight is 0 to 100 with two decimals; a constant is 1 to 10,000 and forces the
@@ -156,16 +158,19 @@ takes the collection id first and locks that `collections` row `for share` where
 `owner_id = auth.uid()`, so a row the caller does not own is never locked and reads as
 "collection not found" (42501).
 
-| Function                                                 | What it does in one transaction                                                                                                                                                                                                                                                                 |
-| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `art_import_layers(collection, payload jsonb)`           | Inserts art collections, layers and traits from the folder upload's structure (names, positions, even weights, `upload_id` per trait); refuses when the project already has layers for the target art collection. Returns the new ids in the same shape.                                        |
-| `art_delete_layer(collection, layer, clear_tokens bool)` | With `clear_tokens`, deletes the art collection's tokens first (the trigger refuses otherwise); deletes the layer (traits cascade); prunes `rules` and `at_least_one` arrays of its trait ids, dropping a rule or group left too small; closes the `position` gap.                              |
-| `art_delete_trait(collection, trait)`                    | Deletes the trait; prunes `related_trait_ids` and `trait_ids` of it; drops a rule whose `trait_id` it was (cascade does this) or whose related list is now empty, and a group with fewer than two traits; closes the position gap. The trait's upload row stays (allowed, see the upload spec). |
-| `art_delete_art_collection(collection, art_collection)`  | Deletes the art collection (layers, traits, rules via cascade, tokens via cascade), prunes groups and rules that referenced its traits, closes the position gap, and renumbers the remaining tokens from 1 in `token_id` order (deferrable PK, one statement).                                  |
-| `art_set_layer_weights(collection, layer, rows jsonb)`   | Updates `weight` and `constant` for every trait in the layer from `[{ id, weight, constant }]`; enforces `constant implies weight 0`; refuses when the ids are not exactly the layer's non-blank traits.                                                                                        |
-| `art_save_tokens(collection, tokens jsonb, seed bigint)` | Deletes the collection's tokens and inserts the new set from `[{ tokenId, artCollectionId, dna, description }]`; writes `generation_seed`. Up to 100,000 rows (MAX_SUPPLY); 10,000 rows take under five seconds per the 9e timing check.                                                        |
-| `art_delete_tokens(collection, ids int[])`               | Deletes the ids and moves every later id up by the count of deleted ids below it, in one set-based update under the deferrable key.                                                                                                                                                             |
-| `art_start_over(collection)`                             | Deletes tokens, rules, groups, layers (traits cascade), art collections and the `layer_image` and matching `thumbnail` upload rows; sets `canvas_width`, `canvas_height` and `generation_seed` to null. Returns the storage keys of the deleted uploads so the action can delete the objects.   |
+| Function                                                 | What it does in one transaction                                                                                                                                                                                                                                                                                                                                  |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `art_import_layers(collection, payload jsonb)`           | Inserts art collections, layers and traits from the folder upload's structure (names, positions, even weights, `upload_id` per trait); refuses when the project already has layers for the target art collection. Returns the new ids in the same shape.                                                                                                         |
+| `art_delete_layer(collection, layer, clear_tokens bool)` | With `clear_tokens`, clears every token of the project (the browser clears the whole set; clearing one art collection would leave id gaps); deletes the layer (traits cascade); prunes `rules` and `at_least_one` arrays of its trait ids, dropping a rule or group left too small; closes the `position` gap.                                                   |
+| `art_delete_trait(collection, trait)`                    | Deletes the trait; prunes `related_trait_ids` and `trait_ids` of it; drops a rule whose `trait_id` it was (cascade does this) or whose related list is now empty, and a group with fewer than two traits; closes the position gap. The trait's upload row stays (allowed, see the upload spec).                                                                  |
+| `art_delete_art_collection(collection, art_collection)`  | Deletes the art collection (layers, traits, rules via cascade, tokens via cascade), prunes groups and rules that referenced its traits, closes the position gap, and renumbers the remaining tokens from 1 in `token_id` order (deferrable PK, one statement).                                                                                                   |
+| `art_set_layer_weights(collection, layer, rows jsonb)`   | Updates only the rows it is given for that layer, ignores ids it does not find and leaves absent traits untouched (a client table built under optimistic edits cannot be exact); constant forces weight 0. The weight table sent includes the blank trait.                                                                                                       |
+| `art_save_tokens(collection, tokens jsonb, seed bigint)` | Deletes the collection's tokens and inserts the new set from `[{ tokenId, artCollectionId, dna, description }]`; writes `generation_seed`. Locks the collection row `for no key update` because it writes it. Up to 100,000 rows (MAX_SUPPLY); 10,000 rows take under five seconds per the 9e timing check.                                                      |
+| `art_delete_tokens(collection, ids int[])`               | Deletes the ids and moves every later id up by the count of deleted ids below it, in one set-based update under the deferrable key.                                                                                                                                                                                                                              |
+| `art_start_over(collection)`                             | Deletes tokens, rules, groups, layers (traits cascade), art collections and the `layer_image` and matching `thumbnail` upload rows; sets `canvas_width`, `canvas_height` and `generation_seed` to null. Locks the collection row `for no key update` because it writes it. Returns the storage keys of the deleted uploads so the action can delete the objects. |
+| `art_move_layer(collection, layer, position int)`        | Moves a layer to a new position and closes the gap.                                                                                                                                                                                                                                                                                                              |
+| `art_update_tokens(collection, updates jsonb)`           | Updates tokens from `[{ tokenId, dna?, description? }]`; only the fields present in each row are updated.                                                                                                                                                                                                                                                        |
+| `art_set_asset_order(collection, orders jsonb)`          | Updates the `position` of asset rows from `[{ uploadId, position }]`.                                                                                                                                                                                                                                                                                            |
 
 Guard sentences that pass through to the creator unchanged: "The art is locked and cannot
 change.", "A layer can have at most 500 traits.", "Clear the tokens first." (from
@@ -173,23 +178,25 @@ change.", "A layer can have at most 500 traits.", "Clear the tokens first." (fro
 layers." when the screen did not offer to), "Token DNA does not match the layers.", and the two
 canvas and cap sentences from `record_upload`.
 
+The `tokens_guard_dna` trigger is re-created to fire only on DNA or art collection writes, so id renumbering stays fast. The `art_import_layers` function deletes existing empty art collections when a project without layers is imported without a fill target. A whole-set save is sent in chunks of 10,000 rows (first chunk through `art_save_tokens`, the rest through `appendTokens`); a later chunk failing clears the set and reports "The set did not save in full. Generate again." The server action body limit is 8 MB.
+
 The functions are re-validated by `verify:local` section 9f (section 12).
 
 ## 8. Token operations
 
-| Screen action                   | Store (unchanged pure logic)   | Persisted as                                                 |
-| ------------------------------- | ------------------------------ | ------------------------------------------------------------ |
-| Generate                        | `generateSet` with `newSeed()` | `saveTokens(all, seed)`; then `setCollectionSupply` as today |
-| Re-roll selected                | `regenerate`                   | `updateTokens` with the changed rows' `dna`                  |
-| Change one trait                | `changeTrait`                  | `updateTokens` (one row)                                     |
-| Describe one or all             | `setDescription`               | `updateTokens` with `description`                            |
-| Swap two ids                    | `swapIds`                      | `swapTokens(a, b)`                                           |
-| Delete tokens                   | `deleteTokens`                 | `deleteTokens(ids)`                                          |
-| Shuffle ids                     | `shuffleIds`                   | `saveTokens(all, seed)` (same seed)                          |
-| Fill to size                    | `fillTo`                       | `appendTokens(new rows)`                                     |
-| Rename tokens (token name)      | `renameTokens`                 | `updateArtSettings({ tokenName })`; names are not stored     |
-| Clear the set (structural edit) | `tokens: null`                 | `clearTokens()`, or the `clearTokens` flag of `deleteLayer`  |
-| Blank traits in metadata        | `showBlankTraits`              | `updateArtSettings({ showBlankTraits })`                     |
+| Screen action                   | Store (unchanged pure logic)   | Persisted as                                                                          |
+| ------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------- |
+| Generate                        | `generateSet` with `newSeed()` | `saveTokens(all, seed)`; then `setCollectionSupply` as today (skipped in sample mode) |
+| Re-roll selected                | `regenerate`                   | `updateTokens` with the changed rows' `dna`                                           |
+| Change one trait                | `changeTrait`                  | `updateTokens` (one row)                                                              |
+| Describe one or all             | `setDescription`               | `updateTokens` with `description`                                                     |
+| Swap two ids                    | `swapIds`                      | `swapTokens(a, b)`                                                                    |
+| Delete tokens                   | `deleteTokens`                 | `deleteTokens(ids)` (sends chunks in descending id order)                             |
+| Shuffle ids                     | `shuffleIds`                   | `saveTokens(all, seed)` (same seed)                                                   |
+| Fill to size                    | `fillTo`                       | `appendTokens(new rows)`                                                              |
+| Rename tokens (token name)      | `renameTokens`                 | `updateArtSettings({ tokenName })`; names are not stored                              |
+| Clear the set (structural edit) | `tokens: null`                 | `clearTokens()`, or the `clearTokens` flag of `deleteLayer`                           |
+| Blank traits in metadata        | `showBlankTraits`              | `updateArtSettings({ showBlankTraits })`                                              |
 
 The seed is saved with the set; the Generate screen shows "Generated from seed <n>" from the
 loaded value, which is new. A structural edit while tokens exist keeps today's confirmation dialog
@@ -210,7 +217,7 @@ rewrite every token.
   `uploadId` yet (still uploading) queue their edit until adoption.
 - The list order is the `uploads.position` of the asset rows; `add` appends positions, a reorder
   or the "shuffled" order writes `setAssetOrder` for every item. The `order` radio therefore
-  becomes an action, not a stored flag: "shuffled" assigns new positions from the screen's seed.
+  becomes an action, not a stored flag; "Shuffled" reorders files (editions of a file stay together) as a pure function of the seed over the added order.
 - The token name and description panel calls `updateArtSettings`.
 - The page loads the asset rows (`kind = 'asset'`, ordered by `position`) into `UploadedAsset`
   with `uploadId`, `quantity`, `attributes`, `mediaType` and the served URL; sample data stays
@@ -222,7 +229,7 @@ rewrite every token.
 - `stageContext` derives `readOnly` for the Art steps from `art_locked_at` (set means read only),
   not from `status`.
 - `artDeferred` comes from `collections.art_deferred`; the "finish later" screen writes it with
-  `updateArtSettings({ artDeferred })`; the `?art=deferred` URL parameter and both `Seam:` comments
+  `updateArtSettings({ artDeferred })`; the `?art=deferred` URL parameter stays only as sample mode's scenario switch, and real projects neither read nor write it. Both `Seam:` comments
   in `finish-later.tsx` go. `_lib/stage.ts` and `layers/page.tsx` drop their "until Phase 3" notes.
 
 ## 11. Folder upload and images
@@ -250,15 +257,16 @@ rewrite every token.
   a failed persist restores the snapshot, a create waits for its id, sample mode persists
   nothing, the lock sentence flips read only); the weight debounce sends one call per layer; the
   action input schemas (one failing row per rule in section 6).
-- `verify:local` section 9f, "art edits": every function in section 7 as the owner and as another
+- `verify:local` section 9f, "art edits": 16 checks, every function in section 7 as the owner and as another
   creator (refused), including: delete a trait that two rules and one group reference (pruned,
   the empty rule gone, the group of one gone); delete a layer with tokens without the flag
   (refused with the trigger sentence) and with it (tokens gone, positions closed); delete an art
   collection with tokens in two collections (remaining tokens renumbered from 1); set weights with
-  a constant (weight forced to 0) and with a missing trait (refused); save 10,000 tokens then
-  delete 3 (gaps closed, under five seconds); import a two-layer folder payload and a second import
-  into the same art collection (refused); start over leaves no art rows, no layer uploads and a
-  null canvas; every function refused after the lock.
+  a constant (weight forced to 0) and with a missing trait (the tolerant weight table refused);
+  save 10,000 tokens then delete 3 (gaps closed, under five seconds); import a two-layer folder
+  payload and a second import into the same art collection (refused); start over leaves no art
+  rows, no layer uploads and a null canvas; every function refused after the lock; the canvas,
+  cap and lock refusals.
 - Browser: sample data off; upload a folder, rename a layer, set weights, add a rule, generate,
   re-roll one token, delete two, reload and see the same project; delete a layer with the clear
   dialog; start over and see the empty Layers screen; on a 1/1 project add two files, set editions
@@ -266,16 +274,18 @@ rewrite every token.
 
 ## 13. Acceptance criteria
 
-- [ ] Every edit the Art screens offer survives a reload in a project with real rows, and sample
+- [x] Every edit the Art screens offer survives a reload in a project with real rows, and sample
       mode still renders every Art screen without a database write.
-- [ ] `pnpm typecheck && pnpm lint && pnpm test` pass at the root; `verify:local` passes with
-      section 9f added; `verify:storage` still passes.
-- [ ] A failed write rolls the screen back and shows a sentence; a locked project is read only on
+- [x] `pnpm typecheck && pnpm lint && pnpm test` pass at the root; `verify:local` passes with
+      section 9f added (9f: 10,000 tokens saved and 3 deleted in 4,091 ms locally, 8 October 2026); `verify:storage` still passes.
+- [x] A failed write rolls the screen back and shows a sentence; a locked project is read only on
       every Art screen from `art_locked_at`.
-- [ ] Deleting a trait prunes every rule and group that named it; deleting tokens closes the id
+- [x] Deleting a trait prunes every rule and group that named it; deleting tokens closes the id
       gaps; deleting an art collection renumbers the rest.
-- [ ] The folder upload writes art collections, layers and traits linked to their upload rows in
+- [x] The folder upload writes art collections, layers and traits linked to their upload rows in
       one transaction; start over empties the project and frees the canvas.
-- [ ] The Assets screen's editions, attributes and order survive a reload.
-- [ ] `docs/MASTER_PLAN.md` Phase 3 names this sub-project as landed and the next one (lock and
+- [x] The Assets screen's editions, attributes and order survive a reload.
+- [x] `docs/MASTER_PLAN.md` Phase 3 names this sub-project as landed and the next one (lock and
       pay); the creator flow spec's seams list drops the Art entries that are now real.
+
+Checked on 8 October 2026 on local Supabase: root typecheck, lint and tests (dna 60, web 169), `verify:local` 169 checks, `verify:storage` 15 checks. Browser walk with Playwright and the dev wallet, sample data off: a two-layer folder imported into one art collection with even weights and thumbnails served; a rename and a single debounced weight save persisted; a rule added; a set of 5 generated with the seed shown and saved (the fixture allows 6 combinations, so 20 was correctly refused); a re-roll and two deletes renumbered the ids; everything survived a reload; moving a layer with tokens asked to clear them and the move held; deleting a layer cleared the tokens and its rule; Start over emptied the project, its layer uploads and objects and freed the canvas; a 1/1 collection kept editions, an attribute and the shuffled order across a reload; a lock set by the service role turned an open tab read only with the locked sentence and rolled the edit back; with sample data on, every Art screen showed sample data and edits made no request.

@@ -97,10 +97,10 @@ The model is the TheSuits contract: [reference/TheSuits.sol](reference/TheSuits.
 
 ## Open decisions
 
-| Decision                                                                                   | Needed by                                                    |
-| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
-| Mint fee: option A, B or C from [PLAN.md](PLAN.md)                                         | Phase 7, when fee values are set (the mechanism is the same) |
-| The logo: keep the Kingdomly crown or replace it                                           | Phase 7                                                      |
+| Decision                                           | Needed by                                                    |
+| -------------------------------------------------- | ------------------------------------------------------------ |
+| Mint fee: option A, B or C from [PLAN.md](PLAN.md) | Phase 7, when fee values are set (the mechanism is the same) |
+| The logo: keep the Kingdomly crown or replace it   | Phase 7                                                      |
 
 ## Phases
 
@@ -175,7 +175,7 @@ What exists:
 
 ### Phase 3: Art generator
 
-**Status:** in progress. The DNA engine (first sub-project) landed on 7 October 2026; see its spec. The art tables (second sub-project) landed on 8 October 2026; see [specs/2026-10-08-art-tables.md](specs/2026-10-08-art-tables.md). Layer and asset upload (third sub-project) landed on 8 October 2026; see [specs/2026-10-08-art-upload.md](specs/2026-10-08-art-upload.md). Owed to the lock and pay sub-project: a sweep of objects that were uploaded but never recorded (older than a day), since the project cap counts recorded rows only. Next: wiring the Art screens to the art tables.
+**Status:** in progress. The DNA engine (first sub-project) landed on 7 October 2026; see its spec. The art tables (second sub-project) landed on 8 October 2026; see [specs/2026-10-08-art-tables.md](specs/2026-10-08-art-tables.md). Layer and asset upload (third sub-project) landed on 8 October 2026; see [specs/2026-10-08-art-upload.md](specs/2026-10-08-art-upload.md). Wiring the Art screens to the art tables (fourth sub-project) landed on 8 October 2026; see [specs/2026-10-08-art-wiring.md](specs/2026-10-08-art-wiring.md). Owed to the lock and pay sub-project: a sweep of objects that were uploaded but never recorded (older than a day), since the project cap counts recorded rows only. Next: lock and pay.
 
 Source: [legacy/market-creator-flow.md](legacy/market-creator-flow.md), sections 2, 3, 4, 7 and 8.
 
