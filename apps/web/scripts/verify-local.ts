@@ -1960,14 +1960,28 @@ async function artEdits(A: Creator, B: Creator): Promise<void> {
     return Number(data?.weight) === 0 && data?.constant === 5 ? null : `stored ${JSON.stringify(data)}`
   })
 
-  await check("art_set_layer_weights: a table missing one of the layer's traits is refused", async () => {
-    const { error } = await callArt(A.client, 'art_set_layer_weights', {
-      p_collection_id: p.cid,
-      p_layer_id: p.layer(0, 1),
-      p_rows: [{ traitId: sleepy, weight: 100, constant: null }],
-    })
-    return expectError(error, CHECK)
-  })
+  await check(
+    "art_set_layer_weights: a table missing a trait leaves it unchanged and another layer's id is ignored",
+    async () => {
+      const before = await admin.from('traits').select('id, weight').in('id', [wink, ink])
+      const { error } = await callArt(A.client, 'art_set_layer_weights', {
+        p_collection_id: p.cid,
+        p_layer_id: p.layer(0, 1),
+        p_rows: [
+          { traitId: sleepy, weight: 30, constant: 5 },
+          { traitId: ink, weight: 1, constant: null },
+        ],
+      })
+      if (error) return describe(error)
+      const after = await admin.from('traits').select('id, weight').in('id', [wink, ink])
+      const same =
+        JSON.stringify(before.data?.sort((x, y) => x.id.localeCompare(y.id))) ===
+        JSON.stringify(after.data?.sort((x, y) => x.id.localeCompare(y.id)))
+      return same && (after.data?.length ?? 0) === 2
+        ? null
+        : `before ${JSON.stringify(before.data)} after ${JSON.stringify(after.data)}`
+    },
+  )
 
   await check(
     'art_delete_layer: refused with the trigger sentence while tokens exist and the flag is off',

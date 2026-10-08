@@ -64,12 +64,12 @@ export function RulesScreen({
   artDeferred = false,
 }: RulesScreenProps) {
   const sync = useArtSync()
-  const readOnly = readOnlyProp || sync.locked
   const collections = useCollections(collection.id, collection.name, {
     collections: seedCollections,
     layers,
     rules: seedRules,
   })
+  const readOnly = readOnlyProp || sync.locked || collections.starting
   const editor = useRulesEditor(collection.id, layers, seedRules, seedConflicts)
   const { conflicts, index } = editor
   const { activeId } = collections

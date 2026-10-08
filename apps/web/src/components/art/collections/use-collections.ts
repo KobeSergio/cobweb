@@ -37,6 +37,8 @@ export function useCollections(projectKey: string, tokenName: string, seed: ArtS
   const hasLayers = (project.layers ?? seed.layers ?? []).length > 0
   const [naming, setNaming] = useState<NameRequest | null>(null)
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
+  /** True while Start over is being saved; the screens read it as read only so no edit queues behind it. */
+  const [starting, setStarting] = useState(false)
 
   const select = (id: string) => void sync.run({ apply: (p) => ({ ...p, activeCollectionId: id }) })
 
@@ -63,6 +65,7 @@ export function useCollections(projectKey: string, tokenName: string, seed: ArtS
     activeId,
     active,
     hasLayers,
+    starting,
     select,
     ensureOne,
     naming,
@@ -160,31 +163,45 @@ export function useCollections(projectKey: string, tokenName: string, seed: ArtS
         0,
       )
       const tokens = (project.tokens === undefined ? seed.tokens : project.tokens)?.length ?? 0
+      const rules = (project.rules ?? seed.rules ?? []).length
+      const groups = (project.atLeastOne ?? []).length
+      const also = [
+        rules ? plural(rules, 'rule') : null,
+        groups ? plural(groups, 'group') : null,
+        tokens ? `the ${plural(tokens, 'generated token')}` : null,
+      ].filter((part): part is string => part !== null)
+      const withList =
+        also.length === 0
+          ? ''
+          : `, with ${also.length === 1 ? also[0] : `${also.slice(0, -1).join(', ')} and ${also[also.length - 1]}`}`
       setConfirm({
         title: 'Start over?',
         body: [
-          `Every collection, its ${plural(allLayers.length, 'layer')} and ${plural(images, 'trait image')} are deleted, with the rules${tokens ? ` and the ${plural(tokens, 'generated token')}` : ''}. This cannot be undone.`,
-          'Layers then opens on the folder upload, and the images can be any size again.',
+          `Every collection, its ${plural(allLayers.length, 'layer')} and ${plural(images, 'trait image')} are deleted${withList}. This cannot be undone.`,
+          'The canvas is freed, so images can be any size again, and Layers opens on the folder upload. Files on the Assets step are kept.',
         ],
         confirmLabel: 'Delete everything',
         destructive: true,
         // The art disappears once the database has deleted it, not before.
         onConfirm: () => {
           sync.debounce.flushAll()
-          void sync.create<undefined>({
-            persist: () => startOver(projectKey),
-            apply: (p) => ({
-              ...p,
-              collections: [],
-              activeCollectionId: undefined,
-              layers: [],
-              rules: [],
-              atLeastOne: [],
-              tokens: null,
-              canvas: null,
-              staleNote: null,
-            }),
-          })
+          setStarting(true)
+          void sync
+            .create<undefined>({
+              persist: () => startOver(projectKey),
+              apply: (p) => ({
+                ...p,
+                collections: [],
+                activeCollectionId: undefined,
+                layers: [],
+                rules: [],
+                atLeastOne: [],
+                tokens: null,
+                canvas: null,
+                staleNote: null,
+              }),
+            })
+            .finally(() => setStarting(false))
         },
       })
     },

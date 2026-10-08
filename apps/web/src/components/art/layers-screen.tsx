@@ -82,12 +82,12 @@ export function LayersScreen({
   artDeferred = false,
 }: LayersScreenProps) {
   const sync = useArtSync()
-  // A save that came back locked turns every control read only at once.
-  const readOnly = readOnlyProp || sync.locked
   const collections = useCollections(collection.id, collection.name, {
     collections: seedCollections,
     layers: seedLayers,
   })
+  // A save that came back locked, or a Start over in flight, turns every control read only at once.
+  const readOnly = readOnlyProp || sync.locked || collections.starting
   const editor = useLayersEditor(collection.id, seedLayers, traitCounts, collections.activeId)
   const { layers } = editor
   const [selectedId, setSelectedId] = useState<string | null>(layers[layers.length - 1]?.id ?? null)

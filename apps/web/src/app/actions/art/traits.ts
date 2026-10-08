@@ -56,7 +56,7 @@ export async function renameTrait(collectionId: string, id: string, name: string
   )
 }
 
-/** The layer's whole weight table, checked as one (`art_set_layer_weights`). */
+/** Saves the weights of the rows given; traits missing from the table keep theirs (`art_set_layer_weights`). */
 export async function setLayerWeights(
   collectionId: string,
   layerId: string,

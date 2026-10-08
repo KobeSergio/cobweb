@@ -357,31 +357,22 @@ $$;
 revoke all on function public.art_delete_art_collection(uuid, uuid) from public, anon;
 grant execute on function public.art_delete_art_collection(uuid, uuid) to authenticated;
 
--- Writes a layer's whole weight table from [{ traitId, weight, constant }]. The rows must name
--- every trait of the layer exactly once (the blank included); a constant forces the weight to 0.
+-- Writes weights from [{ traitId, weight, constant }] to the traits of one layer. Tolerant: only the
+-- rows given are updated, ids that are not traits of this layer are ignored, and traits missing
+-- from the table keep their values (a queued save can meet a trait removed or added meanwhile).
+-- A constant forces the weight to 0.
 create function public.art_set_layer_weights(p_collection_id uuid, p_layer_id uuid, p_rows jsonb)
 returns void
 language plpgsql
 security invoker
 set search_path = ''
 as $$
-declare
-  v_given integer;
-  v_matched integer;
-  v_total integer;
 begin
   perform private.art_lock_owned(p_collection_id);
   if not exists (
     select 1 from public.layers l where l.id = p_layer_id and l.collection_id = p_collection_id
   ) then
     raise exception 'layer not found' using errcode = 'P0002';
-  end if;
-  select count(*), count(distinct t.id) into v_given, v_matched
-  from jsonb_array_elements(p_rows) as e(x)
-  left join public.traits t on t.id = (e.x ->> 'traitId')::uuid and t.layer_id = p_layer_id;
-  select count(*) into v_total from public.traits t where t.layer_id = p_layer_id;
-  if v_given <> v_total or v_matched <> v_total then
-    raise exception 'The weights do not match the layer''s traits.' using errcode = '23514';
   end if;
   update public.traits t
   set weight = case when w.constant is null then w.weight else 0 end,

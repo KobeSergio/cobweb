@@ -129,7 +129,7 @@ export function useLayersEditor(
 
   /** Weight edits show at once and are saved as the layer's whole table, 250 ms after the last one. */
   const editWeights = (layerId: string, change: (layers: Layer[]) => Layer[]) => {
-    const before = sync.read().layers?.find((layer) => layer.id === layerId)
+    const before = (sync.read().layers ?? seedLayers).find((layer) => layer.id === layerId)
     if (before && !weightsBefore.current.has(layerId)) weightsBefore.current.set(layerId, before.traits)
     edit((p) => ({
       ...p,
@@ -384,13 +384,12 @@ export function useLayersEditor(
         const result = results[i]
         return result && 'record' in result ? [{ name: item.name, record: result.record }] : []
       })
-      const failed = items.length - stored.length
-      if (failed > 0)
-        toast.error(
-          failed === 1
-            ? '1 image could not be uploaded. Add it again to retry.'
-            : `${failed} images could not be uploaded. Add them again to retry.`,
-        )
+      // One toast per distinct sentence, with how many images it hit.
+      const reasons = new Map<string, number>()
+      results.forEach((result) => {
+        if (result && 'error' in result) reasons.set(result.error, (reasons.get(result.error) ?? 0) + 1)
+      })
+      for (const [error, count] of reasons) toast.error(count === 1 ? error : `${error} (${count} images)`)
       if (stored.length === 0) return
       // Queue the layer's waiting weight save ahead of the create.
       sync.debounce.flush(weightKey(layerId))
