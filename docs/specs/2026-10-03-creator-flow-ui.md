@@ -288,6 +288,8 @@ Fields that must exist in the real sources because the screens already depend on
 - `RenderJob.quote.payer`: only a payment from that wallet counts.
 - `RenderJob.placeholder` (`{ cid, mediaType } | null`) and the collection's deferred-art flag
   (section 7).
+- `UploadedAsset.uploadId` and `Trait.uploadId`: the `uploads` row behind the file, set by the
+  upload sub-project (specs/2026-10-08-art-upload.md). Sample data has none.
 
 Fields the Phase 6 source adds: the creator address, royalty and `degraded` flag on `MintPageData`.
 The public phase's per-wallet usage is `WalletState.publicMinted`, not `groups[0].used`.

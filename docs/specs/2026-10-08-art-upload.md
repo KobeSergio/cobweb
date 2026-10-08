@@ -222,16 +222,25 @@ New dependencies in `apps/web`: `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presi
 
 ## 12. Acceptance criteria
 
-- [ ] `pnpm --filter @cobweb/web verify:storage` passes against local Supabase storage.
-- [ ] Unit tests cover every admission row, the cap, the key shape, the hash and the uploader's
+- [x] `pnpm --filter @cobweb/web verify:storage` passes against local Supabase storage.
+- [x] Unit tests cover every admission row, the cap, the key shape, the hash and the uploader's
       state machine; `pnpm typecheck && pnpm lint && pnpm test` pass at the root.
-- [ ] A folder upload in the browser writes one `layer_image` and one `thumbnail` row per file,
+- [x] A folder upload in the browser writes one `layer_image` and one `thumbnail` row per file,
       objects land under `<collection id>/layers/` and `/thumbnails/`, and the Layers screen shows
       them through `/api/uploads/`.
-- [ ] A file whose hash the project already has uploads nothing and reuses the row.
-- [ ] A second creator's session gets 404 from `/api/uploads/<id>` for the first creator's file.
-- [ ] A 5 GB project refuses the next file with the cap message (checked by inserting rows that
+- [x] A file whose hash the project already has uploads nothing and reuses the row.
+- [x] A second creator's session gets 404 from `/api/uploads/<id>` for the first creator's file.
+- [x] A 5 GB project refuses the next file with the cap message (checked by inserting rows that
       sum to the cap with the service role in `verify:storage`, not by uploading 5 GB).
-- [ ] `docs/MASTER_PLAN.md` Phase 3 names this sub-project as landed and the next one (wiring
+- [x] `docs/MASTER_PLAN.md` Phase 3 names this sub-project as landed and the next one (wiring
       the Art screens); the creator flow spec's section 5 notes `UploadedAsset` now carries
       `uploadId`.
+
+Checked on 8 October 2026: unit tests, `verify:storage` (12 checks) and `verify:local` (153)
+pass; the browser walk (Playwright with the dev wallet, sample data off) uploaded a folder of
+five PNGs into one layer image and one thumbnail row each with the canvas set to 64 x 64, served
+them through `/api/uploads/`, returned 404 to an anonymous request, and on a single-asset project
+added a PNG, replaced it with a GIF (the PNG's row and objects were deleted) and served the GIF.
+Hash reuse is proved by the uploader test and the 23505 check in `verify:storage`; the browser did
+not re-drop a folder, and no MP4 was uploaded. The folder upload is shown only with
+`NEXT_PUBLIC_DEMO_DATA=0`.

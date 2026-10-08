@@ -32,6 +32,8 @@ pnpm format                               # Prettier
 cd contracts && forge test                # contracts
 supabase start && pnpm --filter @cobweb/web dev      # web app against local Supabase
 pnpm --filter @cobweb/web verify:local    # sign-in and access-rule checks; run after any migration change
+pnpm --filter @cobweb/web verify:storage  # presigned PUT, HEAD, signed GET, delete, the 5 GB cap and the canvas, against local storage
+supabase seed buckets                     # creates the local `art` bucket from config.toml (a restart alone does not)
 ```
 
 ## Rules
