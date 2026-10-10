@@ -18,6 +18,7 @@ import {
   NO_PAYMENT_DUE,
   NO_PAYMENT_FOR_JOB,
   NOT_CONFIRMED,
+  PAYMENT_ON_CHAIN,
   PAYMENT_USED,
   SHORT_PAYMENT,
 } from './result'
@@ -110,6 +111,29 @@ export async function readArtFee(chainId: number): Promise<bigint | null> {
   }
 }
 
+/**
+ * True when the factory holds a payment for the job from its payer, or when that cannot be read: a
+ * payment mined and never recorded must not be stranded by an unlock or a new quote, so an unreadable
+ * answer is treated as a payment.
+ */
+async function paymentOnChain(row: JobRow): Promise<boolean> {
+  if (row.quote_chain_id === null || row.quote_payer === null || row.onchain_job_id === null) return false
+  const factory = row.quote_factory ? (row.quote_factory as Address) : factoryOn(row.quote_chain_id)
+  if (!factory) return true
+  try {
+    const paid = await publicClientFor(row.quote_chain_id).readContract({
+      address: factory,
+      abi: factoryAbi,
+      functionName: 'jobPayment',
+      args: [row.onchain_job_id as Hex, row.quote_payer as Address],
+    })
+    return paid > 0n
+  } catch (error) {
+    console.error(`The job payment could not be read: ${errorSummary(error)}`)
+    return true
+  }
+}
+
 function factoryOn(chainId: number | null): Address | null {
   if (chainId === null) return null
   try {
@@ -182,6 +206,8 @@ async function latestJobRow(
     .select(JOB_COLUMNS)
     .eq('collection_id', collectionId)
     .eq('kind', kind)
+    // A job cancelled by an unlock is history, never the current job.
+    .or('error.is.null,error.neq.unlocked')
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
@@ -222,12 +248,16 @@ export async function lockCore(
     p_fee_per_token_wei: fee.toString() as unknown as number,
     p_chain_id: chainId,
     p_payer: ctx.wallet,
+    p_factory: factoryOn(chainId)?.toLowerCase(),
   })
   if (error) return { error }
   return { data: await loadJob(supabase, (data as { id: string }).id) }
 }
 
 export async function unlockCore(ctx: LockContext): Promise<LockOutcome<null>> {
+  const row = await openJobRow(ctx.supabase, ctx.collection.id, 'real')
+  // The database refuses the other states; only a job waiting for payment can hold a payment not yet recorded.
+  if (row && row.state === 'payment_due' && (await paymentOnChain(row))) return { refused: PAYMENT_ON_CHAIN }
   const { error } = await ctx.supabase.rpc('art_unlock', { p_collection_id: ctx.collection.id })
   return error ? { error } : { data: null }
 }
@@ -250,6 +280,7 @@ export async function quoteCore(ctx: LockContext): Promise<LockOutcome<RenderJob
   if (!row || row.state !== 'payment_due') return { refused: NO_PAYMENT_DUE }
   const expired = row.quote_expires_at !== null && Date.parse(row.quote_expires_at) < Date.now()
   if (!expired || row.quote_chain_id === null) return { data: await jobFromRow(ctx.supabase, row) }
+  if (await paymentOnChain(row)) return { refused: PAYMENT_ON_CHAIN }
   const rate = await readArtFee(row.quote_chain_id)
   if (!feeReady(rate)) return { refused: CHAIN_NOT_READY }
   const { error } = await ctx.service().rpc('art_requote', {
@@ -287,7 +318,7 @@ export async function confirmCore(
   if (!row || row.state !== 'payment_due' || row.quote_chain_id === null || row.quote_payer === null)
     return { refused: NO_PAYMENT_FOR_JOB }
 
-  const factory = factoryOn(row.quote_chain_id)
+  const factory = row.quote_factory ? (row.quote_factory as Address) : factoryOn(row.quote_chain_id)
   let client: PublicClient
   try {
     client = publicClientFor(row.quote_chain_id)

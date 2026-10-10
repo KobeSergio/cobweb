@@ -14,7 +14,9 @@
 -- ---------------------------------------------------------------------------------------------
 alter table public.render_jobs
   add column onchain_job_id text,
-  add column token_list jsonb check (token_list is null or jsonb_typeof(token_list) = 'array');
+  add column token_list jsonb check (token_list is null or jsonb_typeof(token_list) = 'array'),
+  -- The factory the quote's rate was read from and the payment goes to; null on rows from before it was stored.
+  add column quote_factory text check (quote_factory is null or quote_factory ~ '^0x[0-9a-f]{40}$');
 
 -- The bytes32 the factory's payForArt takes: the row's 16 uuid bytes left-aligned in 32 bytes, as
 -- onchainJobId in packages/shared/src/job-id.ts. Derived from the id on every insert; nobody writes it.
@@ -93,7 +95,8 @@ create function public.art_lock(
   p_allow_duplicates boolean,
   p_fee_per_token_wei numeric,
   p_chain_id integer,
-  p_payer text
+  p_payer text,
+  p_factory text default null
 )
 returns public.render_jobs
 language plpgsql
@@ -121,6 +124,10 @@ begin
     raise exception 'The quote must be issued to your sign-in wallet.' using errcode = '23514';
   end if;
   if p_chain_id is null or p_chain_id <= 0 then
+    raise exception 'Choose the network the fee is paid on.' using errcode = '23514';
+  end if;
+  -- A single asset pays nothing, so a chain without a factory may still lock it: null is allowed.
+  if p_factory is not null and p_factory !~ '^0x[0-9a-f]{40}$' then
     raise exception 'Choose the network the fee is paid on.' using errcode = '23514';
   end if;
   if p_fee_per_token_wei is null or p_fee_per_token_wei < 0 or p_fee_per_token_wei <> trunc(p_fee_per_token_wei) then
@@ -204,7 +211,7 @@ begin
 
   insert into public.render_jobs (
     collection_id, kind, state, token_count, token_list_hash, allow_duplicates,
-    fee_per_token_wei, quote_total_wei, quote_chain_id, quote_payer, quote_expires_at,
+    fee_per_token_wei, quote_total_wei, quote_chain_id, quote_payer, quote_factory, quote_expires_at,
     paid_at, batch_size, batches_total, token_list
   )
   values (
@@ -218,6 +225,7 @@ begin
     v_total,
     p_chain_id,
     v_wallet,
+    p_factory,
     now() + interval '24 hours',
     case when v_total = 0 then now() end,
     100,
@@ -229,13 +237,14 @@ begin
 end;
 $$;
 
-revoke all on function public.art_lock(uuid, uuid, text, jsonb, text, boolean, numeric, integer, text)
+revoke all on function public.art_lock(uuid, uuid, text, jsonb, text, boolean, numeric, integer, text, text)
   from public, anon, authenticated;
-grant execute on function public.art_lock(uuid, uuid, text, jsonb, text, boolean, numeric, integer, text)
+grant execute on function public.art_lock(uuid, uuid, text, jsonb, text, boolean, numeric, integer, text, text)
   to service_role;
 
 -- ---------------------------------------------------------------------------------------------
--- art_unlock: free while the payment is due, never after
+-- art_unlock: free while the payment is due, never after. The job is cancelled, not deleted, so a
+-- payment that mined and was never recorded can still be matched to its job id.
 -- ---------------------------------------------------------------------------------------------
 create function public.art_unlock(p_collection_id uuid)
 returns void
@@ -265,7 +274,9 @@ begin
   set art_locked_at = null,
       status = case when c.status = 'art_locked' then 'draft'::public.collection_status else c.status end
   where c.id = v_collection.id;
-  delete from public.render_jobs j where j.id = v_job.id and j.collection_id = p_collection_id;
+  update public.render_jobs j
+  set state = 'failed', error = 'unlocked', finished_at = now()
+  where j.id = v_job.id and j.collection_id = p_collection_id;
   -- A generative supply is saved again by the next generate; 1/1 and single asset keep theirs. A
   -- second statement, because the frozen-field guard allows a supply change only once the row is draft.
   if v_collection.project_type = 'generative' and v_collection.status = 'art_locked' then
@@ -393,15 +404,20 @@ begin
   from public.render_jobs j
   where j.id = p_job_id and j.collection_id = v_collection.id
   for update;
-  if not found or v_job.state <> 'payment_due' then
+  if not found then
     raise exception 'There is no payment waiting for this job.' using errcode = '23514';
   end if;
   -- The quote's expiry is not checked: a payment that mined is recorded whenever it arrives.
   if p_tx_hash is null or p_tx_hash !~ '^0x[0-9a-f]{64}$' then
     raise exception 'The transaction did not pay for this job.' using errcode = '23514';
   end if;
+  -- Before the state check: a second confirm of a hash that already paid this job answers "already
+  -- used", which the screen turns into success, not "no payment waiting".
   if exists (select 1 from public.render_jobs j where j.payment_tx_hash = p_tx_hash) then
     raise exception 'This payment was already used.' using errcode = '23505';
+  end if;
+  if v_job.state <> 'payment_due' then
+    raise exception 'There is no payment waiting for this job.' using errcode = '23514';
   end if;
   -- The action checked both against the receipt already; these are the database's own guards.
   if v_job.payment_tx_hash is not null then

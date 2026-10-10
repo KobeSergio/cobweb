@@ -20,6 +20,7 @@ const row = (overrides: Partial<JobRow> = {}): JobRow => ({
   quote_total_wei: '250000000000000001',
   quote_chain_id: 31337,
   quote_payer: PAYER,
+  quote_factory: null,
   quote_expires_at: '2026-10-10T10:00:00+00:00',
   payment_tx_hash: null,
   paid_at: null,
@@ -63,9 +64,19 @@ describe('toRenderJob', () => {
     })
   })
 
+  it('exposes the factory stored on the job, checksummed, and falls back to the configured one', () => {
+    const stored = '0xe7f1725e7734ce288f8367e1bb143e90bb3f0512'
+    expect(toRenderJob(row({ quote_factory: stored }), extra).quote.factory).toBe(
+      '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512',
+    )
+    expect(toRenderJob(row({ quote_factory: null }), extra).quote.factory).toBe(FACTORY)
+    expect(toRenderJob(row({ quote_factory: null }), { ...extra, factory: null }).quote.factory).toBeNull()
+  })
+
   it('reads every numeric wei column as text', () => {
     for (const column of ['fee_per_token_wei::text', 'quote_total_wei::text', 'paid_amount_wei::text'])
       expect(JOB_COLUMNS).toContain(column)
+    expect(JOB_COLUMNS).toContain('quote_factory')
   })
 
   it('maps paid with its payment, and waived or zero-quote paid without one', () => {

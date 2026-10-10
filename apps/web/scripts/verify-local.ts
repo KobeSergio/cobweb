@@ -2364,6 +2364,9 @@ const txHash = (n: number) => `0x${HEX64(9_000_000 + n)}`
 
 type JobCheckRow = {
   id: string
+  quote_factory: string | null
+  error: string | null
+  finished_at: string | null
   kind: string
   state: string
   onchain_job_id: string
@@ -2382,7 +2385,7 @@ async function jobFor(id: string): Promise<JobCheckRow | null> {
   const { data } = await admin
     .from('render_jobs')
     .select(
-      'id, kind, state, onchain_job_id, token_count, fee_per_token_wei::text, quote_total_wei::text, quote_payer, quote_expires_at, batches_total, token_list, payment_tx_hash, paid_amount_wei::text',
+      'id, kind, state, quote_factory, error, finished_at, onchain_job_id, token_count, fee_per_token_wei::text, quote_total_wei::text, quote_payer, quote_expires_at, batches_total, token_list, payment_tx_hash, paid_amount_wei::text',
     )
     .eq('id', id)
     .maybeSingle()
@@ -2422,6 +2425,7 @@ async function lockableProject(client: SupabaseClient) {
 
 // art_lock, art_requote and art_record_payment are service-role only: the checks call them with the
 // admin client and the owner's id, as the server actions do with the service client.
+const FACTORY_ADDRESS = '0x5fbdb2315678afecb367f032d93f642f64180aa3'
 const lockArgs = (
   owner: string,
   cid: string,
@@ -2438,6 +2442,7 @@ const lockArgs = (
   p_fee_per_token_wei: FEE,
   p_chain_id: 31337,
   p_payer: payer,
+  p_factory: FACTORY_ADDRESS,
   ...overrides,
 })
 
@@ -2527,6 +2532,7 @@ async function artLockAndPay(A: Creator, B: Creator): Promise<void> {
         job.fee_per_token_wei === FEE ? null : `fee ${job.fee_per_token_wei}`,
         job.quote_total_wei === '50000000000000' ? null : `total ${job.quote_total_wei}`,
         job.quote_payer === payer ? null : `payer ${job.quote_payer}`,
+        job.quote_factory === FACTORY_ADDRESS ? null : `factory ${job.quote_factory}`,
         hours > 23.9 && hours < 24.1 ? null : `expires in ${hours} hours`,
         job.batches_total === 1 ? null : `batches ${job.batches_total}`,
         job.token_list === null ? null : 'a generative job stored a token list',
@@ -2543,13 +2549,17 @@ async function artLockAndPay(A: Creator, B: Creator): Promise<void> {
     return expectSentence(error, CHECK, 'The art is already locked.')
   })
 
-  await check('art_unlock: while payment is due, the job goes and the art opens again', async () => {
+  await check('art_unlock: while payment is due, the job is cancelled and the art opens again', async () => {
     const { error } = await callArt(A.client, 'art_unlock', { p_collection_id: g.cid })
     if (error) return describe(error)
     const state = await lockState(g.cid)
     if (state.art_locked_at !== null || state.status !== 'draft') return JSON.stringify(state)
     if (state.max_supply !== null) return `max_supply ${state.max_supply} after unlock`
-    if (await jobFor(job1)) return 'the job is still there'
+    // The job is kept, cancelled: a payment mined and never recorded can still be matched to its id.
+    const cancelled = await jobFor(job1)
+    if (!cancelled) return 'the job row is gone'
+    if (cancelled.state !== 'failed' || cancelled.error !== 'unlocked' || cancelled.finished_at === null)
+      return JSON.stringify(cancelled)
     // The lock gate is open again: the creator can edit a token.
     const edit = await A.client
       .from('tokens')
@@ -2581,6 +2591,15 @@ async function artLockAndPay(A: Creator, B: Creator): Promise<void> {
       job.paid_amount_wei === '50000000000000'
       ? null
       : JSON.stringify(job)
+  })
+
+  await check('art_record_payment: the same hash again on the paid job answers "already used"', async () => {
+    const again = await callArt(
+      admin,
+      'art_record_payment',
+      payArgs(A.userId, g.cid, job1, txHash(1), payer, '50000000000000'),
+    )
+    return expectSentence(again.error, UNIQUE, 'This payment was already used.')
   })
 
   await check('art_unlock: after payment is refused and the art stays locked', async () => {

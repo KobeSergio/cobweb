@@ -51,6 +51,7 @@ export const PAYMENT_USED_FOR_JOB = 'A payment is already recorded for this job.
 export const PAYMENT_AMOUNT_INVALID = 'The payment amount is invalid.'
 export const PAYMENT_USED = 'This payment was already used.'
 // Said by the server or the screen (the database does not raise these).
+export const PAYMENT_ON_CHAIN = 'A payment for this job is on chain. Enter its transaction hash to record it.'
 export const QUOTE_EXPIRED = 'The quote expired. Get a new quote.'
 export const SHORT_PAYMENT = 'The payment was less than the quote.'
 export const CHAIN_NOT_READY = 'This chain is not ready for payments yet.'

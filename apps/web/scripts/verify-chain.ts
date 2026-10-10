@@ -87,10 +87,11 @@ for (const endpoint of [url, rpc])
 const factory = getAddress(factoryEnv)
 
 // Imported after the environment is set, so the shared clients read the local chain settings.
-const { confirmCore, lockCore } = await import('../src/lib/art/lock-core.ts')
+const { confirmCore, lockCore, quoteCore, unlockCore } = await import('../src/lib/art/lock-core.ts')
 const { readLockCollection } = await import('../src/lib/art/lock-collection.ts')
 const { quoteTotalWei } = await import('../src/lib/art/quote.ts')
-const { NOT_CONFIRMED, OTHER_WALLET, PAYMENT_USED, SHORT_PAYMENT } = await import('../src/lib/art/result.ts')
+const { NOT_CONFIRMED, OTHER_WALLET, PAYMENT_ON_CHAIN, PAYMENT_USED, SHORT_PAYMENT } =
+  await import('../src/lib/art/result.ts')
 type LockContext = import('../src/lib/art/lock-core.ts').LockContext
 type LockOutcome<T> = import('../src/lib/art/lock-core.ts').LockOutcome<T>
 
@@ -348,6 +349,42 @@ async function main(): Promise<void> {
     if (!job2) return 'no job'
     const outcome = await confirmCore(second, job2.id, `0x${'ab'.repeat(32)}`)
     return refusal(outcome) === NOT_CONFIRMED ? null : refusal(outcome)
+  })
+
+  // A payment that mined but was never recorded must not be stranded by an unlock or a new quote.
+  const third = await contextFor(client, userId, creator.address, await seededCollection(client))
+  let job3: RenderJob | null = null
+  let unrecorded: Hex | null = null
+  await check(
+    'unlock and requote: refused while a payment for the job is on chain and not yet recorded',
+    async () => {
+      const locked = await lockCore(third, { allowDuplicates: false, chainId: 31337 })
+      if (!('data' in locked)) return refusal(locked)
+      job3 = locked.data
+      unrecorded = await pay(creator, job3.jobId, BigInt(job3.quote.totalWei))
+      const unlock = await unlockCore(third)
+      if (refusal(unlock) !== PAYMENT_ON_CHAIN) return `unlock: ${refusal(unlock)}`
+      const expire = await admin
+        .from('render_jobs')
+        .update({ quote_expires_at: new Date(Date.now() - 60_000).toISOString() })
+        .eq('id', job3.id)
+      if (expire.error) return `backdate: ${expire.error.message}`
+      const requote = await quoteCore(third)
+      if (refusal(requote) !== PAYMENT_ON_CHAIN) return `requote: ${refusal(requote)}`
+      const row = await admin.from('render_jobs').select('state').eq('id', job3.id).single()
+      return row.data?.state === 'payment_due' ? null : JSON.stringify(row)
+    },
+  )
+
+  await check('confirm: the payment left unrecorded is recorded and the job is paid', async () => {
+    if (!job3 || !unrecorded) return 'no payment'
+    const outcome = await confirmCore(third, job3.id, unrecorded)
+    if (!('data' in outcome)) return refusal(outcome)
+    return outcome.data.state === 'paid' &&
+      'payment' in outcome.data &&
+      outcome.data.payment?.txHash === unrecorded
+      ? null
+      : JSON.stringify(outcome.data)
   })
 }
 

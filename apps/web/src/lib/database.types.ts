@@ -359,6 +359,7 @@ export type Database = {
           placeholder_upload_id: string | null
           quote_chain_id: number | null
           quote_expires_at: string | null
+          quote_factory: string | null
           quote_payer: string | null
           quote_total_wei: number
           started_at: string | null
@@ -391,6 +392,7 @@ export type Database = {
           placeholder_upload_id?: string | null
           quote_chain_id?: number | null
           quote_expires_at?: string | null
+          quote_factory?: string | null
           quote_payer?: string | null
           quote_total_wei: number
           started_at?: string | null
@@ -423,6 +425,7 @@ export type Database = {
           placeholder_upload_id?: string | null
           quote_chain_id?: number | null
           quote_expires_at?: string | null
+          quote_factory?: string | null
           quote_payer?: string | null
           quote_total_wei?: number
           started_at?: string | null
@@ -743,6 +746,7 @@ export type Database = {
           p_allow_duplicates: boolean
           p_chain_id: number
           p_collection_id: string
+          p_factory?: string
           p_fee_per_token_wei: number
           p_kind: string
           p_owner: string
@@ -771,6 +775,7 @@ export type Database = {
           placeholder_upload_id: string | null
           quote_chain_id: number | null
           quote_expires_at: string | null
+          quote_factory: string | null
           quote_payer: string | null
           quote_total_wei: number
           started_at: string | null
@@ -812,6 +817,7 @@ export type Database = {
           placeholder_upload_id: string | null
           quote_chain_id: number | null
           quote_expires_at: string | null
+          quote_factory: string | null
           quote_payer: string | null
           quote_total_wei: number
           started_at: string | null
@@ -868,6 +874,7 @@ export type Database = {
           placeholder_upload_id: string | null
           quote_chain_id: number | null
           quote_expires_at: string | null
+          quote_factory: string | null
           quote_payer: string | null
           quote_total_wei: number
           started_at: string | null
@@ -913,6 +920,7 @@ export type Database = {
           placeholder_upload_id: string | null
           quote_chain_id: number | null
           quote_expires_at: string | null
+          quote_factory: string | null
           quote_payer: string | null
           quote_total_wei: number
           started_at: string | null

@@ -1,4 +1,4 @@
-import type { Address, Hex } from 'viem'
+import { getAddress, type Address, type Hex } from 'viem'
 import type { Enums } from '@/lib/database.types'
 import type { MediaType, RenderJob, RenderJobBase, RenderPlaceholder } from '@/lib/demo/types'
 import { servedUrl } from '@/lib/storage/uploads-service'
@@ -16,6 +16,7 @@ export type JobRow = {
   quote_total_wei: string
   quote_chain_id: number | null
   quote_payer: string | null
+  quote_factory: string | null
   quote_expires_at: string | null
   payment_tx_hash: string | null
   paid_at: string | null
@@ -38,7 +39,7 @@ export type JobRow = {
  * 2^53 wei; the casts keep every wei (Review Focus 3).
  */
 export const JOB_COLUMNS =
-  'id, collection_id, kind, state, token_count, token_list_hash, allow_duplicates, fee_per_token_wei::text, quote_total_wei::text, quote_chain_id, quote_payer, quote_expires_at, payment_tx_hash, paid_at, paid_amount_wei::text, batch_size, batches_total, batches_done, images_cid, metadata_cid, placeholder_upload_id, onchain_job_id, error, created_at, started_at, finished_at'
+  'id, collection_id, kind, state, token_count, token_list_hash, allow_duplicates, fee_per_token_wei::text, quote_total_wei::text, quote_chain_id, quote_payer, quote_factory, quote_expires_at, payment_tx_hash, paid_at, paid_amount_wei::text, batch_size, batches_total, batches_done, images_cid, metadata_cid, placeholder_upload_id, onchain_job_id, error, created_at, started_at, finished_at'
 
 /** The placeholder file a job shows: its own for a placeholder job, the collection's latest for a real one. */
 export type JobPlaceholder = { uploadId: string; mediaType: MediaType } | null
@@ -79,7 +80,8 @@ export function toRenderJob(
       totalWei: row.quote_total_wei,
       payer: (row.quote_payer ?? ZERO_ADDRESS) as Address,
       expiresAt: seconds(row.quote_expires_at),
-      factory: extra.factory,
+      // The factory the quote was issued against; rows from before it was stored use the configured one.
+      factory: row.quote_factory ? getAddress(row.quote_factory) : extra.factory,
     },
     lockOptions: { allowDuplicates: row.allow_duplicates },
     placeholder: placeholderOf(extra.placeholder),
