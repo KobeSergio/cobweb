@@ -1,21 +1,26 @@
 'use client'
 
 import { ExternalLinkIcon } from 'lucide-react'
-import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { useMemo, useState } from 'react'
 import { StatusBadge } from '@cobweb/ui/components/status-badge'
 import { ChainName } from '@/components/chains/chain-icon'
-import { explorerTxUrl, formatNative, formatUtc, shortAddress } from '@/lib/demo/helpers'
-import type { Hex, RenderJob, SupportedChain } from '@/lib/demo/types'
-import type { FlowLink } from '@/lib/steps'
 import { StageFooter } from '@/components/shell/stage-footer'
+import type { ReviewData } from '@/lib/art/lock-review'
+import { chainView } from '@/lib/chain/chain-view'
+import { explorerTxUrl, formatNative, formatUtc, shortAddress } from '@/lib/demo/helpers'
+import type { RenderJob } from '@/lib/demo/types'
+import type { FlowLink } from '@/lib/steps'
 import { DoneStep } from './done-step'
 import { PayStep } from './pay-step'
 import { Dot, ProgressionItem, type ProgressionState } from './progression'
+import { RENDER_BATCH_SIZE, type RenderProgress } from './render-sim'
 import { RenderStep } from './render-step'
 import type { RevealLaterState } from './reveal-later'
 import { ReviewStep } from './review-step'
-import { RENDER_BATCH_SIZE, type LockOptions, type RenderProgress, type UploadOutcome } from './upload-sim'
-import type { ArtSummary, RenderResult } from './upload-shared'
+import { realActions } from './upload-actions'
+import type { RenderResult } from './upload-shared'
+import { sampleActions, type LockOptions, type UploadOutcome } from './upload-sim'
 
 type Stage = 'review' | 'pay' | 'render' | 'done'
 
@@ -32,69 +37,98 @@ const STAGE_FOR_JOB: Record<RenderJob['state'], Stage> = {
 }
 
 export type UploadFlowProps = {
+  collectionId: string
+  /** `collections.chain_id`: the quote is on it when set, otherwise on the chain the wallet is on at lock. */
+  collectionChainId: number | null
   job: RenderJob
-  chain: SupportedChain
-  art: ArtSummary
+  /** The job to fall back to after an unlock: nothing locked yet. */
+  pending: RenderJob
+  review: ReviewData
+  sample: boolean
   /** CIDs to finish on when the simulated render completes. Its placeholder CID stands in for any file picked. */
   sampleResult: RenderResult
   /** The description saved with the job's placeholder, when it has one. */
   placeholderDescription: string
   /** "Finish the art later" (MASTER_PLAN, Flow: pre-reveal): this run locks and renders the placeholder alone. */
   deferred: boolean
+  /** A 1/1 or single asset project (no Generate step). */
+  assetsFlow: boolean
   readOnly: boolean
   previous?: FlowLink
   next?: FlowLink
   outcome?: UploadOutcome
 }
 
+function revealFrom(job: RenderJob, deferred: boolean, description: string): RevealLaterState {
+  const placeholder = job.placeholder
+  const extension =
+    placeholder?.mediaType === 'video' ? 'mp4' : placeholder?.mediaType === 'gif' ? 'gif' : 'png'
+  return {
+    on: deferred || placeholder !== null,
+    forced: deferred,
+    file: placeholder
+      ? {
+          url: placeholder.imageUrl,
+          fileName: `placeholder.${extension}`,
+          mediaType: placeholder.mediaType,
+          bytes: null,
+          owned: false,
+          ...(placeholder.uploadId ? { uploadId: placeholder.uploadId } : {}),
+        }
+      : null,
+    description: placeholder ? description : '',
+  }
+}
+
+function renderStartOf(job: RenderJob): RenderProgress {
+  return 'batches' in job
+    ? { phase: 'images', ...job.batches }
+    : {
+        phase: 'images',
+        total: Math.max(1, Math.ceil(job.tokenCount / RENDER_BATCH_SIZE)),
+        done: 0,
+        size: RENDER_BATCH_SIZE,
+      }
+}
+
 /**
  * The four states of Lock and upload as one vertical progression. The job from the server sets
- * where it starts; from there the transitions run in client state through `upload-sim`.
+ * where it starts; review, lock, pay and unlock then run through `realActions` (sample mode:
+ * `sampleActions`), and rendering is simulated until Phase 4 (render-sim.ts).
  */
 export function UploadFlow({
-  job,
-  chain,
-  art,
+  collectionId,
+  collectionChainId,
+  job: initialJob,
+  pending,
+  review,
+  sample,
   sampleResult,
   placeholderDescription,
   deferred,
+  assetsFlow,
   readOnly,
   previous,
   next,
   outcome,
 }: UploadFlowProps) {
-  const [stage, setStage] = useState<Stage>(STAGE_FOR_JOB[job.state])
+  const router = useRouter()
+  const actions = useMemo(
+    () => (sample ? sampleActions(initialJob) : realActions(collectionId)),
+    [sample, initialJob, collectionId],
+  )
+  const [job, setJob] = useState(initialJob)
+  const [stage, setStage] = useState<Stage>(STAGE_FOR_JOB[initialJob.state])
   // "Reveal later": forced on for deferred art, and on whenever the job already has a placeholder.
-  const [reveal, setReveal] = useState<RevealLaterState>(() => ({
-    on: deferred || job.placeholder !== null,
-    forced: deferred,
-    file: job.placeholder
-      ? {
-          url: job.placeholder.imageUrl,
-          fileName: `placeholder.${job.placeholder.mediaType === 'video' ? 'mp4' : job.placeholder.mediaType === 'gif' ? 'gif' : 'svg'}`,
-          mediaType: job.placeholder.mediaType,
-          bytes: null,
-          owned: false,
-        }
-      : null,
-    description: job.placeholder ? placeholderDescription : '',
-  }))
+  const [reveal, setReveal] = useState<RevealLaterState>(() =>
+    revealFrom(initialJob, deferred, placeholderDescription),
+  )
   const placeholderOn = reveal.on && reveal.file !== null
-  const [lockOptions, setLockOptions] = useState<LockOptions>(job.lockOptions)
-  const [lockedAt, setLockedAt] = useState(job.lockedAt)
-  const [paymentTx, setPaymentTx] = useState<Hex | null>(
-    'payment' in job ? (job.payment?.txHash ?? null) : null,
-  )
-  const [renderStart] = useState<RenderProgress>(() =>
-    'batches' in job
-      ? { phase: 'images', ...job.batches }
-      : {
-          phase: 'images',
-          total: Math.ceil(job.tokenCount / RENDER_BATCH_SIZE),
-          done: 0,
-          size: RENDER_BATCH_SIZE,
-        },
-  )
+  const [lockOptions, setLockOptions] = useState<LockOptions>(initialJob.lockOptions)
+  const chain = chainView(job.quote.chainId)
+  const paymentTx = 'payment' in job ? (job.payment?.txHash ?? null) : null
+  const free = job.quote.totalWei === '0'
+  const renderStart = renderStartOf(job)
   const result: RenderResult =
     job.state === 'done'
       ? job
@@ -119,6 +153,19 @@ export function UploadFlow({
   // The last state shows its body while it is the current one, and stays open once done.
   const doneState: ProgressionState = stage === 'done' ? 'current' : 'pending'
 
+  /** A job from the server: show the step its state belongs to, and refresh the stepper and the Art screens. */
+  function settle(nextJob: RenderJob) {
+    setJob(nextJob)
+    setStage(STAGE_FOR_JOB[nextJob.state])
+    if (!sample) router.refresh()
+  }
+
+  function unlocked() {
+    setJob(pending)
+    setStage('review')
+    if (!sample) router.refresh()
+  }
+
   return (
     <div className="flex flex-1 flex-col">
       <ol aria-label="Lock and upload progress" className="pb-10">
@@ -129,7 +176,7 @@ export function UploadFlow({
           receipt={
             <>
               {deferred ? 'Placeholder locked' : 'Locked'}{' '}
-              <span className="numeric">{formatUtc(lockedAt)}</span>
+              <span className="numeric">{formatUtc(job.lockedAt)}</span>
               <Dot />
               {deferred ? (
                 'Real art later, from Art'
@@ -157,7 +204,8 @@ export function UploadFlow({
           }
         >
           <ReviewStep
-            art={art}
+            review={review}
+            previews={sample}
             readOnly={readOnly}
             previous={previous}
             deferred={deferred}
@@ -165,50 +213,59 @@ export function UploadFlow({
             onReveal={setReveal}
             lockOptions={lockOptions}
             onLockOptions={setLockOptions}
-            onLocked={(at) => {
-              setLockedAt(at)
-              setStage('pay')
-            }}
+            actions={actions}
+            collectionChainId={collectionChainId}
+            sample={sample}
+            assetsFlow={assetsFlow}
+            onLocked={settle}
           />
         </ProgressionItem>
 
         <ProgressionItem
           index={2}
-          title={deferred ? 'Pay for the placeholder' : 'Pay the generation fee'}
+          title={deferred ? 'Placeholder fee' : 'Pay the generation fee'}
           state={stateOf('pay')}
           status={<StatusBadge status="draft">Payment due</StatusBadge>}
           receipt={
-            <>
-              Paid <span className="numeric text-foreground/85">{total}</span> on{' '}
-              <ChainName chain={chain} iconClassName="size-3.5" />
-              {paymentTx && (
-                <>
-                  <Dot />
-                  <a
-                    href={explorerTxUrl(chain, paymentTx)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="hover:text-foreground inline-flex items-center gap-1 underline-offset-4 hover:underline"
-                  >
-                    <span className="numeric">{shortAddress(paymentTx, 6)}</span>
-                    <ExternalLinkIcon aria-hidden="true" className="size-3" />
-                    <span className="sr-only">View payment on the explorer (new tab)</span>
-                  </a>
-                </>
-              )}
-            </>
+            free ? (
+              deferred ? (
+                'No fee for the placeholder'
+              ) : (
+                'No fee'
+              )
+            ) : (
+              <>
+                Paid <span className="numeric text-foreground/85">{total}</span> on{' '}
+                <ChainName chain={chain} iconClassName="size-3.5" />
+                {paymentTx && chain.explorerUrl && (
+                  <>
+                    <Dot />
+                    <a
+                      href={explorerTxUrl(chain, paymentTx)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="hover:text-foreground inline-flex items-center gap-1 underline-offset-4 hover:underline"
+                    >
+                      <span className="numeric">{shortAddress(paymentTx, 6)}</span>
+                      <ExternalLinkIcon aria-hidden="true" className="size-3" />
+                      <span className="sr-only">View payment on the explorer (new tab)</span>
+                    </a>
+                  </>
+                )}
+              </>
+            )
           }
         >
           <PayStep
-            quote={job.quote}
+            job={job}
             chain={chain}
             readOnly={readOnly}
+            sample={sample}
             outcome={outcome}
-            deferred={deferred}
-            onPaid={(txHash) => {
-              setPaymentTx(txHash)
-              setStage('render')
-            }}
+            actions={actions}
+            onPaid={settle}
+            onUnlocked={unlocked}
+            onRequoted={setJob}
           />
         </ProgressionItem>
 

@@ -1,21 +1,23 @@
-import type { RenderPlaceholder } from '@/lib/demo/types'
+import type { ActionResult } from '@/lib/art/result'
+import type { Hex, RenderJob, RenderPlaceholder } from '@/lib/demo/types'
 
-/** Counts of the art being locked, worked out on the server from the project's art. */
-export type ArtSummary = {
-  /** The supply: how many tokens the set must have. */
-  supply: number
-  /** How many tokens the generated set has. Lock is blocked while it is short of `supply`. */
-  tokens: number
-  collections: number
-  /** Tokens that break a pairing rule. Lock is blocked while any do. */
-  breaking: number
-  /** Groups of token ids with identical traits, each sorted. Empty when every token is unique. */
-  duplicates: number[][]
-  layers: number
-  traits: number
-  rules: number
-  /** Traits with a maximum count (a cap, MASTER_PLAN, Art: maximum counts) and that maximum. */
-  constants: { name: string; count: number }[]
+/** A placeholder file stored through the uploader, or why it was not. */
+export type PlaceholderUpload = { uploadId: string; url: string } | { error: string }
+
+/**
+ * What the Lock and upload screen does, in one shape for both modes: `realActions`
+ * (upload-actions.ts) calls the server, `sampleActions` (upload-sim.ts) simulates in the browser.
+ */
+export type UploadActions = {
+  lock(input: { allowDuplicates: boolean; chainId: number }): Promise<ActionResult<RenderJob>>
+  unlock(): Promise<ActionResult<null>>
+  requote(): Promise<ActionResult<RenderJob>>
+  confirm(jobId: string, txHash: Hex): Promise<ActionResult<RenderJob>>
+  reload(): Promise<ActionResult<RenderJob | null>>
+  lockPlaceholder(uploadId: string | null): Promise<ActionResult<RenderJob>>
+  /** Stores a placeholder file (`uploads` kind placeholder). Null in sample mode, which keeps it in the browser. */
+  uploadPlaceholder: ((file: File) => Promise<PlaceholderUpload>) | null
+  removePlaceholder(uploadId: string): Promise<ActionResult>
 }
 
 /**
@@ -33,7 +35,7 @@ export const IPFS_GATEWAY = 'https://ipfs.io/ipfs/'
 
 /**
  * The sample preview for a token id. Only 24 sample images exist, so ids past 24 reuse them.
- * Replaced by: the rendered image at `ipfs://<imagesCid>/<id>.png` through the gateway.
+ * Replaced by: the rendered image at `ipfs://<imagesCid>/<id>.png` through the gateway (Phase 4).
  */
 export function tokenPreview(id: number): string {
   return `/demo/tokens/${((id - 1) % 24) + 1}.svg`

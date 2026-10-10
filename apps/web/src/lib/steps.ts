@@ -223,7 +223,8 @@ export function stageAccess(
 ): StageAccess {
   if (options.demo ?? isDemoMode()) return 'open'
   if (stage === MANAGE_STAGE.slug) return isDeployed(status) ? 'open' : 'locked'
-  if (stage === 'upload' && options.artDeferred) return 'open'
+  // Lock and upload opens on a draft: its review step is where the art is checked and locked.
+  if (stage === 'upload' && (options.artDeferred || status === 'draft')) return 'open'
   const index = stageIndex(stage)
   if (index === 0) return 'open'
   return isStageDone(STAGES[index - 1]!.slug, status) ? 'open' : 'locked'

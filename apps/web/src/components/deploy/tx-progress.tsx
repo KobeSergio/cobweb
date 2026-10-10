@@ -14,8 +14,12 @@ import type { Hex } from '@/lib/demo/types'
 export type TxStep = 'switching' | 'simulating' | 'wallet' | 'confirming' | 'verifying'
 
 export type TxFailure = {
-  /** rejected: cancelled in the wallet. reverted: the simulation failed. balance: not enough funds. */
-  kind: 'rejected' | 'reverted' | 'balance' | 'switch'
+  /**
+   * rejected: cancelled in the wallet. reverted: the simulation or the transaction failed. balance:
+   * not enough funds. switch: the wallet is on another chain. refused: a check before the wallet, or
+   * the server, refused it. unconfirmed: sent but not confirmed in time; trying again checks it again.
+   */
+  kind: 'rejected' | 'reverted' | 'balance' | 'switch' | 'refused' | 'unconfirmed'
   title: string
   message: string
 }

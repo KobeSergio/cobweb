@@ -11,6 +11,8 @@ import { DropZone, FilePickerButton } from '@/components/art/assets/drop-zone'
 import { ACCEPT_MEDIA, checkMediaFile, mediaLabel, MEDIA_RULES_COPY } from '@/components/art/assets/media'
 import { MediaPreview } from '@/components/art/assets/media-preview'
 import { formatBytes } from '@/components/art/lib/image-checks'
+import type { ActionResult } from '@/lib/art/result'
+import type { PlaceholderUpload } from './upload-shared'
 
 /** The placeholder file chosen for "Reveal later". Same rules as a single asset (MASTER_PLAN, Art: media types). */
 export type PlaceholderFile = {
@@ -21,6 +23,8 @@ export type PlaceholderFile = {
   bytes: number | null
   /** The URL is an object URL made here, so it must be revoked when replaced. */
   owned: boolean
+  /** The stored `uploads` row (real mode). Unset in sample mode, which keeps the file in the browser. */
+  uploadId?: string
 }
 
 export type RevealLaterState = {
@@ -38,17 +42,23 @@ const DESCRIPTION_MAX = 1000
  * The reveal choice at the top of the Review step: "Reveal at mint" or "Reveal later" (MASTER_PLAN,
  * Flow: pre-reveal). Reveal later shows the placeholder file and its description right below; the
  * contract starts on them and Settings reveals to the real art in one transaction. Deferred art
- * forces Reveal later. Seam: the file goes to storage and is pinned to its own CID by the render
- * pipeline (Phase 4).
+ * forces Reveal later. In real mode the file is stored as soon as it is picked (`uploads` kind
+ * placeholder), because no file can be added once the art is locked; Phase 4 pins it to its own CID.
  */
 export function RevealChoice({
   state,
   onChange,
   readOnly,
+  upload = null,
+  remove = null,
 }: {
   state: RevealLaterState
   onChange: (next: RevealLaterState) => void
   readOnly: boolean
+  /** Stores the picked file (real mode). Null in sample mode. */
+  upload?: ((file: File) => Promise<PlaceholderUpload>) | null
+  /** Deletes a stored placeholder file (real mode). */
+  remove?: ((uploadId: string) => Promise<ActionResult>) | null
 }) {
   const id = useId()
   const [checking, setChecking] = useState(false)
@@ -64,6 +74,28 @@ export function RevealChoice({
       if (checked.errors.length > 0 || !checked.mediaType) {
         URL.revokeObjectURL(checked.url)
         setErrors(checked.errors)
+        return
+      }
+      if (upload) {
+        // Real mode: store the file now and show it from storage.
+        URL.revokeObjectURL(checked.url)
+        const stored = await upload(file)
+        if ('error' in stored) {
+          setErrors([stored.error])
+          return
+        }
+        if (state.file?.uploadId && remove) await remove(state.file.uploadId)
+        onChange({
+          ...state,
+          file: {
+            url: stored.url,
+            fileName: file.name,
+            mediaType: checked.mediaType,
+            bytes: file.size,
+            owned: false,
+            uploadId: stored.uploadId,
+          },
+        })
         return
       }
       if (state.file?.owned) URL.revokeObjectURL(state.file.url)
@@ -82,7 +114,16 @@ export function RevealChoice({
     }
   }
 
-  function remove() {
+  async function removeFile() {
+    if (state.file?.uploadId && remove) {
+      setChecking(true)
+      const result = await remove(state.file.uploadId)
+      setChecking(false)
+      if (!result.ok) {
+        setErrors([result.error])
+        return
+      }
+    }
     if (state.file?.owned) URL.revokeObjectURL(state.file.url)
     onChange({ ...state, file: null })
   }
@@ -165,7 +206,7 @@ export function RevealChoice({
                         {checking ? <Spinner /> : <RefreshCwIcon aria-hidden="true" />}
                         Replace
                       </FilePickerButton>
-                      <Button variant="ghost" size="sm" onClick={remove} disabled={checking}>
+                      <Button variant="ghost" size="sm" onClick={removeFile} disabled={checking}>
                         <Trash2Icon aria-hidden="true" />
                         Remove
                       </Button>

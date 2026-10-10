@@ -1,4 +1,5 @@
 import { satisfiesRules } from '@cobweb/dna'
+import { EMPTY_REVIEW, type ReviewData, type ReviewProblem } from '@/lib/art/lock-review'
 import type { Tables } from '@/lib/database.types'
 import {
   DEMO_COLLECTIONS,
@@ -11,19 +12,20 @@ import {
   DEMO_TOKENS,
   type GeneratedToken,
   type RenderJob,
-  type SupportedChain,
 } from '@/lib/demo'
-import type { FlowLink } from '@/lib/steps'
+import { hasArtSubStep, type FlowLink } from '@/lib/steps'
 import { UploadFlow } from './upload-flow'
-import type { ArtSummary } from './upload-shared'
 import { UPLOAD_OUTCOMES, type UploadOutcome } from './upload-sim'
 
 export type UploadScreenProps = {
   collection: Tables<'collections'>
-  /** The render job; its `state` drives the screen: locked, payment_due, rendering, done. */
+  /** The render job; its state picks the step the screen opens on. */
   job: RenderJob
-  /** The chain the art fee is paid on (`job.quote.chainId`). */
-  chain: SupportedChain
+  /** The job to fall back to after an unlock: nothing locked yet. */
+  pending: RenderJob
+  /** `reviewArt`'s result. Null for deferred art and in sample mode, which works it out from the sample. */
+  review: ReviewData | null
+  sample: boolean
   readOnly: boolean
   /** "Finish the art later" (MASTER_PLAN, Flow: pre-reveal): lock and render the placeholder alone. */
   artDeferred?: boolean
@@ -38,15 +40,17 @@ export type UploadScreenProps = {
 }
 
 /**
- * Lock and upload: lock the art, pay the generation fee through the factory's `payForArt(jobId)`
- * (simulate first, then send), then follow the render in batches until the CIDs are pinned.
- *
- * Server part: works out the art summary so the client bundle does not carry the sample art.
- * Replaced by: counts from the project's layer, trait and rule rows and its stored token list.
+ * Lock and upload: review and lock the art, pay the generation fee through the factory's
+ * `payForArt(jobId)` (simulate first, then send), then follow the render in batches. Server part:
+ * in sample mode it works out the sample's review here, so the client bundle does not carry the
+ * sample art.
  */
 export function UploadScreen({
+  collection,
   job,
-  chain,
+  pending,
+  review,
+  sample,
   readOnly,
   artDeferred = false,
   previous,
@@ -54,40 +58,70 @@ export function UploadScreen({
   sampleOutcome,
 }: UploadScreenProps) {
   const outcome = UPLOAD_OUTCOMES.find((entry) => entry === sampleOutcome) as UploadOutcome | undefined
-  const traits = DEMO_LAYERS.flatMap((layer) => layer.traits)
-  // Rules named in a conflict are skipped by the generator, so they are not held against the set.
-  const conflicted = new Set(DEMO_RULE_CONFLICTS.flatMap((conflict) => conflict.ruleIds.slice(1)))
-  const rules = DEMO_RULES.filter((rule) => !conflicted.has(rule.id))
-  const art: ArtSummary = {
-    supply: DEMO_TOKEN_COUNT,
-    tokens: DEMO_TOKENS.length,
-    collections: DEMO_COLLECTIONS.length,
-    breaking: DEMO_TOKENS.filter((token) => !satisfiesRules(new Set(token.dna), rules)).length,
-    // `?outcome=check-failed` gives the sample two identical tokens to review the duplicates list.
-    duplicates: outcome === 'check-failed' ? [[118, 540]] : findDuplicates(DEMO_TOKENS),
-    layers: DEMO_LAYERS.length,
-    traits: traits.filter((trait) => !trait.blank).length,
-    rules: DEMO_RULES.length,
-    constants: traits.flatMap((trait) =>
-      trait.constant ? [{ name: trait.name, count: trait.constant }] : [],
-    ),
-  }
   const { imagesCid, metadataCid, placeholder } = DEMO_RENDER_JOBS.done
 
   return (
     <UploadFlow
+      collectionId={collection.id}
+      collectionChainId={collection.chain_id}
       job={job}
-      chain={chain}
-      art={art}
+      pending={pending}
+      review={sample ? sampleReview(outcome) : (review ?? EMPTY_REVIEW)}
+      sample={sample}
       sampleResult={{ imagesCid, metadataCid, placeholder }}
-      placeholderDescription={DEMO_PLACEHOLDER_DESCRIPTION}
+      placeholderDescription={sample ? DEMO_PLACEHOLDER_DESCRIPTION : ''}
       deferred={artDeferred}
+      assetsFlow={!hasArtSubStep(collection.project_type, 'generate')}
       readOnly={readOnly}
       previous={previous}
       next={next}
       outcome={outcome}
     />
   )
+}
+
+const fmt = (value: number) => value.toLocaleString('en-US')
+
+/** The sample's review in the shape `reviewArt` returns. */
+function sampleReview(outcome: UploadOutcome | undefined): ReviewData {
+  const traits = DEMO_LAYERS.flatMap((layer) => layer.traits)
+  // Rules named in a conflict are skipped by the generator, so they are not held against the set.
+  const conflicted = new Set(DEMO_RULE_CONFLICTS.flatMap((conflict) => conflict.ruleIds.slice(1)))
+  const rules = DEMO_RULES.filter((rule) => !conflicted.has(rule.id))
+  const breaking = DEMO_TOKENS.filter((token) => !satisfiesRules(new Set(token.dna), rules)).length
+  // `?outcome=check-failed` gives the sample two identical tokens to review the duplicates check.
+  const duplicates = outcome === 'check-failed' ? [[118, 540]] : findDuplicates(DEMO_TOKENS)
+  const problems: ReviewProblem[] = []
+  if (DEMO_TOKENS.length !== DEMO_TOKEN_COUNT)
+    problems.push({
+      code: 'size',
+      message: `The set has ${fmt(DEMO_TOKENS.length)} tokens and the supply is ${fmt(DEMO_TOKEN_COUNT)}. Match them in Generate first.`,
+    })
+  if (breaking > 0)
+    problems.push({
+      code: 'rule',
+      message: `${fmt(breaking)} ${breaking === 1 ? 'token breaks' : 'tokens break'} the rules. Regenerate them in Generate first.`,
+    })
+  if (duplicates.length > 0)
+    problems.push({
+      code: 'duplicate',
+      message: `${duplicates.map((group) => `Tokens ${group.map((id) => `#${id}`).join(' and ')}`).join(', ')} have the same traits. Change them in Generate, or allow identical tokens.`,
+    })
+  return {
+    problems,
+    tokenCount: DEMO_TOKENS.length,
+    supply: DEMO_TOKEN_COUNT,
+    allowDuplicatesNeeded: problems.length > 0 && problems.every((problem) => problem.code === 'duplicate'),
+    counts: {
+      collections: DEMO_COLLECTIONS.length,
+      layers: DEMO_LAYERS.length,
+      traits: traits.filter((trait) => !trait.blank).length,
+      rules: DEMO_RULES.length,
+    },
+    constants: traits.flatMap((trait) =>
+      trait.constant ? [{ name: trait.name, count: trait.constant }] : [],
+    ),
+  }
 }
 
 /** Groups of token ids whose collection and traits are identical. */

@@ -7,7 +7,8 @@ import { Button } from '@cobweb/ui/components/button'
 import { Progress } from '@cobweb/ui/components/progress'
 import { Spinner } from '@cobweb/ui/components/spinner'
 import { cn } from '@cobweb/ui/lib/utils'
-import { followRender, SECONDS_PER_BATCH, type RenderProgress, type UploadOutcome } from './upload-sim'
+import { followRender, retryBatch, SECONDS_PER_BATCH, type RenderProgress } from './render-sim'
+import type { UploadOutcome } from './upload-sim'
 import { formatDuration } from './upload-shared'
 
 /**
@@ -68,7 +69,7 @@ export function RenderStep({
 
   function retry() {
     setRetrying(true)
-    run({ ...progress, failedBatch: undefined })
+    run(retryBatch(progress))
   }
 
   const imagesDone = progress.done >= progress.total
