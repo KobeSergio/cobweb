@@ -18,7 +18,7 @@ services/render    Render and metadata Lambdas
 contracts/         Foundry: factory and collection
 packages/dna       Trait assignment engine
 packages/ui        Component library
-packages/shared    Types, ABIs, chain config
+packages/shared    Chain config, factory ABI and addresses, job ids (browser entry) and viem clients (server entry)
 supabase/          Migrations and policies
 legacy/            Old Kingdomly repos. Not in git. Read-only
 ```
@@ -34,6 +34,10 @@ supabase start && pnpm --filter @cobweb/web dev      # web app against local Sup
 pnpm --filter @cobweb/web verify:local    # sign-in and access-rule checks; run after any migration change
 pnpm --filter @cobweb/web verify:storage  # presigned PUT, HEAD, signed GET, delete, the 5 GB cap and the canvas, against local storage
 supabase seed buckets                     # creates the local `art` bucket from config.toml (a restart alone does not)
+pnpm --filter @cobweb/web chain:local     # Anvil with the factory deployed; prints the .env.local lines
+pnpm --filter @cobweb/web verify:chain    # lock, pay and the refusals against Anvil
+pnpm --filter @cobweb/web verify:sweep    # the upload sweep against local storage
+pnpm --filter @cobweb/web sweep:uploads --dry-run   # unrecorded objects older than a day; drop --dry-run to delete
 ```
 
 ## Rules

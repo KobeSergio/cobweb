@@ -61,6 +61,8 @@ Fifth and last of Phase 3's sub-projects.
 - A price feed or any USD conversion in code; the admin sets the rate.
 - Watching chain events; verification is by receipt on demand.
 - Multi-wallet payment: only the quote's payer counts.
+- Locking the real set of a deferred-art collection after its placeholder lock is wired with the reveal
+  flow in a later phase.
 
 ## 4. Chain plumbing
 
@@ -80,6 +82,9 @@ Fifth and last of Phase 3's sub-projects.
   9g checks the SQL derivation equals it.
 - `clients.ts`: `publicClientFor(chainId)` (viem `createPublicClient` over `rpcUrl`), used from
   server code only.
+
+`@cobweb/shared` has a browser entry and a `@cobweb/shared/server` entry (the viem clients and the
+environment reads live behind the server one). The dev wallet sends transactions on Anvil only.
 
 `contracts/script/DeployLocal.s.sol` deploys `CobwebFactory` with the first Anvil account as admin and
 treasury and sets `artFeePerToken` to a known rate (`25000000000000` wei, 0.000025 ETH, standing in for
@@ -136,6 +141,16 @@ Migration `supabase/migrations/20261009020000_lock_and_pay.sql`:
 | `art_requote(collection, p_owner uuid, fee_per_token_wei numeric)` (`service_role` only)                                                                                                  | Requires the open `real` job in `payment_due` with `quote_expires_at < now()`; rewrites the quote total and expiry. Returns the job.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `art_record_payment(collection, p_owner uuid, job, tx_hash text, payer text, amount_wei numeric)` (`service_role` only)                                                                   | Requires the job `payment_due` and unexpired; requires `payer = quote_payer` and `amount_wei >= quote_total_wei` (the action already checked both; the function repeats them as 23514 guards); refuses a `tx_hash` already recorded on any job (unique index); sets `state = paid`, `payment_tx_hash`, `paid_at = now()`, `paid_amount_wei`. Returns the job.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
+Amendments as built:
+
+- `art_record_payment` does not check the quote expiry. It records a short payment (hash and amount,
+  the job stays `payment_due`) and refuses a second record, a requote or an unlock once a payment is
+  recorded.
+- `art_lock` refuses a zero fee for generative and 1/1 projects, and refuses when a set `max_supply`
+  differs from the token count ('The supply does not match the tokens. Generate again.').
+- `art_unlock` nulls a generative project's `max_supply`.
+- `onchain_job_id` is derived by a trigger.
+
 `render_jobs` select stays owner-only through RLS; nothing grants client writes. The functions are
 checked in `verify:local` 9g (section 10).
 
@@ -159,6 +174,10 @@ read and write, `art_unlock` and `art_lock_placeholder` included, uses the creat
 | `quoteArt(collectionId)`                              | When the open job's quote expired, reads the rate again and calls `art_requote`; otherwise returns the job.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `confirmArtPayment(collectionId, jobId, txHash)`      | Loads the job (owner read), `publicClientFor(quote_chain_id).getTransactionReceipt`; `matchArtPaid(receipt, { factory, jobId, payer, minAmount })` (pure, `apps/web/src/lib/chain/art-paid.ts`) finds the factory's `ArtPaid` log for the job and returns `{ ok }` or one sentence: "The payment has not been confirmed on chain yet." (no receipt or not yet mined), "The payment came from a different wallet than the quote." (payer mismatch), "The payment was less than the quote." (amount short), "The transaction did not pay for this job." (no matching log), "This payment was already used." (hash recorded); then `art_record_payment`. Returns the job. |
 | `getRenderJob(collectionId)`                          | The open job (or the latest done or failed one) as `RenderJob`, for the page and for polling after payment.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+
+As built, `confirmArtPayment` requires a confirmation depth per chain (Anvil 1, Sepolia 2, Ethereum 5,
+other launch chains 3) and treats a short payment as recorded-and-refused, with the job named for
+support.
 
 `RenderJob` (in `lib/demo/types.ts`, kept as the screen's shape) gains states `paid`, `waived`,
 `failed`; `toRenderJob(row)` in `apps/web/src/lib/art/render-job.ts` maps the row: `jobId` from
@@ -185,6 +204,10 @@ the placeholder upload's served URL and media type.
   verification refused (with the sentence). A quote past its expiry shows "The quote expired" with a
   "Get a new quote" button (`quoteArt`). "Unlock the art" is available while `payment_due`, behind a
   confirm that says the lock and the quote are discarded and the Art step opens again.
+- As built, the pay step reads `jobPayment` before simulating, remembers the sent hash per job, and
+  offers "I have a transaction hash", "Check again" and "Discard this attempt". The sent-hash paths
+  stay open after the quote expires. Unlock is disabled while a hash is pending or a short payment is
+  recorded.
 - Reveal later (`reveal-later.tsx`): the placeholder file is uploaded through the existing uploader
   (`kind placeholder`) and `lockPlaceholder` is called; the `?art=deferred` seam goes.
 - Render and done steps: unchanged in look; they read the real job's `batches` and show the
@@ -232,16 +255,18 @@ scheduled later with care. Documented in CLAUDE.md commands.
 
 ## 11. Acceptance criteria
 
-- [ ] A generative collection can be reviewed, locked, quoted from the factory rate, paid on Anvil
+- [x] A generative collection can be reviewed, locked, quoted from the factory rate, paid on Anvil
       and verified; the job row is `paid` with the token list hash, the quote and the payment.
-- [ ] An edit between review and lock is refused with "The art changed while locking. Review it
+- [x] An edit between review and lock is refused with "The art changed while locking. Review it
       again."; unlock while unpaid returns the collection to draft; unlock after payment is refused.
-- [ ] A deferred collection locks its placeholder at no cost without locking the art; a single-asset
+- [x] A deferred collection locks its placeholder at no cost without locking the art; a single-asset
       collection locks at no cost.
-- [ ] `verify:local` passes with section 9g; `verify:chain` passes against Anvil; `pnpm typecheck
-&& pnpm lint && pnpm test` pass at the root; `pnpm --filter @cobweb/web build` passes.
-- [ ] The sweep removes an object older than a day with no row and keeps every recorded object, in
+- [x] `verify:local` passes with section 9g; `verify:chain` passes against Anvil; `pnpm typecheck
+&& pnpm lint && pnpm test` pass at the root; `pnpm --filter @cobweb/web build` passes. Counts measured: root tests 251; `verify:local` 202; `verify:storage` 15; `verify:chain` 9; `verify:sweep` 8.
+- [x] The sweep removes an object older than a day with no row and keeps every recorded object, in
       a dry run and a real run against local storage.
-- [ ] `docs/MASTER_PLAN.md` marks Phase 3 complete and names Phase 4 next; the creator flow spec's
+- [x] `docs/MASTER_PLAN.md` marks Phase 3 complete and names Phase 4 next; the creator flow spec's
       seams list drops the upload entries that are now real; `packages/shared` is documented in
       CLAUDE.md's layout line.
+
+Checked on 10 October 2026 on local Supabase and Anvil: root typecheck, lint and tests; verify:local 202 checks; verify:storage 15; verify:chain 9; verify:sweep 8; next build. Browser walk with Playwright and the dev wallet: review and lock (four checks, 3 tokens, 2 layers, 5 traits), pay 0.000075 ETH on Anvil through the wallet with the phases shown and the job recorded paid with its hashes; reload opened on the render step and the Art screens were read only; a second collection locked, unlocked, re-rolled and relocked at the same quote, then paid; a wallet on Ethereum was told to switch to Anvil with no prompt; a deferred collection locked a GIF placeholder at no fee without locking the art; in sample mode the rejected, reverted, balance and failed-check outcomes each showed and Try again succeeded with no request to a server action.

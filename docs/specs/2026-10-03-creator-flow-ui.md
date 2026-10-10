@@ -295,10 +295,12 @@ Fields the Phase 6 source adds: the creator address, royalty and `degraded` flag
 The public phase's per-wallet usage is `WalletState.publicMinted`, not `groups[0].used`.
 
 Seams: every place a real backend plugs in is marked with a `Seam:` or `SEAM:` comment
-(`components/upload/upload-sim.ts`, `components/deploy/deploy-sim.ts`, `components/manage/simulate.ts`,
+(`components/deploy/deploy-sim.ts`, `components/manage/simulate.ts`,
 `components/mint/mint-transaction.ts`, `app/[slug]/sample-data.ts`). The Art screens read and write the
 art tables since the wiring sub-project (specs/2026-10-08-art-wiring.md); sample-data mode still runs
-them on `lib/demo`.
+them on `lib/demo`. The Lock and upload step reads and writes real jobs since the lock and pay
+sub-project (specs/2026-10-09-lock-and-pay.md), with render progress simulated in
+`components/upload/render-sim.ts` until Phase 4.
 
 ## 6. Design language (summary; `docs/DESIGN.md` is authoritative)
 

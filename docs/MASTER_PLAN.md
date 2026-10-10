@@ -175,7 +175,7 @@ What exists:
 
 ### Phase 3: Art generator
 
-**Status:** in progress. The DNA engine (first sub-project) landed on 7 October 2026; see its spec. The art tables (second sub-project) landed on 8 October 2026; see [specs/2026-10-08-art-tables.md](specs/2026-10-08-art-tables.md). Layer and asset upload (third sub-project) landed on 8 October 2026; see [specs/2026-10-08-art-upload.md](specs/2026-10-08-art-upload.md). Wiring the Art screens to the art tables (fourth sub-project) landed on 8 October 2026; see [specs/2026-10-08-art-wiring.md](specs/2026-10-08-art-wiring.md). Owed to the lock and pay sub-project: a sweep of objects that were uploaded but never recorded (older than a day), since the project cap counts recorded rows only. Next: lock and pay.
+**Status:** in progress. The DNA engine (first sub-project) landed on 7 October 2026; see its spec. The art tables (second sub-project) landed on 8 October 2026; see [specs/2026-10-08-art-tables.md](specs/2026-10-08-art-tables.md). Layer and asset upload (third sub-project) landed on 8 October 2026; see [specs/2026-10-08-art-upload.md](specs/2026-10-08-art-upload.md). Wiring the Art screens to the art tables (fourth sub-project) landed on 8 October 2026; see [specs/2026-10-08-art-wiring.md](specs/2026-10-08-art-wiring.md). Owed to the lock and pay sub-project: a sweep of objects that were uploaded but never recorded (older than a day), since the project cap counts recorded rows only. Next: lock and pay. Lock and pay (fifth sub-project) landed on 10 October 2026; see [specs/2026-10-09-lock-and-pay.md](specs/2026-10-09-lock-and-pay.md). Phase 3 is complete. Owed to Phase 4: the worker re-checks jobPayment(onchain_job_id, quote_payer) against the quote on chain before rendering; locking the real set of a deferred-art collection after its placeholder lock is wired with the reveal flow. Next: Phase 4, rendering.
 
 Source: [legacy/market-creator-flow.md](legacy/market-creator-flow.md), sections 2, 3, 4, 7 and 8.
 
@@ -193,14 +193,15 @@ Data contract: [specs/2026-10-03-creator-flow-ui.md](specs/2026-10-03-creator-fl
 - Lock: the server validates and hashes the submitted token list and creates the job row with quote and TTL.
 - Pay: the factory's `payForArt(jobId)`; the job becomes `paid` only from the verified event.
 
-**Done when:** a creator can upload layers, generate and curate 10,000 tokens, lock, and pay on testnet, leaving a `paid` job row with a stored assignment.
+**Done when:** a creator can upload layers, generate and curate 10,000 tokens, lock, and pay on testnet, leaving a `paid` job row with a stored assignment. Proven on a local Anvil chain (`verify:chain` and the browser walk); a public testnet needs only `RPC_URL_<id>` and `FACTORY_ADDRESS_<id>` once the factory is deployed there.
 
 ### Phase 4: Render pipeline
 
-**Status:** not started.
+**Status:** next. It starts from a `paid` (or `waived`) render job: `render_jobs.token_list_hash`, `batch_size` and `batches_total` are set at lock, the generative list is the `tokens` rows and the 1/1 and single asset list is `render_jobs.token_list`. The screen's render and done steps run on `components/upload/render-sim.ts`, the seam this phase replaces.
 
 Source: [legacy/artgen-lambda.md](legacy/artgen-lambda.md), sections 3, 4, 7 and 9.
 
+- Before rendering a `paid` job, the worker re-checks the payment on chain as defense in depth: `jobPayment(onchain_job_id, quote_payer) >= quote_total_wei` on the factory. The lock, requote and payment record are already service-role only (Phase 3), so this guards against a server bug, not a creator.
 - SQS queue with a dead-letter queue; one message per 100 tokens carrying only job id and range.
 - Render Lambda: lift the sharp compositing and multi-collection code; read layers from S3 to `/tmp`; pack the batch as a CAR; upload to Filebase.
 - Single asset video or GIF, and the pre-reveal placeholder, pass through without compositing, each with matching metadata; the placeholder gets its own small CID.
