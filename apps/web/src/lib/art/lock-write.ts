@@ -18,9 +18,9 @@ export async function lockWrite<T>(
   collectionId: string,
   run: (ctx: LockContext) => Promise<LockOutcome<T>>,
 ): Promise<ActionResult<T>> {
-  const owned = await ownedCollection(collectionId)
-  if (owned.error !== undefined) return fail(owned.error)
   try {
+    const owned = await ownedCollection(collectionId)
+    if (owned.error !== undefined) return fail(owned.error)
     const outcome = await run({
       supabase: owned.supabase,
       service: createServiceClient,

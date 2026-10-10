@@ -25,7 +25,7 @@ import { ChainName } from '@/components/chains/chain-icon'
 import { SummaryRow } from '@/components/deploy/copy-value'
 import { isTxRunning, TX_IDLE, TxProgress } from '@/components/deploy/tx-progress'
 import { quoteExpired } from '@/lib/art/quote'
-import { NOT_A_HASH } from '@/lib/art/result'
+import { NOT_A_HASH, PAYMENT_ON_CHAIN, THROWN } from '@/lib/art/result'
 import { explorerTxUrl, formatNative, shortAddress } from '@/lib/demo/helpers'
 import type { RenderJob, SupportedChain } from '@/lib/demo/types'
 import {
@@ -219,23 +219,39 @@ export function PayStep({
     dispatch({ type: 'set', phase: TX_IDLE })
   }
 
+  /** A refusal because the payment is already on chain also opens the hash box, where it is recorded. */
+  function refuse(error: string) {
+    setNotice(error)
+    if (error === PAYMENT_ON_CHAIN) setHashOpen(true)
+  }
+
   async function unlock() {
     setBusy('unlock')
     setNotice(null)
-    const result = await actions.unlock()
-    setBusy(null)
-    if (result.ok) onUnlocked()
-    else setNotice(result.error)
+    try {
+      const result = await actions.unlock()
+      if (result.ok) onUnlocked()
+      else refuse(result.error)
+    } catch {
+      setNotice(THROWN)
+    } finally {
+      setBusy(null)
+    }
   }
 
   async function requote() {
     setBusy('requote')
     setNotice(null)
-    const result = await actions.requote()
-    setBusy(null)
-    if (!result.ok) return setNotice(result.error)
-    dispatch({ type: 'set', phase: TX_IDLE })
-    onRequoted(result.data)
+    try {
+      const result = await actions.requote()
+      if (!result.ok) return refuse(result.error)
+      dispatch({ type: 'set', phase: TX_IDLE })
+      onRequoted(result.data)
+    } catch {
+      setNotice(THROWN)
+    } finally {
+      setBusy(null)
+    }
   }
 
   return (
@@ -276,7 +292,10 @@ export function PayStep({
             <RefreshCwIcon aria-hidden="true" />
             <AlertTitle>The quote expired</AlertTitle>
             <AlertDescription>
-              <p>A quote lasts 24 hours, so the fee follows the current rate. Get a new quote to pay.</p>
+              <p>
+                A quote lasts 24 hours, so the fee follows the current rate.{' '}
+                {sent ? 'Check the payment first.' : 'Get a new quote to pay.'}
+              </p>
               <Button variant="secondary" size="sm" onClick={requote} disabled={busy !== null || sent}>
                 {busy === 'requote' ? <Spinner /> : <RefreshCwIcon />}
                 Get a new quote

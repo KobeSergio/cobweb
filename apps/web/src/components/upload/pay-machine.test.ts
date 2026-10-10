@@ -3,11 +3,17 @@ import { describe, expect, it } from 'vitest'
 import type { TxPhase } from '@/components/deploy/tx-progress'
 import {
   CHAIN_NOT_READY,
+  NO_PAYMENT_FOR_JOB,
   NOT_CONFIRMED,
+  NOT_FOUND,
+  NOT_THIS_JOB,
   OTHER_WALLET,
   PAYMENT_USED,
   SHORT_PAYMENT,
+  SIGNED_OUT,
+  THROWN,
   TIMED_OUT,
+  UNSAVED,
   type ActionResult,
 } from '@/lib/art/result'
 import type { RenderJob } from '@/lib/demo/types'
@@ -331,5 +337,94 @@ describe('rechecking a short payment and keeping a timed-out hash', () => {
     })
     expect(retryHash(phase)).toBe(HASH)
     expect(calls.forget).toBe(0)
+  })
+})
+
+describe('which answers forget the remembered hash (Review Focus: lost payments)', () => {
+  it('a simulation failure sends nothing and remembers nothing', async () => {
+    const { deps, calls } = fakeDeps([], {
+      simulate: async () => {
+        throw Object.assign(new Error('reverted'), { shortMessage: 'Execution reverted: JobAlreadyPaid.' })
+      },
+    })
+    const { last, job } = await run(deps)
+    expect(job).toBeNull()
+    expect(last).toMatchObject({ type: 'failed', failure: { kind: 'reverted' } })
+    expect(calls.send).toBe(0)
+    expect(calls.remember).toEqual([])
+    expect(calls.confirm).toBe(0)
+  })
+
+  it('a wallet rejection remembers nothing and reads as rejected', async () => {
+    const { deps, calls } = fakeDeps([], {
+      simulate: async () => async () => {
+        throw Object.assign(new Error('User rejected'), { code: 4001 })
+      },
+    })
+    const { last } = await run(deps)
+    expect(last).toMatchObject({ type: 'failed', failure: { kind: 'rejected' } })
+    expect(calls.remember).toEqual([])
+    expect(calls.forget).toBe(0)
+  })
+
+  it('a wait that throws keeps the sent hash and offers a check', async () => {
+    const { deps, calls } = fakeDeps([], {
+      wait: async () => {
+        throw new Error('timeout')
+      },
+    })
+    const { last } = await run(deps)
+    expect(last).toMatchObject({ type: 'failed', failure: { kind: 'unconfirmed' } })
+    expect(calls.remember).toEqual([HASH])
+    expect(calls.forget).toBe(0)
+    expect(calls.confirm).toBe(0)
+  })
+
+  it.each([SIGNED_OUT, THROWN, UNSAVED, CHAIN_NOT_READY, NOT_FOUND])(
+    'a transient refusal (%s) keeps the hash and stays checkable',
+    async (error) => {
+      const { deps, calls } = fakeDeps([{ ok: false, error }])
+      let phase: TxPhase = { step: 'idle' }
+      await runPayment(input, deps, (event) => {
+        phase = payReducer(phase, event)
+      })
+      expect(phase).toMatchObject({ step: 'failed', failure: { kind: 'unconfirmed', message: error } })
+      expect(retryHash(phase)).toBe(HASH)
+      expect(calls.forget).toBe(0)
+    },
+  )
+
+  it('a confirm that throws is a transient refusal too', async () => {
+    const { deps, calls } = fakeDeps([], {
+      confirm: async () => {
+        throw new Error('fetch failed')
+      },
+    })
+    const { last } = await run(deps, { ...input, sentHash: HASH })
+    expect(last).toMatchObject({ type: 'failed', failure: { kind: 'unconfirmed' } })
+    expect(calls.forget).toBe(0)
+  })
+
+  it.each([NOT_THIS_JOB, OTHER_WALLET])('a terminal refusal (%s) forgets the hash', async (error) => {
+    const { deps, calls } = fakeDeps([{ ok: false, error }])
+    const { last } = await run(deps, { ...input, sentHash: HASH })
+    expect(last).toMatchObject({ type: 'failed', failure: { kind: 'refused', message: error } })
+    expect(calls.forget).toBe(1)
+  })
+
+  it('treats "no payment waiting for this job" as success when the job was paid with this hash', async () => {
+    const { deps } = fakeDeps([{ ok: false, error: NO_PAYMENT_FOR_JOB }])
+    const { last, job } = await run(deps, { ...input, sentHash: HASH })
+    expect(last).toEqual({ type: 'success', txHash: HASH })
+    expect(job?.state).toBe('paid')
+  })
+
+  it('refuses "no payment waiting for this job" when the job holds another hash', async () => {
+    const { deps, calls } = fakeDeps([{ ok: false, error: NO_PAYMENT_FOR_JOB }], {
+      reload: async () => ({ ok: true, data: paidWith(OTHER_HASH) }),
+    })
+    const { last } = await run(deps, { ...input, sentHash: HASH })
+    expect(last).toMatchObject({ type: 'failed', failure: { kind: 'refused', message: NO_PAYMENT_FOR_JOB } })
+    expect(calls.forget).toBe(1)
   })
 })

@@ -1,9 +1,13 @@
 import type { TxFailure, TxPhase } from '@/components/deploy/tx-progress'
 import {
   CHAIN_NOT_READY,
+  NO_PAYMENT_FOR_JOB,
   NOT_CONFIRMED,
+  NOT_THIS_JOB,
+  OTHER_WALLET,
   PAYMENT_USED,
   SHORT_PAYMENT,
+  THROWN,
   TIMED_OUT,
   type ActionResult,
 } from '@/lib/art/result'
@@ -166,7 +170,8 @@ export function classifyError(error: unknown, at: 'simulating' | 'wallet' | 'con
 
 /**
  * Asks the server to confirm a payment every 3 seconds while it answers "not confirmed yet", for up
- * to 2 minutes. "Already used" for this job's own hash is a confirmation that arrived before.
+ * to 2 minutes. "Already used" and "no payment waiting for this job" are a confirmation that arrived
+ * before when the job's recorded hash is this one. A confirm that throws is a transient failure.
  */
 export async function verifyPayment(
   hash: Hex,
@@ -174,10 +179,20 @@ export async function verifyPayment(
 ): Promise<{ job: RenderJob } | { error: string }> {
   const started = deps.now()
   for (;;) {
-    const result = await deps.confirm(hash)
+    let result: ActionResult<RenderJob>
+    try {
+      result = await deps.confirm(hash)
+    } catch {
+      return { error: THROWN }
+    }
     if (result.ok) return { job: result.data }
-    if (result.error === PAYMENT_USED) {
-      const current = await deps.reload()
+    if (result.error === PAYMENT_USED || result.error === NO_PAYMENT_FOR_JOB) {
+      let current: ActionResult<RenderJob | null>
+      try {
+        current = await deps.reload()
+      } catch {
+        return { error: THROWN }
+      }
       const job = current.ok ? current.data : null
       if (job && 'payment' in job && job.payment?.txHash.toLowerCase() === hash.toLowerCase()) {
         // A short payment is recorded with its hash but the job still waits: that is not a success.
@@ -185,12 +200,28 @@ export async function verifyPayment(
           return { error: `${SHORT_PAYMENT} Tell support about job ${job.jobId}.` }
         return { job }
       }
-      return { error: PAYMENT_USED }
+      // The reload itself failing says nothing about the payment: keep the hash.
+      return { error: current.ok ? result.error : current.error }
     }
     if (result.error !== NOT_CONFIRMED) return { error: result.error }
     if (deps.now() - started + CONFIRM_INTERVAL_MS > CONFIRM_TIMEOUT_MS) return { error: TIMED_OUT }
     await deps.sleep(CONFIRM_INTERVAL_MS)
   }
+}
+
+/**
+ * Whether the server's answer ends the payment for good, so this browser forgets the hash. Any other
+ * refusal (signed out, a thrown action, an unsaved change, a chain not ready, a collection not found,
+ * a network error) says nothing about the payment: the hash stays and "Check again" is offered.
+ */
+export function isTerminalAnswer(error: string): boolean {
+  return (
+    error === NOT_THIS_JOB ||
+    error === OTHER_WALLET ||
+    error === PAYMENT_USED ||
+    error === NO_PAYMENT_FOR_JOB ||
+    isShortPayment(error)
+  )
 }
 
 /** Pays the art fee, or checks a payment already sent, reporting each step through `dispatch`. */
@@ -247,10 +278,15 @@ export async function runPayment(
     dispatch({ type: 'success', txHash: hash })
     return verified.job
   }
-  if (verified.error === TIMED_OUT) {
+  if (!isTerminalAnswer(verified.error)) {
+    // Timed out or a transient refusal: the payment may still be recorded, so the hash stays.
     dispatch({
       type: 'failed',
-      failure: { kind: 'unconfirmed', title: 'Payment not confirmed yet', message: TIMED_OUT },
+      failure: {
+        kind: 'unconfirmed',
+        title: 'Payment not confirmed yet',
+        message: verified.error,
+      },
     })
   } else {
     // A short payment is recorded on the job (it stays awaiting payment) and the server has its
