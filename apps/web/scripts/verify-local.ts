@@ -2389,14 +2389,16 @@ async function jobFor(id: string): Promise<JobCheckRow | null> {
   return data as JobCheckRow | null
 }
 
-async function lockState(cid: string): Promise<{ art_locked_at: string | null; status: string }> {
+type LockState = { art_locked_at: string | null; status: string; max_supply: number | null }
+
+async function lockState(cid: string): Promise<LockState> {
   const { data, error } = await admin
     .from('collections')
-    .select('art_locked_at, status')
+    .select('art_locked_at, status, max_supply')
     .eq('id', cid)
     .single()
   if (error) throw new Error(`lock state: ${describe(error as DbError)}`)
-  return data as { art_locked_at: string | null; status: string }
+  return data as LockState
 }
 
 /** A generative project with one art collection of two tokens, ready to lock. */
@@ -2484,6 +2486,23 @@ async function artLockAndPay(A: Creator, B: Creator): Promise<void> {
     return expectSentence(error, CHECK, 'The art changed while locking. Review it again.')
   })
 
+  await check('art_lock: a list with one token more than stored is refused', async () => {
+    const extra = [...g.list, { id: 3, collectionId: g.art, dna: [g.wide] }]
+    const { error } = await callArt(admin, 'art_lock', lockArgs(A.userId, g.cid, extra, payer))
+    return expectSentence(error, CHECK, 'The art changed while locking. Review it again.')
+  })
+
+  await check('art_lock: a zero fee on a generative project is refused', async () => {
+    const { error } = await callArt(
+      admin,
+      'art_lock',
+      lockArgs(A.userId, g.cid, g.list, payer, { p_fee_per_token_wei: '0' }),
+    )
+    const problem = expectSentence(error, CHECK, 'This chain is not ready for payments yet.')
+    if (problem) return problem
+    return (await lockState(g.cid)).art_locked_at === null ? null : 'the art locked'
+  })
+
   await check('art_lock: a quote for another wallet than the sign-in wallet is refused', async () => {
     const other = B.account.address.toLowerCase()
     const { error } = await callArt(admin, 'art_lock', lockArgs(A.userId, g.cid, g.list, other))
@@ -2511,7 +2530,9 @@ async function artLockAndPay(A: Creator, B: Creator): Promise<void> {
         hours > 23.9 && hours < 24.1 ? null : `expires in ${hours} hours`,
         job.batches_total === 1 ? null : `batches ${job.batches_total}`,
         job.token_list === null ? null : 'a generative job stored a token list',
-        state.art_locked_at !== null && state.status === 'art_locked' ? null : JSON.stringify(state),
+        state.art_locked_at !== null && state.status === 'art_locked' && state.max_supply === 2
+          ? null
+          : JSON.stringify(state),
       ].filter(Boolean)
       return problems.length ? problems.join('; ') : null
     },
@@ -2527,6 +2548,7 @@ async function artLockAndPay(A: Creator, B: Creator): Promise<void> {
     if (error) return describe(error)
     const state = await lockState(g.cid)
     if (state.art_locked_at !== null || state.status !== 'draft') return JSON.stringify(state)
+    if (state.max_supply !== null) return `max_supply ${state.max_supply} after unlock`
     if (await jobFor(job1)) return 'the job is still there'
     // The lock gate is open again: the creator can edit a token.
     const edit = await A.client
@@ -2567,6 +2589,39 @@ async function artLockAndPay(A: Creator, B: Creator): Promise<void> {
     if (problem) return problem
     return (await lockState(g.cid)).art_locked_at !== null ? null : 'the lock was cleared'
   })
+
+  // The supply: a stored supply that differs from the token count refuses the lock; an unlock clears
+  // a generative supply, so a relock after a different count succeeds.
+  const k = await lockableProject(A.client)
+  await check('art_lock: a stored supply that differs from the token count is refused', async () => {
+    const set = await admin.from('collections').update({ max_supply: 5 }).eq('id', k.cid)
+    if (set.error) return `setup: ${describe(set.error as DbError)}`
+    const { error } = await callArt(admin, 'art_lock', lockArgs(A.userId, k.cid, k.list, payer))
+    const problem = expectSentence(error, CHECK, 'The supply does not match the tokens. Generate again.')
+    if (problem) return problem
+    return (await lockState(k.cid)).art_locked_at === null ? null : 'the art locked'
+  })
+  await check(
+    'art_unlock: clears a generative supply, and a relock after a different count works',
+    async () => {
+      const clear = await admin.from('collections').update({ max_supply: null }).eq('id', k.cid)
+      if (clear.error) return `setup: ${describe(clear.error as DbError)}`
+      const first = await callArt(admin, 'art_lock', lockArgs(A.userId, k.cid, k.list, payer))
+      if (first.error) return `lock: ${describe(first.error)}`
+      idOf(first.data)
+      const unlock = await callArt(A.client, 'art_unlock', { p_collection_id: k.cid })
+      if (unlock.error) return `unlock: ${describe(unlock.error)}`
+      const state = await lockState(k.cid)
+      if (state.max_supply !== null || state.status !== 'draft') return JSON.stringify(state)
+      const drop = await admin.from('tokens').delete().eq('collection_id', k.cid).eq('token_id', 2)
+      if (drop.error) return `setup: ${describe(drop.error as DbError)}`
+      const again = await callArt(admin, 'art_lock', lockArgs(A.userId, k.cid, [k.list[0]], payer))
+      if (again.error) return `relock: ${describe(again.error)}`
+      idOf(again.data)
+      const after = await lockState(k.cid)
+      return after.max_supply === 1 && after.status === 'art_locked' ? null : JSON.stringify(after)
+    },
+  )
 
   // A second project for the refusals, the requote and the grace hour.
   const h = await lockableProject(A.client)
@@ -2655,6 +2710,35 @@ async function artLockAndPay(A: Creator, B: Creator): Promise<void> {
       : JSON.stringify(job)
   })
 
+  await check(
+    'a recorded payment protects the job: unlock, requote and a second record are refused',
+    async () => {
+      const unlock = await callArt(A.client, 'art_unlock', { p_collection_id: i.cid })
+      const requote = await callArt(admin, 'art_requote', {
+        p_collection_id: i.cid,
+        p_owner: A.userId,
+        p_fee_per_token_wei: '30000000000000',
+      })
+      const second = await callArt(
+        admin,
+        'art_record_payment',
+        payArgs(A.userId, i.cid, job3, txHash(7), payer, '50000000000000'),
+      )
+      const problem =
+        expectSentence(unlock.error, CHECK, 'A payment is recorded on this lock, so it stays.') ??
+        expectSentence(requote.error, CHECK, 'A payment is already recorded, so the quote cannot change.') ??
+        expectSentence(second.error, CHECK, 'A payment is already recorded for this job.')
+      if (problem) return problem
+      const job = await jobFor(job3)
+      return job?.state === 'payment_due' &&
+        job.payment_tx_hash === txHash(3) &&
+        job.paid_amount_wei === '49999999999999' &&
+        (await lockState(i.cid)).art_locked_at !== null
+        ? null
+        : JSON.stringify(job)
+    },
+  )
+
   // Deferred art: the placeholder alone, at no cost, without locking the art.
   const d = (await insertCollection(A.client)).row!.id
   const deferred = await A.client.from('collections').update({ art_deferred: true }).eq('id', d)
@@ -2679,6 +2763,17 @@ async function artLockAndPay(A: Creator, B: Creator): Promise<void> {
     const { error } = await callArt(A.client, 'art_lock_placeholder', {
       p_collection_id: d,
       p_placeholder_upload_id: layerImage,
+    })
+    return expectSentence(error, CHECK, 'Choose a placeholder file first.')
+  })
+
+  await check('art_lock_placeholder: a placeholder file of another collection is refused', async () => {
+    const other = (await insertCollection(A.client)).row!.id
+    const foreign = await recordUpload(A.client, other, { kind: 'placeholder' })
+    if (!foreign.id) return `setup: ${describe(foreign.error)}`
+    const { error } = await callArt(A.client, 'art_lock_placeholder', {
+      p_collection_id: d,
+      p_placeholder_upload_id: foreign.id,
     })
     return expectSentence(error, CHECK, 'Choose a placeholder file first.')
   })
@@ -2717,19 +2812,32 @@ async function artLockAndPay(A: Creator, B: Creator): Promise<void> {
   if (quantity.error) throw new Error(`setup: ${describe(quantity.error as DbError)}`)
   const assetList = [1, 2, 3].map((id) => ({ id, uploadId: asset.id, attributes: [] }))
 
+  await check('art_lock: a changed asset attribute is refused', async () => {
+    const changed = assetList.map((t) => ({ ...t, attributes: [{ trait_type: 'Mood', value: 'Calm' }] }))
+    const { error } = await callArt(
+      admin,
+      'art_lock',
+      lockArgs(A.userId, s, changed, payer, { p_kind: 'single_asset', p_fee_per_token_wei: '0' }),
+    )
+    return expectSentence(error, CHECK, 'The art changed while locking. Review it again.')
+  })
+
   await check(
     'art_lock: a single asset locks at no cost, goes straight to paid and stores its list',
     async () => {
       const { data, error } = await callArt(
         admin,
         'art_lock',
-        lockArgs(A.userId, s, assetList, payer, { p_kind: 'single_asset' }),
+        lockArgs(A.userId, s, assetList, payer, { p_kind: 'single_asset', p_fee_per_token_wei: '0' }),
       )
       if (error) return describe(error)
       const job = await jobFor(idOf(data))
+      const state = await lockState(s)
       return job?.state === 'paid' &&
         job.quote_total_wei === '0' &&
         job.fee_per_token_wei === '0' &&
+        state.status === 'art_locked' &&
+        state.max_supply === 3 &&
         Array.isArray(job.token_list) &&
         job.token_list.length === 3
         ? null
@@ -2798,7 +2906,7 @@ async function artLockAndPay(A: Creator, B: Creator): Promise<void> {
   const { data: jobs } = await admin
     .from('render_jobs')
     .select('id')
-    .in('collection_id', [g.cid, h.cid, i.cid, d, s])
+    .in('collection_id', [g.cid, h.cid, i.cid, k.cid, d, s])
   for (const job of (jobs ?? []) as { id: string }[]) createdJobIds.add(job.id)
 }
 

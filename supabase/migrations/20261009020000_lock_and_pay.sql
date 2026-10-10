@@ -57,11 +57,11 @@ create unique index render_jobs_payment_tx_hash_once on public.render_jobs (paym
 
 -- Locks the owner's collections row `for no key update` (the functions then write it or rows that
 -- point at it) and returns it. The session functions pass (select auth.uid()); the service functions
--- pass their p_owner. A null owner matches nothing. Called only from the definer functions below.
+-- pass their p_owner. A null owner matches nothing. Security invoker: it runs with the rights of the definer function that calls it.
 create function private.lock_owned_collection(p_collection_id uuid, p_owner uuid)
 returns public.collections
 language plpgsql
-security definer
+security invoker
 set search_path = ''
 as $$
 declare
@@ -182,6 +182,14 @@ begin
     raise exception 'The art changed while locking. Review it again.' using errcode = '23514';
   end if;
 
+  -- A zero or missing fee means the chain's fee is not set: only a single asset may cost nothing.
+  if v_collection.project_type <> 'single_asset' and (p_fee_per_token_wei is null or p_fee_per_token_wei = 0) then
+    raise exception 'This chain is not ready for payments yet.' using errcode = '23514';
+  end if;
+  if v_collection.max_supply is not null and v_collection.max_supply <> v_count then
+    raise exception 'The supply does not match the tokens. Generate again.' using errcode = '23514';
+  end if;
+
   -- A single asset pays nothing (MASTER_PLAN, Decisions: art fee).
   v_fee := case when v_collection.project_type = 'single_asset' then 0 else p_fee_per_token_wei end;
   v_total := v_fee * v_count;
@@ -250,11 +258,19 @@ begin
   if v_job.state <> 'payment_due' then
     raise exception 'The art is paid for and stays locked.' using errcode = '23514';
   end if;
+  if v_job.payment_tx_hash is not null then
+    raise exception 'A payment is recorded on this lock, so it stays.' using errcode = '23514';
+  end if;
   update public.collections c
   set art_locked_at = null,
       status = case when c.status = 'art_locked' then 'draft'::public.collection_status else c.status end
   where c.id = v_collection.id;
   delete from public.render_jobs j where j.id = v_job.id and j.collection_id = p_collection_id;
+  -- A generative supply is saved again by the next generate; 1/1 and single asset keep theirs. A
+  -- second statement, because the frozen-field guard allows a supply change only once the row is draft.
+  if v_collection.project_type = 'generative' and v_collection.status = 'art_locked' then
+    update public.collections c set max_supply = null where c.id = v_collection.id;
+  end if;
 end;
 $$;
 
@@ -333,6 +349,9 @@ begin
   if not found or v_job.state <> 'payment_due' then
     raise exception 'There is no payment waiting for this collection.' using errcode = '23514';
   end if;
+  if v_job.payment_tx_hash is not null then
+    raise exception 'A payment is already recorded, so the quote cannot change.' using errcode = '23514';
+  end if;
   if v_job.quote_expires_at >= now() then
     raise exception 'The quote has not expired yet.' using errcode = '23514';
   end if;
@@ -385,11 +404,14 @@ begin
     raise exception 'This payment was already used.' using errcode = '23505';
   end if;
   -- The action checked both against the receipt already; these are the database's own guards.
+  if v_job.payment_tx_hash is not null then
+    raise exception 'A payment is already recorded for this job.' using errcode = '23514';
+  end if;
   if p_payer is distinct from v_job.quote_payer then
     raise exception 'The payment came from a different wallet than the quote.' using errcode = '23514';
   end if;
   if p_amount_wei is null or p_amount_wei < 0 then
-    raise exception 'The payment was less than the quote.' using errcode = '23514';
+    raise exception 'The payment amount is invalid.' using errcode = '23514';
   end if;
   -- A short payment is recorded and the job stays payment_due, so the screen can tell the creator
   -- the amount was short and name the job for support. The factory takes one payment per job and payer.
