@@ -1,7 +1,7 @@
 import { StagePage } from '@/components/shell/stage-page'
 import { UploadScreen } from '@/components/upload/upload-screen'
 import { requireOwnedCollection } from '@/lib/auth'
-import { getChain, getRenderJob, type RenderJobState } from '@/lib/demo'
+import { getChain, getRenderJob, type SampleJobState } from '@/lib/demo'
 import { getStage, type CollectionStatus, type FlowLink } from '@/lib/steps'
 import {
   LockedStagePage,
@@ -11,10 +11,10 @@ import {
   type SearchParams,
 } from '../_lib/stage'
 
-const JOB_STATES: RenderJobState[] = ['locked', 'payment_due', 'rendering', 'done']
+const JOB_STATES: SampleJobState[] = ['locked', 'payment_due', 'rendering', 'done']
 
 /** The render job state that matches the collection's status, until real jobs exist. */
-const STATE_FOR_STATUS: Record<CollectionStatus, RenderJobState> = {
+const STATE_FOR_STATUS: Record<CollectionStatus, SampleJobState> = {
   draft: 'locked',
   art_locked: 'payment_due',
   rendering: 'rendering',
@@ -40,7 +40,7 @@ export default async function UploadPage({
   const ctx = stageContext(collection, 'upload', 'upload', { art: await searchParam(searchParams, 'art') })
   if (ctx.access === 'locked') return <LockedStagePage collection={collection} stage="upload" />
 
-  const requested = (await searchParam(searchParams, 'job')) as RenderJobState | undefined
+  const requested = (await searchParam(searchParams, 'job')) as SampleJobState | undefined
   const state = ctx.demo
     ? requested && JOB_STATES.includes(requested)
       ? requested

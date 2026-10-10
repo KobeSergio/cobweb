@@ -230,8 +230,11 @@ export const DEMO_PLACEHOLDER: RenderPlaceholder = {
 export const DEMO_PLACEHOLDER_DESCRIPTION =
   'Something is stirring in the dark. Every Night Owl is revealed once the sale ends.'
 
+/** The states the sample shows on Lock and upload (`?job=`). */
+export type SampleJobState = Extract<RenderJobState, 'locked' | 'payment_due' | 'rendering' | 'done'>
+
 type RenderJobsByState = {
-  [S in RenderJobState]: Extract<RenderJob, { state: S }>
+  [S in SampleJobState]: Extract<RenderJob, { state: S }>
 }
 
 /**
@@ -242,7 +245,7 @@ export const DEMO_RENDER_JOBS: Omit<RenderJobsByState, 'done'> & {
   done: RenderJobsByState['done'] & { imagesCid: string; metadataCid: string; placeholder: RenderPlaceholder }
 } = {
   locked: { ...jobBase, state: 'locked', placeholder: null },
-  payment_due: { ...jobBase, state: 'payment_due', placeholder: DEMO_PLACEHOLDER },
+  payment_due: { ...jobBase, state: 'payment_due', placeholder: DEMO_PLACEHOLDER, payment: null },
   rendering: {
     ...jobBase,
     state: 'rendering',
@@ -286,7 +289,7 @@ const deferredPayment = { ...payment, amountWei: deferredQuote.totalWei }
  */
 export const DEMO_DEFERRED_RENDER_JOBS: RenderJobsByState = {
   locked: { ...deferredBase, state: 'locked', placeholder: null },
-  payment_due: { ...deferredBase, state: 'payment_due', placeholder: DEMO_PLACEHOLDER },
+  payment_due: { ...deferredBase, state: 'payment_due', placeholder: DEMO_PLACEHOLDER, payment: null },
   rendering: {
     ...deferredBase,
     state: 'rendering',
@@ -322,7 +325,7 @@ export function sampleArtDeferred(artParam: string | undefined): boolean {
   return artParam === 'deferred' ? DEMO_ART_DEFERRED.collection.artDeferred : DEMO_COLLECTION.artDeferred
 }
 
-export function getRenderJob(state: RenderJobState, options: { artDeferred?: boolean } = {}): RenderJob {
+export function getRenderJob(state: SampleJobState, options: { artDeferred?: boolean } = {}): RenderJob {
   return (options.artDeferred ? DEMO_DEFERRED_RENDER_JOBS : DEMO_RENDER_JOBS)[state]
 }
 

@@ -65,10 +65,10 @@ export type UploadedAsset = {
 // Lock and upload (Phase 4: render pipeline)
 // ---------------------------------------------------------------------------------------------
 
-/** A render job's state. Replaced by: `render_jobs.state` (Phase 4). */
-export type RenderJobState = 'locked' | 'payment_due' | 'rendering' | 'done'
+/** A render job's state: `render_jobs.state`. */
+export type RenderJobState = 'locked' | 'payment_due' | 'paid' | 'waived' | 'rendering' | 'done' | 'failed'
 
-/** The art-fee quote issued at lock. Replaced by: the quote row written at lock, from the factory's `artFeePerToken()`. */
+/** The art-fee quote issued at lock, from the factory's `artFeePerToken()` (render_jobs quote columns). */
 export type ArtFeeQuote = {
   chainId: number
   /** `artFeePerToken` at the time of the quote. */
@@ -79,33 +79,36 @@ export type ArtFeeQuote = {
   payer: Address
   /** Quote expiry, unix seconds. */
   expiresAt: number
+  /**
+   * The factory `payForArt` is paid to, filled in by the server from `FACTORY_ADDRESS_<chainId>`;
+   * null when the chain is not configured. Sample data has none.
+   */
+  factory?: Address | null
 }
 
 /**
- * The pre-reveal placeholder (MASTER_PLAN, Flow: pre-reveal): one file every token shows until the reveal, pinned
- * to its own small CID. Replaced by: the placeholder columns of `render_jobs` (Phase 4).
+ * The pre-reveal placeholder (MASTER_PLAN, Flow: pre-reveal): one file every token shows until the
+ * reveal, pinned to its own small CID in Phase 4 (`cid` is '' until then).
  */
 export type RenderPlaceholder = {
   cid: string
   mediaType: MediaType
   /** A preview of the file. For a video this is the MP4. */
   imageUrl: string
+  /** The `uploads` row behind the file. Sample data has none. */
+  uploadId?: string
 }
 
-type RenderJobBase = {
+export type RenderJobBase = {
   id: string
-  /** The factory job id passed to `payForArt(jobId)`. */
+  /** The factory job id passed to `payForArt(jobId)` (`render_jobs.onchain_job_id`). */
   jobId: Hex
   tokenCount: number
   lockedAt: number
   /** Hash of the token list stored at lock (MASTER_PLAN, Art: lock check). */
   tokenListHash: Hex
   quote: ArtFeeQuote
-  /**
-   * What the creator chose under "Lock options". `allowDuplicates`: identical trait combinations are
-   * accepted. Seam: the server honours it when it validates the submitted token list at lock
-   * (decision C1; MASTER_PLAN, Art: assignment integrity at lock).
-   */
+  /** What the creator chose under "Lock options". `allowDuplicates`: identical trait combinations are accepted. */
   lockOptions: { allowDuplicates: boolean }
   /**
    * Set when the creator chose "Reveal later": the contract starts on this placeholder and reveals
@@ -114,23 +117,41 @@ type RenderJobBase = {
   placeholder: RenderPlaceholder | null
 }
 
+/** The payment recorded from the factory's `ArtPaid` event. */
+export type RenderPayment = { txHash: Hex; paidAt: number; amountWei: string }
+
+/** Coarse progress: batches done of total. There is no per-image status. */
+export type RenderBatches = { total: number; done: number; size: number }
+
 /**
- * A render job in one of its states. Replaced by: `render_jobs` rows and the render Lambda's progress (Phase 4).
- * Progress is coarse on purpose: batches done of total, then metadata. There is no per-image status.
+ * A render job in one of its states (`render_jobs`). Every state after payment carries the payment,
+ * or null when nothing was owed (a single asset, a placeholder) or the job was waived. A job waiting
+ * for payment carries a short payment if one was recorded.
  */
 export type RenderJob =
   | (RenderJobBase & { state: 'locked' })
-  | (RenderJobBase & { state: 'payment_due' })
+  | (RenderJobBase & {
+      state: 'payment_due'
+      /** Set when a payment was recorded but fell short of the quote; the job stays waiting. */
+      payment: RenderPayment | null
+    })
+  | (RenderJobBase & { state: 'paid' | 'waived'; payment: RenderPayment | null; batches: RenderBatches })
+  | (RenderJobBase & {
+      state: 'failed'
+      payment: RenderPayment | null
+      batches: RenderBatches
+      error: string | null
+    })
   | (RenderJobBase & {
       state: 'rendering'
-      payment: { txHash: Hex; paidAt: number; amountWei: string }
-      batches: { total: number; done: number; size: number }
+      payment: RenderPayment | null
+      batches: RenderBatches
       startedAt: number
     })
   | (RenderJobBase & {
       state: 'done'
-      payment: { txHash: Hex; paidAt: number; amountWei: string }
-      batches: { total: number; done: number; size: number }
+      payment: RenderPayment | null
+      batches: RenderBatches
       startedAt: number
       finishedAt: number
       /**

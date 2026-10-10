@@ -1,8 +1,9 @@
 import 'server-only'
-import { getVerifiedUser } from '@/lib/auth'
+import { getVerifiedUser, type SessionUser } from '@/lib/auth'
 import type { Tables } from '@/lib/database.types'
 import type { Canvas } from '@/lib/storage/admission'
 import { createClient } from '@/lib/supabase/server'
+import { readLockCollection, type LockCollection } from './lock-collection'
 import { LOCKED, NOT_FOUND, SIGNED_OUT } from './result'
 
 export type ArtClient = Awaited<ReturnType<typeof createClient>>
@@ -55,4 +56,23 @@ export async function ownedUnlocked(collectionId: string): Promise<Owned> {
     art_deferred: data.art_deferred,
   }
   return { supabase, canvas, collection }
+}
+
+export type OwnedAny =
+  | { error: string }
+  | { error?: undefined; supabase: ArtClient; user: SessionUser; collection: LockCollection }
+
+/**
+ * The collection, only if the signed-in creator owns it, locked or not: the lock and pay actions
+ * (docs/specs/2026-10-09-lock-and-pay.md, section 7) run on a locked collection. The same checks as
+ * `ownedUnlocked` otherwise; the database checks ownership again in every function.
+ */
+export async function ownedCollection(collectionId: string): Promise<OwnedAny> {
+  const user = await getVerifiedUser()
+  if (!user) return { error: SIGNED_OUT }
+  if (!UUID.test(collectionId)) return { error: NOT_FOUND }
+  const supabase = await createClient()
+  const collection = await readLockCollection(supabase, collectionId)
+  if (!collection || collection.owner_id !== user.id) return { error: NOT_FOUND }
+  return { supabase, user, collection }
 }

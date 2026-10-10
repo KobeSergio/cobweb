@@ -24,7 +24,10 @@ const ORDER: Stage[] = ['review', 'pay', 'render', 'done']
 const STAGE_FOR_JOB: Record<RenderJob['state'], Stage> = {
   locked: 'review',
   payment_due: 'pay',
+  paid: 'render',
+  waived: 'render',
   rendering: 'render',
+  failed: 'render',
   done: 'done',
 }
 
@@ -79,7 +82,9 @@ export function UploadFlow({
   const placeholderOn = reveal.on && reveal.file !== null
   const [lockOptions, setLockOptions] = useState<LockOptions>(job.lockOptions)
   const [lockedAt, setLockedAt] = useState(job.lockedAt)
-  const [paymentTx, setPaymentTx] = useState<Hex | null>('payment' in job ? job.payment.txHash : null)
+  const [paymentTx, setPaymentTx] = useState<Hex | null>(
+    'payment' in job ? (job.payment?.txHash ?? null) : null,
+  )
   const [renderStart] = useState<RenderProgress>(() =>
     'batches' in job
       ? { phase: 'images', ...job.batches }
