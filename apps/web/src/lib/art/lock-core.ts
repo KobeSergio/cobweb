@@ -307,9 +307,10 @@ export async function confirmCore(
   }
   // sic: viem types the receipt as always present; a node can still answer with nothing.
   if (!receipt) return { refused: NOT_CONFIRMED }
-  // A receipt too shallow to survive a reorg is not recorded yet; the screen keeps asking.
+  // A receipt too shallow to survive a reorg is not recorded yet; the screen keeps asking. cacheTime 0:
+  // viem reuses a block number for the poll interval, which can read older than the receipt just fetched.
   try {
-    const latest = await client.getBlockNumber()
+    const latest = await client.getBlockNumber({ cacheTime: 0 })
     if (!hasConfirmations(receipt.blockNumber, latest, confirmationsFor(row.quote_chain_id)))
       return { refused: NOT_CONFIRMED }
   } catch (error) {
