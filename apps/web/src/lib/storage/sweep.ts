@@ -24,22 +24,32 @@ export type SweepReport = {
 
 export async function sweepOrphans(
   deps: SweepDeps,
-  options: { prefix: string; minAgeMs: number; now: number; dryRun: boolean },
+  options: {
+    prefix: string
+    minAgeMs: number
+    now: number
+    dryRun: boolean
+    /** Called after each page, with that page's counts, its orphan keys and the totals so far. */
+    onPage?: (page: { listed: number; old: number; orphaned: string[] }, totals: SweepReport) => void
+  },
 ): Promise<SweepReport> {
   const report: SweepReport = { listed: 0, old: 0, recorded: 0, orphaned: [], deleted: 0 }
   for await (const page of deps.list(options.prefix)) {
     report.listed += page.length
     const old = page.filter((entry) => options.now - entry.lastModified.getTime() >= options.minAgeMs)
     report.old += old.length
-    if (old.length === 0) continue
-    const known = await deps.recorded(old.map((entry) => entry.key))
-    const orphans = old.map((entry) => entry.key).filter((key) => !known.has(key))
-    report.recorded += old.length - orphans.length
-    report.orphaned.push(...orphans)
-    if (!options.dryRun && orphans.length > 0) {
-      await deps.remove(orphans)
-      report.deleted += orphans.length
+    let orphans: string[] = []
+    if (old.length > 0) {
+      const known = await deps.recorded(old.map((entry) => entry.key))
+      orphans = old.map((entry) => entry.key).filter((key) => !known.has(key))
+      report.recorded += old.length - orphans.length
+      report.orphaned.push(...orphans)
+      if (!options.dryRun && orphans.length > 0) {
+        await deps.remove(orphans)
+        report.deleted += orphans.length
+      }
     }
+    options.onPage?.({ listed: page.length, old: old.length, orphaned: orphans }, report)
   }
   return report
 }
@@ -55,12 +65,16 @@ export function parseSweepArgs(argv: string[]): SweepArgs {
     else if (arg === '--dry-run') args.dryRun = true
     else if (arg === '--allow-remote') args.allowRemote = true
     else if (arg === '--min-age-hours') {
-      const hours = Number(argv[++at])
-      if (!Number.isFinite(hours) || hours < 0)
+      const value = argv[++at]
+      if (value === undefined || !/^\d+(\.\d+)?$/.test(value))
         throw new Error('The minimum age is a number of hours, 0 or more.')
-      args.minAgeHours = hours
-    } else if (arg === '--prefix') args.prefix = argv[++at] ?? ''
-    else throw new Error(`Unknown option: ${arg}`)
+      args.minAgeHours = Number(value)
+    } else if (arg === '--prefix') {
+      const value = argv[++at]
+      if (value === undefined || value.startsWith('--'))
+        throw new Error('The prefix option needs a key prefix, such as c1/.')
+      args.prefix = value
+    } else throw new Error(`Unknown option: ${arg}`)
   }
   return args
 }

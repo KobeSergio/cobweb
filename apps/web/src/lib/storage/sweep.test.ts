@@ -59,6 +59,21 @@ describe('sweepOrphans', () => {
   })
 })
 
+describe('sweepOrphans progress', () => {
+  it('reports each page with the totals so far', async () => {
+    const { deps } = fake(pages, ['c1/assets/a.png'])
+    const seen: [number, string[], number][] = []
+    await sweepOrphans(deps, {
+      ...options,
+      onPage: (page, totals) => seen.push([page.listed, page.orphaned, totals.deleted]),
+    })
+    expect(seen).toEqual([
+      [3, ['c1/assets/b.png'], 1],
+      [1, ['c2/layers/d.png'], 2],
+    ])
+  })
+})
+
 describe('parseSweepArgs', () => {
   it('defaults to a real run, a day, the whole bucket and local only', () => {
     expect(parseSweepArgs([])).toEqual({ dryRun: false, allowRemote: false, minAgeHours: 24, prefix: '' })
@@ -77,6 +92,12 @@ describe('parseSweepArgs', () => {
     expect(() => parseSweepArgs(['--min-age-hours', '-1'])).toThrow(
       'The minimum age is a number of hours, 0 or more.',
     )
+    for (const bad of [[], [''], [' ']])
+      expect(() => parseSweepArgs(['--min-age-hours', ...bad])).toThrow(
+        'The minimum age is a number of hours, 0 or more.',
+      )
+    expect(() => parseSweepArgs(['--prefix'])).toThrow('The prefix option needs a key prefix')
+    expect(() => parseSweepArgs(['--prefix', '--dry-run'])).toThrow('The prefix option needs a key prefix')
     expect(() => parseSweepArgs(['--everything'])).toThrow('Unknown option: --everything')
   })
 })

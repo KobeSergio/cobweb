@@ -56,7 +56,7 @@ const serviceKey = config('SUPABASE_SERVICE_ROLE_KEY', ['SERVICE_ROLE_KEY', 'SEC
 process.env.NEXT_PUBLIC_SUPABASE_URL = url
 process.env.SUPABASE_SERVICE_ROLE_KEY = serviceKey
 for (const endpoint of [url, process.env.ART_S3_ENDPOINT])
-  if (!['localhost', '127.0.0.1'].includes(new URL(endpoint).hostname)) {
+  if (!['localhost', '127.0.0.1', '[::1]', '::1'].includes(new URL(endpoint).hostname)) {
     console.error(`Refusing to run: ${endpoint} is not local.`)
     process.exit(2)
   }
@@ -187,6 +187,23 @@ await check('sweep: refuses a remote Supabase without --allow-remote', async () 
     NEXT_PUBLIC_SUPABASE_URL: 'https://example.supabase.co',
   })
   return status === 2 && out.includes('Refusing to run') ? null : `exit ${status}: ${out}`
+})
+
+await check('sweep: refuses a remote bucket next to a local database', async () => {
+  const { status, out } = sweep(['--dry-run'], {
+    ...process.env,
+    ART_S3_ENDPOINT: 'https://example.supabase.co/storage/v1/s3',
+  })
+  return status === 2 && out.includes('Refusing to run') ? null : `exit ${status}: ${out}`
+})
+
+await check('sweep: --allow-remote takes nothing from the local stack', async () => {
+  const env = { ...process.env }
+  delete env.SUPABASE_SERVICE_ROLE_KEY
+  const { status, out } = sweep(['--dry-run', '--allow-remote'], env)
+  return status === 2 && out.includes('SUPABASE_SERVICE_ROLE_KEY is unset') && !out.includes(serviceKey)
+    ? null
+    : `exit ${status}: ${out.replace(serviceKey, '[key]')}`
 })
 
 await check('cleanup: the run leaves no object, row or user behind', async () => {

@@ -2,7 +2,11 @@
 // default) with no uploads.storage_key row (docs/specs/2026-10-09-lock-and-pay.md, section 9). The
 // project's 5 GB cap counts recorded rows only, so these would otherwise take storage for good.
 // Uses the service role and the storage credentials. Refuses anything but local endpoints unless
-// --allow-remote is passed, so it can be scheduled later with care. Never prints a key.
+// --allow-remote is passed, so it can be scheduled later with care. With --allow-remote nothing is
+// discovered from the local stack: the Supabase URL, the service key and every ART_S3_* variable must
+// be in the environment, and the database and the bucket must both be remote. It prints the keys of
+// unrecorded objects it deletes (or would delete); keys of recorded objects are never printed, and
+// neither are secrets.
 //
 //   pnpm --filter @cobweb/web sweep:uploads --dry-run
 //   options: --dry-run, --min-age-hours <n> (default 24), --prefix <key prefix>, --allow-remote
@@ -14,7 +18,7 @@ import { execFileSync } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createClient } from '@supabase/supabase-js'
-import { parseSweepArgs, sweepOrphans, type SweepArgs } from '../src/lib/storage/sweep.ts'
+import { parseSweepArgs, sweepOrphans, type SweepArgs, type SweepReport } from '../src/lib/storage/sweep.ts'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 
@@ -63,7 +67,29 @@ const local = (value: string | undefined) => {
   }
 }
 
-if (!options.allowRemote) {
+function fromEnvOnly(name: string): string {
+  const value = process.env[name]
+  if (!value) {
+    console.error(`Refusing to run: ${name} is unset. With --allow-remote it must come from the environment.`)
+    process.exit(2)
+  }
+  return value
+}
+
+let url: string
+let serviceKey: string
+if (options.allowRemote) {
+  for (const name of [
+    'ART_S3_ENDPOINT',
+    'ART_S3_REGION',
+    'ART_S3_BUCKET',
+    'ART_S3_ACCESS_KEY_ID',
+    'ART_S3_SECRET_ACCESS_KEY',
+  ])
+    fromEnvOnly(name)
+  url = fromEnvOnly('NEXT_PUBLIC_SUPABASE_URL')
+  serviceKey = fromEnvOnly('SUPABASE_SERVICE_ROLE_KEY')
+} else {
   // The storage module reads ART_S3_* from the environment; fill them from the local status first.
   process.env.ART_S3_ENDPOINT = config('ART_S3_ENDPOINT', ['STORAGE_S3_URL'])
   process.env.ART_S3_REGION = config('ART_S3_REGION', ['S3_PROTOCOL_REGION'], 'local')
@@ -71,13 +97,23 @@ if (!options.allowRemote) {
   process.env.ART_S3_ACCESS_KEY_ID = config('ART_S3_ACCESS_KEY_ID', ['S3_PROTOCOL_ACCESS_KEY_ID'])
   process.env.ART_S3_SECRET_ACCESS_KEY = config('ART_S3_SECRET_ACCESS_KEY', ['S3_PROTOCOL_ACCESS_KEY_SECRET'])
   process.env.ART_S3_FORCE_PATH_STYLE = '1'
+  url = config('NEXT_PUBLIC_SUPABASE_URL', ['API_URL'])
+  serviceKey = config('SUPABASE_SERVICE_ROLE_KEY', ['SERVICE_ROLE_KEY', 'SECRET_KEY'])
 }
-const url = config('NEXT_PUBLIC_SUPABASE_URL', ['API_URL'])
-const serviceKey = config('SUPABASE_SERVICE_ROLE_KEY', ['SERVICE_ROLE_KEY', 'SECRET_KEY'])
-if (!options.allowRemote && (!local(url) || !local(process.env.ART_S3_ENDPOINT))) {
+const dbLocal = local(url)
+const bucketLocal = local(process.env.ART_S3_ENDPOINT)
+if (dbLocal !== bucketLocal) {
+  console.error('Refusing to run: the database and the bucket must both be local or both be remote.')
+  process.exit(2)
+}
+if (!options.allowRemote && !dbLocal) {
   console.error(
     `Refusing to run: ${url} and the storage endpoint must both be local. Pass --allow-remote to sweep a remote project, with care.`,
   )
+  process.exit(2)
+}
+if (options.allowRemote && dbLocal) {
+  console.error('Refusing to run: --allow-remote is for a remote project, but these are local.')
   process.exit(2)
 }
 
@@ -90,37 +126,49 @@ const { deleteObjects, listObjectPages } = await import('../src/lib/storage/obje
 /** Keys per uploads lookup, so the query string stays short. */
 const RECORDED_CHUNK = 100
 
-const report = await sweepOrphans(
-  {
-    list: listObjectPages,
-    recorded: async (keys) => {
-      const found = new Set<string>()
-      for (let at = 0; at < keys.length; at += RECORDED_CHUNK) {
-        const { data, error } = await admin
-          .from('uploads')
-          .select('storage_key')
-          .in('storage_key', keys.slice(at, at + RECORDED_CHUNK))
-        if (error) throw new Error(`The uploads could not be read: ${error.message}`)
-        for (const row of data as { storage_key: string }[]) found.add(row.storage_key)
-      }
-      return found
-    },
-    remove: deleteObjects,
-  },
-  {
-    prefix: options.prefix,
-    minAgeMs: options.minAgeHours * 3_600_000,
-    now: Date.now(),
-    dryRun: options.dryRun,
-  },
-)
+let totals: SweepReport | null = null
+const summary = (report: SweepReport) =>
+  `${report.listed} objects listed, ${report.old} older than ${options.minAgeHours} hours, ${report.recorded} of those recorded.`
 
-console.log(
-  `${report.listed} objects listed, ${report.old} older than ${options.minAgeHours} hours, ${report.recorded} of those recorded.`,
-)
-for (const key of report.orphaned) console.log(`${options.dryRun ? 'Would delete' : 'Deleted'} ${key}`)
-console.log(
-  options.dryRun
-    ? `${report.orphaned.length} unrecorded objects would be deleted (dry run).`
-    : `${report.deleted} unrecorded objects deleted.`,
-)
+try {
+  const report = await sweepOrphans(
+    {
+      list: listObjectPages,
+      recorded: async (keys) => {
+        const found = new Set<string>()
+        for (let at = 0; at < keys.length; at += RECORDED_CHUNK) {
+          const { data, error } = await admin
+            .from('uploads')
+            .select('storage_key')
+            .in('storage_key', keys.slice(at, at + RECORDED_CHUNK))
+          if (error) throw new Error(`The uploads could not be read: ${error.message}`)
+          for (const row of data as { storage_key: string }[]) found.add(row.storage_key)
+        }
+        return found
+      },
+      remove: deleteObjects,
+    },
+    {
+      prefix: options.prefix,
+      minAgeMs: options.minAgeHours * 3_600_000,
+      now: Date.now(),
+      dryRun: options.dryRun,
+      onPage: (page, running) => {
+        totals = running
+        console.log(`Page: ${page.listed} listed, ${page.old} old, ${page.orphaned.length} unrecorded.`)
+        for (const key of page.orphaned) console.log(`${options.dryRun ? 'Would delete' : 'Deleted'} ${key}`)
+      },
+    },
+  )
+  console.log(summary(report))
+  console.log(
+    options.dryRun
+      ? `${report.orphaned.length} unrecorded objects would be deleted (dry run).`
+      : `${report.deleted} unrecorded objects deleted.`,
+  )
+} catch (e) {
+  console.error(`The sweep stopped: ${e instanceof Error ? e.message : String(e)}`)
+  const partial = totals as SweepReport | null
+  if (partial) console.error(`Before it stopped: ${summary(partial)} ${partial.deleted} deleted.`)
+  process.exit(1)
+}
