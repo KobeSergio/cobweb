@@ -1,6 +1,7 @@
 import {
   ALREADY_LOCKED,
   ART_CHANGED,
+  CHAIN_NOT_READY,
   CHANGED_ELSEWHERE,
   CLEAR_FIRST,
   DNA_MISMATCH,
@@ -70,6 +71,7 @@ export function artWriteError(error: DbError): string {
 const LOCK_SENTENCES = new Set([
   ALREADY_LOCKED,
   ART_CHANGED,
+  CHAIN_NOT_READY,
   NOTHING_TO_LOCK,
   PAYER_NOT_YOU,
   FEE_NOT_WHOLE,

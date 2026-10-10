@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { availableChains, chainById, factoryAddress, isLocalUrl, LAUNCH_CHAINS } from './chains.ts'
+import {
+  availableChains,
+  chainById,
+  confirmationsFor,
+  factoryAddress,
+  hasConfirmations,
+  isLocalUrl,
+  LAUNCH_CHAINS,
+} from './chains.ts'
 import { rpcUrl } from './rpc.ts'
 
 const LAUNCH_IDS = [1, 42161, 8453, 80094, 143, 4663]
@@ -59,5 +67,21 @@ describe('isLocalUrl', () => {
     expect(isLocalUrl('http://[::1]:8545')).toBe(true)
     expect(isLocalUrl('https://mainnet.example.com')).toBe(false)
     expect(isLocalUrl('not a url')).toBe(false)
+  })
+})
+
+describe('confirmations', () => {
+  it('asks Anvil for 1, Sepolia for 2 and every launch chain for at least 3', () => {
+    expect(confirmationsFor(31337, false)).toBe(1)
+    expect(confirmationsFor(11155111, false)).toBe(2)
+    for (const chain of LAUNCH_CHAINS) expect(confirmationsFor(chain.id, true)).toBeGreaterThanOrEqual(3)
+    expect(() => confirmationsFor(31337, true)).toThrow()
+  })
+
+  it('counts the receipt block as the first confirmation', () => {
+    expect(hasConfirmations(10n, 10n, 1)).toBe(true)
+    expect(hasConfirmations(10n, 10n, 3)).toBe(false)
+    expect(hasConfirmations(10n, 12n, 3)).toBe(true)
+    expect(hasConfirmations(10n, 11n, 3)).toBe(false)
   })
 })

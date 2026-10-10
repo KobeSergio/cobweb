@@ -6,12 +6,13 @@ import { ownedCollection } from './owned'
 import { fail, THROWN, type ActionResult } from './result'
 
 /**
- * Runs a lock or payment step for the signed-in owner of a collection, locked or not (artWrite's
- * counterpart for Lock and upload). Two clients: the creator's RLS client for the session check, the
- * owner read and everything else, and the service client (built on first use, after the ownership check, so a step that never needs it works without the key) for the three functions whose arguments come
- * from the chain or a verified receipt, called with the verified user's id as `p_owner`. A refusal is
- * returned as its sentence; a database error becomes the creator's sentence (`lockWriteError`);
- * anything thrown is logged and reads "Try again".
+ * Runs a lock or payment step for the signed-in owner of a collection, locked or not (artWrite's counterpart
+ * for Lock and upload). Two clients: the creator's RLS client for the session check, the owner read and
+ * everything else, and the service client for the three functions whose arguments come from the chain or a
+ * verified receipt, called with the verified user's id as `p_owner`. The service client is built on first
+ * use, after the ownership check, so a step that never needs it works without the key. A refusal is returned
+ * as its sentence; a database error becomes the creator's sentence (`lockWriteError`); anything thrown is
+ * logged and reads "Try again".
  */
 export async function lockWrite<T>(
   collectionId: string,

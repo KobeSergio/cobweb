@@ -3,6 +3,7 @@ import { artWriteError, lockWriteError } from './db-error'
 import {
   ALREADY_LOCKED,
   ART_CHANGED,
+  CHAIN_NOT_READY,
   CLEAR_FIRST,
   FEE_NOT_WHOLE,
   HASH_INVALID,
@@ -84,6 +85,7 @@ describe('lockWriteError', () => {
     for (const sentence of [
       ALREADY_LOCKED,
       ART_CHANGED,
+      CHAIN_NOT_READY,
       NOTHING_TO_LOCK,
       PAYER_NOT_YOU,
       FEE_NOT_WHOLE,

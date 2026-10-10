@@ -1,5 +1,5 @@
 import { hashTokenList } from '@cobweb/dna'
-import { chainById, factoryAbi, factoryAddress } from '@cobweb/shared'
+import { chainById, confirmationsFor, factoryAbi, factoryAddress, hasConfirmations } from '@cobweb/shared'
 import { publicClientFor } from '@cobweb/shared/server'
 import { TransactionReceiptNotFoundError, type Address, type Hex, type PublicClient } from 'viem'
 import type { Json } from '@/lib/database.types'
@@ -136,11 +136,12 @@ export async function latestPlaceholder(supabase: LockClient, collectionId: stri
 async function jobFromRow(supabase: LockClient, row: JobRow): Promise<RenderJob> {
   let placeholder: JobPlaceholder
   if (row.placeholder_upload_id) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('uploads')
       .select('id, media_type')
       .eq('id', row.placeholder_upload_id)
       .maybeSingle()
+    if (error) throw new Error(`The placeholder could not be read: ${error.message}`)
     placeholder = data ? { uploadId: data.id, mediaType: data.media_type } : null
   } else {
     placeholder = await latestPlaceholder(supabase, row.collection_id)
@@ -306,6 +307,15 @@ export async function confirmCore(
   }
   // sic: viem types the receipt as always present; a node can still answer with nothing.
   if (!receipt) return { refused: NOT_CONFIRMED }
+  // A receipt too shallow to survive a reorg is not recorded yet; the screen keeps asking.
+  try {
+    const latest = await client.getBlockNumber()
+    if (!hasConfirmations(receipt.blockNumber, latest, confirmationsFor(row.quote_chain_id)))
+      return { refused: NOT_CONFIRMED }
+  } catch (error) {
+    console.error(`The latest block could not be read: ${errorSummary(error)}`)
+    return { refused: NOT_CONFIRMED }
+  }
   const expected = {
     factory,
     jobId: row.onchain_job_id as Hex,

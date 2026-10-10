@@ -15,12 +15,14 @@ export type ChainConfig = {
   rpcEnv: string
   factoryEnv: string
   testnet: boolean
+  /** Blocks (the receipt's own included) a payment must be buried under before it is recorded. */
+  confirmations: number
   viem: Chain
 }
 
 export type Env = Record<string, string | undefined>
 
-function entry(chain: Chain, name: string, testnet: boolean): ChainConfig {
+function entry(chain: Chain, name: string, testnet: boolean, confirmations: number): ChainConfig {
   return {
     id: chain.id,
     name,
@@ -29,22 +31,23 @@ function entry(chain: Chain, name: string, testnet: boolean): ChainConfig {
     rpcEnv: `RPC_URL_${chain.id}`,
     factoryEnv: `FACTORY_ADDRESS_${chain.id}`,
     testnet,
+    confirmations,
     viem: chain,
   }
 }
 
 export const LAUNCH_CHAINS: readonly ChainConfig[] = [
-  entry(mainnet, 'Ethereum', false),
-  entry(arbitrum, 'Arbitrum', false),
-  entry(base, 'Base', false),
-  entry(berachain, 'Berachain', false),
-  entry(monad, 'Monad', false),
-  entry(robinhood, 'Robinhood Chain', false),
+  entry(mainnet, 'Ethereum', false, 5),
+  entry(arbitrum, 'Arbitrum', false, 3),
+  entry(base, 'Base', false, 3),
+  entry(berachain, 'Berachain', false, 3),
+  entry(monad, 'Monad', false, 3),
+  entry(robinhood, 'Robinhood Chain', false, 3),
 ]
 
 export const TEST_CHAINS: readonly ChainConfig[] = [
-  entry(sepolia, 'Sepolia', true),
-  entry(anvil, 'Anvil', true),
+  entry(sepolia, 'Sepolia', true, 2),
+  entry(anvil, 'Anvil', true, 1),
 ]
 
 export const isProduction = () => process.env.NODE_ENV === 'production'
@@ -55,6 +58,18 @@ export function availableChains(production = isProduction()): readonly ChainConf
 
 export function chainById(id: number, production = isProduction()): ChainConfig | undefined {
   return availableChains(production).find((chain) => chain.id === id)
+}
+
+/** How many blocks deep a payment must be on a chain. Throws a sentence for a chain that is not offered. */
+export function confirmationsFor(id: number, production = isProduction()): number {
+  const chain = chainById(id, production)
+  if (!chain) throw new Error(`Chain ${id} is not configured.`)
+  return chain.confirmations
+}
+
+/** Whether a receipt mined in `receiptBlock` is buried under `required` blocks (itself counted) at `latest`. */
+export function hasConfirmations(receiptBlock: bigint, latest: bigint, required: number): boolean {
+  return latest - receiptBlock + 1n >= BigInt(required)
 }
 
 /** The factory on a chain, checksummed. Throws a sentence when the chain or its variable is not set. */
