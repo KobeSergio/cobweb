@@ -1,6 +1,37 @@
 import { describe, expect, it } from 'vitest'
-import { artWriteError } from './db-error'
-import { CLEAR_FIRST, LOCKED, NOT_FOUND, SAVE_CAP, UNSAVED } from './result'
+import { artWriteError, lockWriteError } from './db-error'
+import {
+  ALREADY_LOCKED,
+  ART_CHANGED,
+  CLEAR_FIRST,
+  FEE_NOT_WHOLE,
+  HASH_INVALID,
+  LOCKED,
+  NO_CHAIN,
+  NO_PAYMENT_DUE,
+  NO_PAYMENT_FOR_JOB,
+  NO_PLACEHOLDER,
+  NOT_DEFERRED,
+  NOT_FOUND,
+  NOT_LOCKED,
+  NOT_THIS_JOB,
+  NOTHING_TO_LOCK,
+  OTHER_WALLET,
+  PAID_STAYS_LOCKED,
+  PAYER_NOT_YOU,
+  PAYMENT_AMOUNT_INVALID,
+  PAYMENT_RECORDED,
+  PAYMENT_USED,
+  PAYMENT_USED_FOR_JOB,
+  PLACEHOLDER_LOCKED,
+  QUOTE_EXPIRED,
+  QUOTE_FROZEN,
+  QUOTE_NOT_EXPIRED,
+  SAVE_CAP,
+  SHORT_PAYMENT,
+  SUPPLY_MISMATCH,
+  UNSAVED,
+} from './result'
 
 describe('artWriteError', () => {
   it('maps 42501 to not found or locked', () => {
@@ -45,5 +76,62 @@ describe('artWriteError', () => {
     )
     expect(artWriteError({ code: 'P0002', message: 'layer not found' })).toBe(UNSAVED)
     expect(artWriteError(null)).toBe(UNSAVED)
+  })
+})
+
+describe('lockWriteError', () => {
+  it('passes the lock and pay sentences through', () => {
+    for (const sentence of [
+      ALREADY_LOCKED,
+      ART_CHANGED,
+      NOTHING_TO_LOCK,
+      PAYER_NOT_YOU,
+      FEE_NOT_WHOLE,
+      HASH_INVALID,
+      NO_CHAIN,
+      NOT_LOCKED,
+      PAID_STAYS_LOCKED,
+      NOT_DEFERRED,
+      NO_PLACEHOLDER,
+      PLACEHOLDER_LOCKED,
+      NO_PAYMENT_DUE,
+      QUOTE_NOT_EXPIRED,
+      NO_PAYMENT_FOR_JOB,
+      QUOTE_EXPIRED,
+      NOT_THIS_JOB,
+      OTHER_WALLET,
+      SHORT_PAYMENT,
+      SUPPLY_MISMATCH,
+      PAYMENT_RECORDED,
+      QUOTE_FROZEN,
+      PAYMENT_USED_FOR_JOB,
+      PAYMENT_AMOUNT_INVALID,
+    ])
+      expect(lockWriteError({ code: '23514', message: sentence })).toBe(sentence)
+  })
+
+  it('maps the owner check and the two unique indexes', () => {
+    expect(lockWriteError({ code: '42501', message: 'collection not found' })).toBe(NOT_FOUND)
+    expect(lockWriteError({ code: '23505', message: PAYMENT_USED })).toBe(PAYMENT_USED)
+    expect(
+      lockWriteError({
+        code: '23505',
+        message: 'duplicate key value violates unique constraint "render_jobs_payment_tx_hash_once"',
+      }),
+    ).toBe(PAYMENT_USED)
+    expect(
+      lockWriteError({
+        code: '23505',
+        message: 'duplicate key value violates unique constraint "render_jobs_one_open_per_kind"',
+      }),
+    ).toBe(ALREADY_LOCKED)
+  })
+
+  it('says "reload" for anything else', () => {
+    expect(lockWriteError({ code: '23514', message: 'new row violates check constraint "x"' })).toBe(UNSAVED)
+    expect(lockWriteError({ code: '42501', message: 'permission denied for function art_lock' })).toBe(
+      UNSAVED,
+    )
+    expect(lockWriteError(null)).toBe(UNSAVED)
   })
 })
