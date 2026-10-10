@@ -13,7 +13,9 @@
     "verify:local": "node scripts/verify-local.ts",
     "verify:storage": "node --conditions=react-server scripts/verify-storage.ts",
     "chain:local": "node scripts/chain-local.ts",
-    "verify:chain": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-chain.ts"
+    "verify:chain": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-chain.ts",
+    "sweep:uploads": "node --conditions=react-server scripts/sweep-uploads.ts",
+    "verify:sweep": "node --conditions=react-server scripts/verify-sweep.ts"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",

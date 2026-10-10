@@ -3,6 +3,7 @@ import {
   DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
@@ -60,4 +61,21 @@ export async function deleteObjects(keys: string[]): Promise<void> {
       throw new Error(`Storage refused to delete ${response.Errors.length} object(s): ${failed}.`)
     }
   }
+}
+
+/** The bucket's objects under a prefix with their last-modified time, a page of up to 1,000 at a time. */
+export async function* listObjectPages(
+  prefix: string,
+): AsyncGenerator<{ key: string; lastModified: Date }[]> {
+  const { bucket } = storageConfig()
+  let token: string | undefined
+  do {
+    const page = await s3().send(
+      new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix || undefined, ContinuationToken: token }),
+    )
+    yield (page.Contents ?? []).flatMap((entry) =>
+      entry.Key && entry.LastModified ? [{ key: entry.Key, lastModified: entry.LastModified }] : [],
+    )
+    token = page.IsTruncated ? page.NextContinuationToken : undefined
+  } while (token)
 }
