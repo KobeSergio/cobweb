@@ -290,3 +290,46 @@ describe('a short payment (the server records it and refuses with a sentence)', 
     expect(isShortPayment(OTHER_WALLET)).toBe(false)
   })
 })
+
+describe('rechecking a short payment and keeping a timed-out hash', () => {
+  const shortJob = (): RenderJob => ({
+    ...paidWith(HASH),
+    state: 'payment_due',
+    payment: { txHash: HASH, paidAt: 0, amountWei: '1' },
+  })
+
+  it('does not report success when the recorded hash belongs to a job still awaiting payment', async () => {
+    const { deps } = fakeDeps([{ ok: false, error: PAYMENT_USED }], {
+      reload: async () => ({ ok: true, data: shortJob() }),
+    })
+    const { last, job } = await run(deps, { ...input, sentHash: HASH })
+    expect(job).toBeNull()
+    expect(last).toMatchObject({ type: 'failed', failure: { kind: 'refused' } })
+    const message = (last as { failure: { message: string } }).failure.message
+    expect(isShortPayment(message)).toBe(true)
+    expect(message.endsWith(`Tell support about job 0x${'11'.repeat(32)}.`)).toBe(true)
+  })
+
+  it('carries the hash in a timed-out phase, so Unlock stays guarded without storage', async () => {
+    const { deps } = fakeDeps([])
+    let phase: TxPhase = { step: 'idle' }
+    await runPayment(input, deps, (event) => {
+      phase = payReducer(phase, event)
+    })
+    expect(retryHash(phase)).toBe(HASH)
+  })
+
+  it('treats a receipt that cannot be read as unconfirmed, keeping the hash', async () => {
+    const { deps, calls } = fakeDeps([], {
+      wait: async () => {
+        throw new Error('timeout')
+      },
+    })
+    let phase: TxPhase = { step: 'idle' }
+    await runPayment(input, deps, (event) => {
+      phase = payReducer(phase, event)
+    })
+    expect(retryHash(phase)).toBe(HASH)
+    expect(calls.forget).toBe(0)
+  })
+})

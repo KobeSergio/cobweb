@@ -11,7 +11,7 @@ import { DropZone, FilePickerButton } from '@/components/art/assets/drop-zone'
 import { ACCEPT_MEDIA, checkMediaFile, mediaLabel, MEDIA_RULES_COPY } from '@/components/art/assets/media'
 import { MediaPreview } from '@/components/art/assets/media-preview'
 import { formatBytes } from '@/components/art/lib/image-checks'
-import type { ActionResult } from '@/lib/art/result'
+import { THROWN, type ActionResult } from '@/lib/art/result'
 import type { PlaceholderUpload } from './upload-shared'
 
 /** The placeholder file chosen for "Reveal later". Same rules as a single asset (MASTER_PLAN, Art: media types). */
@@ -84,7 +84,15 @@ export function RevealChoice({
           setErrors([stored.error])
           return
         }
-        if (state.file?.uploadId && remove) await remove(state.file.uploadId)
+        if (state.file?.uploadId && remove) {
+          const removed = await remove(state.file.uploadId)
+          if (!removed.ok) {
+            // Keep the old file; drop the one just stored so nothing is orphaned.
+            if (remove) await remove(stored.uploadId)
+            setErrors([removed.error])
+            return
+          }
+        }
         onChange({
           ...state,
           file: {
@@ -109,6 +117,8 @@ export function RevealChoice({
           owned: true,
         },
       })
+    } catch {
+      setErrors([THROWN])
     } finally {
       setChecking(false)
     }

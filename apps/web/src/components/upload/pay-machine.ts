@@ -179,7 +179,12 @@ export async function verifyPayment(
     if (result.error === PAYMENT_USED) {
       const current = await deps.reload()
       const job = current.ok ? current.data : null
-      if (job && 'payment' in job && job.payment?.txHash.toLowerCase() === hash.toLowerCase()) return { job }
+      if (job && 'payment' in job && job.payment?.txHash.toLowerCase() === hash.toLowerCase()) {
+        // A short payment is recorded with its hash but the job still waits: that is not a success.
+        if (job.state === 'payment_due')
+          return { error: `${SHORT_PAYMENT} Tell support about job ${job.jobId}.` }
+        return { job }
+      }
       return { error: PAYMENT_USED }
     }
     if (result.error !== NOT_CONFIRMED) return { error: result.error }
@@ -222,7 +227,11 @@ export async function runPayment(
     try {
       status = await deps.wait(hash)
     } catch (error) {
-      dispatch({ type: 'failed', failure: classifyError(error, 'confirming') })
+      // The receipt could not be read: the transaction may still land, so keep the hash and offer a check.
+      dispatch({
+        type: 'failed',
+        failure: { ...classifyError(error, 'confirming'), kind: 'unconfirmed' },
+      })
       return null
     }
     if (status === 'reverted') {

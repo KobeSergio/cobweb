@@ -83,6 +83,7 @@ export function PayStep({
   const [unlockOpen, setUnlockOpen] = useState(false)
   const [busy, setBusy] = useState<'unlock' | 'requote' | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
   const [hashOpen, setHashOpen] = useState(false)
   const [hashText, setHashText] = useState('')
   const controller = useRef<AbortController | null>(null)
@@ -94,7 +95,13 @@ export function PayStep({
   const expired = !sample && now !== null && quoteExpired(quote.expiresAt, now)
   // A payment was sent and is not recorded yet: unlocking now would strand it.
   const hasShortPayment = job.state === 'payment_due' && job.payment !== null
-  const sent = resumable !== null || (running && phase.step !== 'idle' && phase.txHash !== undefined)
+  // The phase carries a timed-out hash too, so the guard holds when storage is blocked.
+  const sent =
+    resumable !== null ||
+    (running && phase.step !== 'idle' && phase.txHash !== undefined) ||
+    retryHash(phase) !== undefined
+  // A sent payment is checked even after its quote expired; a new quote would only strand it.
+  const canPay = !expired || sent
   const txUrl = chain.explorerUrl ? (hash: Hex) => explorerTxUrl(chain, hash) : undefined
   const waiting = resumable !== null && phase.step === 'idle'
 
@@ -127,6 +134,7 @@ export function PayStep({
 
   async function payReal(typedHash?: Hex) {
     setNotice(null)
+    setInfo(null)
     const store = browserStore()
     const sentHash = typedHash ?? retryHash(phase) ?? resumable ?? undefined
     if (!sentHash && quote.factory) {
@@ -141,7 +149,7 @@ export function PayStep({
         })
         if (paidWei > 0n) {
           setHashOpen(true)
-          return setNotice(ALREADY_PAID_ON_CHAIN)
+          return setInfo(ALREADY_PAID_ON_CHAIN)
         }
       } catch {
         // The read failed: the simulation below reports a real problem before the wallet opens.
@@ -269,7 +277,7 @@ export function PayStep({
             <AlertTitle>The quote expired</AlertTitle>
             <AlertDescription>
               <p>A quote lasts 24 hours, so the fee follows the current rate. Get a new quote to pay.</p>
-              <Button variant="secondary" size="sm" onClick={requote} disabled={busy !== null}>
+              <Button variant="secondary" size="sm" onClick={requote} disabled={busy !== null || sent}>
                 {busy === 'requote' ? <Spinner /> : <RefreshCwIcon />}
                 Get a new quote
               </Button>
@@ -339,6 +347,16 @@ export function PayStep({
         </div>
       )}
 
+      {info && (
+        <div className="p-6">
+          <Alert>
+            <InfoIcon aria-hidden="true" />
+            <AlertTitle>This payment is already on chain</AlertTitle>
+            <AlertDescription>{info}</AlertDescription>
+          </Alert>
+        </div>
+      )}
+
       {notice && (
         <div className="p-6">
           <Alert variant="destructive">
@@ -348,7 +366,7 @@ export function PayStep({
         </div>
       )}
 
-      {!readOnly && (
+      {!readOnly && !sample && (
         <div className="space-y-3 p-6">
           {hashOpen ? (
             <div className="space-y-2">
@@ -361,22 +379,26 @@ export function PayStep({
                   placeholder="0x"
                   spellCheck={false}
                   className="numeric max-w-xl min-w-0 flex-1"
-                  disabled={running}
+                  disabled={running || hasShortPayment}
+                  aria-invalid={notice === NOT_A_HASH}
+                  aria-describedby={`${job.id}-hash-help`}
                 />
-                <Button variant="secondary" onClick={checkTyped} disabled={running || !hashText.trim()}>
+                <Button
+                  variant="secondary"
+                  onClick={checkTyped}
+                  disabled={running || hasShortPayment || !hashText.trim()}
+                >
                   Check this hash
                 </Button>
               </div>
-              <p className="text-muted-foreground text-[0.8125rem] leading-snug">
+              <p id={`${job.id}-hash-help`} className="text-muted-foreground text-[0.8125rem] leading-snug">
                 Use this if you paid and this page lost the transaction. Cobweb checks it against your quote.
               </p>
             </div>
           ) : (
-            !sample && (
-              <Button variant="link" className="h-auto p-0" onClick={() => setHashOpen(true)}>
-                I have a transaction hash
-              </Button>
-            )
+            <Button variant="link" className="h-auto p-0" onClick={() => setHashOpen(true)}>
+              I have a transaction hash
+            </Button>
           )}
         </div>
       )}
@@ -403,7 +425,7 @@ export function PayStep({
             )}
             <Button
               onClick={sample ? paySample : () => payReal()}
-              disabled={running || expired || busy !== null}
+              disabled={running || !canPay || hasShortPayment || busy !== null}
             >
               {running ? <Spinner /> : <WalletIcon />}
               {running

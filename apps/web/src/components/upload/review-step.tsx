@@ -21,7 +21,7 @@ import { Spinner } from '@cobweb/ui/components/spinner'
 import { Stat, StatGroup } from '@cobweb/ui/components/stat'
 import { Switch } from '@cobweb/ui/components/switch'
 import { cn } from '@cobweb/ui/lib/utils'
-import { SUPPLY_MISMATCH } from '@/lib/art/result'
+import { SUPPLY_MISMATCH, THROWN } from '@/lib/art/result'
 import { lockRefusal, reviewChecks, type ReviewData } from '@/lib/art/lock-review'
 import type { RenderJob } from '@/lib/demo/types'
 import type { FlowLink } from '@/lib/steps'
@@ -114,6 +114,8 @@ export function ReviewStep({
       })
       if (result.ok) onLocked(result.data)
       else refused(result.error)
+    } catch {
+      setError(THROWN)
     } finally {
       setLocking(false)
     }
