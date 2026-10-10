@@ -90,7 +90,7 @@ const factory = getAddress(factoryEnv)
 const { confirmCore, lockCore, quoteCore, unlockCore } = await import('../src/lib/art/lock-core.ts')
 const { readLockCollection } = await import('../src/lib/art/lock-collection.ts')
 const { quoteTotalWei } = await import('../src/lib/art/quote.ts')
-const { NOT_CONFIRMED, OTHER_WALLET, PAYMENT_ON_CHAIN, PAYMENT_USED, SHORT_PAYMENT } =
+const { NOT_CONFIRMED, OTHER_WALLET, PAYMENT_ON_CHAIN, PAYMENT_USED, QUOTE_FROZEN, SHORT_PAYMENT } =
   await import('../src/lib/art/result.ts')
 type LockContext = import('../src/lib/art/lock-core.ts').LockContext
 type LockOutcome<T> = import('../src/lib/art/lock-core.ts').LockOutcome<T>
@@ -349,6 +349,19 @@ async function main(): Promise<void> {
     if (!job2) return 'no job'
     const outcome = await confirmCore(second, job2.id, `0x${'ab'.repeat(32)}`)
     return refusal(outcome) === NOT_CONFIRMED ? null : refusal(outcome)
+  })
+
+  await check('requote: a job with a recorded short payment keeps its quote, even expired', async () => {
+    if (!job2) return 'no job'
+    const expire = await admin
+      .from('render_jobs')
+      .update({ quote_expires_at: new Date(Date.now() - 60_000).toISOString() })
+      .eq('id', job2.id)
+    if (expire.error) return `backdate: ${expire.error.message}`
+    // The database refuses with the sentence as a check error; the action maps it to the creator's refusal.
+    const outcome = await quoteCore(second)
+    if ('error' in outcome && outcome.error?.message === QUOTE_FROZEN) return null
+    return refusal(outcome)
   })
 
   // A payment that mined but was never recorded must not be stranded by an unlock or a new quote.

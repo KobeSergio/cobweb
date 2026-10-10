@@ -175,7 +175,7 @@ What exists:
 
 ### Phase 3: Art generator
 
-**Status:** complete. The DNA engine (first sub-project) landed on 7 October 2026; see its spec. The art tables (second sub-project) landed on 8 October 2026; see [specs/2026-10-08-art-tables.md](specs/2026-10-08-art-tables.md). Layer and asset upload (third sub-project) landed on 8 October 2026; see [specs/2026-10-08-art-upload.md](specs/2026-10-08-art-upload.md). Wiring the Art screens to the art tables (fourth sub-project) landed on 8 October 2026; see [specs/2026-10-08-art-wiring.md](specs/2026-10-08-art-wiring.md). Owed to the lock and pay sub-project: a sweep of objects that were uploaded but never recorded (older than a day), since the project cap counts recorded rows only. Next: lock and pay. Lock and pay (fifth sub-project) landed on 10 October 2026; see [specs/2026-10-09-lock-and-pay.md](specs/2026-10-09-lock-and-pay.md). Phase 3 is complete. Owed to Phase 4: the worker re-checks jobPayment(onchain_job_id, quote_payer) against the quote on chain before rendering; locking the real set of a deferred-art collection after its placeholder lock is wired with the reveal flow; render output must not be written into the `art` bucket under upload-shaped keys, or the sweep must learn the pattern first. Owed to Phase 5: deploy on the job's `quote_chain_id` or refuse a mismatch, since the chain is not frozen on the collection. Next: Phase 4, rendering.
+**Status:** complete. The DNA engine (first sub-project) landed on 7 October 2026; see its spec. The art tables (second sub-project) landed on 8 October 2026; see [specs/2026-10-08-art-tables.md](specs/2026-10-08-art-tables.md). Layer and asset upload (third sub-project) landed on 8 October 2026; see [specs/2026-10-08-art-upload.md](specs/2026-10-08-art-upload.md). Wiring the Art screens to the art tables (fourth sub-project) landed on 8 October 2026; see [specs/2026-10-08-art-wiring.md](specs/2026-10-08-art-wiring.md). Owed to the lock and pay sub-project: a sweep of objects that were uploaded but never recorded (older than a day), since the project cap counts recorded rows only. Next: lock and pay. Lock and pay (fifth sub-project) landed on 10 October 2026; see [specs/2026-10-09-lock-and-pay.md](specs/2026-10-09-lock-and-pay.md). Phase 3 is complete. Owed to Phase 4: the worker re-checks jobPayment(onchain_job_id, quote_payer) against the quote on chain before rendering; locking the real set of a deferred-art collection after its placeholder lock is wired with the reveal flow; render output must not be written into the `art` bucket under upload-shaped keys, or the sweep must learn the pattern first; a support path to reconcile a payment that mined after its job was unlocked (the job row is kept with state failed and error unlocked, keyed by its on-chain job id). Owed to Phase 5: deploy on the job's `quote_chain_id` or refuse a mismatch, since the chain is not frozen on the collection. Next: Phase 4, rendering.
 
 Source: [legacy/market-creator-flow.md](legacy/market-creator-flow.md), sections 2, 3, 4, 7 and 8.
 
@@ -197,7 +197,7 @@ Data contract: [specs/2026-10-03-creator-flow-ui.md](specs/2026-10-03-creator-fl
 
 ### Phase 4: Render pipeline
 
-**Status:** next. It starts from a `paid` (or `waived`) render job: `render_jobs.token_list_hash`, `batch_size` and `batches_total` are set at lock, the generative list is the `tokens` rows and the 1/1 and single asset list is `render_jobs.token_list`. The screen's render and done steps run on `components/upload/render-sim.ts`, the seam this phase replaces.
+**Status:** next. Items owed to this phase are listed at the end of the Phase 3 status line. It starts from a `paid` (or `waived`) render job: `render_jobs.token_list_hash`, `batch_size` and `batches_total` are set at lock, the generative list is the `tokens` rows and the 1/1 and single asset list is `render_jobs.token_list`. The screen's render and done steps run on `components/upload/render-sim.ts`, the seam this phase replaces.
 
 Source: [legacy/artgen-lambda.md](legacy/artgen-lambda.md), sections 3, 4, 7 and 9.
 
@@ -216,7 +216,7 @@ Source: [legacy/artgen-lambda.md](legacy/artgen-lambda.md), sections 3, 4, 7 and
 
 ### Phase 5: Deploy and manage
 
-**Status:** not started.
+**Status:** not started. The item owed to this phase is listed at the end of the Phase 3 status line.
 
 Source: [legacy/market-creator-flow.md](legacy/market-creator-flow.md) section 6.
 

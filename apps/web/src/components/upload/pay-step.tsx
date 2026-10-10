@@ -296,7 +296,7 @@ export function PayStep({
                 A quote lasts 24 hours, so the fee follows the current rate.{' '}
                 {sent ? 'Check the payment first.' : 'Get a new quote to pay.'}
               </p>
-              <Button variant="secondary" size="sm" onClick={requote} disabled={busy !== null || sent}>
+              <Button variant="secondary" size="sm" onClick={requote} disabled={busy !== null || sent || hasShortPayment}>
                 {busy === 'requote' ? <Spinner /> : <RefreshCwIcon />}
                 Get a new quote
               </Button>

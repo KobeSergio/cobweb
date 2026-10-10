@@ -280,7 +280,8 @@ export async function quoteCore(ctx: LockContext): Promise<LockOutcome<RenderJob
   if (!row || row.state !== 'payment_due') return { refused: NO_PAYMENT_DUE }
   const expired = row.quote_expires_at !== null && Date.parse(row.quote_expires_at) < Date.now()
   if (!expired || row.quote_chain_id === null) return { data: await jobFromRow(ctx.supabase, row) }
-  if (await paymentOnChain(row)) return { refused: PAYMENT_ON_CHAIN }
+  // A recorded (short) payment freezes the quote; the database says so. The chain guard is for payments not yet recorded.
+  if (row.payment_tx_hash === null && (await paymentOnChain(row))) return { refused: PAYMENT_ON_CHAIN }
   const rate = await readArtFee(row.quote_chain_id)
   if (!feeReady(rate)) return { refused: CHAIN_NOT_READY }
   const { error } = await ctx.service().rpc('art_requote', {
