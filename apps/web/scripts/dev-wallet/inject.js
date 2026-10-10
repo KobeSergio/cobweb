@@ -63,6 +63,19 @@
     return body.signature
   }
 
+  const ANVIL = '0x7a69'
+
+  async function post(path, body, code) {
+    const response = await fetch(`${SIGNER}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const payload = await response.json()
+    if (!response.ok) throw rpcError(code, payload.error ?? 'Dev wallet request failed')
+    return payload
+  }
+
   const provider = {
     isCobwebDevWallet: true,
     async request({ method, params = [] }) {
@@ -85,7 +98,8 @@
           // personal_sign is (message, address); some callers swap them.
           const [first, second] = params
           const looksLikeAddress = (value) => typeof value === 'string' && /^0x[0-9a-fA-F]{40}$/.test(value)
-          const [message, from] = looksLikeAddress(first) && !looksLikeAddress(second) ? [second, first] : [first, second]
+          const [message, from] =
+            looksLikeAddress(first) && !looksLikeAddress(second) ? [second, first] : [first, second]
           return sign(message, from)
         }
         case 'wallet_switchEthereumChain':
@@ -105,7 +119,15 @@
           remember(false)
           emit('accountsChanged', [])
           return null
+        case 'eth_sendTransaction': {
+          if (chainId !== ANVIL)
+            throw rpcError(4200, 'The dev wallet sends transactions on Anvil (31337) only')
+          const { hash } = await post('/send', { chainId: 31337, tx: params[0] }, -32603)
+          return hash
+        }
         default:
+          if (chainId === ANVIL)
+            return (await post('/rpc', { chainId: 31337, method, params }, -32603)).result
           throw rpcError(4200, `Dev wallet does not support ${method}`)
       }
     },

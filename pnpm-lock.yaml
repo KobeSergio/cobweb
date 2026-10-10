@@ -46,6 +46,9 @@ importers:
       '@cobweb/dna':
         specifier: workspace:^
         version: link:../../packages/dna
+      '@cobweb/shared':
+        specifier: workspace:^
+        version: link:../../packages/shared
       '@cobweb/ui':
         specifier: workspace:^
         version: link:../../packages/ui
@@ -116,7 +119,11 @@ importers:
 
   packages/dna: {}
 
-  packages/shared: {}
+  packages/shared:
+    dependencies:
+      viem:
+        specifier: ^2.57.2
+        version: 2.57.2(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)(zod@4.6.5)
 
   packages/ui:
     dependencies:

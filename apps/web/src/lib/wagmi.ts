@@ -1,11 +1,11 @@
 import { getDefaultConfig } from '@rainbow-me/rainbowkit'
-import { arbitrum, base, berachain, mainnet, monad, robinhood, sepolia } from 'wagmi/chains'
+import { anvil, arbitrum, base, berachain, mainnet, monad, robinhood, sepolia } from 'wagmi/chains'
 
-/** The chains Cobweb launches on, plus Sepolia outside production for testing. */
+/** The chains Cobweb launches on, plus Sepolia and a local Anvil chain outside production for testing. */
 const launchChains = [mainnet, arbitrum, base, berachain, monad, robinhood] as const
 
 export const chains =
-  process.env.NODE_ENV === 'production' ? launchChains : ([...launchChains, sepolia] as const)
+  process.env.NODE_ENV === 'production' ? launchChains : ([...launchChains, sepolia, anvil] as const)
 
 export const wagmiConfig = getDefaultConfig({
   appName: 'Cobweb',

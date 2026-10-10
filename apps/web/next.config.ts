@@ -2,7 +2,7 @@ import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
   // The UI and DNA packages ship TypeScript source, so Next compiles it with the app.
-  transpilePackages: ['@cobweb/ui', '@cobweb/dna'],
+  transpilePackages: ['@cobweb/ui', '@cobweb/dna', '@cobweb/shared'],
   poweredByHeader: false,
   experimental: {
     // A token action carries one chunk of at most CHUNK_BUDGET_BYTES (3.5 MB of JSON, and at most

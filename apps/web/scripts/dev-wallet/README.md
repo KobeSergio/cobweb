@@ -27,4 +27,6 @@ await page.goto('http://localhost:3000')
 
 With the Playwright MCP tools, run that through `browser_run_code_unsafe`. If the file path is not readable from the browser process, pass the script text instead: `page.addInitScript({ content })`.
 
-Supported methods: `eth_requestAccounts`, `eth_accounts`, `eth_chainId`, `net_version`, `personal_sign`, `wallet_switchEthereumChain`, `wallet_addEthereumChain`, `wallet_getPermissions`, `wallet_requestPermissions`, `wallet_revokePermissions`. Anything else (transactions included) is refused with code 4200.
+Supported methods: `eth_requestAccounts`, `eth_accounts`, `eth_chainId`, `net_version`, `personal_sign`, `wallet_switchEthereumChain`, `wallet_addEthereumChain`, `wallet_getPermissions`, `wallet_requestPermissions`, `wallet_revokePermissions`. On the local Anvil chain (31337, after switching to it in the app) it also sends transactions (`eth_sendTransaction`, signed by the signer) and forwards reads such as `eth_estimateGas` to Anvil. On any other chain, transactions and reads are refused with code 4200.
+
+To pay on Anvil: start the signer, run `pnpm --filter @cobweb/web chain:local` (it funds the signer's address with 100 ETH), copy its two lines into `apps/web/.env.local`, restart the app, and switch the network to Anvil in the account menu.
