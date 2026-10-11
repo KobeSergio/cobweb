@@ -15,8 +15,8 @@ export type RenderProblemCode =
  */
 export class RenderProblem extends Error {
   code: RenderProblemCode
-  tokenId?: number
-  detail?: Record<string, string | number>
+  declare tokenId?: number
+  declare detail?: Record<string, string | number>
 
   constructor(
     code: RenderProblemCode,

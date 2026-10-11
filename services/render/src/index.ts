@@ -1,3 +1,5 @@
 export * from './types'
 export { RenderProblem } from './problems'
 export type { RenderProblemCode } from './problems'
+export { compositeToken } from './composite'
+export { setConcurrency } from './png'
