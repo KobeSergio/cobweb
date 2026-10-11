@@ -192,7 +192,10 @@ export function toRenderJob(
         errorCode: row.error_code,
         failedBatch: failedBatchOf(batchRows),
         retries: row.retries,
-        retryable: row.error !== 'unlocked' && row.retries < MAX_RENDER_RETRIES,
+        retryable:
+          row.error !== 'unlocked' &&
+          row.error_code !== 'payment-mismatch' &&
+          row.retries < MAX_RENDER_RETRIES,
       }
     case 'done': {
       // render_jobs_done_complete makes a done row without them impossible.

@@ -40,6 +40,7 @@ import {
   QUOTE_FROZEN,
   QUOTE_NOT_EXPIRED,
   RETRY_LIMIT,
+  PAYMENT_UNVERIFIED,
   SAVE_CAP,
   SHORT_PAYMENT,
   SUPPLY_MISMATCH,
@@ -138,6 +139,7 @@ describe('lockWriteError', () => {
       [JOB_UNLOCKED]: 'This job was unlocked. Lock the art again to render it.',
       [JOB_FAILURE_NEEDS_FINAL]: 'A job-level failure must be final.',
       [RETRY_LIMIT]: 'This job has been retried too many times. Tell support about it.',
+      [PAYMENT_UNVERIFIED]: 'The payment for this job could not be verified. Tell support about it.',
     }
     for (const [constant, sentence] of Object.entries(sentences)) {
       expect(constant).toBe(sentence)

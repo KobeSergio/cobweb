@@ -112,7 +112,7 @@ describe('toRenderJob', () => {
   })
 
   it('reads the new job columns and the batch columns, and no longer reads images_cid', () => {
-    for (const column of ['base_uri', 'placeholder_image_cid', 'collage_key', 'error_code'])
+    for (const column of ['base_uri', 'placeholder_image_cid', 'collage_key', 'error_code', 'retries'])
       expect(JOB_COLUMNS).toContain(column)
     expect(JOB_COLUMNS).not.toContain('images_cid')
     expect(BATCH_COLUMNS).toBe('index, state, attempts, images_cid, images_size, error, error_code')
@@ -193,6 +193,13 @@ describe('toRenderJob', () => {
     const failed = (retries: number) => toRenderJob(row({ state: 'failed', error: 'x', retries }), [], extra)
     expect(failed(4)).toMatchObject({ retries: 4, retryable: true })
     expect(failed(5)).toMatchObject({ retries: 5, retryable: false })
+  })
+
+  it('does not allow a retry of a job failed with payment-mismatch', () => {
+    const job = toRenderJob(row({ state: 'failed', error: 'x', error_code: 'payment-mismatch' }), [], extra)
+    expect(job).toMatchObject({ errorCode: 'payment-mismatch', retryable: false })
+    const other = toRenderJob(row({ state: 'failed', error: 'x', error_code: 'cid-mismatch' }), [], extra)
+    expect(other).toMatchObject({ retryable: true })
   })
 
   it('maps a job cancelled by an unlock as failed and not retryable', () => {

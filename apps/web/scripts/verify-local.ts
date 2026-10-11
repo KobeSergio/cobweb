@@ -3057,6 +3057,8 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
   const capped = await renderFixture(A, payer, 109)
   const mixed = await renderFixture(A, payer, 110)
   const bare = await renderFixture(A, payer, 111)
+  // One batch failed for good with the worker's payment-mismatch code.
+  const unverified = await renderFixture(A, payer, 112)
 
   await check(
     'render state: the new job and batch columns exist and render_jobs.images_cid is gone',
@@ -3757,6 +3759,38 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
       const row = await admin.from('render_jobs').select('state, retries').eq('id', capped.jobId).single()
       if (row.error) return describe(row.error as DbError)
       return row.data.state === 'failed' && row.data.retries === 5 ? null : JSON.stringify(row.data)
+    },
+  )
+
+  await check(
+    'art_render_retry: a job failed with payment-mismatch is refused with its sentence and stays failed',
+    async () => {
+      const { failed } = await runSteps(
+        [
+          ['art_claim_render', { p_job_id: unverified.jobId }],
+          [
+            'art_batch_failed',
+            {
+              p_job_id: unverified.jobId,
+              p_index: null,
+              p_code: 'payment-mismatch',
+              p_message: 'The payment could not be verified on chain.',
+              p_final: true,
+            },
+          ],
+        ],
+        async () => '',
+      )
+      if (failed) return `setup: ${failed}`
+      const { error } = await callArt(A.client, 'art_render_retry', { p_collection_id: unverified.cid })
+      const refused = expectSentence(
+        error,
+        CHECK,
+        'The payment for this job could not be verified. Tell support about it.',
+      )
+      if (refused) return refused
+      const job = await renderJob(unverified.jobId)
+      return job.state === 'failed' && job.error_code === 'payment-mismatch' ? null : JSON.stringify(job)
     },
   )
 

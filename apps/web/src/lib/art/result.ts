@@ -74,3 +74,5 @@ export const JOB_UNLOCKED = 'This job was unlocked. Lock the art again to render
 export const JOB_FAILURE_NEEDS_FINAL = 'A job-level failure must be final.'
 // Ruling: the creator may retry a failed job five times (render_jobs.retries).
 export const RETRY_LIMIT = 'This job has been retried too many times. Tell support about it.'
+// Ruling: a job the worker failed for a payment it could not verify is not retried by the creator.
+export const PAYMENT_UNVERIFIED = 'The payment for this job could not be verified. Tell support about it.'

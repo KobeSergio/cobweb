@@ -9,7 +9,10 @@ import { IPFS_GATEWAY, tokenPreview, type RenderResult } from './upload-shared'
 
 const GALLERY = 12
 
-type CidRow = { label: string; name: string; cid: string | null; help: string }
+/** The gateway link for an `ipfs://` URI. */
+const gatewayUrl = (uri: string) => `${IPFS_GATEWAY}${uri.replace(/^ipfs:\/\//, '')}`
+
+type CidRow = { label: string; name: string; cid: string | null; help: string; href?: string }
 
 /**
  * Done: the pinned CIDs, a sample of the final images, and a pointer to Deploy. Creators always see
@@ -49,8 +52,9 @@ export function DoneStep({ result, tokenCount }: { result: RenderResult; tokenCo
       ? [
           {
             label: 'Placeholder',
-            name: 'Placeholder CID',
-            cid: placeholder.cid,
+            name: result.placeholderUri ? 'Placeholder base URI' : 'Placeholder CID',
+            cid: result.placeholderUri ?? placeholder.cid,
+            href: result.placeholderUri ? gatewayUrl(result.placeholderUri) : undefined,
             help: `${mediaLabel(placeholder.mediaType)}. Every token shows it until you reveal. The contract starts here.`,
           },
         ]
@@ -71,7 +75,7 @@ export function DoneStep({ result, tokenCount }: { result: RenderResult; tokenCo
                 <CopyValue
                   value={entry.cid}
                   label={entry.name}
-                  href={`${IPFS_GATEWAY}${entry.cid}`}
+                  href={entry.href ?? `${IPFS_GATEWAY}${entry.cid}`}
                   linkLabel="Open on an IPFS gateway"
                 />
               ) : (

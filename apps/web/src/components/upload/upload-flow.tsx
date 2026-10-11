@@ -19,7 +19,7 @@ import { RenderStep } from './render-step'
 import type { RevealLaterState } from './reveal-later'
 import { ReviewStep } from './review-step'
 import { realActions } from './upload-actions'
-import type { RenderResult } from './upload-shared'
+import { resultOf, type RenderResult } from './upload-shared'
 import { sampleActions, type LockOptions, type UploadOutcome } from './upload-sim'
 
 type Stage = 'review' | 'pay' | 'render' | 'done'
@@ -91,16 +91,6 @@ function renderStartOf(job: RenderJob): RenderProgress {
     }
   // A finalizing job has every batch in; only the metadata is left.
   return { phase: job.state === 'finalizing' ? 'metadata' : 'images', ...job.batches }
-}
-
-/**
- * A finished job as the done step shows it. A placeholder job rendered no real set. The step shows one
- * images CID, the first batch directory, until the screen lists `batchCids`.
- */
-function resultOf(job: Extract<RenderJob, { state: 'done' }>): RenderResult {
-  if (job.placeholderImageCid !== null)
-    return { imagesCid: null, metadataCid: null, placeholder: job.placeholder }
-  return { imagesCid: job.batchCids[0] ?? null, metadataCid: job.metadataCid, placeholder: job.placeholder }
 }
 
 /**

@@ -53,7 +53,7 @@ export default async function Page({
         activity={DEMO_ACTIVITY}
         totalMinted={sample.totalMinted}
         slug={collection.slug}
-        // Seam: the real set is rendered when the collection's finished render job has its metadata CID.
+        // Seam: the real set is rendered when the collection's finished render job is not the placeholder's (no placeholder image CID).
         realArtRendered={!ctx.artDeferred || DEMO_DEFERRED_RENDER_JOBS.done.placeholderImageCid === null}
       />
     </StagePage>

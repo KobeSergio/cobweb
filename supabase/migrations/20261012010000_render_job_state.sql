@@ -398,6 +398,10 @@ begin
   if v_job.error = 'unlocked' then
     raise exception 'This job was unlocked. Lock the art again to render it.' using errcode = '23514';
   end if;
+  -- The worker could not verify the on-chain payment: only support may look at it.
+  if v_job.error_code = 'payment-mismatch' then
+    raise exception 'The payment for this job could not be verified. Tell support about it.' using errcode = '23514';
+  end if;
   if v_job.retries >= 5 then
     raise exception 'This job has been retried too many times. Tell support about it.' using errcode = '23514';
   end if;

@@ -28,6 +28,22 @@ export type RenderResult = {
   imagesCid: string | null
   metadataCid: string | null
   placeholder: RenderPlaceholder | null
+  /**
+   * The base URI a finished placeholder job gives the contract (`ipfs://<cid>/metadata.json`), which
+   * the done step shows for the placeholder in place of the image directory CID. Absent in sample mode.
+   */
+  placeholderUri?: string | null
+}
+
+/**
+ * A finished job as the done step shows it. A placeholder job rendered no real set and shows the base
+ * URI the contract is given. The step shows one images CID, the first batch directory, until the screen
+ * lists `batchCids`.
+ */
+export function resultOf(job: Extract<RenderJob, { state: 'done' }>): RenderResult {
+  if (job.placeholderImageCid !== null)
+    return { imagesCid: null, metadataCid: null, placeholder: job.placeholder, placeholderUri: job.baseUri }
+  return { imagesCid: job.batchCids[0] ?? null, metadataCid: job.metadataCid, placeholder: job.placeholder }
 }
 
 /** A public gateway for the "open" links next to CIDs. */
