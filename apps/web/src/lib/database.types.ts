@@ -750,6 +750,57 @@ export type Database = {
           last: boolean
         }[]
       }
+      art_batch_failed: {
+        Args: {
+          p_code: string
+          p_final: boolean
+          p_index: number
+          p_job_id: string
+          p_message: string
+        }
+        Returns: {
+          allow_duplicates: boolean
+          base_uri: string | null
+          batch_size: number
+          batches_done: number
+          batches_total: number
+          collage_key: string | null
+          collection_id: string
+          created_at: string
+          error: string | null
+          error_code: string | null
+          fee_per_token_wei: number
+          finished_at: string | null
+          id: string
+          kind: Database['public']['Enums']['render_kind']
+          metadata_cid: string | null
+          onchain_job_id: string | null
+          paid_amount_wei: number | null
+          paid_at: string | null
+          payment_tx_hash: string | null
+          placeholder_image_cid: string | null
+          placeholder_upload_id: string | null
+          quote_chain_id: number | null
+          quote_expires_at: string | null
+          quote_factory: string | null
+          quote_payer: string | null
+          quote_total_wei: number
+          started_at: string | null
+          state: Database['public']['Enums']['render_state']
+          token_count: number
+          token_list: Json | null
+          token_list_hash: string | null
+          updated_at: string
+          waived_by: string | null
+          waived_reason: string | null
+        }
+        SetofOptions: {
+          from: '*'
+          to: 'render_jobs'
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       art_batch_start: {
         Args: { p_index: number; p_job_id: string }
         Returns: {
@@ -960,6 +1011,57 @@ export type Database = {
           p_owner: string
           p_payer: string
           p_tx_hash: string
+        }
+        Returns: {
+          allow_duplicates: boolean
+          base_uri: string | null
+          batch_size: number
+          batches_done: number
+          batches_total: number
+          collage_key: string | null
+          collection_id: string
+          created_at: string
+          error: string | null
+          error_code: string | null
+          fee_per_token_wei: number
+          finished_at: string | null
+          id: string
+          kind: Database['public']['Enums']['render_kind']
+          metadata_cid: string | null
+          onchain_job_id: string | null
+          paid_amount_wei: number | null
+          paid_at: string | null
+          payment_tx_hash: string | null
+          placeholder_image_cid: string | null
+          placeholder_upload_id: string | null
+          quote_chain_id: number | null
+          quote_expires_at: string | null
+          quote_factory: string | null
+          quote_payer: string | null
+          quote_total_wei: number
+          started_at: string | null
+          state: Database['public']['Enums']['render_state']
+          token_count: number
+          token_list: Json | null
+          token_list_hash: string | null
+          updated_at: string
+          waived_by: string | null
+          waived_reason: string | null
+        }
+        SetofOptions: {
+          from: '*'
+          to: 'render_jobs'
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      art_render_finish: {
+        Args: {
+          p_base_uri: string
+          p_collage_key?: string
+          p_job_id: string
+          p_metadata_cid: string
+          p_placeholder_image_cid?: string
         }
         Returns: {
           allow_duplicates: boolean

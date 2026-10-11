@@ -225,3 +225,123 @@ $$;
 
 revoke all on function public.art_batch_done(uuid, integer, text, bigint) from public, anon, authenticated;
 grant execute on function public.art_batch_done(uuid, integer, text, bigint) to service_role;
+
+-- ---------------------------------------------------------------------------------------------
+-- art_batch_failed: a batch's failure with its cause; a final one fails the job. A null index is
+-- a job-level failure (the metadata step, or the worker's own checks), allowed only as final.
+-- ---------------------------------------------------------------------------------------------
+create function public.art_batch_failed(
+  p_job_id uuid,
+  p_index integer,
+  p_code text,
+  p_message text,
+  p_final boolean
+)
+returns public.render_jobs
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_job public.render_jobs;
+  v_batch public.render_batches;
+begin
+  -- A job-level failure has no batch to retry: it ends the job or it is not reported.
+  if p_index is null and p_final is not true then
+    raise exception 'A job-level failure must be final.' using errcode = '23514';
+  end if;
+  -- A final failure writes the collection, so its row is locked before the job row.
+  if p_final then
+    perform private.lock_job_collection(p_job_id);
+  end if;
+  select j.* into v_job from public.render_jobs j where j.id = p_job_id for update;
+  if not found or v_job.state not in ('rendering', 'finalizing') then
+    raise exception 'This job is not rendering.' using errcode = '23514';
+  end if;
+  if p_index is not null then
+    select b.* into v_batch
+    from public.render_batches b
+    where b.job_id = p_job_id and b.index = p_index
+    for update;
+    if not found then
+      raise exception 'There is no such batch.' using errcode = '23514';
+    end if;
+    -- A failure reported after the batch's success is a worker bug, not a state to record.
+    if v_batch.state = 'done' then
+      raise exception 'This batch is already done.' using errcode = '23514';
+    end if;
+    update public.render_batches b
+    set state = 'failed', error_code = p_code, error = p_message, finished_at = now()
+    where b.job_id = p_job_id and b.index = p_index;
+  end if;
+  if p_final then
+    update public.render_jobs j
+    set state = 'failed', error_code = p_code, error = p_message, finished_at = now()
+    where j.id = p_job_id
+    returning * into v_job;
+    -- A deployed collection keeps its status: the reveal flow (Phase 5) owns it.
+    if v_job.kind = 'real' then
+      update public.collections c
+      set status = 'art_locked'
+      where c.id = v_job.collection_id and c.status <> 'deployed';
+    end if;
+  end if;
+  return v_job;
+end;
+$$;
+
+revoke all on function public.art_batch_failed(uuid, integer, text, text, boolean) from public, anon, authenticated;
+grant execute on function public.art_batch_failed(uuid, integer, text, text, boolean) to service_role;
+
+-- ---------------------------------------------------------------------------------------------
+-- art_render_finish: the metadata and base URI of a job whose batches are all done
+-- ---------------------------------------------------------------------------------------------
+create function public.art_render_finish(
+  p_job_id uuid,
+  p_metadata_cid text,
+  p_base_uri text,
+  p_placeholder_image_cid text default null,
+  p_collage_key text default null
+)
+returns public.render_jobs
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_job public.render_jobs;
+begin
+  perform private.lock_job_collection(p_job_id);
+  select j.* into v_job from public.render_jobs j where j.id = p_job_id for update;
+  if found and v_job.state = 'done' then
+    if v_job.metadata_cid is not distinct from p_metadata_cid and v_job.base_uri is not distinct from p_base_uri then
+      return v_job;
+    end if;
+    raise exception 'This job was already finished with a different result.' using errcode = '23514';
+  end if;
+  if not found or v_job.state <> 'finalizing' or exists (
+    select 1 from public.render_batches b where b.job_id = p_job_id and b.state <> 'done'
+  ) then
+    raise exception 'This job has batches still rendering.' using errcode = '23514';
+  end if;
+  update public.render_jobs j
+  set state = 'done',
+      metadata_cid = p_metadata_cid,
+      base_uri = p_base_uri,
+      placeholder_image_cid = p_placeholder_image_cid,
+      collage_key = p_collage_key,
+      finished_at = now()
+  where j.id = p_job_id
+  returning * into v_job;
+  -- A deployed collection keeps its status: the reveal flow (Phase 5) owns it.
+  if v_job.kind = 'real' then
+    update public.collections c
+    set status = 'rendered'
+    where c.id = v_job.collection_id and c.status <> 'deployed';
+  end if;
+  return v_job;
+end;
+$$;
+
+revoke all on function public.art_render_finish(uuid, text, text, text, text) from public, anon, authenticated;
+grant execute on function public.art_render_finish(uuid, text, text, text, text) to service_role;

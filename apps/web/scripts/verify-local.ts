@@ -3021,6 +3021,20 @@ type DoneResult = { batches_done: number; last: boolean }
 /** art_batch_done returns a table: PostgREST answers an array of one row. */
 const doneOf = (data: unknown) => (data as DoneResult[] | null)?.[0]
 
+/** Runs service calls in order against one collection, reading its status after each one. */
+async function runSteps(
+  steps: [string, Record<string, unknown>][],
+  statusOf: () => Promise<string>,
+): Promise<{ seen: string[]; failed: string | null }> {
+  const seen: string[] = []
+  for (const [fn, args] of steps) {
+    const { error } = await callArt(admin, fn, args)
+    if (error) return { seen, failed: `${fn}: ${describe(error)}` }
+    seen.push(await statusOf())
+  }
+  return { seen, failed: null }
+}
+
 async function artRenderState(A: Creator, B: Creator): Promise<void> {
   const payer = A.account.address.toLowerCase()
   // One batch (batch size 100, three tokens).
@@ -3029,6 +3043,10 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
   const three = await renderFixture(A, payer, 101)
   // Locked and waiting for payment; unlocked in group 7.
   const due = await renderFixture(A, payer, 103, false)
+  // A collection already deployed: the render must not move its status (the reveal flow owns it).
+  const shipped = await renderFixture(A, payer, 105)
+  // One batch, brought to finalizing, then failed at job level.
+  const meta = await renderFixture(A, payer, 106)
 
   await check(
     'render state: the new job and batch columns exist and render_jobs.images_cid is gone',
@@ -3299,6 +3317,194 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
       return batch.state === 'done' && batch.attempts === before?.attempts && batch.images_cid === CID('a')
         ? null
         : JSON.stringify(batch)
+    },
+  )
+
+  // Group 5: the finish.
+  await check('art_batch_failed: a failure reported for a done batch is refused', async () => {
+    const { error } = await callArt(admin, 'art_batch_failed', {
+      p_job_id: three.jobId,
+      p_index: 0,
+      p_code: 'late-report',
+      p_message: 'A late failure.',
+      p_final: false,
+    })
+    return expectSentence(error, CHECK, 'This batch is already done.')
+  })
+
+  await check('art_batch_failed and art_render_finish: a job waiting for payment is refused', async () => {
+    const failed = await callArt(admin, 'art_batch_failed', {
+      p_job_id: due.jobId,
+      p_index: 0,
+      p_code: 'x',
+      p_message: 'x',
+      p_final: true,
+    })
+    const finish = await callArt(admin, 'art_render_finish', {
+      p_job_id: due.jobId,
+      p_metadata_cid: CID('m'),
+      p_base_uri: `ipfs://${CID('m')}/`,
+    })
+    return (
+      expectSentence(failed.error, CHECK, 'This job is not rendering.') ??
+      expectSentence(finish.error, CHECK, 'This job has batches still rendering.')
+    )
+  })
+
+  const finishArgs = {
+    p_job_id: three.jobId,
+    p_metadata_cid: CID('m'),
+    p_base_uri: `ipfs://${CID('m')}/`,
+    p_collage_key: 'collages/verify.webp',
+  }
+  await check('art_render_finish: the job is done with its CIDs and the collection is rendered', async () => {
+    const { error } = await callArt(admin, 'art_render_finish', finishArgs)
+    if (error) return describe(error)
+    const job = await renderJob(three.jobId)
+    const status = (await lockState(three.cid)).status
+    return job.state === 'done' &&
+      job.metadata_cid === CID('m') &&
+      job.base_uri === `ipfs://${CID('m')}/` &&
+      job.collage_key === 'collages/verify.webp' &&
+      job.placeholder_image_cid === null &&
+      job.finished_at !== null &&
+      status === 'rendered'
+      ? null
+      : `${JSON.stringify(job)} collection ${status}`
+  })
+
+  await check('art_render_finish: the same call again returns the job unchanged', async () => {
+    const before = await renderJob(three.jobId)
+    const { error } = await callArt(admin, 'art_render_finish', finishArgs)
+    if (error) return describe(error)
+    const after = await renderJob(three.jobId)
+    return after.state === 'done' && after.finished_at === before.finished_at ? null : JSON.stringify(after)
+  })
+
+  await check('art_render_finish: different values for a done job are refused', async () => {
+    const { error } = await callArt(admin, 'art_render_finish', { ...finishArgs, p_metadata_cid: CID('n') })
+    return expectSentence(error, CHECK, 'This job was already finished with a different result.')
+  })
+
+  await check('art_render_finish: a job still rendering is refused', async () => {
+    const claim = await callArt(admin, 'art_claim_render', { p_job_id: one.jobId })
+    if (claim.error) return `setup: ${describe(claim.error)}`
+    const { error } = await callArt(admin, 'art_render_finish', {
+      p_job_id: one.jobId,
+      p_metadata_cid: CID('m'),
+      p_base_uri: `ipfs://${CID('m')}/`,
+    })
+    return expectSentence(error, CHECK, 'This job has batches still rendering.')
+  })
+
+  await check(
+    'render functions: a deployed collection keeps its status through the claim and the finish',
+    async () => {
+      const deploy = await admin
+        .from('collections')
+        .update({ status: 'deployed', chain_id: 31337, contract_address: `0x${'ab'.repeat(20)}` })
+        .eq('id', shipped.cid)
+      if (deploy.error) return `setup: ${describe(deploy.error as DbError)}`
+      const steps: [string, Record<string, unknown>][] = [
+        ['art_claim_render', { p_job_id: shipped.jobId }],
+        [
+          'art_batch_done',
+          { p_job_id: shipped.jobId, p_index: 0, p_images_cid: CID('g'), p_images_size: 64 },
+        ],
+        [
+          'art_render_finish',
+          { p_job_id: shipped.jobId, p_metadata_cid: CID('h'), p_base_uri: `ipfs://${CID('h')}/` },
+        ],
+      ]
+      const { seen, failed } = await runSteps(steps, () => lockState(shipped.cid).then((s) => s.status))
+      if (failed) return failed
+      const job = await renderJob(shipped.jobId)
+      return job.state === 'done' && seen.every((status) => status === 'deployed')
+        ? null
+        : `${job.state}, statuses ${seen.join(' ')}`
+    },
+  )
+
+  // Group 6: failures, on the one-batch job.
+  const failure = {
+    p_job_id: one.jobId,
+    p_index: 0,
+    p_code: 'layer-missing',
+    p_message: 'A layer image is missing.',
+  }
+  await check(
+    'art_batch_failed: a failure that is not final leaves the job rendering and the batch failed with its code',
+    async () => {
+      const start = await callArt(admin, 'art_batch_start', { p_job_id: one.jobId, p_index: 0 })
+      if (start.error) return `setup: ${describe(start.error)}`
+      const { data, error } = await callArt(admin, 'art_batch_failed', { ...failure, p_final: false })
+      if (error) return describe(error)
+      const job = await renderJob(one.jobId)
+      const batch = (await batchesOf(one.jobId))[0]
+      return (data as { state?: string } | null)?.state === 'rendering' &&
+        job.state === 'rendering' &&
+        job.error === null &&
+        batch?.state === 'failed' &&
+        batch.error_code === 'layer-missing' &&
+        batch.finished_at !== null
+        ? null
+        : `${JSON.stringify(job)} ${JSON.stringify(batch)}`
+    },
+  )
+
+  await check(
+    'art_batch_failed: a final failure fails the job with its code and returns the collection to art_locked',
+    async () => {
+      const { error } = await callArt(admin, 'art_batch_failed', { ...failure, p_final: true })
+      if (error) return describe(error)
+      const job = await renderJob(one.jobId)
+      const state = await lockState(one.cid)
+      return job.state === 'failed' &&
+        job.error_code === 'layer-missing' &&
+        job.error === 'A layer image is missing.' &&
+        job.finished_at !== null &&
+        state.status === 'art_locked' &&
+        state.art_locked_at !== null
+        ? null
+        : `${JSON.stringify(job)} ${JSON.stringify(state)}`
+    },
+  )
+  await check(
+    'art_batch_failed: a job-level failure must be final, and a final one fails a finalizing job and returns the collection to art_locked',
+    async () => {
+      const claim = await callArt(admin, 'art_claim_render', { p_job_id: meta.jobId })
+      if (claim.error) return `setup: claim: ${describe(claim.error)}`
+      const done = await callArt(admin, 'art_batch_done', {
+        p_job_id: meta.jobId,
+        p_index: 0,
+        p_images_cid: CID('i'),
+        p_images_size: 128,
+      })
+      if (done.error || doneOf(done.data)?.last !== true) return `setup: done: ${describe(done.error)}`
+      const jobLevel = {
+        p_job_id: meta.jobId,
+        p_index: null as unknown as number,
+        p_code: 'cid-mismatch',
+        p_message: 'The pinning service returned a different CID.',
+      }
+      const notFinal = await callArt(admin, 'art_batch_failed', { ...jobLevel, p_final: false })
+      const problem = expectSentence(notFinal.error, CHECK, 'A job-level failure must be final.')
+      if (problem) return `not final: ${problem}`
+      if ((await renderJob(meta.jobId)).state !== 'finalizing') return 'the refused call changed the job'
+      const { error } = await callArt(admin, 'art_batch_failed', { ...jobLevel, p_final: true })
+      if (error) return describe(error)
+      const job = await renderJob(meta.jobId)
+      const batch = (await batchesOf(meta.jobId))[0]
+      const state = await lockState(meta.cid)
+      return job.state === 'failed' &&
+        job.error_code === 'cid-mismatch' &&
+        job.error === 'The pinning service returned a different CID.' &&
+        job.finished_at !== null &&
+        batch?.state === 'done' &&
+        batch.images_cid === CID('i') &&
+        state.status === 'art_locked'
+        ? null
+        : `${JSON.stringify(job)} ${JSON.stringify(batch)} ${JSON.stringify(state)}`
     },
   )
 }
