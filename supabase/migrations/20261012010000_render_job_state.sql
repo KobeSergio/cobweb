@@ -129,18 +129,23 @@ declare
   v_batch public.render_batches;
 begin
   select j.* into v_job from public.render_jobs j where j.id = p_job_id for update;
-  if not found or v_job.state <> 'rendering' then
+  if not found then
     raise exception 'This job is not rendering.' using errcode = '23514';
   end if;
   select b.* into v_batch
   from public.render_batches b
   where b.job_id = p_job_id and b.index = p_index
   for update;
+  -- A finished batch is answered as it is, whatever the job's state: a start redelivered after the
+  -- flip to finalizing (or after the finish) is a duplicate, not an error.
+  if found and v_batch.state = 'done' then
+    return v_batch;
+  end if;
+  if v_job.state <> 'rendering' then
+    raise exception 'This job is not rendering.' using errcode = '23514';
+  end if;
   if not found then
     raise exception 'There is no such batch.' using errcode = '23514';
-  end if;
-  if v_batch.state = 'done' then
-    return v_batch;
   end if;
   if v_batch.state = 'running' then
     -- Another copy is running: counted, otherwise untouched. The worker's output is idempotent.

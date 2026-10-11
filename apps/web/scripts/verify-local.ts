@@ -2999,6 +2999,7 @@ type BatchCheck = {
   first_token_id: number
   last_token_id: number
   images_cid: string | null
+  images_size: number | null
   error_code: string | null
   started_at: string | null
   finished_at: string | null
@@ -3008,7 +3009,7 @@ async function batchesOf(jobId: string): Promise<BatchCheck[]> {
   const { data, error } = await admin
     .from('render_batches')
     .select(
-      'index, state, attempts, first_token_id, last_token_id, images_cid, error_code, started_at, finished_at',
+      'index, state, attempts, first_token_id, last_token_id, images_cid, images_size, error_code, started_at, finished_at',
     )
     .eq('job_id', jobId)
     .order('index')
@@ -3190,6 +3191,7 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
       result.last === false &&
       batch?.state === 'done' &&
       batch.images_cid === CID('a') &&
+      batch.images_size === 1024 &&
       batch.finished_at !== null &&
       job.batches_done === 1 &&
       job.state === 'rendering'
@@ -3284,6 +3286,19 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
       return result?.last === false && result.batches_done === 3 && job.state === 'finalizing'
         ? null
         : `${JSON.stringify(result)} ${JSON.stringify(job)}`
+    },
+  )
+
+  await check(
+    'art_batch_start: a start of a done batch on a finalizing job returns it unchanged',
+    async () => {
+      const before = (await batchesOf(three.jobId))[0]
+      const { data, error } = await callArt(admin, 'art_batch_start', { p_job_id: three.jobId, p_index: 0 })
+      if (error) return describe(error)
+      const batch = data as BatchCheck
+      return batch.state === 'done' && batch.attempts === before?.attempts && batch.images_cid === CID('a')
+        ? null
+        : JSON.stringify(batch)
     },
   )
 }
