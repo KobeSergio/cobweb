@@ -24,11 +24,16 @@ export type JobRow = {
   batch_size: number
   batches_total: number
   batches_done: number
-  images_cid: string | null
   metadata_cid: string | null
+  /** What the contract gets: `ipfs://<cid>/`, or `ipfs://<cid>/metadata.json` for a single asset and the placeholder. */
+  base_uri: string | null
+  /** The placeholder's image directory; set on a placeholder job only. */
+  placeholder_image_cid: string | null
+  collage_key: string | null
   placeholder_upload_id: string | null
   onchain_job_id: string | null
   error: string | null
+  error_code: string | null
   created_at: string
   started_at: string | null
   finished_at: string | null
@@ -39,7 +44,22 @@ export type JobRow = {
  * 2^53 wei; the casts keep every wei (Review Focus 3).
  */
 export const JOB_COLUMNS =
-  'id, collection_id, kind, state, token_count, token_list_hash, allow_duplicates, fee_per_token_wei::text, quote_total_wei::text, quote_chain_id, quote_payer, quote_factory, quote_expires_at, payment_tx_hash, paid_at, paid_amount_wei::text, batch_size, batches_total, batches_done, images_cid, metadata_cid, placeholder_upload_id, onchain_job_id, error, created_at, started_at, finished_at'
+  'id, collection_id, kind, state, token_count, token_list_hash, allow_duplicates, fee_per_token_wei::text, quote_total_wei::text, quote_chain_id, quote_payer, quote_factory, quote_expires_at, payment_tx_hash, paid_at, paid_amount_wei::text, batch_size, batches_total, batches_done, metadata_cid, base_uri, placeholder_image_cid, collage_key, placeholder_upload_id, onchain_job_id, error, error_code, created_at, started_at, finished_at'
+
+/** A render_batches row as the lock core reads it (`BATCH_COLUMNS`). */
+export type BatchRow = {
+  index: number
+  state: Enums<'batch_state'>
+  attempts: number
+  /** The batch directory's CID, once the batch is done. */
+  images_cid: string | null
+  /** The CAR size the worker uploaded, in bytes. */
+  images_size: number | null
+  error: string | null
+  error_code: string | null
+}
+
+export const BATCH_COLUMNS = 'index, state, attempts, images_cid, images_size, error, error_code'
 
 /** The placeholder file a job shows: its own for a placeholder job, the collection's latest for a real one. */
 export type JobPlaceholder = { uploadId: string; mediaType: MediaType } | null
@@ -107,6 +127,8 @@ export function toRenderJob(
       return { ...base, state: 'failed', payment, batches, error: row.error }
     case 'rendering':
       return { ...base, state: 'rendering', payment, batches, startedAt }
+    case 'finalizing':
+      return { ...base, state: 'finalizing', payment, batches, startedAt }
     case 'done':
       return {
         ...base,
@@ -115,7 +137,8 @@ export function toRenderJob(
         batches,
         startedAt,
         finishedAt: seconds(row.finished_at),
-        imagesCid: row.images_cid,
+        // render_jobs.images_cid is gone: each batch directory has its CID on its batch row.
+        imagesCid: null,
         metadataCid: row.metadata_cid,
       }
   }

@@ -1041,6 +1041,7 @@ async function main(): Promise<void> {
   await artInvariants(A)
   await artEdits(A, B)
   await artLockAndPay(A, B)
+  await artRenderState(A)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2927,6 +2928,85 @@ async function artLockAndPay(A: Creator, B: Creator): Promise<void> {
     .select('id')
     .in('collection_id', [g.cid, h.cid, i.cid, k.cid, d, s])
   for (const job of (jobs ?? []) as { id: string }[]) createdJobIds.add(job.id)
+}
+
+// ---------------------------------------------------------------------------------------------
+// 9h. Render job state: the functions the render worker and the retry call
+// (docs/specs/2026-10-12-render-job-state.md)
+// ---------------------------------------------------------------------------------------------
+
+/** A CIDv1 in base32, as the worker reports them: 59 characters of a to z and 2 to 7. */
+const CID = (letter: string) => `bafybei${letter.repeat(52)}`
+const NO_JOB = '00000000-0000-0000-0000-000000000000'
+
+/** A generative project of three tokens, locked, and paid for unless `pay` is false. */
+async function renderFixture(A: Creator, payer: string, tag: number, pay = true) {
+  const col = await insertCollection(A.client)
+  if (!col.row) throw new Error(`setup: ${describe(col.error)}`)
+  const cid = col.row.id
+  const art = (await insertArtCollection(A.client, cid, { size: 3 })).row!.id
+  const uploadId = await insertUploadRow(A.client, cid)
+  const layer = (await insertLayer(A.client, cid, art)).row!.id
+  const traits: string[] = []
+  for (const name of ['Wide', 'Sleepy', 'Wink'])
+    traits.push((await insertTrait(A.client, cid, layer, { name, upload_id: uploadId })).row!.id)
+  const list = traits.map((trait, i) => ({ id: i + 1, collectionId: art, dna: [trait] }))
+  const tokens = await A.client.from('tokens').insert(list.map((t) => tokenRow(cid, art, t.id, t.dna)))
+  if (tokens.error) throw new Error(`setup: ${describe(tokens.error as DbError)}`)
+  const lock = await callArt(admin, 'art_lock', lockArgs(A.userId, cid, list, payer))
+  if (lock.error) throw new Error(`setup: lock: ${describe(lock.error)}`)
+  const jobId = idOf(lock.data)
+  if (pay) {
+    const paid = await callArt(
+      admin,
+      'art_record_payment',
+      payArgs(A.userId, cid, jobId, txHash(tag), payer, '75000000000000'),
+    )
+    if (paid.error) throw new Error(`setup: pay: ${describe(paid.error)}`)
+  }
+  return { cid, jobId }
+}
+
+async function artRenderState(A: Creator): Promise<void> {
+  const payer = A.account.address.toLowerCase()
+  // One batch (batch size 100, three tokens).
+  const one = await renderFixture(A, payer, 102)
+
+  await check(
+    'render state: the new job and batch columns exist and render_jobs.images_cid is gone',
+    async () => {
+      const job = await admin
+        .from('render_jobs')
+        .select('base_uri, placeholder_image_cid, collage_key, error_code')
+        .limit(1)
+      if (job.error) return `render_jobs: ${describe(job.error as DbError)}`
+      const batch = await admin
+        .from('render_batches')
+        .select('images_size, error_code, started_at, finished_at')
+        .limit(1)
+      if (batch.error) return `render_batches: ${describe(batch.error as DbError)}`
+      const gone = await admin.from('render_jobs').select('images_cid').limit(1)
+      return gone.error ? null : 'render_jobs.images_cid still exists'
+    },
+  )
+
+  await check(
+    'render state: finalizing is a render state, and a done job needs its metadata and base URI',
+    async () => {
+      const finalizing = await admin
+        .from('render_jobs')
+        .update({ state: 'finalizing' })
+        .eq('id', NO_JOB)
+        .select('id')
+      if (finalizing.error) return `finalizing: ${describe(finalizing.error as DbError)}`
+      const done = await admin
+        .from('render_jobs')
+        .update({ state: 'done', metadata_cid: CID('m') })
+        .eq('id', one.jobId)
+        .select('id')
+      return expectError(done.error as DbError, CHECK, done.data)
+    },
+  )
 }
 
 // ---------------------------------------------------------------------------------------------

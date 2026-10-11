@@ -32,6 +32,7 @@ const STAGE_FOR_JOB: Record<RenderJob['state'], Stage> = {
   paid: 'render',
   waived: 'render',
   rendering: 'render',
+  finalizing: 'render',
   failed: 'render',
   done: 'done',
 }

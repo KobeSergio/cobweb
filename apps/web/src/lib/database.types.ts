@@ -297,33 +297,45 @@ export type Database = {
         Row: {
           attempts: number
           error: string | null
+          error_code: string | null
+          finished_at: string | null
           first_token_id: number
           images_cid: string | null
+          images_size: number | null
           index: number
           job_id: string
           last_token_id: number
+          started_at: string | null
           state: Database['public']['Enums']['batch_state']
           updated_at: string
         }
         Insert: {
           attempts?: number
           error?: string | null
+          error_code?: string | null
+          finished_at?: string | null
           first_token_id: number
           images_cid?: string | null
+          images_size?: number | null
           index: number
           job_id: string
           last_token_id: number
+          started_at?: string | null
           state?: Database['public']['Enums']['batch_state']
           updated_at?: string
         }
         Update: {
           attempts?: number
           error?: string | null
+          error_code?: string | null
+          finished_at?: string | null
           first_token_id?: number
           images_cid?: string | null
+          images_size?: number | null
           index?: number
           job_id?: string
           last_token_id?: number
+          started_at?: string | null
           state?: Database['public']['Enums']['batch_state']
           updated_at?: string
         }
@@ -340,22 +352,25 @@ export type Database = {
       render_jobs: {
         Row: {
           allow_duplicates: boolean
+          base_uri: string | null
           batch_size: number
           batches_done: number
           batches_total: number
+          collage_key: string | null
           collection_id: string
           created_at: string
           error: string | null
+          error_code: string | null
           fee_per_token_wei: number
           finished_at: string | null
           id: string
-          images_cid: string | null
           kind: Database['public']['Enums']['render_kind']
           metadata_cid: string | null
           onchain_job_id: string | null
           paid_amount_wei: number | null
           paid_at: string | null
           payment_tx_hash: string | null
+          placeholder_image_cid: string | null
           placeholder_upload_id: string | null
           quote_chain_id: number | null
           quote_expires_at: string | null
@@ -373,22 +388,25 @@ export type Database = {
         }
         Insert: {
           allow_duplicates?: boolean
+          base_uri?: string | null
           batch_size?: number
           batches_done?: number
           batches_total?: number
+          collage_key?: string | null
           collection_id: string
           created_at?: string
           error?: string | null
+          error_code?: string | null
           fee_per_token_wei: number
           finished_at?: string | null
           id?: string
-          images_cid?: string | null
           kind: Database['public']['Enums']['render_kind']
           metadata_cid?: string | null
           onchain_job_id?: string | null
           paid_amount_wei?: number | null
           paid_at?: string | null
           payment_tx_hash?: string | null
+          placeholder_image_cid?: string | null
           placeholder_upload_id?: string | null
           quote_chain_id?: number | null
           quote_expires_at?: string | null
@@ -406,22 +424,25 @@ export type Database = {
         }
         Update: {
           allow_duplicates?: boolean
+          base_uri?: string | null
           batch_size?: number
           batches_done?: number
           batches_total?: number
+          collage_key?: string | null
           collection_id?: string
           created_at?: string
           error?: string | null
+          error_code?: string | null
           fee_per_token_wei?: number
           finished_at?: string | null
           id?: string
-          images_cid?: string | null
           kind?: Database['public']['Enums']['render_kind']
           metadata_cid?: string | null
           onchain_job_id?: string | null
           paid_amount_wei?: number | null
           paid_at?: string | null
           payment_tx_hash?: string | null
+          placeholder_image_cid?: string | null
           placeholder_upload_id?: string | null
           quote_chain_id?: number | null
           quote_expires_at?: string | null
@@ -756,22 +777,25 @@ export type Database = {
         }
         Returns: {
           allow_duplicates: boolean
+          base_uri: string | null
           batch_size: number
           batches_done: number
           batches_total: number
+          collage_key: string | null
           collection_id: string
           created_at: string
           error: string | null
+          error_code: string | null
           fee_per_token_wei: number
           finished_at: string | null
           id: string
-          images_cid: string | null
           kind: Database['public']['Enums']['render_kind']
           metadata_cid: string | null
           onchain_job_id: string | null
           paid_amount_wei: number | null
           paid_at: string | null
           payment_tx_hash: string | null
+          placeholder_image_cid: string | null
           placeholder_upload_id: string | null
           quote_chain_id: number | null
           quote_expires_at: string | null
@@ -798,22 +822,25 @@ export type Database = {
         Args: { p_collection_id: string; p_placeholder_upload_id: string }
         Returns: {
           allow_duplicates: boolean
+          base_uri: string | null
           batch_size: number
           batches_done: number
           batches_total: number
+          collage_key: string | null
           collection_id: string
           created_at: string
           error: string | null
+          error_code: string | null
           fee_per_token_wei: number
           finished_at: string | null
           id: string
-          images_cid: string | null
           kind: Database['public']['Enums']['render_kind']
           metadata_cid: string | null
           onchain_job_id: string | null
           paid_amount_wei: number | null
           paid_at: string | null
           payment_tx_hash: string | null
+          placeholder_image_cid: string | null
           placeholder_upload_id: string | null
           quote_chain_id: number | null
           quote_expires_at: string | null
@@ -855,22 +882,25 @@ export type Database = {
         }
         Returns: {
           allow_duplicates: boolean
+          base_uri: string | null
           batch_size: number
           batches_done: number
           batches_total: number
+          collage_key: string | null
           collection_id: string
           created_at: string
           error: string | null
+          error_code: string | null
           fee_per_token_wei: number
           finished_at: string | null
           id: string
-          images_cid: string | null
           kind: Database['public']['Enums']['render_kind']
           metadata_cid: string | null
           onchain_job_id: string | null
           paid_amount_wei: number | null
           paid_at: string | null
           payment_tx_hash: string | null
+          placeholder_image_cid: string | null
           placeholder_upload_id: string | null
           quote_chain_id: number | null
           quote_expires_at: string | null
@@ -901,22 +931,25 @@ export type Database = {
         }
         Returns: {
           allow_duplicates: boolean
+          base_uri: string | null
           batch_size: number
           batches_done: number
           batches_total: number
+          collage_key: string | null
           collection_id: string
           created_at: string
           error: string | null
+          error_code: string | null
           fee_per_token_wei: number
           finished_at: string | null
           id: string
-          images_cid: string | null
           kind: Database['public']['Enums']['render_kind']
           metadata_cid: string | null
           onchain_job_id: string | null
           paid_amount_wei: number | null
           paid_at: string | null
           payment_tx_hash: string | null
+          placeholder_image_cid: string | null
           placeholder_upload_id: string | null
           quote_chain_id: number | null
           quote_expires_at: string | null
@@ -996,7 +1029,8 @@ export type Database = {
       media_type: 'image' | 'gif' | 'video'
       project_type: 'generative' | 'one_of_one' | 'single_asset'
       render_kind: 'real' | 'placeholder'
-      render_state: 'locked' | 'payment_due' | 'paid' | 'waived' | 'rendering' | 'done' | 'failed'
+      render_state:
+        'locked' | 'payment_due' | 'paid' | 'waived' | 'rendering' | 'finalizing' | 'done' | 'failed'
       rule_kind: 'doesnt_mix_with' | 'always_pairs_with' | 'must_pair_with'
       upload_kind: 'layer_image' | 'asset' | 'placeholder' | 'thumbnail'
     }
@@ -1127,7 +1161,7 @@ export const Constants = {
       media_type: ['image', 'gif', 'video'],
       project_type: ['generative', 'one_of_one', 'single_asset'],
       render_kind: ['real', 'placeholder'],
-      render_state: ['locked', 'payment_due', 'paid', 'waived', 'rendering', 'done', 'failed'],
+      render_state: ['locked', 'payment_due', 'paid', 'waived', 'rendering', 'finalizing', 'done', 'failed'],
       rule_kind: ['doesnt_mix_with', 'always_pairs_with', 'must_pair_with'],
       upload_kind: ['layer_image', 'asset', 'placeholder', 'thumbnail'],
     },

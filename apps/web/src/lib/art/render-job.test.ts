@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { JOB_COLUMNS, pendingJob, toRenderJob, ZERO_ADDRESS, type JobRow } from './render-job'
+import { BATCH_COLUMNS, JOB_COLUMNS, pendingJob, toRenderJob, ZERO_ADDRESS, type JobRow } from './render-job'
 
 const JOB = '0f4a0f3e-2f5e-4e3a-9d1c-1b2c3d4e5f60'
 const ONCHAIN = `0x0f4a0f3e2f5e4e3a9d1c1b2c3d4e5f60${'0'.repeat(32)}`
@@ -28,11 +28,14 @@ const row = (overrides: Partial<JobRow> = {}): JobRow => ({
   batch_size: 100,
   batches_total: 1,
   batches_done: 0,
-  images_cid: null,
   metadata_cid: null,
+  base_uri: null,
+  placeholder_image_cid: null,
+  collage_key: null,
   placeholder_upload_id: null,
   onchain_job_id: ONCHAIN,
   error: null,
+  error_code: null,
   created_at: '2026-10-09T10:00:00+00:00',
   started_at: null,
   finished_at: null,
@@ -79,6 +82,26 @@ describe('toRenderJob', () => {
     expect(JOB_COLUMNS).toContain('quote_factory')
   })
 
+  it('reads the new job columns and the batch columns, and no longer reads images_cid', () => {
+    for (const column of ['base_uri', 'placeholder_image_cid', 'collage_key', 'error_code'])
+      expect(JOB_COLUMNS).toContain(column)
+    expect(JOB_COLUMNS).not.toContain('images_cid')
+    expect(BATCH_COLUMNS).toBe('index, state, attempts, images_cid, images_size, error, error_code')
+  })
+
+  it('maps finalizing with its batches and start', () => {
+    expect(
+      toRenderJob(
+        row({ state: 'finalizing', started_at: '2026-10-09T11:00:00+00:00', batches_done: 1 }),
+        extra,
+      ),
+    ).toMatchObject({
+      state: 'finalizing',
+      startedAt: at('2026-10-09T11:00:00Z'),
+      batches: { total: 1, done: 1, size: 100 },
+    })
+  })
+
   it('maps paid with its payment, and waived or zero-quote paid without one', () => {
     const paid = toRenderJob(
       row({
@@ -115,7 +138,6 @@ describe('toRenderJob', () => {
           state: 'done',
           started_at: '2026-10-09T11:00:00+00:00',
           finished_at: '2026-10-09T11:30:00+00:00',
-          images_cid: 'bafyimages',
           metadata_cid: 'bafymeta',
         }),
         extra,
@@ -123,7 +145,6 @@ describe('toRenderJob', () => {
     ).toMatchObject({
       state: 'done',
       finishedAt: at('2026-10-09T11:30:00Z'),
-      imagesCid: 'bafyimages',
       metadataCid: 'bafymeta',
     })
   })

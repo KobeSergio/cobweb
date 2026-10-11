@@ -66,7 +66,8 @@ export type UploadedAsset = {
 // ---------------------------------------------------------------------------------------------
 
 /** A render job's state: `render_jobs.state`. */
-export type RenderJobState = 'locked' | 'payment_due' | 'paid' | 'waived' | 'rendering' | 'done' | 'failed'
+export type RenderJobState =
+  'locked' | 'payment_due' | 'paid' | 'waived' | 'rendering' | 'finalizing' | 'done' | 'failed'
 
 /** The art-fee quote issued at lock, from the factory's `artFeePerToken()` (render_jobs quote columns). */
 export type ArtFeeQuote = {
@@ -144,6 +145,13 @@ export type RenderJob =
     })
   | (RenderJobBase & {
       state: 'rendering'
+      payment: RenderPayment | null
+      batches: RenderBatches
+      startedAt: number
+    })
+  | (RenderJobBase & {
+      /** Every batch is in; the metadata is being written and pinned. */
+      state: 'finalizing'
       payment: RenderPayment | null
       batches: RenderBatches
       startedAt: number
