@@ -27,6 +27,11 @@ describe('previewCollage', () => {
     expect(await pixel(png, 128, 128)).toEqual([255, 0, 0, 255])
   })
 
+  it('returns identical bytes for two calls on the same images', async () => {
+    const images = await colours(5)
+    expect(await previewCollage(images)).toEqual(await previewCollage(images))
+  })
+
   it('refuses an empty list', async () => {
     await expect(previewCollage([])).rejects.toMatchObject({ code: 'empty-collage' })
   })

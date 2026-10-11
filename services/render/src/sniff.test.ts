@@ -31,4 +31,12 @@ describe('sniffExt', () => {
     expect(sniffExt(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]))).toBeNull()
     expect(sniffExt(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBeNull()
   })
+
+  it('returns null for a RIFF container that is not WebP', () => {
+    expect(sniffExt(pad([...ascii('RIFF'), 0, 0, 0, 0, ...ascii('WAVE')]))).toBeNull()
+  })
+
+  it('recognises a PNG head of exactly 12 bytes', () => {
+    expect(sniffExt(pad([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 12))).toBe('png')
+  })
 })
