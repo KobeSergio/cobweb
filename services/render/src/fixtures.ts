@@ -2,6 +2,9 @@
  * Test helpers: images drawn with sharp (no binary fixtures are committed), an in-memory loader, a
  * PNG chunk reader and a CAR reader. Not exported from the package.
  */
+import { CarReader } from '@ipld/car'
+import * as UnixFS from '@ipld/unixfs'
+import type { CID } from 'multiformats/cid'
 import { sharp, TRANSPARENT } from './png'
 import type { GenerativeSpec, ImageRef, MetadataText } from './types'
 
@@ -53,6 +56,53 @@ export function pngChunks(png: Uint8Array): string[] {
     at += 12 + length
   }
   return types
+}
+
+const RAW_CODE = 0x55
+
+/**
+ * Every file in a CAR's root directory, plain or HAMT-sharded, by name. Reads single-block (raw
+ * leaf) files only, which is every file the tests write.
+ */
+export async function readCarFiles(car: Uint8Array): Promise<{
+  root: string
+  files: Map<string, Uint8Array>
+  shard: { fanout: number; hashType: number } | null
+}> {
+  const reader = await CarReader.fromBytes(car)
+  const [root] = await reader.getRoots()
+  if (!root) throw new Error('The CAR has no root.')
+  const files = new Map<string, Uint8Array>()
+  const blockOf = async (cid: CID) => {
+    const block = await reader.get(cid)
+    if (!block) throw new Error(`The CAR is missing block ${cid.toString()}.`)
+    return block.bytes
+  }
+  const fileOf = async (cid: CID) => {
+    if (cid.code !== RAW_CODE) throw new Error(`File ${cid.toString()} is not a single raw block.`)
+    return blockOf(cid)
+  }
+  const rootNode = UnixFS.decode(await blockOf(root))
+  const shard =
+    rootNode.type === UnixFS.NodeType.HAMTShard
+      ? { fanout: rootNode.fanout, hashType: rootNode.hashType }
+      : null
+  const walk = async (node: ReturnType<typeof UnixFS.decode>): Promise<void> => {
+    if (node.type === UnixFS.NodeType.Directory) {
+      for (const entry of node.entries) files.set(entry.name, await fileOf(entry.cid as unknown as CID))
+      return
+    }
+    if (node.type !== UnixFS.NodeType.HAMTShard) throw new Error(`Unexpected node type ${node.type}.`)
+    // In a HAMT shard a link named by its two hex digit prefix alone is a sub-shard; any longer
+    // name is the prefix followed by the entry name.
+    for (const entry of node.entries) {
+      const cid = entry.cid as unknown as CID
+      if (entry.name.length === 2) await walk(UnixFS.decode(await blockOf(cid)))
+      else files.set(entry.name.slice(2), await fileOf(cid))
+    }
+  }
+  await walk(rootNode)
+  return { root: root.toString(), files, shard }
 }
 
 export const TEXT: MetadataText = {
