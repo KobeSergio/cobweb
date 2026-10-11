@@ -42,11 +42,16 @@ describe('packDirectory', () => {
       { name: 'a.png', bytes: text('a') },
       { name: '10.png', bytes: text('10') },
       { name: '9.png', bytes: text('9') },
+      { name: '\u{1F600}', bytes: text('smile') },
+      { name: '\u{FFFD}', bytes: text('replacement') },
     ]
     const one = await packDirectory(files)
     const two = await packDirectory([...files].reverse())
     expect(two.cid).toBe(one.cid)
     expect(two.car).toEqual(one.car)
+    // UTF-8 byte order puts U+FFFD (EF BF BD) before U+1F600 (F0 9F 98 80); UTF-16 order would not.
+    const { files: read } = await readCarFiles(one.car)
+    expect([...read.keys()].slice(-2)).toEqual(['\u{FFFD}', '\u{1F600}'])
   })
 
   it('writes a block shared by identical files once and reads both back', async () => {

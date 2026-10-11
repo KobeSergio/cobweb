@@ -4,7 +4,7 @@
  */
 import { CarReader } from '@ipld/car'
 import * as UnixFS from '@ipld/unixfs'
-import type { CID } from 'multiformats/cid'
+import { CID } from 'multiformats/cid'
 import { sharp, TRANSPARENT } from './png'
 import type { GenerativeSpec, ImageRef, MetadataText } from './types'
 
@@ -89,14 +89,14 @@ export async function readCarFiles(car: Uint8Array): Promise<{
       : null
   const walk = async (node: ReturnType<typeof UnixFS.decode>): Promise<void> => {
     if (node.type === UnixFS.NodeType.Directory) {
-      for (const entry of node.entries) files.set(entry.name, await fileOf(entry.cid as unknown as CID))
+      for (const entry of node.entries) files.set(entry.name, await fileOf(CID.decode(entry.cid.bytes)))
       return
     }
     if (node.type !== UnixFS.NodeType.HAMTShard) throw new Error(`Unexpected node type ${node.type}.`)
     // In a HAMT shard a link named by its two hex digit prefix alone is a sub-shard; any longer
     // name is the prefix followed by the entry name.
     for (const entry of node.entries) {
-      const cid = entry.cid as unknown as CID
+      const cid = CID.decode(entry.cid.bytes)
       if (entry.name.length === 2) await walk(UnixFS.decode(await blockOf(cid)))
       else files.set(entry.name.slice(2), await fileOf(cid))
     }
