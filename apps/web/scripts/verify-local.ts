@@ -3047,6 +3047,9 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
   const shipped = await renderFixture(A, payer, 105)
   // One batch, brought to finalizing, then failed at job level.
   const meta = await renderFixture(A, payer, 106)
+  // One batch each: a code longer than the column allows, and a deployed collection failed for good.
+  const clamp = await renderFixture(A, payer, 107)
+  const held = await renderFixture(A, payer, 108)
 
   await check(
     'render state: the new job and batch columns exist and render_jobs.images_cid is gone',
@@ -3357,6 +3360,22 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
     p_base_uri: `ipfs://${CID('m')}/`,
     p_collage_key: 'collages/verify.webp',
   }
+  await check(
+    'art_render_finish: a base URI built from a different CID than the metadata CID is refused',
+    async () => {
+      const { error } = await callArt(admin, 'art_render_finish', {
+        ...finishArgs,
+        p_base_uri: `ipfs://${CID('n')}/`,
+      })
+      const refused = expectError(error, CHECK)
+      if (refused) return refused
+      const job = await renderJob(three.jobId)
+      return job.state === 'finalizing' && job.metadata_cid === null && job.base_uri === null
+        ? null
+        : JSON.stringify(job)
+    },
+  )
+
   await check('art_render_finish: the job is done with its CIDs and the collection is rendered', async () => {
     const { error } = await callArt(admin, 'art_render_finish', finishArgs)
     if (error) return describe(error)
@@ -3469,6 +3488,75 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
         : `${JSON.stringify(job)} ${JSON.stringify(state)}`
     },
   )
+  await check(
+    'art_batch_failed: a second final failure on a failed job returns it unchanged with the first code',
+    async () => {
+      const { data, error } = await callArt(admin, 'art_batch_failed', {
+        ...failure,
+        p_code: 'other-code',
+        p_message: 'Another message.',
+        p_final: true,
+      })
+      if (error) return describe(error)
+      const job = await renderJob(one.jobId)
+      return (data as { state?: string } | null)?.state === 'failed' &&
+        job.state === 'failed' &&
+        job.error_code === 'layer-missing' &&
+        job.error === 'A layer image is missing.'
+        ? null
+        : `${JSON.stringify(data)} ${JSON.stringify(job)}`
+    },
+  )
+
+  await check(
+    'art_batch_failed: a code longer than 40 characters is clamped and the job still fails',
+    async () => {
+      const claim = await callArt(admin, 'art_claim_render', { p_job_id: clamp.jobId })
+      if (claim.error) return `setup: ${describe(claim.error)}`
+      const code = 'c'.repeat(60)
+      const { error } = await callArt(admin, 'art_batch_failed', {
+        p_job_id: clamp.jobId,
+        p_index: 0,
+        p_code: code,
+        p_message: 'A long code.',
+        p_final: true,
+      })
+      if (error) return describe(error)
+      const job = await renderJob(clamp.jobId)
+      const batch = (await batchesOf(clamp.jobId))[0]
+      const expected = code.slice(0, 40)
+      return job.state === 'failed' && job.error_code === expected && batch?.error_code === expected
+        ? null
+        : `${JSON.stringify(job)} ${JSON.stringify(batch)}`
+    },
+  )
+
+  await check(
+    'art_batch_failed: a deployed collection keeps its status through a final failure',
+    async () => {
+      const deploy = await admin
+        .from('collections')
+        .update({ status: 'deployed', chain_id: 31337, contract_address: `0x${'cd'.repeat(20)}` })
+        .eq('id', held.cid)
+      if (deploy.error) return `setup: ${describe(deploy.error as DbError)}`
+      const { seen, failed } = await runSteps(
+        [
+          ['art_claim_render', { p_job_id: held.jobId }],
+          [
+            'art_batch_failed',
+            { p_job_id: held.jobId, p_index: 0, p_code: 'x', p_message: 'x', p_final: true },
+          ],
+        ],
+        () => lockState(held.cid).then((s) => s.status),
+      )
+      if (failed) return failed
+      const job = await renderJob(held.jobId)
+      return job.state === 'failed' && seen.every((status) => status === 'deployed')
+        ? null
+        : `${job.state}, statuses ${seen.join(' ')}`
+    },
+  )
+
   await check(
     'art_batch_failed: a job-level failure must be final, and a final one fails a finalizing job and returns the collection to art_locked',
     async () => {

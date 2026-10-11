@@ -29,6 +29,11 @@ alter table public.render_jobs
   -- RenderProblem.code, or the worker's own (dead-letter, payment-mismatch, cid-mismatch). error
   -- keeps the sentence.
   add column error_code text check (error_code is null or char_length(error_code) between 1 and 40),
+  add constraint render_jobs_metadata_cid_valid
+    check (metadata_cid is null or metadata_cid ~ '^[a-z2-7]{59}$'),
+  -- The base URI is the directory of the metadata CID, so the two cannot name different uploads.
+  add constraint render_jobs_base_uri_matches_metadata
+    check (base_uri is null or metadata_cid is null or starts_with(base_uri, 'ipfs://' || metadata_cid || '/')),
   drop constraint render_jobs_done_has_metadata,
   add constraint render_jobs_done_complete
     check (state <> 'done' or (metadata_cid is not null and base_uri is not null));
@@ -255,6 +260,10 @@ begin
     perform private.lock_job_collection(p_job_id);
   end if;
   select j.* into v_job from public.render_jobs j where j.id = p_job_id for update;
+  -- A final failure reported again for a job that already failed: the first code and message stay.
+  if found and v_job.state = 'failed' and p_final then
+    return v_job;
+  end if;
   if not found or v_job.state not in ('rendering', 'finalizing') then
     raise exception 'This job is not rendering.' using errcode = '23514';
   end if;
@@ -271,12 +280,14 @@ begin
       raise exception 'This batch is already done.' using errcode = '23514';
     end if;
     update public.render_batches b
-    set state = 'failed', error_code = p_code, error = p_message, finished_at = now()
+    set state = 'failed', error_code = coalesce(nullif(left(p_code, 40), ''), 'unknown'), error = p_message,
+        finished_at = now()
     where b.job_id = p_job_id and b.index = p_index;
   end if;
   if p_final then
     update public.render_jobs j
-    set state = 'failed', error_code = p_code, error = p_message, finished_at = now()
+    set state = 'failed', error_code = coalesce(nullif(left(p_code, 40), ''), 'unknown'), error = p_message,
+        finished_at = now()
     where j.id = p_job_id
     returning * into v_job;
     -- A deployed collection keeps its status: the reveal flow (Phase 5) owns it.
