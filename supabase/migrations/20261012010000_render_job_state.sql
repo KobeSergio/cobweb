@@ -281,8 +281,10 @@ begin
   -- (3) a report older than the creator's latest retry (p_retries) changes nothing, unless it is a
   -- final payment mismatch, which is never stale; (4) a final payment mismatch on a done job
   -- changes nothing; (5) a final failure of a failed job keeps its code, except that a payment
-  -- mismatch replaces it; (6) a final job-level failure, or a final payment mismatch, on a paid or
-  -- waived job fails it before any claim; (7) any other report needs a rendering or finalizing job.
+  -- mismatch replaces it unless the job was unlocked; (6) a final payment mismatch on a paid or
+  -- waived job fails it before any claim, and no other failure can; (7) any other report needs a
+  -- rendering or finalizing job; (8) a final payment mismatch is about the job, so the batch it
+  -- names is not read and a finished batch cannot refuse it.
   -- A job-level failure has no batch to retry: it ends the job or it is not reported.
   if p_index is null and p_final is not true then
     raise exception 'A job-level failure must be final.' using errcode = '23514';
@@ -304,7 +306,13 @@ begin
   -- except that a payment mismatch replaces any other code, so the gate in art_render_retry holds
   -- whichever report arrived first.
   if found and v_job.state = 'failed' and p_final then
-    if v_code = 'payment-mismatch' and v_job.error_code is distinct from 'payment-mismatch' then
+    if
+      v_code = 'payment-mismatch'
+      and v_job.error_code is distinct from 'payment-mismatch'
+      -- An unlocked job stays unlocked: the creator took the art back, and nothing will render.
+      and v_job.error_code is distinct from 'unlocked'
+      and v_job.error is distinct from 'unlocked'
+    then
       update public.render_jobs j
       set error_code = v_code, error = p_message
       where j.id = p_job_id
@@ -312,9 +320,10 @@ begin
     end if;
     return v_job;
   end if;
-  -- A job-level failure on a job the worker has not claimed yet (its payment could not be verified):
-  -- the job fails, and the collection stays art_locked as it is.
-  if found and p_final and (p_index is null or v_mismatch) and v_job.state in ('paid', 'waived') then
+  -- A payment mismatch on a job the worker has not claimed yet: the job fails, and the collection
+  -- stays art_locked as it is. No other failure can end an unclaimed job, since the creator could
+  -- neither retry nor unlock it.
+  if found and v_mismatch and v_job.state in ('paid', 'waived') then
     update public.render_jobs j
     set state = 'failed', error_code = v_code, error = p_message, finished_at = now()
     where j.id = p_job_id
@@ -330,7 +339,7 @@ begin
   if not found or v_job.state not in ('rendering', 'finalizing') then
     raise exception 'This job is not rendering.' using errcode = '23514';
   end if;
-  if p_index is not null then
+  if p_index is not null and not v_mismatch then
     select b.* into v_batch
     from public.render_batches b
     where b.job_id = p_job_id and b.index = p_index

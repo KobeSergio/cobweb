@@ -3070,6 +3070,9 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
   const late = await renderFixture(A, payer, 116)
   const preclaim = await renderFixture(A, payer, 117)
   const flipped = await renderFixture(A, payer, 118, false)
+  const indexed = await renderFixture(A, payer, 120)
+  const unlockedLate = await renderFixture(A, payer, 121)
+  const preclaimOther = await renderFixture(A, payer, 122)
 
   await check(
     'render state: the new job and batch columns exist and render_jobs.images_cid is gone',
@@ -3890,7 +3893,8 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
       if (error) return describe(error)
       const job = await renderJob(codeBatch.jobId)
       const batch = (await batchesOf(codeBatch.jobId))[0]
-      if (job.error_code !== 'payment-mismatch' || batch?.error_code !== 'payment-mismatch')
+      // A payment mismatch is about the job: the batch it names is not read or changed.
+      if (job.error_code !== 'payment-mismatch' || batch?.state !== 'queued' || batch.error_code !== null)
         return `${JSON.stringify(job)} ${JSON.stringify(batch)}`
       const retry = await callArt(A.client, 'art_render_retry', { p_collection_id: codeBatch.cid })
       return expectSentence(
@@ -4048,6 +4052,76 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
         CHECK,
         'The payment for this job could not be verified. Tell support about it.',
       )
+    },
+  )
+
+  await check(
+    'art_batch_failed: a final payment mismatch sent with the index of a finished batch still fails a finalizing job',
+    async () => {
+      const claim = await callArt(admin, 'art_claim_render', { p_job_id: indexed.jobId })
+      if (claim.error) return `setup: ${describe(claim.error)}`
+      const done = await callArt(admin, 'art_batch_done', {
+        p_job_id: indexed.jobId,
+        p_index: 0,
+        p_images_cid: CID('c'),
+        p_images_size: 10,
+      })
+      if (done.error) return `setup: ${describe(done.error)}`
+      const mid = await renderJob(indexed.jobId)
+      if (mid.state !== 'finalizing') return `setup: ${JSON.stringify(mid)}`
+      const { error } = await callArt(admin, 'art_batch_failed', {
+        p_job_id: indexed.jobId,
+        p_index: 0,
+        p_code: 'payment-mismatch',
+        p_message: 'The payment could not be verified on chain.',
+        p_final: true,
+      })
+      if (error) return describe(error)
+      const job = await renderJob(indexed.jobId)
+      const batch = (await batchesOf(indexed.jobId))[0]
+      return job.state === 'failed' && job.error_code === 'payment-mismatch' && batch?.state === 'done'
+        ? null
+        : `${JSON.stringify(job)} ${JSON.stringify(batch)}`
+    },
+  )
+
+  await check(
+    'art_batch_failed: a payment mismatch reported for an unlocked job leaves it unlocked',
+    async () => {
+      const set = await admin
+        .from('render_jobs')
+        .update({ state: 'failed', error: 'unlocked', error_code: 'unlocked' })
+        .eq('id', unlockedLate.jobId)
+      if (set.error) return `setup: ${describe(set.error)}`
+      const { error } = await callArt(admin, 'art_batch_failed', {
+        p_job_id: unlockedLate.jobId,
+        p_index: null,
+        p_code: 'payment-mismatch',
+        p_message: 'The payment could not be verified on chain.',
+        p_final: true,
+      })
+      if (error) return describe(error)
+      const job = await renderJob(unlockedLate.jobId)
+      return job.state === 'failed' && job.error_code === 'unlocked' && job.error === 'unlocked'
+        ? null
+        : JSON.stringify(job)
+    },
+  )
+
+  await check(
+    'art_batch_failed: before a claim only a payment mismatch may fail the job; any other job-level failure is refused',
+    async () => {
+      const { error } = await callArt(admin, 'art_batch_failed', {
+        p_job_id: preclaimOther.jobId,
+        p_index: null,
+        p_code: 'dead-letter',
+        p_message: 'The message ran out of deliveries.',
+        p_final: true,
+      })
+      const refused = expectSentence(error, CHECK, 'This job is not rendering.')
+      if (refused) return refused
+      const job = await renderJob(preclaimOther.jobId)
+      return job.state === 'paid' && job.error_code === null ? null : JSON.stringify(job)
     },
   )
 
