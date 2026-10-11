@@ -43,7 +43,7 @@ functions; the screen (fourth sub-project) reads the model and calls the one ses
 
 In:
 
-- Migration `supabase/migrations/20261012010000_render_job_state.sql`: the new state, the columns, the
+- Migrations `supabase/migrations/20261012000000_render_state_finalizing.sql` (the enum value alone, since Postgres refuses to use a value added in the same transaction) and `20261012010000_render_job_state.sql`: the columns, the
   five service functions, the session function, the grants, the sentences.
 - Regenerated `apps/web/src/lib/database.types.ts`.
 - The job model: `JobRow`, `JOB_COLUMNS`, `toRenderJob`, the `RenderJob` union, the stage mapping, the
@@ -106,7 +106,7 @@ already has `rendering` and `rendered`.
 
 All `security definer`, `set search_path = ''`, `revoke all from public, anon, authenticated`, `grant
 execute to service_role`, refusals raised with errcode 23514 and a plain sentence (section 8). Every
-function locks the job row `for update` first, then the collection row when it writes one.
+function that writes the collection (`art_claim_render`, `art_batch_failed` when final, `art_render_finish`) locks the collection row first, then the job row, as `art_unlock` does; `art_batch_start` and `art_batch_done` lock only the job row, so no lock cycle is possible. Every collection status write is conditional on the current status not being `deployed`: a deployed collection keeps its status (the reveal flow in Phase 5 owns it).
 
 ```sql
 art_claim_render(p_job_id uuid) returns public.render_jobs
@@ -149,12 +149,13 @@ batches_done = batches_total returning id`; `last` is true exactly when that ret
   and the other sees `finalizing` already set.
 
 ```sql
-art_batch_failed(p_job_id uuid, p_index integer, p_code text, p_message text, p_final boolean)
+art_batch_failed(p_job_id uuid, p_index integer, p_code text, p_message text, p_final boolean) -- p_index nullable
   returns public.render_jobs
 ```
 
 - Job not `rendering` or `finalizing`: "This job is not rendering."
 - Batch `done`: "This batch is already done." (a failure report after success is a worker bug).
+- `p_index` null is a job-level failure (the metadata step or the worker's own checks), allowed only with `p_final` true; it touches no batch row. Null with `p_final` false: "A job-level failure must be final."
 - Set the batch `failed`, `error_code = p_code`, `error = p_message`, `finished_at = now()`.
 - When `p_final`: set the job `failed`, `error_code = p_code`, `error = p_message`, `finished_at =
 now()`; for a real job set the collection's status to `art_locked`.
@@ -180,12 +181,12 @@ art_render_retry(p_collection_id uuid) returns public.render_jobs
 `security definer`, `set search_path = ''`, granted to `authenticated` only. Owner through
 `private.lock_owned_collection(p_collection_id, auth.uid())` (42501 'collection not found' for a
 stranger, as the lock functions). The job is the collection's latest `real` job, or its `placeholder`
-job when the collection is deferred and has no real job, chosen as `renderJobCore` chooses.
+job when the collection is deferred and has no real job (unlocked jobs included, so the refusal below can name them).
 
 - Job not `failed`: "This job has not failed."
 - `error = 'unlocked'`: "This job was unlocked. Lock the art again to render it."
 - Set every `failed` batch to `queued` (attempts kept, error kept until the next start clears it); set
-  the job `rendering`, clear `error`, `error_code` and `finished_at`; for a real job set the
+  the job `finalizing` when every batch row is already `done` (a job-level failure in the metadata step; the worker reruns that step) and `rendering` otherwise, clear `error`, `error_code` and `finished_at`; for a real job set the
   collection's status to `rendering`. Returns the job row.
 
 The fourth sub-project's `retryRender` action calls this, then the third sub-project's
@@ -206,6 +207,7 @@ Added to `LOCK_SENTENCES` in `apps/web/src/lib/art/db-error.ts` and exported fro
 - `BATCHES_STILL_RENDERING = 'This job has batches still rendering.'`
 - `JOB_NOT_FAILED = 'This job has not failed.'`
 - `JOB_UNLOCKED = 'This job was unlocked. Lock the art again to render it.'`
+- `JOB_FAILURE_NEEDS_FINAL = 'A job-level failure must be final.'`
 
 ## 9. The job model
 
@@ -214,17 +216,19 @@ Added to `LOCK_SENTENCES` in `apps/web/src/lib/art/db-error.ts` and exported fro
 - `JobRow` gains `base_uri`, `placeholder_image_cid`, `collage_key`, `error_code`, loses `images_cid`;
   `JOB_COLUMNS` follows. A new `BatchRow` type (`index`, `state`, `attempts`, `images_cid`,
   `images_size`, `error`, `error_code`) and `BATCH_COLUMNS`.
-- `toRenderJob(row, batches, placeholder)` takes the job's batch rows ordered by index (empty before
+- `toRenderJob(row, batchRows, extra)` takes the job's batch rows ordered by index (empty before
   claim).
 
 `RenderJob` in `apps/web/src/lib/demo/types.ts`:
 
 ```ts
-type RenderBatches =
-  | { total: number; done: number; size: number }
+type RenderBatches = { total: number; done: number; size: number }
+
+// The render branches of RenderJob; locked, payment_due and the common fields (including payment) are unchanged.
+type RenderBranches =
   | { state: 'paid' | 'waived'; batches: RenderBatches }
-  | { state: 'rendering'; batches: RenderBatches; startedAt: string; failedBatch: number | null }
-  | { state: 'finalizing'; batches: RenderBatches; startedAt: string }
+  | { state: 'rendering'; batches: RenderBatches; startedAt: number; failedBatch: number | null }
+  | { state: 'finalizing'; batches: RenderBatches; startedAt: number }
   | {
       state: 'failed'
       batches: RenderBatches
@@ -236,8 +240,8 @@ type RenderBatches =
   | {
       state: 'done'
       batches: RenderBatches
-      startedAt: string
-      finishedAt: string
+      startedAt: number
+      finishedAt: number
       metadataCid: string
       baseUri: string
       batchCids: string[]
