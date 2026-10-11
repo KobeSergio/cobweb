@@ -114,3 +114,109 @@ $$;
 
 revoke all on function public.art_claim_render(uuid) from public, anon, authenticated;
 grant execute on function public.art_claim_render(uuid) to service_role;
+
+-- ---------------------------------------------------------------------------------------------
+-- art_batch_start: a batch's run begins; a redelivered finished batch is skipped
+-- ---------------------------------------------------------------------------------------------
+create function public.art_batch_start(p_job_id uuid, p_index integer)
+returns public.render_batches
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_job public.render_jobs;
+  v_batch public.render_batches;
+begin
+  select j.* into v_job from public.render_jobs j where j.id = p_job_id for update;
+  if not found or v_job.state <> 'rendering' then
+    raise exception 'This job is not rendering.' using errcode = '23514';
+  end if;
+  select b.* into v_batch
+  from public.render_batches b
+  where b.job_id = p_job_id and b.index = p_index
+  for update;
+  if not found then
+    raise exception 'There is no such batch.' using errcode = '23514';
+  end if;
+  if v_batch.state = 'done' then
+    return v_batch;
+  end if;
+  if v_batch.state = 'running' then
+    -- Another copy is running: counted, otherwise untouched. The worker's output is idempotent.
+    update public.render_batches b
+    set attempts = b.attempts + 1
+    where b.job_id = p_job_id and b.index = p_index
+    returning * into v_batch;
+  else
+    update public.render_batches b
+    set state = 'running', attempts = b.attempts + 1, started_at = now(), finished_at = null,
+        error = null, error_code = null
+    where b.job_id = p_job_id and b.index = p_index
+    returning * into v_batch;
+  end if;
+  return v_batch;
+end;
+$$;
+
+revoke all on function public.art_batch_start(uuid, integer) from public, anon, authenticated;
+grant execute on function public.art_batch_start(uuid, integer) to service_role;
+
+-- ---------------------------------------------------------------------------------------------
+-- art_batch_done: a batch's directory is recorded once; the last one flips the job to finalizing
+-- ---------------------------------------------------------------------------------------------
+-- The output columns are named as the spec names them, and batches_done is also a render_jobs
+-- column: the directive and the table aliases keep every reference in the body on the column.
+create function public.art_batch_done(p_job_id uuid, p_index integer, p_images_cid text, p_images_size bigint)
+returns table (batches_done integer, last boolean)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+#variable_conflict use_column
+declare
+  v_job public.render_jobs;
+  v_batch public.render_batches;
+  v_done integer;
+  v_flipped uuid;
+begin
+  select j.* into v_job from public.render_jobs j where j.id = p_job_id for update;
+  if not found or v_job.state not in ('rendering', 'finalizing') then
+    raise exception 'This job is not rendering.' using errcode = '23514';
+  end if;
+  select b.* into v_batch
+  from public.render_batches b
+  where b.job_id = p_job_id and b.index = p_index
+  for update;
+  if not found then
+    raise exception 'There is no such batch.' using errcode = '23514';
+  end if;
+  if v_batch.state = 'done' then
+    if v_batch.images_cid is distinct from p_images_cid then
+      raise exception 'This batch was already recorded with a different result.' using errcode = '23514';
+    end if;
+    -- A redelivered report of the same result: nothing changes, and it is never the last.
+    return query select v_job.batches_done, false;
+    return;
+  end if;
+  update public.render_batches b
+  set state = 'done', images_cid = p_images_cid, images_size = p_images_size, finished_at = now(),
+      error = null, error_code = null
+  where b.job_id = p_job_id and b.index = p_index;
+  -- Recounted from the rows, never incremented: a redelivery cannot count twice.
+  select count(*)::integer into v_done
+  from public.render_batches b
+  where b.job_id = p_job_id and b.state = 'done';
+  update public.render_jobs j set batches_done = v_done where j.id = p_job_id;
+  -- The one conditional flip. Calls for the last two batches serialize on the job row lock taken
+  -- above: the first sees one batch missing, the second sees the full count and flips.
+  update public.render_jobs j
+  set state = 'finalizing'
+  where j.id = p_job_id and j.state = 'rendering' and j.batches_done = j.batches_total
+  returning j.id into v_flipped;
+  return query select v_done, v_flipped is not null;
+end;
+$$;
+
+revoke all on function public.art_batch_done(uuid, integer, text, bigint) from public, anon, authenticated;
+grant execute on function public.art_batch_done(uuid, integer, text, bigint) to service_role;

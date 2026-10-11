@@ -3016,6 +3016,10 @@ async function batchesOf(jobId: string): Promise<BatchCheck[]> {
   return data as BatchCheck[]
 }
 
+type DoneResult = { batches_done: number; last: boolean }
+/** art_batch_done returns a table: PostgREST answers an array of one row. */
+const doneOf = (data: unknown) => (data as DoneResult[] | null)?.[0]
+
 async function artRenderState(A: Creator, B: Creator): Promise<void> {
   const payer = A.account.address.toLowerCase()
   // One batch (batch size 100, three tokens).
@@ -3132,6 +3136,154 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
       if (mine.data.length !== 3) return `A sees ${mine.data.length} rows`
       const theirs = await B.client.from('render_batches').select('index').eq('job_id', three.jobId)
       return expectNothing(theirs.error as DbError, theirs.data)
+    },
+  )
+
+  // Group 2: a batch starts.
+  await check('art_batch_start: a queued batch runs with its first attempt', async () => {
+    const { data, error } = await callArt(admin, 'art_batch_start', { p_job_id: three.jobId, p_index: 0 })
+    if (error) return describe(error)
+    const batch = data as BatchCheck
+    return batch.state === 'running' &&
+      batch.attempts === 1 &&
+      batch.started_at !== null &&
+      batch.finished_at === null
+      ? null
+      : JSON.stringify(batch)
+  })
+
+  await check('art_batch_start: a redelivered start keeps it running and counts the attempt', async () => {
+    const { data, error } = await callArt(admin, 'art_batch_start', { p_job_id: three.jobId, p_index: 0 })
+    if (error) return describe(error)
+    const batch = data as BatchCheck
+    return batch.state === 'running' && batch.attempts === 2 ? null : JSON.stringify(batch)
+  })
+
+  await check('art_batch_start: an unknown batch is refused', async () => {
+    const { error } = await callArt(admin, 'art_batch_start', { p_job_id: three.jobId, p_index: 3 })
+    return expectSentence(error, CHECK, 'There is no such batch.')
+  })
+
+  await check('art_batch_start and art_batch_done: a job waiting for payment is refused', async () => {
+    const start = await callArt(admin, 'art_batch_start', { p_job_id: due.jobId, p_index: 0 })
+    const done = await callArt(admin, 'art_batch_done', {
+      p_job_id: due.jobId,
+      p_index: 0,
+      p_images_cid: CID('a'),
+      p_images_size: 1,
+    })
+    return (
+      expectSentence(start.error, CHECK, 'This job is not rendering.') ??
+      expectSentence(done.error, CHECK, 'This job is not rendering.')
+    )
+  })
+
+  // Group 3: a batch lands, once.
+  const batch0 = { p_job_id: three.jobId, p_index: 0, p_images_cid: CID('a'), p_images_size: 1024 }
+  await check('art_batch_done: batch 0 is recorded; one of three done, not the last', async () => {
+    const { data, error } = await callArt(admin, 'art_batch_done', batch0)
+    if (error) return describe(error)
+    const result = doneOf(data)
+    const batch = (await batchesOf(three.jobId))[0]
+    const job = await renderJob(three.jobId)
+    return result?.batches_done === 1 &&
+      result.last === false &&
+      batch?.state === 'done' &&
+      batch.images_cid === CID('a') &&
+      batch.finished_at !== null &&
+      job.batches_done === 1 &&
+      job.state === 'rendering'
+      ? null
+      : `${JSON.stringify(result)} ${JSON.stringify(batch)} ${JSON.stringify(job)}`
+  })
+
+  await check('art_batch_done: the same report again changes nothing and is not the last', async () => {
+    const before = (await batchesOf(three.jobId))[0]
+    const { data, error } = await callArt(admin, 'art_batch_done', batch0)
+    if (error) return describe(error)
+    const result = doneOf(data)
+    const after = (await batchesOf(three.jobId))[0]
+    return result?.batches_done === 1 && result.last === false && after?.finished_at === before?.finished_at
+      ? null
+      : `${JSON.stringify(result)} ${JSON.stringify(after)}`
+  })
+
+  await check('art_batch_done: a different CID for a done batch is refused', async () => {
+    const { error } = await callArt(admin, 'art_batch_done', { ...batch0, p_images_cid: CID('b') })
+    return expectSentence(error, CHECK, 'This batch was already recorded with a different result.')
+  })
+
+  await check('art_batch_start: a redelivered start of a done batch returns it unchanged', async () => {
+    const { data, error } = await callArt(admin, 'art_batch_start', { p_job_id: three.jobId, p_index: 0 })
+    if (error) return describe(error)
+    const batch = data as BatchCheck
+    return batch.state === 'done' && batch.attempts === 2 && batch.images_cid === CID('a')
+      ? null
+      : JSON.stringify(batch)
+  })
+
+  await check('art_batch_done: a missing or malformed CID is refused and the batch stays open', async () => {
+    const missing = await callArt(admin, 'art_batch_done', {
+      p_job_id: three.jobId,
+      p_index: 1,
+      p_images_cid: null,
+      p_images_size: 1,
+    })
+    const malformed = await callArt(admin, 'art_batch_done', {
+      p_job_id: three.jobId,
+      p_index: 1,
+      p_images_cid: 'QmNotBase32',
+      p_images_size: 1,
+    })
+    const problem = expectError(missing.error, CHECK) ?? expectError(malformed.error, CHECK)
+    if (problem) return problem
+    const batch = (await batchesOf(three.jobId))[1]
+    const job = await renderJob(three.jobId)
+    return batch?.state === 'queued' && job.batches_done === 1
+      ? null
+      : `${JSON.stringify(batch)} ${JSON.stringify(job)}`
+  })
+
+  // Group 4: the last two batches land at once. Two PostgREST requests run on two connections, so the
+  // job row lock really serializes them.
+  await check(
+    'art_batch_done: the last two batches at once flip the job to finalizing exactly once',
+    async () => {
+      const results = await Promise.all(
+        [1, 2].map((index) =>
+          callArt(admin, 'art_batch_done', {
+            p_job_id: three.jobId,
+            p_index: index,
+            p_images_cid: CID(index === 1 ? 'c' : 'd'),
+            p_images_size: 2048,
+          }),
+        ),
+      )
+      const refused = results.find((r) => r.error)
+      if (refused) return describe(refused.error)
+      const lasts = results.filter((r) => doneOf(r.data)?.last === true).length
+      const job = await renderJob(three.jobId)
+      return lasts === 1 && job.state === 'finalizing' && job.batches_done === 3
+        ? null
+        : `${lasts} last, ${JSON.stringify(job)}`
+    },
+  )
+
+  await check(
+    'art_batch_done: a redelivered last batch after the flip changes nothing and is not the last',
+    async () => {
+      const { data, error } = await callArt(admin, 'art_batch_done', {
+        p_job_id: three.jobId,
+        p_index: 2,
+        p_images_cid: CID('d'),
+        p_images_size: 2048,
+      })
+      if (error) return describe(error)
+      const result = doneOf(data)
+      const job = await renderJob(three.jobId)
+      return result?.last === false && result.batches_done === 3 && job.state === 'finalizing'
+        ? null
+        : `${JSON.stringify(result)} ${JSON.stringify(job)}`
     },
   )
 }

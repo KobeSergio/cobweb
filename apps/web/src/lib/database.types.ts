@@ -738,6 +738,42 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      art_batch_done: {
+        Args: {
+          p_images_cid: string
+          p_images_size: number
+          p_index: number
+          p_job_id: string
+        }
+        Returns: {
+          batches_done: number
+          last: boolean
+        }[]
+      }
+      art_batch_start: {
+        Args: { p_index: number; p_job_id: string }
+        Returns: {
+          attempts: number
+          error: string | null
+          error_code: string | null
+          finished_at: string | null
+          first_token_id: number
+          images_cid: string | null
+          images_size: number | null
+          index: number
+          job_id: string
+          last_token_id: number
+          started_at: string | null
+          state: Database['public']['Enums']['batch_state']
+          updated_at: string
+        }
+        SetofOptions: {
+          from: '*'
+          to: 'render_batches'
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       art_claim_render: {
         Args: { p_job_id: string }
         Returns: {
