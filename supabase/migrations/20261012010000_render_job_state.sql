@@ -29,6 +29,9 @@ alter table public.render_jobs
   -- RenderProblem.code, or the worker's own (dead-letter, payment-mismatch, cid-mismatch). error
   -- keeps the sentence.
   add column error_code text check (error_code is null or char_length(error_code) between 1 and 40),
+  -- How many times the creator retried the job; art_render_retry stops at five.
+  add column retries integer not null default 0,
+  add constraint render_jobs_retries_range check (retries between 0 and 5),
   add constraint render_jobs_metadata_cid_valid
     check (metadata_cid is null or metadata_cid ~ '^[a-z2-7]{59}$'),
   -- The base URI is the directory of the metadata CID, so the two cannot name different uploads.
@@ -395,8 +398,17 @@ begin
   if v_job.error = 'unlocked' then
     raise exception 'This job was unlocked. Lock the art again to render it.' using errcode = '23514';
   end if;
-  -- Attempts are kept; each batch's error stays until its next start clears it.
-  update public.render_batches b set state = 'queued' where b.job_id = v_job.id and b.state = 'failed';
+  if v_job.retries >= 5 then
+    raise exception 'This job has been retried too many times. Tell support about it.' using errcode = '23514';
+  end if;
+  -- A failed job that never seeded a batch failed before the worker claimed it: nothing to retry.
+  if not exists (select 1 from public.render_batches b where b.job_id = v_job.id) then
+    raise exception 'This job is not ready to render.' using errcode = '23514';
+  end if;
+  -- Attempts are kept; each batch's error stays until its next start clears it. A batch left
+  -- running belongs to a worker that died with the job, so it is queued again with the failed ones.
+  update public.render_batches b set state = 'queued'
+  where b.job_id = v_job.id and b.state in ('failed', 'running');
   -- With every batch done (a job-level failure in the metadata step) nothing is re-queued: the job
   -- goes back to finalizing and the metadata step reruns. Otherwise it renders the queued batches.
   update public.render_jobs j
@@ -405,7 +417,7 @@ begin
           then 'rendering'::public.render_state
         else 'finalizing'::public.render_state
       end,
-      error = null, error_code = null, finished_at = null
+      error = null, error_code = null, finished_at = null, retries = j.retries + 1
   where j.id = v_job.id and j.collection_id = p_collection_id
   returning * into v_job;
   -- A deployed collection keeps its status: the reveal flow (Phase 5) owns it.

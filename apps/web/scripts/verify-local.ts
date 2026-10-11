@@ -3052,6 +3052,11 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
   // One batch each: a code longer than the column allows, and a deployed collection failed for good.
   const clamp = await renderFixture(A, payer, 107)
   const held = await renderFixture(A, payer, 108)
+  // One batch failed for good over and over (the retry cap), a three-batch job left half run, and a
+  // paid job failed by hand with no batch rows.
+  const capped = await renderFixture(A, payer, 109)
+  const mixed = await renderFixture(A, payer, 110)
+  const bare = await renderFixture(A, payer, 111)
 
   await check(
     'render state: the new job and batch columns exist and render_jobs.images_cid is gone',
@@ -3705,6 +3710,114 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
     return expectSentence(error, CHECK, 'This job was unlocked. Lock the art again to render it.')
   })
 
+  await check('art_render_retry: a deployed collection is retried and stays deployed', async () => {
+    const { data, error } = await callArt(A.client, 'art_render_retry', { p_collection_id: held.cid })
+    if (error) return describe(error)
+    const job = await renderJob(held.jobId)
+    const status = (await lockState(held.cid)).status
+    return (data as { id?: string } | null)?.id === held.jobId &&
+      job.state !== 'failed' &&
+      status === 'deployed'
+      ? null
+      : `${JSON.stringify(job)} collection ${status}`
+  })
+
+  await check(
+    'art_render_retry: the sixth retry is refused, and the job stays failed with five retries counted',
+    async () => {
+      const claim = await callArt(admin, 'art_claim_render', { p_job_id: capped.jobId })
+      if (claim.error) return `setup: claim: ${describe(claim.error)}`
+      const failFinally = async (): Promise<string | null> => {
+        const start = await callArt(admin, 'art_batch_start', { p_job_id: capped.jobId, p_index: 0 })
+        if (start.error) return `start: ${describe(start.error)}`
+        const failed = await callArt(admin, 'art_batch_failed', {
+          p_job_id: capped.jobId,
+          p_index: 0,
+          p_code: 'render-timeout',
+          p_message: 'The batch took too long.',
+          p_final: true,
+        })
+        return failed.error ? `failed: ${describe(failed.error)}` : null
+      }
+      for (let round = 1; round <= 5; round++) {
+        const problem = await failFinally()
+        if (problem) return `round ${round}: ${problem}`
+        const retry = await callArt(A.client, 'art_render_retry', { p_collection_id: capped.cid })
+        if (retry.error) return `retry ${round}: ${describe(retry.error)}`
+      }
+      const problem = await failFinally()
+      if (problem) return `round 6: ${problem}`
+      const { error } = await callArt(A.client, 'art_render_retry', { p_collection_id: capped.cid })
+      const refused = expectSentence(
+        error,
+        CHECK,
+        'This job has been retried too many times. Tell support about it.',
+      )
+      if (refused) return refused
+      const row = await admin.from('render_jobs').select('state, retries').eq('id', capped.jobId).single()
+      if (row.error) return describe(row.error as DbError)
+      return row.data.state === 'failed' && row.data.retries === 5 ? null : JSON.stringify(row.data)
+    },
+  )
+
+  await check(
+    'art_render_retry: a batch left running is queued again with the failed one, and the done one keeps its CID',
+    async () => {
+      const set = await admin
+        .from('render_jobs')
+        .update({ batch_size: 1, batches_total: 3 })
+        .eq('id', mixed.jobId)
+      if (set.error) return `setup: ${describe(set.error as DbError)}`
+      const { failed } = await runSteps(
+        [
+          ['art_claim_render', { p_job_id: mixed.jobId }],
+          [
+            'art_batch_done',
+            { p_job_id: mixed.jobId, p_index: 0, p_images_cid: CID('g'), p_images_size: 2048 },
+          ],
+          ['art_batch_start', { p_job_id: mixed.jobId, p_index: 1 }],
+          ['art_batch_start', { p_job_id: mixed.jobId, p_index: 2 }],
+          [
+            'art_batch_failed',
+            {
+              p_job_id: mixed.jobId,
+              p_index: 2,
+              p_code: 'render-timeout',
+              p_message: 'The batch took too long.',
+              p_final: true,
+            },
+          ],
+        ],
+        async () => '',
+      )
+      if (failed) return `setup: ${failed}`
+      const before = (await batchesOf(mixed.jobId)).map((b) => b.state).join(' ')
+      if (before !== 'done running failed') return `setup: batches ${before}`
+      const retry = await callArt(A.client, 'art_render_retry', { p_collection_id: mixed.cid })
+      if (retry.error) return describe(retry.error)
+      const job = await renderJob(mixed.jobId)
+      const batches = (await batchesOf(mixed.jobId))
+        .map((b) => `${b.index}:${b.state}:${b.images_cid ?? '-'}:${b.attempts}`)
+        .join(' ')
+      return job.state === 'rendering' && batches === `0:done:${CID('g')}:0 1:queued:-:1 2:queued:-:1`
+        ? null
+        : `${JSON.stringify(job)} ${batches}`
+    },
+  )
+
+  await check('art_render_retry: a failed job with no batch rows and no unlock is not ready', async () => {
+    const set = await admin
+      .from('render_jobs')
+      .update({ state: 'failed', error: 'The art could not be read.', error_code: 'layer-missing' })
+      .eq('id', bare.jobId)
+    if (set.error) return `setup: ${describe(set.error as DbError)}`
+    const { error } = await callArt(A.client, 'art_render_retry', { p_collection_id: bare.cid })
+    const refused = expectSentence(error, CHECK, 'This job is not ready to render.')
+    if (refused) return refused
+    const job = await renderJob(bare.jobId)
+    return job.state === 'failed' ? null : `the refused call changed the job: ${job.state}`
+  })
+
   // Group 8: who may call them. The five service functions take a job id and check nothing else, so
   // only the service role may run them.
   const renderCalls: [string, Record<string, unknown>][] = [
@@ -3739,7 +3852,7 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
         ['art_render_retry', { p_collection_id: one.cid }] as [string, Record<string, unknown>],
       ]) {
         const { error } = await callArt(anon, fn, args)
-        const problem = expectError(error, PERMISSION)
+        const problem = expectSentence(error, PERMISSION, 'permission denied')
         if (problem) problems.push(`${fn}: ${problem}`)
       }
       const job = await renderJob(one.jobId)

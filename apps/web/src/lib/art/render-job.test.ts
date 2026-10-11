@@ -36,6 +36,7 @@ const row = (overrides: Partial<JobRow> = {}): JobRow => ({
   onchain_job_id: ONCHAIN,
   error: null,
   error_code: null,
+  retries: 0,
   created_at: '2026-10-09T10:00:00+00:00',
   started_at: null,
   finished_at: null,
@@ -83,7 +84,7 @@ describe('toRenderJob', () => {
   })
 
   it('reads the new job columns and the batch columns, and no longer reads images_cid', () => {
-    for (const column of ['base_uri', 'placeholder_image_cid', 'collage_key', 'error_code'])
+    for (const column of ['base_uri', 'placeholder_image_cid', 'collage_key', 'error_code', 'retries'])
       expect(JOB_COLUMNS).toContain(column)
     expect(JOB_COLUMNS).not.toContain('images_cid')
     expect(BATCH_COLUMNS).toBe('index, state, attempts, images_cid, images_size, error, error_code')

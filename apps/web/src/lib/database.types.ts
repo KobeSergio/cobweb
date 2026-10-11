@@ -377,6 +377,7 @@ export type Database = {
           quote_factory: string | null
           quote_payer: string | null
           quote_total_wei: number
+          retries: number
           started_at: string | null
           state: Database['public']['Enums']['render_state']
           token_count: number
@@ -413,6 +414,7 @@ export type Database = {
           quote_factory?: string | null
           quote_payer?: string | null
           quote_total_wei: number
+          retries?: number
           started_at?: string | null
           state?: Database['public']['Enums']['render_state']
           token_count: number
@@ -449,6 +451,7 @@ export type Database = {
           quote_factory?: string | null
           quote_payer?: string | null
           quote_total_wei?: number
+          retries?: number
           started_at?: string | null
           state?: Database['public']['Enums']['render_state']
           token_count?: number
@@ -785,6 +788,7 @@ export type Database = {
           quote_factory: string | null
           quote_payer: string | null
           quote_total_wei: number
+          retries: number
           started_at: string | null
           state: Database['public']['Enums']['render_state']
           token_count: number
@@ -854,6 +858,7 @@ export type Database = {
           quote_factory: string | null
           quote_payer: string | null
           quote_total_wei: number
+          retries: number
           started_at: string | null
           state: Database['public']['Enums']['render_state']
           token_count: number
@@ -934,6 +939,7 @@ export type Database = {
           quote_factory: string | null
           quote_payer: string | null
           quote_total_wei: number
+          retries: number
           started_at: string | null
           state: Database['public']['Enums']['render_state']
           token_count: number
@@ -979,6 +985,7 @@ export type Database = {
           quote_factory: string | null
           quote_payer: string | null
           quote_total_wei: number
+          retries: number
           started_at: string | null
           state: Database['public']['Enums']['render_state']
           token_count: number
@@ -1039,6 +1046,7 @@ export type Database = {
           quote_factory: string | null
           quote_payer: string | null
           quote_total_wei: number
+          retries: number
           started_at: string | null
           state: Database['public']['Enums']['render_state']
           token_count: number
@@ -1090,6 +1098,7 @@ export type Database = {
           quote_factory: string | null
           quote_payer: string | null
           quote_total_wei: number
+          retries: number
           started_at: string | null
           state: Database['public']['Enums']['render_state']
           token_count: number
@@ -1135,6 +1144,7 @@ export type Database = {
           quote_factory: string | null
           quote_payer: string | null
           quote_total_wei: number
+          retries: number
           started_at: string | null
           state: Database['public']['Enums']['render_state']
           token_count: number
@@ -1184,6 +1194,7 @@ export type Database = {
           quote_factory: string | null
           quote_payer: string | null
           quote_total_wei: number
+          retries: number
           started_at: string | null
           state: Database['public']['Enums']['render_state']
           token_count: number

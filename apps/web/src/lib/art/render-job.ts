@@ -34,6 +34,8 @@ export type JobRow = {
   onchain_job_id: string | null
   error: string | null
   error_code: string | null
+  /** How many times the creator retried the job; five is the cap. */
+  retries: number
   created_at: string
   started_at: string | null
   finished_at: string | null
@@ -44,7 +46,7 @@ export type JobRow = {
  * 2^53 wei; the casts keep every wei (Review Focus 3).
  */
 export const JOB_COLUMNS =
-  'id, collection_id, kind, state, token_count, token_list_hash, allow_duplicates, fee_per_token_wei::text, quote_total_wei::text, quote_chain_id, quote_payer, quote_factory, quote_expires_at, payment_tx_hash, paid_at, paid_amount_wei::text, batch_size, batches_total, batches_done, metadata_cid, base_uri, placeholder_image_cid, collage_key, placeholder_upload_id, onchain_job_id, error, error_code, created_at, started_at, finished_at'
+  'id, collection_id, kind, state, token_count, token_list_hash, allow_duplicates, fee_per_token_wei::text, quote_total_wei::text, quote_chain_id, quote_payer, quote_factory, quote_expires_at, payment_tx_hash, paid_at, paid_amount_wei::text, batch_size, batches_total, batches_done, metadata_cid, base_uri, placeholder_image_cid, collage_key, placeholder_upload_id, onchain_job_id, error, error_code, retries, created_at, started_at, finished_at'
 
 /** A render_batches row as the lock core reads it (`BATCH_COLUMNS`). */
 export type BatchRow = {
