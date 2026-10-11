@@ -63,7 +63,7 @@ Out (later sub-projects):
   `@ipld/unixfs`, `@ipld/car`, `multiformats`, and `@cobweb/dna` (workspace) for `tokenAttributes` and
   the token types. Exact pins, no caret, for `sharp`, `@ipld/unixfs` and `@ipld/car`: their output is
   the CID.
-- `devDependencies`: `vitest` as the other packages, `@types/node`.
+- `devDependencies`: `vitest` and `@types/node` with the root's specifiers. `multiformats` is pinned exactly too.
 - Scripts `typecheck`, `lint`, `test` as today; `test` drops `--passWithNoTests`.
 - `tsconfig.json` keeps `../../tsconfig.base.json` and adds `"types": ["node"]`.
 
@@ -192,14 +192,14 @@ export function placeholderMetadataJson(input: {
 ```
 
 - Key order is fixed: `name`, `description`, `image`, `attributes`, then the extra fields in the order
-  given. `JSON.stringify(value, null, 2)` once, UTF-8, no trailing newline.
+  given. Written entry by entry with two-space indentation (JavaScript's own serializer would move an integer-like key such as `2024` ahead of `name`), UTF-8, no trailing newline; a test shows the bytes equal `JSON.stringify(value, null, 2)` for ordinary keys.
 - `name` is `` `${text.tokenName} #${id}` ``. `description` is the token's own when not null, else
   `text.tokenDescription`.
 - `attributes` for a generative token come from `tokenAttributes` in `@cobweb/dna` (blank left out
   unless `showBlankTraits`, `inMetadata` false left out, `displayName` over `name`); for an asset token
   they are the list stored at lock, unchanged.
 - An extra field whose key is in `RESERVED_KEYS` is refused with `RenderProblem` code `reserved-key`.
-  The check runs once per spec, before any token is rendered.
+  The check runs at the start of `renderBatch` and `renderMetadataSet`, before any token is rendered, and again as a guard inside the serializer.
 - The placeholder JSON has `name`, `description` and `image` only.
 
 ## 8. Content archives (`src/car.ts`)
@@ -213,7 +213,7 @@ export async function packDirectory(files: { name: string; bytes: Uint8Array }[]
 - UnixFS, CIDv1, sha2-256, raw leaves, fixed-size chunks of 1,048,576 bytes, files sorted by name in
   byte order, duplicate names refused (`RenderProblem` code `duplicate-name`).
 - A directory is a plain UnixFS directory unless its encoded block would exceed 262,144 bytes; then it
-  is a HAMT-sharded directory with the standard fanout (256, murmur3), the same rule and parameters
+  is a HAMT-sharded directory with the standard fanout (256, murmur3), the block-size rule above (Kubo estimates from link lengths, which is close but not identical), the same parameters
   Kubo applies, so a 100,000 entry metadata set still packs and a gateway still resolves it.
 - The CAR has the directory as its single root. `cid` is the root as a base32 string. `size` is the
   CAR length in bytes.
@@ -240,7 +240,7 @@ export async function renderBatch(
 - `batchNo` is 0-based; the tokens must be exactly those with
   `floor((id - 1) / spec.batchSize) === batchNo`, else `RenderProblem` code `batch-range`.
 - Generative: for each token, the collection's layers bottom first; for layer `i` the trait with id
-  `dna[i]`; an unknown trait id is `RenderProblem` code `bad-dna` naming the token; a non-blank trait
+  `dna[i]`; an unknown trait id is `RenderProblem` code `bad-dna` naming the token; a DNA of the wrong length, a trait from another layer or an unknown collection is `bad-dna` too; an asset token in a generative batch is `bad-dna` and a generative token in an asset batch is `missing-image`; a non-blank trait
   loads its image through `loadImage` (a thrown load is `missing-image` naming the key and the token).
   The file is `<id>.png`. Images are loaded once per distinct key within the batch.
 - 1/1 and single asset: the token's image bytes pass through unchanged, named `<id>.<ext>`.
@@ -262,7 +262,7 @@ export async function renderMetadataSet(
   and the asset's own extension otherwise.
 - Generative and 1/1: files named by bare id (`1`, `2`, ...), `baseUri` `` `ipfs://${cid}/` ``, so
   the contract's `tokenURI` is `baseUri + id`.
-- Single asset: one file `metadata.json` describing token 1 (every token shares it), `baseUri`
+- Single asset: one file `metadata.json` describing token 1 (every token shares it, so the name reads `<tokenName> #1`; a list without token 1 is `batch-range`), `baseUri`
   `` `ipfs://${cid}/metadata.json` ``; with no trailing slash the contract returns it for every token.
 
 ```ts
@@ -287,7 +287,7 @@ export async function previewCollage(
 
 A grid of the images given (the worker passes the first 16 rendered tokens), 4 columns by default,
 each resized to `cell` (256) pixels with `fit: 'contain'` on a transparent background, PNG with the
-same pinned settings as section 6. Fewer images than cells leaves the rest transparent. Zero images is
+same pinned settings as section 6. The grid has `ceil(n / columns)` rows, so 3 images give one row of 4 with the last cell transparent. Zero images is
 `RenderProblem` code `empty-collage`.
 
 ## 11. Problems (`src/problems.ts`)
