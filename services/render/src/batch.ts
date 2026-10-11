@@ -4,7 +4,7 @@ import { compositeToken } from './composite'
 import { batchOf, isGenerativeToken, resolveTraits } from './generative'
 import { assertExtraFields } from './metadata'
 import { mapLimit } from './pool'
-import { forToken, RenderProblem } from './problems'
+import { forToken, reasonOf, RenderProblem } from './problems'
 import type { AssetSpec, AssetToken, GenerativeSpec, GenerativeToken, ImageRef, LoadImage } from './types'
 
 export type RenderedBatch = PackedDirectory & {
@@ -25,13 +25,13 @@ function cachedLoader(loadImage: LoadImage): CachedLoad {
     }
     try {
       return await pending
-    } catch {
+    } catch (error) {
       throw new RenderProblem(
         'missing-image',
-        `The image ${ref.key} for token ${tokenId} could not be loaded.`,
+        `Token ${tokenId}: The image ${ref.key} could not be loaded.`,
         {
           tokenId,
-          detail: { key: ref.key },
+          detail: { key: ref.key, reason: reasonOf(error) },
         },
       )
     }

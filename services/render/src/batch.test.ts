@@ -77,11 +77,13 @@ describe('renderBatch, generative', () => {
   it('turns a thrown load into missing-image naming the key and the token', async () => {
     const images = await owlImages()
     delete images['eyes-sleepy.png']
-    await expect(renderBatch(owlSpec(), 0, tokens, memoryLoader(images))).rejects.toMatchObject({
+    const error = await renderBatch(owlSpec(), 0, tokens, memoryLoader(images)).catch((e: unknown) => e)
+    expect(error).toMatchObject({
       code: 'missing-image',
       tokenId: 2,
-      detail: { key: 'eyes-sleepy.png' },
+      detail: { key: 'eyes-sleepy.png', reason: 'No object at eyes-sleepy.png' },
     })
+    expect((error as Error).message).toBe('Token 2: The image eyes-sleepy.png could not be loaded.')
   })
 
   it('rejects the whole batch when one token fails, naming it', async () => {
@@ -108,8 +110,13 @@ describe('renderBatch, generative', () => {
 
   it('refuses two tokens with the same id', async () => {
     await expect(
-      renderBatch(owlSpec(), 0, [tokens[1]!, tokens[1]!], memoryLoader(await owlImages())),
-    ).rejects.toMatchObject({ code: 'duplicate-name' })
+      renderBatch(
+        owlSpec(),
+        0,
+        [owl(1, ['bg-ink', 'eyes-wide', 'hat-none']), owl(1, ['bg-ink', 'eyes-wide', 'hat-none'])],
+        memoryLoader(await owlImages()),
+      ),
+    ).rejects.toMatchObject({ code: 'duplicate-name', tokenId: 1 })
   })
 
   it('refuses a duplicate id even when the tokens differ', async () => {

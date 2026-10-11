@@ -33,6 +33,18 @@ describe('mapLimit', () => {
     expect(started.length).toBeLessThan(6)
   })
 
+  it('rejects with the lowest failing index even when a higher one settles first', async () => {
+    const error = await mapLimit([1, 2], 2, async (n) => {
+      if (n === 1) {
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      }
+      throw new Error(`item ${n} failed`)
+    }).catch((e: unknown) => e)
+    expect((error as Error).message).toBe('item 1 failed')
+  })
+
   it('handles an empty list', async () => {
     expect(await mapLimit([], 4, async (n: number) => n)).toEqual([])
   })
