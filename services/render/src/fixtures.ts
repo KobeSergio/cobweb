@@ -3,6 +3,7 @@
  * PNG chunk reader and a CAR reader. Not exported from the package.
  */
 import { sharp, TRANSPARENT } from './png'
+import type { GenerativeSpec, ImageRef, MetadataText } from './types'
 
 export type Rgba = { r: number; g: number; b: number; alpha: number }
 
@@ -52,4 +53,80 @@ export function pngChunks(png: Uint8Array): string[] {
     at += 12 + length
   }
   return types
+}
+
+export const TEXT: MetadataText = {
+  tokenName: 'Owl',
+  tokenDescription: 'A night owl.',
+  showBlankTraits: false,
+  extraFields: {},
+}
+
+const ref = (key: string): ImageRef => ({ key, ext: 'png' })
+
+/**
+ * One collection, `owls`, three layers bottom first: Background shown as "Scene" (ink, dusk), Eyes
+ * (wide, and sleepy which is left out of metadata) and Hat (a blank "None", and cap at `hatOpacity`).
+ */
+export function owlSpec(options: { hatOpacity?: number; showBlankTraits?: boolean } = {}): GenerativeSpec {
+  return {
+    kind: 'generative',
+    canvas: 64,
+    batchSize: 100,
+    text: { ...TEXT, showBlankTraits: options.showBlankTraits ?? false },
+    collections: [
+      {
+        id: 'owls',
+        layers: [
+          {
+            id: 'background',
+            name: 'Background',
+            displayName: 'Scene',
+            opacity: 1,
+            traits: [
+              { id: 'bg-ink', name: 'Ink', blank: false, inMetadata: true, image: ref('bg-ink.png') },
+              { id: 'bg-dusk', name: 'Dusk', blank: false, inMetadata: true, image: ref('bg-dusk.png') },
+            ],
+          },
+          {
+            id: 'eyes',
+            name: 'Eyes',
+            displayName: null,
+            opacity: 1,
+            traits: [
+              { id: 'eyes-wide', name: 'Wide', blank: false, inMetadata: true, image: ref('eyes-wide.png') },
+              {
+                id: 'eyes-sleepy',
+                name: 'Sleepy',
+                blank: false,
+                inMetadata: false,
+                image: ref('eyes-sleepy.png'),
+              },
+            ],
+          },
+          {
+            id: 'hat',
+            name: 'Hat',
+            displayName: null,
+            opacity: options.hatOpacity ?? 1,
+            traits: [
+              { id: 'hat-none', name: 'None', blank: true, inMetadata: true, image: null },
+              { id: 'hat-cap', name: 'Cap', blank: false, inMetadata: true, image: ref('hat-cap.png') },
+            ],
+          },
+        ],
+      },
+    ],
+  }
+}
+
+/** Images for every key `owlSpec` names, 64 by 64. */
+export async function owlImages(): Promise<Record<string, Uint8Array>> {
+  return {
+    'bg-ink.png': await flatPng({ r: 20, g: 20, b: 60, alpha: 1 }),
+    'bg-dusk.png': await flatPng({ r: 200, g: 120, b: 60, alpha: 1 }),
+    'eyes-wide.png': await halfAlphaSquarePng({ r: 255, g: 255, b: 0 }),
+    'eyes-sleepy.png': await halfAlphaSquarePng({ r: 0, g: 255, b: 255 }),
+    'hat-cap.png': await halfAlphaSquarePng({ r: 255, g: 0, b: 0 }),
+  }
 }
