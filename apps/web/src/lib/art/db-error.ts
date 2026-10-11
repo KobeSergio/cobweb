@@ -1,6 +1,10 @@
 import {
   ALREADY_LOCKED,
   ART_CHANGED,
+  BATCH_ALREADY_DONE,
+  BATCH_COUNT_MISMATCH,
+  BATCH_RESULT_DIFFERS,
+  BATCHES_STILL_RENDERING,
   CHAIN_NOT_READY,
   CHANGED_ELSEWHERE,
   CLEAR_FIRST,
@@ -9,11 +13,18 @@ import {
   FEE_NOT_WHOLE,
   HASH_INVALID,
   IMPORT_REFUSED,
+  JOB_FAILURE_NEEDS_FINAL,
+  JOB_NOT_FAILED,
+  JOB_NOT_READY,
+  JOB_NOT_RENDERING,
+  JOB_RESULT_DIFFERS,
+  JOB_UNLOCKED,
   LOCKED,
   NO_CHAIN,
   NO_PAYMENT_DUE,
   NO_PAYMENT_FOR_JOB,
   NO_PLACEHOLDER,
+  NO_SUCH_BATCH,
   NOT_DEFERRED,
   NOT_FOUND,
   NOT_LOCKED,
@@ -30,6 +41,7 @@ import {
   QUOTE_EXPIRED,
   QUOTE_FROZEN,
   QUOTE_NOT_EXPIRED,
+  RETRY_LIMIT,
   SAVE_CAP,
   SHORT_PAYMENT,
   SUPPLY_MISMATCH,
@@ -67,7 +79,10 @@ export function artWriteError(error: DbError): string {
   return UNSAVED
 }
 
-/** Sentences the lock and pay functions raise (supabase/migrations/20261009020000_lock_and_pay.sql). */
+/**
+ * Sentences the lock, pay and render functions raise (supabase/migrations/20261009020000_lock_and_pay.sql,
+ * 20261012010000_render_job_state.sql).
+ */
 const LOCK_SENTENCES = new Set([
   ALREADY_LOCKED,
   ART_CHANGED,
@@ -94,6 +109,18 @@ const LOCK_SENTENCES = new Set([
   QUOTE_FROZEN,
   PAYMENT_USED_FOR_JOB,
   PAYMENT_AMOUNT_INVALID,
+  JOB_NOT_READY,
+  BATCH_COUNT_MISMATCH,
+  JOB_NOT_RENDERING,
+  NO_SUCH_BATCH,
+  BATCH_RESULT_DIFFERS,
+  BATCH_ALREADY_DONE,
+  JOB_RESULT_DIFFERS,
+  BATCHES_STILL_RENDERING,
+  JOB_NOT_FAILED,
+  JOB_UNLOCKED,
+  JOB_FAILURE_NEEDS_FINAL,
+  RETRY_LIMIT,
 ])
 
 /** A failed lock or payment write, by SQLSTATE, in the creator's words (docs/specs/2026-10-09-lock-and-pay.md). */

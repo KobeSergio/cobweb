@@ -3862,6 +3862,91 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
       return problems.length ? problems.join('; ') : null
     },
   )
+
+  // Group 9: deferred art. The placeholder job runs the same path and never moves the collection's status.
+  const d = (await insertCollection(A.client)).row!.id
+  const deferredSet = await A.client.from('collections').update({ art_deferred: true }).eq('id', d)
+  if (deferredSet.error) throw new Error(`setup: ${describe(deferredSet.error as DbError)}`)
+  const placeholderUpload = await recordUpload(A.client, d, { kind: 'placeholder' })
+  if (!placeholderUpload.id) throw new Error(`setup: ${describe(placeholderUpload.error)}`)
+  const placeholderLock = await callArt(A.client, 'art_lock_placeholder', {
+    p_collection_id: d,
+    p_placeholder_upload_id: placeholderUpload.id,
+  })
+  if (placeholderLock.error) throw new Error(`setup: ${describe(placeholderLock.error)}`)
+  const placeholderJob = idOf(placeholderLock.data)
+
+  await check('placeholder render: the claim seeds one batch and the collection stays draft', async () => {
+    const { error } = await callArt(admin, 'art_claim_render', { p_job_id: placeholderJob })
+    if (error) return describe(error)
+    const job = await renderJob(placeholderJob)
+    const batches = (await batchesOf(placeholderJob))
+      .map((b) => `${b.index}:${b.first_token_id}-${b.last_token_id}`)
+      .join(' ')
+    const status = (await lockState(d)).status
+    return job.state === 'rendering' && batches === '0:1-1' && status === 'draft'
+      ? null
+      : `${job.state} ${batches} ${status}`
+  })
+
+  await check(
+    "placeholder render: a final failure and the owner's retry pick the placeholder job and leave the status alone",
+    async () => {
+      const start = await callArt(admin, 'art_batch_start', { p_job_id: placeholderJob, p_index: 0 })
+      if (start.error) return `start: ${describe(start.error)}`
+      const failed = await callArt(admin, 'art_batch_failed', {
+        p_job_id: placeholderJob,
+        p_index: 0,
+        p_code: 'placeholder-unreadable',
+        p_message: 'The placeholder file could not be read.',
+        p_final: true,
+      })
+      if (failed.error) return `failed: ${describe(failed.error)}`
+      const afterFailure = (await lockState(d)).status
+      const failedJob = await renderJob(placeholderJob)
+      const retry = await callArt(A.client, 'art_render_retry', { p_collection_id: d })
+      if (retry.error) return `retry: ${describe(retry.error)}`
+      const job = await renderJob(placeholderJob)
+      const status = (await lockState(d)).status
+      return (retry.data as { id?: string } | null)?.id === placeholderJob &&
+        failedJob.state === 'failed' &&
+        job.state === 'rendering' &&
+        afterFailure === 'draft' &&
+        status === 'draft'
+        ? null
+        : `${JSON.stringify(job)} after failure ${afterFailure}, after retry ${status}`
+    },
+  )
+
+  await check(
+    'placeholder render: its batch lands last and the job finishes on a metadata file with its image CID',
+    async () => {
+      const done = await callArt(admin, 'art_batch_done', {
+        p_job_id: placeholderJob,
+        p_index: 0,
+        p_images_cid: CID('p'),
+        p_images_size: 512,
+      })
+      if (done.error) return `done: ${describe(done.error)}`
+      const finish = await callArt(admin, 'art_render_finish', {
+        p_job_id: placeholderJob,
+        p_metadata_cid: CID('q'),
+        p_base_uri: `ipfs://${CID('q')}/metadata.json`,
+        p_placeholder_image_cid: CID('p'),
+      })
+      if (finish.error) return `finish: ${describe(finish.error)}`
+      const job = await renderJob(placeholderJob)
+      const status = (await lockState(d)).status
+      return doneOf(done.data)?.last === true &&
+        job.state === 'done' &&
+        job.metadata_cid === CID('q') &&
+        job.base_uri === `ipfs://${CID('q')}/metadata.json` &&
+        job.placeholder_image_cid === CID('p') &&
+        status === 'draft'
+        ? null
+        : `${JSON.stringify(job)} collection ${status}`
+    },
+  )
 }
 
 // ---------------------------------------------------------------------------------------------

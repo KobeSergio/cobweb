@@ -58,3 +58,19 @@ export const CHAIN_NOT_READY = 'This chain is not ready for payments yet.'
 export const NOT_CONFIRMED = 'The payment has not been confirmed on chain yet.'
 export const TIMED_OUT = 'The payment is not confirmed yet. Try again in a minute; you will not pay twice.'
 export const NOT_A_HASH = 'That is not a transaction hash.'
+
+// Render job state (docs/specs/2026-10-12-render-job-state.md, section 8). The database raises these as they are.
+export const JOB_NOT_READY = 'This job is not ready to render.'
+export const BATCH_COUNT_MISMATCH = 'The batch count does not match the token count.'
+export const JOB_NOT_RENDERING = 'This job is not rendering.'
+export const NO_SUCH_BATCH = 'There is no such batch.'
+export const BATCH_RESULT_DIFFERS = 'This batch was already recorded with a different result.'
+export const BATCH_ALREADY_DONE = 'This batch is already done.'
+export const JOB_RESULT_DIFFERS = 'This job was already finished with a different result.'
+export const BATCHES_STILL_RENDERING = 'This job has batches still rendering.'
+export const JOB_NOT_FAILED = 'This job has not failed.'
+export const JOB_UNLOCKED = 'This job was unlocked. Lock the art again to render it.'
+// Ruling on spec section 4: a job-level failure (art_batch_failed with no batch) is final only.
+export const JOB_FAILURE_NEEDS_FINAL = 'A job-level failure must be final.'
+// Ruling: the creator may retry a failed job five times (render_jobs.retries).
+export const RETRY_LIMIT = 'This job has been retried too many times. Tell support about it.'

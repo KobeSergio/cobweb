@@ -3,15 +3,26 @@ import { artWriteError, lockWriteError } from './db-error'
 import {
   ALREADY_LOCKED,
   ART_CHANGED,
+  BATCH_ALREADY_DONE,
+  BATCH_COUNT_MISMATCH,
+  BATCH_RESULT_DIFFERS,
+  BATCHES_STILL_RENDERING,
   CHAIN_NOT_READY,
   CLEAR_FIRST,
   FEE_NOT_WHOLE,
   HASH_INVALID,
+  JOB_FAILURE_NEEDS_FINAL,
+  JOB_NOT_FAILED,
+  JOB_NOT_READY,
+  JOB_NOT_RENDERING,
+  JOB_RESULT_DIFFERS,
+  JOB_UNLOCKED,
   LOCKED,
   NO_CHAIN,
   NO_PAYMENT_DUE,
   NO_PAYMENT_FOR_JOB,
   NO_PLACEHOLDER,
+  NO_SUCH_BATCH,
   NOT_DEFERRED,
   NOT_FOUND,
   NOT_LOCKED,
@@ -28,6 +39,7 @@ import {
   QUOTE_EXPIRED,
   QUOTE_FROZEN,
   QUOTE_NOT_EXPIRED,
+  RETRY_LIMIT,
   SAVE_CAP,
   SHORT_PAYMENT,
   SUPPLY_MISMATCH,
@@ -110,6 +122,27 @@ describe('lockWriteError', () => {
       PAYMENT_AMOUNT_INVALID,
     ])
       expect(lockWriteError({ code: '23514', message: sentence })).toBe(sentence)
+  })
+
+  it('passes the render job sentences through, word for word', () => {
+    const sentences = {
+      [JOB_NOT_READY]: 'This job is not ready to render.',
+      [BATCH_COUNT_MISMATCH]: 'The batch count does not match the token count.',
+      [JOB_NOT_RENDERING]: 'This job is not rendering.',
+      [NO_SUCH_BATCH]: 'There is no such batch.',
+      [BATCH_RESULT_DIFFERS]: 'This batch was already recorded with a different result.',
+      [BATCH_ALREADY_DONE]: 'This batch is already done.',
+      [JOB_RESULT_DIFFERS]: 'This job was already finished with a different result.',
+      [BATCHES_STILL_RENDERING]: 'This job has batches still rendering.',
+      [JOB_NOT_FAILED]: 'This job has not failed.',
+      [JOB_UNLOCKED]: 'This job was unlocked. Lock the art again to render it.',
+      [JOB_FAILURE_NEEDS_FINAL]: 'A job-level failure must be final.',
+      [RETRY_LIMIT]: 'This job has been retried too many times. Tell support about it.',
+    }
+    for (const [constant, sentence] of Object.entries(sentences)) {
+      expect(constant).toBe(sentence)
+      expect(lockWriteError({ code: '23514', message: sentence })).toBe(sentence)
+    }
   })
 
   it('maps the owner check and the two unique indexes', () => {
