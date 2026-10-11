@@ -5,6 +5,7 @@ import { batchOf, isGenerativeToken, resolveTraits } from './generative'
 import { assertExtraFields } from './metadata'
 import { mapLimit } from './pool'
 import { forToken, reasonOf, RenderProblem } from './problems'
+import { sniffExt } from './sniff'
 import type { AssetSpec, AssetToken, GenerativeSpec, GenerativeToken, ImageRef, LoadImage } from './types'
 
 export type RenderedBatch = PackedDirectory & {
@@ -104,7 +105,15 @@ async function passThrough(
         tokenId: token.id,
       },
     )
-  return { name: `${token.id}.${token.image.ext}`, bytes: await load(token.image, token.id) }
+  const { ext } = token.image
+  const bytes = await load(token.image, token.id)
+  const found = sniffExt(bytes)
+  if (found !== ext)
+    throw new RenderProblem('decode', `Token ${token.id}: the file is not a ${ext}.`, {
+      tokenId: token.id,
+      detail: { expected: ext, found: found ?? 'unknown' },
+    })
+  return { name: `${token.id}.${ext}`, bytes }
 }
 
 /**

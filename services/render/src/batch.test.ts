@@ -186,4 +186,15 @@ describe('renderBatch, 1/1 and single asset', () => {
     expect(batch.files.map((f) => f.name)).toEqual(['1.gif', '2.gif', '3.gif'])
     expect(loader.calls.get('art.gif')).toBe(1)
   })
+
+  it('refuses a passed-through file whose bytes are not its extension', async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])
+    const mislabelled: AssetToken[] = [{ id: 1, image: { key: 'one.gif', ext: 'gif' }, attributes: [] }]
+    await expect(renderBatch(spec, 0, mislabelled, memoryLoader({ 'one.gif': png }))).rejects.toMatchObject({
+      code: 'decode',
+      tokenId: 1,
+      message: 'Token 1: the file is not a gif.',
+      detail: { expected: 'gif', found: 'png' },
+    })
+  })
 })

@@ -35,6 +35,15 @@ describe('renderPlaceholder', () => {
     expect(metadata.baseUri).toBe(`ipfs://${metadata.cid}/metadata.json`)
   })
 
+  it('refuses a placeholder whose bytes are not its extension', async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])
+    await expect(renderPlaceholder(spec('gif'), memoryLoader({ 'soon.gif': png }))).rejects.toMatchObject({
+      code: 'decode',
+      message: 'The placeholder file is not a gif.',
+      detail: { expected: 'gif', found: 'png' },
+    })
+  })
+
   it('turns a failed load into missing-image naming the key', async () => {
     await expect(renderPlaceholder(spec('gif'), memoryLoader({}))).rejects.toMatchObject({
       code: 'missing-image',

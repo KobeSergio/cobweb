@@ -3,6 +3,7 @@ import type { PackedDirectory } from './car'
 import { placeholderMetadataJson, SHARED_METADATA_FILE } from './metadata'
 import type { RenderedMetadata } from './metadata-set'
 import { reasonOf, RenderProblem } from './problems'
+import { sniffExt } from './sniff'
 import type { LoadImage, PlaceholderSpec } from './types'
 
 /**
@@ -21,6 +22,11 @@ export async function renderPlaceholder(
       detail: { key: spec.image.key, reason: reasonOf(error) },
     })
   }
+  const found = sniffExt(bytes)
+  if (found !== spec.image.ext)
+    throw new RenderProblem('decode', `The placeholder file is not a ${spec.image.ext}.`, {
+      detail: { expected: spec.image.ext, found: found ?? 'unknown' },
+    })
   const fileName = `placeholder.${spec.image.ext}`
   const image = await packDirectory([{ name: fileName, bytes }])
   const json = placeholderMetadataJson({
