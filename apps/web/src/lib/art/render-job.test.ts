@@ -212,6 +212,17 @@ describe('toRenderJob', () => {
     })
   })
 
+  it('does not allow a retry of a job whose error code marks an unlock, whatever its sentence says', () => {
+    const marked = toRenderJob(
+      row({ state: 'failed', error: 'The art was unlocked.', error_code: 'unlocked' }),
+      [],
+      extra,
+    )
+    expect(marked).toMatchObject({ errorCode: 'unlocked', retryable: false })
+    const worker = toRenderJob(row({ state: 'failed', error: 'x', error_code: 'dead-letter' }), [], extra)
+    expect(worker).toMatchObject({ retryable: true })
+  })
+
   it('maps done with its base URI, its collage and the batch CIDs in batch order', () => {
     const job = toRenderJob(
       row({

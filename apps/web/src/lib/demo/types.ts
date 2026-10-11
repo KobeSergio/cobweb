@@ -158,13 +158,17 @@ export type RenderJob =
       batches: RenderBatches
       /** The worker's sentence, or `unlocked` for a job an unlock cancelled. */
       error: string
-      /** `RenderProblem.code` or the worker's own code; null for an unlock. */
+      /** `RenderProblem.code` or the worker's own code; `unlocked` for an unlock. */
       errorCode: string | null
       /** How many times the creator retried this job; the cap is five. */
       retries: number
       /** The 1-based number of the lowest failed batch, or null. */
       failedBatch: number | null
-      /** False for a job an unlock cancelled (the creator locks the art again) and once the retry cap is reached. */
+      /**
+       * False for a job an unlock cancelled (error code or sentence `unlocked`: the creator locks the art
+       * again), for a job failed with the code `payment-mismatch` (only support may look at it), and
+       * once the retry cap is reached.
+       */
       retryable: boolean
     })
   | (RenderJobBase & {

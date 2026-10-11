@@ -41,6 +41,7 @@ import {
   QUOTE_NOT_EXPIRED,
   RETRY_LIMIT,
   PAYMENT_UNVERIFIED,
+  PLACEHOLDER_LIMIT,
   SAVE_CAP,
   SHORT_PAYMENT,
   SUPPLY_MISMATCH,
@@ -140,7 +141,9 @@ describe('lockWriteError', () => {
       [JOB_FAILURE_NEEDS_FINAL]: 'A job-level failure must be final.',
       [RETRY_LIMIT]: 'This job has been retried too many times. Tell support about it.',
       [PAYMENT_UNVERIFIED]: 'The payment for this job could not be verified. Tell support about it.',
+      [PLACEHOLDER_LIMIT]: 'The placeholder has been locked too many times. Tell support about it.',
     }
+    expect(Object.keys(sentences)).toHaveLength(14)
     for (const [constant, sentence] of Object.entries(sentences)) {
       expect(constant).toBe(sentence)
       expect(lockWriteError({ code: '23514', message: sentence })).toBe(sentence)

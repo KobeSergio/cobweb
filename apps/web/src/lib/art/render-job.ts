@@ -193,6 +193,7 @@ export function toRenderJob(
         failedBatch: failedBatchOf(batchRows),
         retries: row.retries,
         retryable:
+          row.error_code !== 'unlocked' &&
           row.error !== 'unlocked' &&
           row.error_code !== 'payment-mismatch' &&
           row.retries < MAX_RENDER_RETRIES,

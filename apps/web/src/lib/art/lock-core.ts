@@ -209,8 +209,9 @@ async function latestJobRow(
     .select(JOB_COLUMNS)
     .eq('collection_id', collectionId)
     .eq('kind', kind)
-    // A job cancelled by an unlock is history, never the current job.
+    // A job cancelled by an unlock is history, never the current job: two or filters, both must hold.
     .or('error.is.null,error.neq.unlocked')
+    .or('error_code.is.null,error_code.neq.unlocked')
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()

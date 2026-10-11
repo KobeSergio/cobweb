@@ -10,7 +10,9 @@
 -- row alone, which serializes two deliveries of one job. The collection follows a real job:
 -- rendering while it renders or finalizes, rendered once done, art_locked again after a final
 -- failure. A placeholder job never moves the collection's status, and no write moves a deployed
--- collection: the reveal flow (Phase 5) owns its status.
+-- collection: the reveal flow (Phase 5) owns its status. At the end the file redefines art_unlock
+-- (it marks the job it cancels with the error code unlocked) and art_lock_placeholder (it stops at
+-- ten placeholder jobs a collection), both from 20261009020000_lock_and_pay.sql.
 
 -- ---------------------------------------------------------------------------------------------
 -- render_jobs: the base URI, the placeholder image directory, the collage and the error code
@@ -92,11 +94,12 @@ declare
 begin
   perform private.lock_job_collection(p_job_id);
   select j.* into v_job from public.render_jobs j where j.id = p_job_id for update;
-  if not found or v_job.state not in ('paid', 'waived', 'rendering') then
+  if not found or v_job.state not in ('paid', 'waived', 'rendering', 'finalizing', 'done') then
     raise exception 'This job is not ready to render.' using errcode = '23514';
   end if;
-  -- A redelivered claim: the batches are seeded already.
-  if v_job.state = 'rendering' then
+  -- A redelivered claim, even one that lands after the job moved on: the batches are seeded already
+  -- and nothing is inserted or moved.
+  if v_job.state in ('rendering', 'finalizing', 'done') then
     return v_job;
   end if;
   -- Numeric division: integer division would turn 3 / 100 into 0 before ceil saw it.
@@ -194,7 +197,18 @@ declare
   v_flipped uuid;
 begin
   select j.* into v_job from public.render_jobs j where j.id = p_job_id for update;
-  if not found or v_job.state not in ('rendering', 'finalizing') then
+  -- A job that failed for good after its batches were seeded still takes the result of a batch that
+  -- was running beside the one that failed: the work is recorded, the job stays failed, and nothing
+  -- flips. A job an unlock cancelled, or one that failed before any batch was seeded, takes nothing.
+  if not found or not (
+    v_job.state in ('rendering', 'finalizing')
+    or (
+      v_job.state = 'failed'
+      and v_job.error_code is distinct from 'unlocked'
+      and v_job.error is distinct from 'unlocked'
+      and exists (select 1 from public.render_batches b where b.job_id = p_job_id)
+    )
+  ) then
     raise exception 'This job is not rendering.' using errcode = '23514';
   end if;
   select b.* into v_batch
@@ -221,8 +235,9 @@ begin
   from public.render_batches b
   where b.job_id = p_job_id and b.state = 'done';
   update public.render_jobs j set batches_done = v_done where j.id = p_job_id;
-  -- The one conditional flip. Calls for the last two batches serialize on the job row lock taken
-  -- above: the first sees one batch missing, the second sees the full count and flips.
+  -- The one conditional flip, for a rendering job only. Calls for the last two batches serialize on
+  -- the job row lock taken above: the first sees one batch missing, the second sees the full count
+  -- and flips.
   update public.render_jobs j
   set state = 'finalizing'
   where j.id = p_job_id and j.state = 'rendering' and j.batches_done = j.batches_total
@@ -236,14 +251,19 @@ grant execute on function public.art_batch_done(uuid, integer, text, bigint) to 
 
 -- ---------------------------------------------------------------------------------------------
 -- art_batch_failed: a batch's failure with its cause; a final one fails the job. A null index is
--- a job-level failure (the metadata step, or the worker's own checks), allowed only as final.
+-- a job-level failure (the metadata step, or the worker's own checks), allowed only as final, on a
+-- job that renders or finalizes or, before the claim, on a paid or waived one. p_retries is the
+-- job's retries value the worker saw when it took the work: a report older than the creator's
+-- latest retry changes nothing. The code is stored trimmed and in lower case, so the payment gate
+-- in art_render_retry cannot be dodged by spelling.
 -- ---------------------------------------------------------------------------------------------
 create function public.art_batch_failed(
   p_job_id uuid,
   p_index integer,
   p_code text,
   p_message text,
-  p_final boolean
+  p_final boolean,
+  p_retries integer default null
 )
 returns public.render_jobs
 language plpgsql
@@ -253,6 +273,7 @@ as $$
 declare
   v_job public.render_jobs;
   v_batch public.render_batches;
+  v_code text := coalesce(nullif(left(lower(btrim(p_code)), 40), ''), 'unknown');
 begin
   -- A job-level failure has no batch to retry: it ends the job or it is not reported.
   if p_index is null and p_final is not true then
@@ -263,8 +284,29 @@ begin
     perform private.lock_job_collection(p_job_id);
   end if;
   select j.* into v_job from public.render_jobs j where j.id = p_job_id for update;
-  -- A final failure reported again for a job that already failed: the first code and message stay.
+  -- A report from before the creator's latest retry: the job has moved on, so it changes nothing.
+  if found and p_retries is not null and p_retries < v_job.retries then
+    return v_job;
+  end if;
+  -- A final failure reported again for a job that already failed: the first code and message stay,
+  -- except that a payment mismatch replaces any other code, so the gate in art_render_retry holds
+  -- whichever report arrived first.
   if found and v_job.state = 'failed' and p_final then
+    if v_code = 'payment-mismatch' and v_job.error_code is distinct from 'payment-mismatch' then
+      update public.render_jobs j
+      set error_code = v_code, error = p_message
+      where j.id = p_job_id
+      returning * into v_job;
+    end if;
+    return v_job;
+  end if;
+  -- A job-level failure on a job the worker has not claimed yet (its payment could not be verified):
+  -- the job fails, and the collection stays art_locked as it is.
+  if found and p_index is null and p_final and v_job.state in ('paid', 'waived') then
+    update public.render_jobs j
+    set state = 'failed', error_code = v_code, error = p_message, finished_at = now()
+    where j.id = p_job_id
+    returning * into v_job;
     return v_job;
   end if;
   if not found or v_job.state not in ('rendering', 'finalizing') then
@@ -283,14 +325,12 @@ begin
       raise exception 'This batch is already done.' using errcode = '23514';
     end if;
     update public.render_batches b
-    set state = 'failed', error_code = coalesce(nullif(left(p_code, 40), ''), 'unknown'), error = p_message,
-        finished_at = now()
+    set state = 'failed', error_code = v_code, error = p_message, finished_at = now()
     where b.job_id = p_job_id and b.index = p_index;
   end if;
   if p_final then
     update public.render_jobs j
-    set state = 'failed', error_code = coalesce(nullif(left(p_code, 40), ''), 'unknown'), error = p_message,
-        finished_at = now()
+    set state = 'failed', error_code = v_code, error = p_message, finished_at = now()
     where j.id = p_job_id
     returning * into v_job;
     -- A deployed collection keeps its status: the reveal flow (Phase 5) owns it.
@@ -304,8 +344,9 @@ begin
 end;
 $$;
 
-revoke all on function public.art_batch_failed(uuid, integer, text, text, boolean) from public, anon, authenticated;
-grant execute on function public.art_batch_failed(uuid, integer, text, text, boolean) to service_role;
+revoke all on function public.art_batch_failed(uuid, integer, text, text, boolean, integer)
+  from public, anon, authenticated;
+grant execute on function public.art_batch_failed(uuid, integer, text, text, boolean, integer) to service_role;
 
 -- ---------------------------------------------------------------------------------------------
 -- art_render_finish: the metadata and base URI of a job whose batches are all done
@@ -328,7 +369,10 @@ begin
   perform private.lock_job_collection(p_job_id);
   select j.* into v_job from public.render_jobs j where j.id = p_job_id for update;
   if found and v_job.state = 'done' then
-    if v_job.metadata_cid is not distinct from p_metadata_cid and v_job.base_uri is not distinct from p_base_uri then
+    if v_job.metadata_cid is not distinct from p_metadata_cid
+      and v_job.base_uri is not distinct from p_base_uri
+      and v_job.placeholder_image_cid is not distinct from p_placeholder_image_cid
+      and v_job.collage_key is not distinct from p_collage_key then
       return v_job;
     end if;
     raise exception 'This job was already finished with a different result.' using errcode = '23514';
@@ -372,30 +416,37 @@ as $$
 declare
   v_collection public.collections;
   v_job public.render_jobs;
+  v_placeholder public.render_jobs;
 begin
   -- The collection row first, then the job row: the order every writing function here uses.
   v_collection := private.lock_owned_collection(p_collection_id, (select auth.uid()));
-  -- The collection's latest real job, or its placeholder job when the art is deferred and no real
-  -- job exists. A job cancelled by an unlock counts here, so it is refused by name below.
+  -- The collection's latest real job. A job cancelled by an unlock counts here, so it is refused by
+  -- name below.
   select j.* into v_job
   from public.render_jobs j
   where j.collection_id = v_collection.id and j.kind = 'real'
   order by j.created_at desc, j.id desc
   limit 1
   for update;
-  if not found and v_collection.art_deferred then
-    select j.* into v_job
+  -- A deferred collection with no real job, or whose latest real job an unlock cancelled (the creator
+  -- may switch to finishing the art later at any time), retries its latest placeholder job, if any.
+  if v_collection.art_deferred
+    and (v_job.id is null or v_job.error_code = 'unlocked' or v_job.error = 'unlocked') then
+    select j.* into v_placeholder
     from public.render_jobs j
     where j.collection_id = v_collection.id and j.kind = 'placeholder'
     order by j.created_at desc, j.id desc
     limit 1
     for update;
+    if v_placeholder.id is not null then
+      v_job := v_placeholder;
+    end if;
   end if;
   -- A select into that finds nothing leaves every field null.
   if v_job.id is null or v_job.state <> 'failed' then
     raise exception 'This job has not failed.' using errcode = '23514';
   end if;
-  if v_job.error = 'unlocked' then
+  if v_job.error_code = 'unlocked' or v_job.error = 'unlocked' then
     raise exception 'This job was unlocked. Lock the art again to render it.' using errcode = '23514';
   end if;
   -- The worker could not verify the on-chain payment: only support may look at it.
@@ -434,5 +485,110 @@ begin
 end;
 $$;
 
-revoke all on function public.art_render_retry(uuid) from public, anon;
+-- Granted to authenticated only: it acts for the signed-in owner, so the service role has no use for it.
+revoke all on function public.art_render_retry(uuid) from public, anon, service_role;
 grant execute on function public.art_render_retry(uuid) to authenticated;
+
+-- ---------------------------------------------------------------------------------------------
+-- art_unlock, redefined: the job it cancels carries the error code unlocked, so a worker message
+-- that reads "unlocked" is not taken for an unlock. Otherwise as in 20261009020000_lock_and_pay.sql.
+-- ---------------------------------------------------------------------------------------------
+create or replace function public.art_unlock(p_collection_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_collection public.collections;
+  v_job public.render_jobs;
+begin
+  v_collection := private.lock_owned_collection(p_collection_id, (select auth.uid()));
+  select j.* into v_job
+  from public.render_jobs j
+  where j.collection_id = p_collection_id and j.kind = 'real' and j.state not in ('done', 'failed')
+  for update;
+  if not found then
+    raise exception 'The art is not locked.' using errcode = '23514';
+  end if;
+  if v_job.state <> 'payment_due' then
+    raise exception 'The art is paid for and stays locked.' using errcode = '23514';
+  end if;
+  if v_job.payment_tx_hash is not null then
+    raise exception 'A payment is recorded on this lock, so it stays.' using errcode = '23514';
+  end if;
+  update public.collections c
+  set art_locked_at = null,
+      status = case when c.status = 'art_locked' then 'draft'::public.collection_status else c.status end
+  where c.id = v_collection.id;
+  update public.render_jobs j
+  set state = 'failed', error = 'unlocked', error_code = 'unlocked', finished_at = now()
+  where j.id = v_job.id and j.collection_id = p_collection_id;
+  -- A generative supply is saved again by the next generate; 1/1 and single asset keep theirs. A
+  -- second statement, because the frozen-field guard allows a supply change only once the row is draft.
+  if v_collection.project_type = 'generative' and v_collection.status = 'art_locked' then
+    update public.collections c set max_supply = null where c.id = v_collection.id;
+  end if;
+end;
+$$;
+
+revoke all on function public.art_unlock(uuid) from public, anon;
+grant execute on function public.art_unlock(uuid) to authenticated;
+
+-- ---------------------------------------------------------------------------------------------
+-- art_lock_placeholder, redefined: a collection locks its placeholder at most ten times, whatever
+-- state the earlier jobs are in. Otherwise as in 20261009020000_lock_and_pay.sql.
+-- ---------------------------------------------------------------------------------------------
+create or replace function public.art_lock_placeholder(p_collection_id uuid, p_placeholder_upload_id uuid)
+returns public.render_jobs
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_collection public.collections;
+  v_wallet text;
+  v_job public.render_jobs;
+begin
+  v_collection := private.lock_owned_collection(p_collection_id, (select auth.uid()));
+  if not v_collection.art_deferred then
+    raise exception 'Only a collection that finishes its art later locks a placeholder alone.'
+      using errcode = '23514';
+  end if;
+  if not exists (
+    select 1 from public.uploads u
+    where u.id = p_placeholder_upload_id and u.collection_id = p_collection_id and u.kind = 'placeholder'
+  ) then
+    raise exception 'Choose a placeholder file first.' using errcode = '23514';
+  end if;
+  if exists (
+    select 1 from public.render_jobs j
+    where j.collection_id = p_collection_id and j.kind = 'placeholder' and j.state not in ('done', 'failed')
+  ) then
+    raise exception 'The placeholder is already locked.' using errcode = '23514';
+  end if;
+  -- A relock after a failure or a finish is allowed, so the creator can change the file, but not
+  -- without end: every job the worker renders is free to the creator.
+  if (
+    select count(*) from public.render_jobs j
+    where j.collection_id = p_collection_id and j.kind = 'placeholder'
+  ) >= 10 then
+    raise exception 'The placeholder has been locked too many times. Tell support about it.'
+      using errcode = '23514';
+  end if;
+  select p.wallet_address into v_wallet from public.profiles p where p.id = (select auth.uid());
+  insert into public.render_jobs (
+    collection_id, kind, state, token_count, fee_per_token_wei, quote_total_wei, quote_chain_id,
+    quote_payer, placeholder_upload_id, paid_at, batch_size, batches_total
+  )
+  values (
+    p_collection_id, 'placeholder', 'paid', 1, 0, 0, v_collection.chain_id,
+    v_wallet, p_placeholder_upload_id, now(), 1, 1
+  )
+  returning * into v_job;
+  return v_job;
+end;
+$$;
+
+revoke all on function public.art_lock_placeholder(uuid, uuid) from public, anon;
+grant execute on function public.art_lock_placeholder(uuid, uuid) to authenticated;

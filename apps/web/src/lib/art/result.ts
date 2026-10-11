@@ -76,3 +76,5 @@ export const JOB_FAILURE_NEEDS_FINAL = 'A job-level failure must be final.'
 export const RETRY_LIMIT = 'This job has been retried too many times. Tell support about it.'
 // Ruling: a job the worker failed for a payment it could not verify is not retried by the creator.
 export const PAYMENT_UNVERIFIED = 'The payment for this job could not be verified. Tell support about it.'
+// Ruling: a collection may lock its placeholder ten times, in any state of the earlier jobs.
+export const PLACEHOLDER_LIMIT = 'The placeholder has been locked too many times. Tell support about it.'

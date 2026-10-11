@@ -760,6 +760,7 @@ export type Database = {
           p_index: number
           p_job_id: string
           p_message: string
+          p_retries?: number
         }
         Returns: {
           allow_duplicates: boolean

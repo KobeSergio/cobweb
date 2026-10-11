@@ -43,6 +43,7 @@ import {
   QUOTE_NOT_EXPIRED,
   RETRY_LIMIT,
   PAYMENT_UNVERIFIED,
+  PLACEHOLDER_LIMIT,
   SAVE_CAP,
   SHORT_PAYMENT,
   SUPPLY_MISMATCH,
@@ -123,6 +124,7 @@ const LOCK_SENTENCES = new Set([
   JOB_FAILURE_NEEDS_FINAL,
   RETRY_LIMIT,
   PAYMENT_UNVERIFIED,
+  PLACEHOLDER_LIMIT,
 ])
 
 /** A failed lock or payment write, by SQLSTATE, in the creator's words (docs/specs/2026-10-09-lock-and-pay.md). */
