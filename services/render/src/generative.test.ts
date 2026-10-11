@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { owlSpec } from './fixtures'
-import { batchOf, isGenerativeToken, resolveTraits } from './generative'
+import { attributesFor, batchOf, isGenerativeToken, resolveTraits } from './generative'
+import { RenderProblem } from './problems'
 
 const token = (dna: string[], collectionId = 'owls') => ({ id: 8, collectionId, dna, description: null })
 
@@ -39,5 +40,31 @@ describe('resolveTraits', () => {
       expect(() => resolveTraits(owlSpec(), bad)).toThrow(
         expect.objectContaining({ code: 'bad-dna', tokenId: 8 }),
       )
+  })
+})
+
+describe('attributesFor', () => {
+  it('refuses a token whose DNA names a trait from another layer', () => {
+    const write = attributesFor(owlSpec())
+    let error: unknown
+    try {
+      write(token(['eyes-wide', 'bg-ink', 'hat-none']))
+    } catch (e) {
+      error = e
+    }
+    expect(error).toBeInstanceOf(RenderProblem)
+    expect(error).toMatchObject({ code: 'bad-dna', tokenId: 8 })
+  })
+
+  it('names the DNA length and the layer count when the DNA is the wrong length', () => {
+    const write = attributesFor(owlSpec())
+    let error: unknown
+    try {
+      write(token(['bg-ink', 'eyes-wide']))
+    } catch (e) {
+      error = e
+    }
+    expect(error).toBeInstanceOf(RenderProblem)
+    expect(error).toMatchObject({ code: 'bad-dna', detail: { length: 2, layers: 3 } })
   })
 })

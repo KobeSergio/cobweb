@@ -42,7 +42,7 @@ export function resolveTraits(
     throw new RenderProblem(
       'bad-dna',
       `Token ${token.id} has ${token.dna.length} traits for ${collection.layers.length} layers.`,
-      { tokenId: token.id },
+      { tokenId: token.id, detail: { length: token.dna.length, layers: collection.layers.length } },
     )
   const picks = collection.layers.map((layer, i) => {
     const traitId = token.dna[i] ?? ''
