@@ -163,6 +163,7 @@ art_batch_failed(p_job_id uuid, p_index integer, p_code text, p_message text, p_
 ```
 
 - `p_index` null is a job-level failure (the metadata step or the worker's own checks), allowed only with `p_final` true; it touches no batch row. Null with `p_final` false: "A job-level failure must be final." This check runs before the job's state is checked.
+- Gate order: the null-index rule; the collection, then the job, locked; the `p_retries` staleness check; a final payment mismatch on a done job (returned unchanged); a final failure of a failed job; the pre-claim failure; the state refusal. A final failure whose normalised code is `payment-mismatch` is never ignored as stale: it takes effect whatever `p_retries` says and whatever the job's state among `paid`, `waived`, `rendering`, `finalizing` and `failed` (it sets or overwrites the job to `failed` with that code; on a real job the collection returns to `art_locked`, a deployed one keeping its status); a `done` job is left unchanged.
 - `p_retries` is the job's `retries` value the worker saw when it took the work. When it is not null and less than the job's current `retries`, the report is older than the creator's latest retry: nothing changes and the job row is returned. This runs right after the job row is locked, before any state refusal.
 - Job not `rendering` or `finalizing`: "This job is not rendering." Exceptions: a final failure for a job that is already `failed` returns the job unchanged (the first code is kept), so a redelivered dead-letter message is acknowledged, except that a `payment-mismatch` code replaces any other stored code and message, so the gate in section 7 holds whichever report arrived first; and a job-level failure (`p_index` null, final) for a job that is `paid` or `waived`, not yet claimed, fails the job with the code, the message and `finished_at` and leaves the collection's status as it is (`art_locked`). The worker may check the payment before it claims and record a mismatch this way.
 - Unknown index: "There is no such batch."
@@ -287,7 +288,7 @@ The sample data path (`NEXT_PUBLIC_DEMO_DATA`) gets a `finalizing` sample so the
 
 - `verify:local` section 9h, `artRenderState(A, B)`, after 9g, using the service client and two owner
   sessions, on fixtures locked and paid as 9g does (3 tokens; one fixture keeps batch size 100 for one
-  batch, others have `batch_size` set to 1 or 2 through the service client before the claim). Sixty-three
+  batch, others have `batch_size` set to 1 or 2 through the service client before the claim). Sixty-four
   checks in all: two on the schema (the new job and batch columns exist and `images_cid` is gone from
   `render_jobs`; `finalizing` is a render state and a done job needs its metadata and base URI), then
   these groups:
@@ -325,10 +326,10 @@ The sample data path (`NEXT_PUBLIC_DEMO_DATA`) gets a `finalizing` sample so the
      error code `unlocked` and a job with that code is refused by name; a code with mixed case and a
      trailing space is stored normalised and the retry is refused; a payment mismatch reported after
      another final failure replaces the code and the retry is refused; a final report carrying an
-     older `p_retries` changes nothing and a current one fails the job; a job-level failure on a paid
+     older `p_retries` changes nothing, a current one fails the job, and a final payment mismatch with an older value still fails it; a job-level failure on a paid
      job never claimed fails it, the claim is then refused and the collection stays `art_locked`; a
      batch that lands after a sibling failed for good is recorded without a flip and the retry queues
-     only the failed one; a failed job with no batch rows still refuses a batch result (19 checks).
+     only the failed one; a failed job with no batch rows still refuses a batch result (20 checks).
   8. access: every service function called with the owner's session and with anon is refused, and
      anon cannot call the retry function, and the service role cannot either (3 checks, two of them
      looping over the functions).
@@ -338,7 +339,7 @@ The sample data path (`NEXT_PUBLIC_DEMO_DATA`) gets a `finalizing` sample so the
      placeholder job; the eleventh placeholder lock is refused with `PLACEHOLDER_LIMIT` (5 checks).
 - Unit tests for `toRenderJob` (`render-job.test.ts`): each new state, `failedBatch`, `retryable`,
   `batchCids` order, the placeholder CID.
-- Typecheck, lint, the root test suite, `verify:local` (203 plus 9h, 266 checks in all), `verify:storage`, `verify:chain`,
+- Typecheck, lint, the root test suite, `verify:local` (203 plus 9h, 267 checks in all), `verify:storage`, `verify:chain`,
   `verify:sweep`, build.
 
 ## 11. Acceptance criteria

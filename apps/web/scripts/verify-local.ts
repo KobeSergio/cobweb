@@ -3066,6 +3066,7 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
   const codeBatch = await renderFixture(A, payer, 113)
   const codeJob = await renderFixture(A, payer, 114)
   const stale = await renderFixture(A, payer, 115)
+  const staleMismatch = await renderFixture(A, payer, 119)
   const late = await renderFixture(A, payer, 116)
   const preclaim = await renderFixture(A, payer, 117)
   const flipped = await renderFixture(A, payer, 118, false)
@@ -3972,6 +3973,46 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
       if (current.error) return `current: ${describe(current.error)}`
       const failedNow = await renderJob(stale.jobId)
       return failedNow.state === 'failed' && failedNow.retries === 1 ? null : JSON.stringify(failedNow)
+    },
+  )
+
+  await check(
+    'art_batch_failed: a final payment mismatch carrying an older retries value still fails the job and the retry is refused',
+    async () => {
+      const claim = await callArt(admin, 'art_claim_render', { p_job_id: staleMismatch.jobId })
+      if (claim.error) return `setup: ${describe(claim.error)}`
+      const first = await callArt(admin, 'art_batch_failed', {
+        p_job_id: staleMismatch.jobId,
+        p_index: 0,
+        p_code: 'dead-letter',
+        p_message: 'The message ran out of deliveries.',
+        p_final: true,
+        p_retries: 0,
+      })
+      if (first.error) return `first: ${describe(first.error)}`
+      const retry = await callArt(A.client, 'art_render_retry', { p_collection_id: staleMismatch.cid })
+      if (retry.error) return `retry: ${describe(retry.error)}`
+      const mid = await renderJob(staleMismatch.jobId)
+      if (mid.state !== 'rendering' || mid.retries !== 1) return `setup: ${JSON.stringify(mid)}`
+      const { error } = await callArt(admin, 'art_batch_failed', {
+        p_job_id: staleMismatch.jobId,
+        p_index: null,
+        p_code: 'payment-mismatch',
+        p_message: 'The payment could not be verified on chain.',
+        p_final: true,
+        p_retries: 0,
+      })
+      if (error) return describe(error)
+      const job = await renderJob(staleMismatch.jobId)
+      const status = (await lockState(staleMismatch.cid)).status
+      if (job.state !== 'failed' || job.error_code !== 'payment-mismatch' || status !== 'art_locked')
+        return `${JSON.stringify(job)} collection ${status}`
+      const again = await callArt(A.client, 'art_render_retry', { p_collection_id: staleMismatch.cid })
+      return expectSentence(
+        again.error,
+        CHECK,
+        'The payment for this job could not be verified. Tell support about it.',
+      )
     },
   )
 

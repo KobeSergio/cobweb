@@ -274,7 +274,15 @@ declare
   v_job public.render_jobs;
   v_batch public.render_batches;
   v_code text := coalesce(nullif(left(lower(btrim(p_code)), 40), ''), 'unknown');
+  -- A final payment mismatch is a gate on the job, not a report about one run: see the order below.
+  v_mismatch boolean := p_final is true and v_code = 'payment-mismatch';
 begin
+  -- Gate order: (1) a job-level failure must be final; (2) the collection, then the job, are locked;
+  -- (3) a report older than the creator's latest retry (p_retries) changes nothing, unless it is a
+  -- final payment mismatch, which is never stale; (4) a final payment mismatch on a done job
+  -- changes nothing; (5) a final failure of a failed job keeps its code, except that a payment
+  -- mismatch replaces it; (6) a final job-level failure, or a final payment mismatch, on a paid or
+  -- waived job fails it before any claim; (7) any other report needs a rendering or finalizing job.
   -- A job-level failure has no batch to retry: it ends the job or it is not reported.
   if p_index is null and p_final is not true then
     raise exception 'A job-level failure must be final.' using errcode = '23514';
@@ -285,7 +293,11 @@ begin
   end if;
   select j.* into v_job from public.render_jobs j where j.id = p_job_id for update;
   -- A report from before the creator's latest retry: the job has moved on, so it changes nothing.
-  if found and p_retries is not null and p_retries < v_job.retries then
+  if found and not v_mismatch and p_retries is not null and p_retries < v_job.retries then
+    return v_job;
+  end if;
+  -- A job that finished is left alone: a mismatch found late cannot undo a finished render.
+  if found and v_mismatch and v_job.state = 'done' then
     return v_job;
   end if;
   -- A final failure reported again for a job that already failed: the first code and message stay,
@@ -302,11 +314,17 @@ begin
   end if;
   -- A job-level failure on a job the worker has not claimed yet (its payment could not be verified):
   -- the job fails, and the collection stays art_locked as it is.
-  if found and p_index is null and p_final and v_job.state in ('paid', 'waived') then
+  if found and p_final and (p_index is null or v_mismatch) and v_job.state in ('paid', 'waived') then
     update public.render_jobs j
     set state = 'failed', error_code = v_code, error = p_message, finished_at = now()
     where j.id = p_job_id
     returning * into v_job;
+    -- A real job's collection is art_locked already; a deployed one keeps its status.
+    if v_job.kind = 'real' then
+      update public.collections c
+      set status = 'art_locked'
+      where c.id = v_job.collection_id and c.status <> 'deployed';
+    end if;
     return v_job;
   end if;
   if not found or v_job.state not in ('rendering', 'finalizing') then
