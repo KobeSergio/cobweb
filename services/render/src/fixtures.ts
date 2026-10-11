@@ -6,7 +6,7 @@ import { CarReader } from '@ipld/car'
 import * as UnixFS from '@ipld/unixfs'
 import { CID } from 'multiformats/cid'
 import { sharp, TRANSPARENT } from './png'
-import type { GenerativeSpec, ImageRef, MetadataText } from './types'
+import type { GenerativeSpec, ImageRef, LoadImage, MetadataText } from './types'
 
 export type Rgba = { r: number; g: number; b: number; alpha: number }
 
@@ -56,6 +56,18 @@ export function pngChunks(png: Uint8Array): string[] {
     at += 12 + length
   }
   return types
+}
+
+/** A loader over a key to bytes map. Throws for an unknown key and counts every call by key. */
+export function memoryLoader(images: Record<string, Uint8Array>): LoadImage & { calls: Map<string, number> } {
+  const calls = new Map<string, number>()
+  const load = async (ref: ImageRef) => {
+    calls.set(ref.key, (calls.get(ref.key) ?? 0) + 1)
+    const bytes = images[ref.key]
+    if (!bytes) throw new Error(`No object at ${ref.key}`)
+    return bytes
+  }
+  return Object.assign(load, { calls })
 }
 
 const RAW_CODE = 0x55
