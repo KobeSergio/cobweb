@@ -1041,7 +1041,7 @@ async function main(): Promise<void> {
   await artInvariants(A)
   await artEdits(A, B)
   await artLockAndPay(A, B)
-  await artRenderState(A)
+  await artRenderState(A, B)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2967,10 +2967,63 @@ async function renderFixture(A: Creator, payer: string, tag: number, pay = true)
   return { cid, jobId }
 }
 
-async function artRenderState(A: Creator): Promise<void> {
+type RenderJobCheck = {
+  state: string
+  batches_done: number
+  started_at: string | null
+  finished_at: string | null
+  metadata_cid: string | null
+  base_uri: string | null
+  placeholder_image_cid: string | null
+  collage_key: string | null
+  error: string | null
+  error_code: string | null
+}
+
+async function renderJob(id: string): Promise<RenderJobCheck> {
+  const { data, error } = await admin
+    .from('render_jobs')
+    .select(
+      'state, batches_done, started_at, finished_at, metadata_cid, base_uri, placeholder_image_cid, collage_key, error, error_code',
+    )
+    .eq('id', id)
+    .single()
+  if (error) throw new Error(`render job: ${describe(error as DbError)}`)
+  return data as RenderJobCheck
+}
+
+type BatchCheck = {
+  index: number
+  state: string
+  attempts: number
+  first_token_id: number
+  last_token_id: number
+  images_cid: string | null
+  error_code: string | null
+  started_at: string | null
+  finished_at: string | null
+}
+
+async function batchesOf(jobId: string): Promise<BatchCheck[]> {
+  const { data, error } = await admin
+    .from('render_batches')
+    .select(
+      'index, state, attempts, first_token_id, last_token_id, images_cid, error_code, started_at, finished_at',
+    )
+    .eq('job_id', jobId)
+    .order('index')
+  if (error) throw new Error(`render batches: ${describe(error as DbError)}`)
+  return data as BatchCheck[]
+}
+
+async function artRenderState(A: Creator, B: Creator): Promise<void> {
   const payer = A.account.address.toLowerCase()
   // One batch (batch size 100, three tokens).
   const one = await renderFixture(A, payer, 102)
+  // Three batches: batch size 1 is set through the service client before the claim.
+  const three = await renderFixture(A, payer, 101)
+  // Locked and waiting for payment; unlocked in group 7.
+  const due = await renderFixture(A, payer, 103, false)
 
   await check(
     'render state: the new job and batch columns exist and render_jobs.images_cid is gone',
@@ -3001,6 +3054,75 @@ async function artRenderState(A: Creator): Promise<void> {
         .eq('id', one.jobId)
         .select('id')
       return expectError(done.error as DbError, CHECK, done.data)
+    },
+  )
+
+  // Group 1: the claim.
+  await check('art_claim_render: a batch count that does not match the token count is refused', async () => {
+    const set = await admin.from('render_jobs').update({ batch_size: 1 }).eq('id', three.jobId)
+    if (set.error) return `setup: ${describe(set.error as DbError)}`
+    const { error } = await callArt(admin, 'art_claim_render', { p_job_id: three.jobId })
+    return expectSentence(error, CHECK, 'The batch count does not match the token count.')
+  })
+
+  await check(
+    'art_claim_render: three batch rows with their token ranges, the job and the collection rendering',
+    async () => {
+      const set = await admin.from('render_jobs').update({ batches_total: 3 }).eq('id', three.jobId)
+      if (set.error) return `setup: ${describe(set.error as DbError)}`
+      const { data, error } = await callArt(admin, 'art_claim_render', { p_job_id: three.jobId })
+      if (error) return describe(error)
+      const job = await renderJob(three.jobId)
+      const ranges = (await batchesOf(three.jobId))
+        .map((b) => `${b.index}:${b.first_token_id}-${b.last_token_id}:${b.state}:${b.attempts}`)
+        .join(' ')
+      const status = (await lockState(three.cid)).status
+      const problems = [
+        (data as { id?: string } | null)?.id === three.jobId ? null : `returned ${JSON.stringify(data)}`,
+        job.state === 'rendering' && job.started_at !== null && job.batches_done === 0
+          ? null
+          : JSON.stringify(job),
+        ranges === '0:1-1:queued:0 1:2-2:queued:0 2:3-3:queued:0' ? null : `batches ${ranges}`,
+        status === 'rendering' ? null : `collection ${status}`,
+      ].filter(Boolean)
+      return problems.length ? problems.join('; ') : null
+    },
+  )
+
+  await check('art_claim_render: a second claim returns the same job and adds no batch', async () => {
+    const before = await renderJob(three.jobId)
+    const { data, error } = await callArt(admin, 'art_claim_render', { p_job_id: three.jobId })
+    if (error) return describe(error)
+    const after = await renderJob(three.jobId)
+    const count = await countRows('render_batches', 'job_id', three.jobId)
+    return (data as { state?: string } | null)?.state === 'rendering' &&
+      after.started_at === before.started_at &&
+      count === 3
+      ? null
+      : `${count} batches, ${JSON.stringify(after)}`
+  })
+
+  await check('art_claim_render: a job waiting for payment is refused', async () => {
+    const { error } = await callArt(admin, 'art_claim_render', { p_job_id: due.jobId })
+    return expectSentence(error, CHECK, 'This job is not ready to render.')
+  })
+
+  await check('art_claim_render: an unknown job id is refused', async () => {
+    const { error } = await callArt(admin, 'art_claim_render', { p_job_id: NO_JOB })
+    return expectSentence(error, CHECK, 'This job is not ready to render.')
+  })
+
+  await check(
+    "render_batches: A reads the job's batch rows and their new columns; B reads none",
+    async () => {
+      const mine = await A.client
+        .from('render_batches')
+        .select('index, images_size, error_code, started_at, finished_at')
+        .eq('job_id', three.jobId)
+      if (mine.error) return describe(mine.error as DbError)
+      if (mine.data.length !== 3) return `A sees ${mine.data.length} rows`
+      const theirs = await B.client.from('render_batches').select('index').eq('job_id', three.jobId)
+      return expectNothing(theirs.error as DbError, theirs.data)
     },
   )
 }

@@ -44,3 +44,73 @@ alter table public.render_batches
   add constraint render_batches_images_cid_valid check (images_cid is null or images_cid ~ '^[a-z2-7]{59}$'),
   -- A done batch has its directory: the job's list of batch CIDs never has a hole.
   add constraint render_batches_done_has_cid check (state <> 'done' or images_cid is not null);
+
+-- ---------------------------------------------------------------------------------------------
+-- The collection lock the writing service functions start with
+-- ---------------------------------------------------------------------------------------------
+
+-- Locks the job's collections row `for no key update`, before the caller locks the job row: the
+-- order art_unlock, art_render_retry and the lock-and-pay functions take them (collection, then
+-- job), so no two functions wait on each other in opposite orders. A job's collection_id never
+-- changes, so reading it unlocked is safe. An unknown job locks nothing; the caller refuses it.
+-- Security invoker: it runs with the rights of the definer function that calls it.
+create function private.lock_job_collection(p_job_id uuid)
+returns void
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  perform 1
+  from public.collections c
+  where c.id = (select j.collection_id from public.render_jobs j where j.id = p_job_id)
+  for no key update;
+end;
+$$;
+
+revoke all on function private.lock_job_collection(uuid) from public, anon, authenticated;
+
+-- ---------------------------------------------------------------------------------------------
+-- art_claim_render: a paid or waived job starts rendering and gets its batch rows, once
+-- ---------------------------------------------------------------------------------------------
+create function public.art_claim_render(p_job_id uuid)
+returns public.render_jobs
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_job public.render_jobs;
+begin
+  perform private.lock_job_collection(p_job_id);
+  select j.* into v_job from public.render_jobs j where j.id = p_job_id for update;
+  if not found or v_job.state not in ('paid', 'waived', 'rendering') then
+    raise exception 'This job is not ready to render.' using errcode = '23514';
+  end if;
+  -- A redelivered claim: the batches are seeded already.
+  if v_job.state = 'rendering' then
+    return v_job;
+  end if;
+  -- Numeric division: integer division would turn 3 / 100 into 0 before ceil saw it.
+  if v_job.batches_total <> ceil(v_job.token_count::numeric / v_job.batch_size)::integer then
+    raise exception 'The batch count does not match the token count.' using errcode = '23514';
+  end if;
+  insert into public.render_batches (job_id, index, state, first_token_id, last_token_id)
+  select v_job.id, g.i, 'queued', g.i * v_job.batch_size + 1, least((g.i + 1) * v_job.batch_size, v_job.token_count)
+  from generate_series(0, v_job.batches_total - 1) as g(i);
+  update public.render_jobs j
+  set state = 'rendering', started_at = now(), batches_done = 0, error = null, error_code = null
+  where j.id = v_job.id
+  returning * into v_job;
+  -- A deployed collection keeps its status: the reveal flow (Phase 5) owns it.
+  if v_job.kind = 'real' then
+    update public.collections c
+    set status = 'rendering'
+    where c.id = v_job.collection_id and c.status <> 'deployed';
+  end if;
+  return v_job;
+end;
+$$;
+
+revoke all on function public.art_claim_render(uuid) from public, anon, authenticated;
+grant execute on function public.art_claim_render(uuid) to service_role;
