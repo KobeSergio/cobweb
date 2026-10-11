@@ -1,4 +1,6 @@
 import { CarReader } from '@ipld/car'
+import type { CID } from 'multiformats/cid'
+import { exporter } from 'ipfs-unixfs-exporter'
 import { describe, expect, it } from 'vitest'
 import { needsShard, packDirectory, SHARD_THRESHOLD } from './car'
 import { readCarFiles } from './fixtures'
@@ -99,5 +101,27 @@ describe('packDirectory', () => {
     expect(root).toBe(packed.cid)
     expect(files.size).toBe(6000)
     expect(new TextDecoder().decode(files.get('4321'))).toBe('{"n":4320}')
+  })
+
+  it('resolves names in a sharded directory by hash path, the way a gateway does', async () => {
+    const packed = await packDirectory(entries(6000))
+    const reader = await CarReader.fromBytes(packed.car)
+    const blockstore = {
+      get: async (cid: CID) => {
+        const block = await reader.get(cid)
+        if (!block) throw new Error(`Missing block ${cid.toString()}`)
+        return block.bytes
+      },
+    } as unknown as Parameters<typeof exporter>[1]
+    // First, middle and last by name (names sort as UTF-8 bytes, so "1" comes first and "999" last).
+    const names = Object.keys(Object.fromEntries(entries(6000).map((e) => [e.name, 1]))).sort()
+    for (const name of [names[0]!, names[3000]!, names.at(-1)!, '4321', '6000']) {
+      const entry = await exporter(`${packed.cid}/${name}`, blockstore)
+      const chunks: Uint8Array[] = []
+      for await (const chunk of entry.content()) chunks.push(chunk)
+      expect(new TextDecoder().decode(chunks[0]), name).toBe(`{"n":${Number(name) - 1}}`)
+    }
+    await expect(exporter(`${packed.cid}/6001`, blockstore)).rejects.toThrow()
+    await expect(exporter(`${packed.cid}/0`, blockstore)).rejects.toThrow()
   })
 })
