@@ -11,7 +11,8 @@ export type RenderProblemCode =
 
 /**
  * Every refusal the library makes. The worker stores `code` and `message` on the batch row, so
- * messages are plain sentences.
+ * messages are plain sentences. Consumers check `error.name === 'RenderProblem'` and `code`, not
+ * `instanceof`, because a bundler may include more than one copy of this module.
  */
 export class RenderProblem extends Error {
   code: RenderProblemCode

@@ -2,7 +2,7 @@ import { reasonOf, RenderProblem } from './problems'
 import { PNG_OPTIONS, TRANSPARENT, bytesOf, sharp } from './png'
 
 /**
- * A preview grid of the images given (the worker passes the first 16 rendered tokens): `columns`
+ * A preview grid of the images given (the worker passes the first 16 rendered tokens, PNG batch files only: it filters GIF and MP4 files out first, since the collage cannot read them): `columns`
  * across (4), as many rows as needed, each image fitted inside a `cell` (256) pixel square on
  * transparency. Cells past the last image stay transparent.
  */

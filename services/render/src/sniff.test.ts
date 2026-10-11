@@ -39,4 +39,18 @@ describe('sniffExt', () => {
   it('recognises a PNG head of exactly 12 bytes', () => {
     expect(sniffExt(pad([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 12))).toBe('png')
   })
+
+  it('recognises an MP4 whose first box is free, wide or skip', () => {
+    for (const box of ['free', 'wide', 'skip'])
+      expect(sniffExt(pad([0, 0, 0, 8, ...ascii(box), 0, 0, 0, 0x18, ...ascii('ftypisom')], 24))).toBe('mp4')
+  })
+
+  it('returns null for a free box followed by something other than ftyp', () => {
+    expect(sniffExt(pad([0, 0, 0, 8, ...ascii('free'), 1, 2, 3, 4, 5, 6, 7, 8], 24))).toBeNull()
+  })
+
+  it('returns null when the first box size is below 8 or past the end of the bytes', () => {
+    expect(sniffExt(pad([0, 0, 0, 4, ...ascii('free'), 0, 0, 0, 0x18, ...ascii('ftypisom')], 24))).toBeNull()
+    expect(sniffExt(pad([0, 0, 1, 0, ...ascii('free'), 0, 0, 0, 0x18, ...ascii('ftypisom')], 24))).toBeNull()
+  })
 })

@@ -32,6 +32,7 @@ export async function renderMetadataSet(
   tokens: (GenerativeToken | AssetToken)[],
   imageCids: Map<number, string>,
 ): Promise<RenderedMetadata> {
+  if (tokens.length === 0) throw new RenderProblem('batch-range', 'The token list is empty.')
   assertExtraFields(spec.text)
   const cids = new Map(tokens.map((token) => [token.id, imageCidOf(imageCids, spec.batchSize, token.id)]))
   const attributesOf = spec.kind === 'generative' ? attributesFor(spec) : null

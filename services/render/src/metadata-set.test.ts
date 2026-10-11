@@ -16,6 +16,13 @@ const imageCids = new Map([
 ])
 const parse = (bytes: Uint8Array | undefined) => JSON.parse(new TextDecoder().decode(bytes))
 
+describe('renderMetadataSet, empty list', () => {
+  it('refuses an empty token list as batch-range instead of packing an empty directory', async () => {
+    const error = await renderMetadataSet(owlSpec(), [], imageCids).catch((e: unknown) => e)
+    expect(error).toMatchObject({ code: 'batch-range', message: 'The token list is empty.' })
+  })
+})
+
 describe('renderMetadataSet, generative', () => {
   it('points each image into its own batch, for ids 1, 100, 101 and 300', async () => {
     const set = await renderMetadataSet(owlSpec(), owls, imageCids)
