@@ -53,6 +53,32 @@ describe('renderMetadataSet, generative', () => {
   })
 })
 
+describe('renderMetadataSet, refusals before and across tokens', () => {
+  it('refuses a reserved extra field before looking at any token', async () => {
+    const spec = owlSpec()
+    const reserved = { ...spec, text: { ...spec.text, extraFields: { image: 'x' } } }
+    await expect(renderMetadataSet(reserved, owls, new Map())).rejects.toMatchObject({
+      code: 'reserved-key',
+    })
+  })
+
+  it('refuses an asset token in a generative set as bad-dna', async () => {
+    const asset: AssetToken = { id: 1, image: { key: 'a', ext: 'png' }, attributes: [] }
+    await expect(renderMetadataSet(owlSpec(), [asset], imageCids)).rejects.toMatchObject({
+      code: 'bad-dna',
+      tokenId: 1,
+    })
+  })
+
+  it('refuses a generative token in a 1/1 set as missing-image', async () => {
+    const spec: AssetSpec = { kind: 'one_of_one', text: TEXT, batchSize: 100 }
+    await expect(renderMetadataSet(spec, [owls[0]!], imageCids)).rejects.toMatchObject({
+      code: 'missing-image',
+      tokenId: 1,
+    })
+  })
+})
+
 describe('renderMetadataSet, 1/1', () => {
   it("uses each asset's own extension and stored attributes", async () => {
     const spec: AssetSpec = { kind: 'one_of_one', text: TEXT, batchSize: 100 }

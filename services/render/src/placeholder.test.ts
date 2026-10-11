@@ -32,6 +32,7 @@ describe('renderPlaceholder', () => {
       description: 'Revealed soon.',
       image: `ipfs://${image.cid}/placeholder.gif`,
     })
+    expect([...files.keys()]).toEqual(['metadata.json'])
     expect(metadata.baseUri).toBe(`ipfs://${metadata.cid}/metadata.json`)
   })
 
