@@ -357,13 +357,13 @@ Commands: `pnpm --filter @cobweb/render test`, `pnpm typecheck`, `pnpm lint`.
 
 ## 14. Acceptance criteria
 
-- [ ] `services/render` is a package with the exact pins of section 4 and passes `typecheck`, `lint`
+- [x] `services/render` is a package with the exact pins of section 4 and passes `typecheck`, `lint`
       and `test` through Turborepo.
-- [ ] Every function of sections 6 to 10 exists with the signatures given and every refusal of
+- [x] Every function of sections 6 to 10 exists with the signatures given and every refusal of
       section 11 is thrown as a `RenderProblem` with its code.
-- [ ] The end-to-end test renders 300 tokens twice with identical CIDs.
-- [ ] No clock, environment, network or file-system access anywhere in `src/` (grep for `Date`,
+- [x] The end-to-end test renders 300 tokens twice with identical CIDs.
+- [x] No clock, environment, network or file-system access anywhere in `src/` (grep for `Date`,
       `process.env`, `fetch`, `fs`).
-- [ ] MASTER_PLAN's Phase 4 status line records the first sub-project landing and the interfaces the
+- [x] MASTER_PLAN's Phase 4 status line records the first sub-project landing and the interfaces the
       second and third consume: `LoadImage`, `renderBatch`, `renderMetadataSet`, `renderPlaceholder`,
       `previewCollage`, `PackedDirectory.cid`.

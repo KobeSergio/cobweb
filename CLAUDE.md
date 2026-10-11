@@ -38,6 +38,7 @@ pnpm --filter @cobweb/web chain:local     # Anvil with the factory deployed; pri
 pnpm --filter @cobweb/web verify:chain    # lock, pay and the refusals against Anvil
 pnpm --filter @cobweb/web verify:sweep    # the upload sweep against local storage
 pnpm --filter @cobweb/web sweep:uploads --dry-run   # unrecorded objects older than a day; drop --dry-run to delete
+pnpm --filter @cobweb/render test         # render core: compositing, metadata JSON, CARs and local CIDs
 ```
 
 ## Rules
