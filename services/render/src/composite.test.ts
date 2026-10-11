@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { alphaOf, compositeToken, decodeOptions } from './composite'
+import { compositeRaw, compositeToken, decodeOptions } from './composite'
 import { flatPng, halfAlphaSquarePng, pixel, pngChunks, sizeOf } from './fixtures'
 import { setConcurrency, sharp } from './png'
 import { forToken, RenderProblem } from './problems'
@@ -148,15 +149,6 @@ describe('decodeOptions', () => {
   })
 })
 
-describe('alphaOf', () => {
-  it('reads NaN as 255, clamps out of range values and rounds', () => {
-    expect(alphaOf(Number.NaN)).toBe(255)
-    expect(alphaOf(1.5)).toBe(255)
-    expect(alphaOf(-1)).toBe(0)
-    expect(alphaOf(0.5)).toBe(128)
-  })
-})
-
 describe('setConcurrency', () => {
   it('sets the libvips thread count, flooring and never going below 1', () => {
     try {
@@ -175,5 +167,20 @@ describe('setConcurrency', () => {
 describe('forToken', () => {
   it('does not add a detail key to a problem that has none', () => {
     expect('detail' in forToken(new RenderProblem('decode', 'x'), 1)).toBe(false)
+  })
+})
+
+describe('compositeRaw golden', () => {
+  // Computed once with `pnpm --filter @cobweb/render exec vitest run src/composite.test.ts` (the expected
+  // value was a placeholder; the received value was pasted in). Verified on darwin arm64.
+  it('pins the SHA-256 of a fixed three-layer stack, the same on every architecture', async () => {
+    const raw = await compositeRaw(64, [
+      { bytes: await flatPng({ r: 20, g: 20, b: 60, alpha: 1 }), opacity: 1 },
+      { bytes: await halfAlphaSquarePng({ r: 255, g: 255, b: 0 }), opacity: 0.37 },
+      { bytes: await halfAlphaSquarePng({ r: 255, g: 0, b: 0 }), opacity: 0.83 },
+    ])
+    expect(createHash('sha256').update(raw).digest('hex')).toBe(
+      '5283f10d9327fb8e74901fe2905572ef99d4c4f276d7c9cc12bbcb072204b734',
+    )
   })
 })

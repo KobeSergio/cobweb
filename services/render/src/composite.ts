@@ -1,13 +1,6 @@
 import { reasonOf, RenderProblem } from './problems'
-import { PNG_OPTIONS, TRANSPARENT, bytesOf, sharp } from './png'
-
-type RawInput = { input: Buffer; raw: { width: number; height: number; channels: 4 } }
-
-/** Opacity as stored is 0 to 1. Out of range values are clamped; NaN counts as fully opaque. */
-export function alphaOf(opacity: number): number {
-  const clamped = Number.isNaN(opacity) ? 1 : Math.min(1, Math.max(0, opacity))
-  return Math.round(clamped * 255)
-}
+import { alphaOf, blendOver } from './blend'
+import { PNG_OPTIONS, bytesOf, sharp } from './png'
 
 /**
  * Decode limits for every sharp call that reads pixels: nothing larger than the canvas is allocated,
@@ -41,14 +34,13 @@ async function dimensionsOf(
   }
 }
 
-/** One image as raw sRGBA at canvas size, its alpha multiplied by the opacity. */
-async function prepareLayer(
+/** One image as raw sRGBA at canvas size. */
+async function decodeLayer(
   canvas: number,
   bytes: Uint8Array,
-  opacity: number,
   position: number,
   total: number,
-): Promise<RawInput> {
+): Promise<Uint8Array> {
   const { width, height } = await dimensionsOf(bytes, position, total)
   if (width !== canvas || height !== canvas)
     throw new RenderProblem(
@@ -56,19 +48,9 @@ async function prepareLayer(
       `Image ${position + 1} of ${total} in the stack is ${width} by ${height} pixels; the canvas is ${canvas} by ${canvas}.`,
       { detail: { position, width, height } },
     )
-  const alpha = alphaOf(opacity)
-  let image = sharp(bytes, decodeOptions(canvas)).toColourspace('srgb').ensureAlpha()
-  if (alpha < 255)
-    image = image.composite([
-      {
-        input: Buffer.from([0, 0, 0, alpha]),
-        raw: { width: 1, height: 1, channels: 4 },
-        tile: true,
-        blend: 'dest-in',
-      },
-    ])
   try {
-    return { input: await image.raw().toBuffer(), raw: { width: canvas, height: canvas, channels: 4 } }
+    const raw = await sharp(bytes, decodeOptions(canvas)).toColourspace('srgb').ensureAlpha().raw().toBuffer()
+    return bytesOf(raw)
   } catch (error) {
     throw decodeProblem(position, total, error)
   }
@@ -77,20 +59,37 @@ async function prepareLayer(
 /**
  * Stacks layer images bottom first on a transparent `canvas` by `canvas` RGBA base and returns the
  * PNG. Every image must be exactly canvas sized; nothing is resized. A blank trait is simply not
- * passed in.
+ * passed in. Sharp only decodes each layer to raw sRGBA and encodes the result; the blend itself is
+ * integer arithmetic (see `blendOver`), so the bytes do not depend on the CPU.
  */
 export async function compositeToken(
   canvas: number,
   layers: { bytes: Uint8Array; opacity: number }[],
 ): Promise<Uint8Array> {
-  const inputs: RawInput[] = []
-  for (const [position, layer] of layers.entries())
-    inputs.push(await prepareLayer(canvas, layer.bytes, layer.opacity, position, layers.length))
+  return encode(canvas, await compositeRaw(canvas, layers))
+}
+
+/** The blended raw sRGBA buffer of a stack, before PNG encoding. */
+export async function compositeRaw(
+  canvas: number,
+  layers: { bytes: Uint8Array; opacity: number }[],
+): Promise<Uint8Array> {
+  let pixels: Uint8Array
   try {
-    const png = await sharp({
-      create: { width: canvas, height: canvas, channels: 4, background: TRANSPARENT },
+    pixels = new Uint8Array(canvas * canvas * 4)
+  } catch (error) {
+    throw new RenderProblem('decode', 'The composited image could not be written as a PNG.', {
+      detail: { reason: reasonOf(error) },
     })
-      .composite(inputs)
+  }
+  for (const [position, layer] of layers.entries())
+    blendOver(pixels, await decodeLayer(canvas, layer.bytes, position, layers.length), alphaOf(layer.opacity))
+  return pixels
+}
+
+async function encode(canvas: number, pixels: Uint8Array): Promise<Uint8Array> {
+  try {
+    const png = await sharp(pixels, { raw: { width: canvas, height: canvas, channels: 4 } })
       .png(PNG_OPTIONS)
       .toBuffer()
     return bytesOf(png)
