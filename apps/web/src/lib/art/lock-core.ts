@@ -12,7 +12,7 @@ import { lockRefusal, reviewData, type LockList, type ReviewData } from './lock-
 import { feeReady } from './quote'
 import { readAll } from './read-all'
 import { readArtRows } from './read-rows'
-import { JOB_COLUMNS, toRenderJob, type JobPlaceholder, type JobRow } from './render-job'
+import { JOB_COLUMNS, loadBatchRows, toRenderJob, type JobPlaceholder, type JobRow } from './render-job'
 import {
   CHAIN_NOT_READY,
   NO_PAYMENT_DUE,
@@ -170,7 +170,10 @@ async function jobFromRow(supabase: LockClient, row: JobRow): Promise<RenderJob>
   } else {
     placeholder = await latestPlaceholder(supabase, row.collection_id)
   }
-  return toRenderJob(row, { factory: factoryOn(row.quote_chain_id), placeholder })
+  return toRenderJob(row, await loadBatchRows(supabase, row.id, row.state), {
+    factory: factoryOn(row.quote_chain_id),
+    placeholder,
+  })
 }
 
 /** A job by id as the screen's RenderJob, every wei read as text. */

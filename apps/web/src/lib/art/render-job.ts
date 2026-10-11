@@ -1,7 +1,8 @@
 import { getAddress, type Address, type Hex } from 'viem'
 import type { Enums } from '@/lib/database.types'
-import type { MediaType, RenderJob, RenderJobBase, RenderPlaceholder } from '@/lib/demo/types'
+import type { MediaType, RenderBatches, RenderJob, RenderJobBase, RenderPlaceholder } from '@/lib/demo/types'
 import { servedUrl } from '@/lib/storage/uploads-service'
+import type { LockClient } from './lock-collection'
 
 /** A render_jobs row as the lock core reads it (`JOB_COLUMNS`): the wei columns arrive as text. */
 export type JobRow = {
@@ -63,6 +64,37 @@ export type BatchRow = {
 
 export const BATCH_COLUMNS = 'index, state, attempts, images_cid, images_size, error, error_code'
 
+/** How many times the creator may retry a failed render; the database refuses a sixth. */
+export const MAX_RENDER_RETRIES = 5
+
+/** A job has at most 1,000 batches (100,000 tokens at 100 a batch), the most one PostgREST page returns. */
+const MAX_BATCH_ROWS = 1000
+
+/** Whether a job in this state has batch rows to read: none exist before the claim. */
+export function readsBatchRows(state: JobRow['state']): boolean {
+  return state === 'rendering' || state === 'finalizing' || state === 'failed' || state === 'done'
+}
+
+/**
+ * The job's batch rows in index order under the creator's session (owner-read policy): one bounded
+ * select, no paging, since the screen polls this every 3 seconds. Empty without a query before the claim.
+ */
+export async function loadBatchRows(
+  supabase: LockClient,
+  jobId: string,
+  state: JobRow['state'],
+): Promise<BatchRow[]> {
+  if (!readsBatchRows(state)) return []
+  const { data, error } = await supabase
+    .from('render_batches')
+    .select(BATCH_COLUMNS)
+    .eq('job_id', jobId)
+    .order('index')
+    .range(0, MAX_BATCH_ROWS - 1)
+  if (error) throw new Error(`The render batches could not be read: ${error.message}`)
+  return (data ?? []) as unknown as BatchRow[]
+}
+
 /** The placeholder file a job shows: its own for a placeholder job, the collection's latest for a real one. */
 export type JobPlaceholder = { uploadId: string; mediaType: MediaType } | null
 
@@ -71,10 +103,11 @@ export const ZERO_ADDRESS: Address = `0x${'0'.repeat(40)}`
 
 const seconds = (iso: string | null) => (iso ? Math.floor(Date.parse(iso) / 1000) : 0)
 
-function placeholderOf(placeholder: JobPlaceholder): RenderPlaceholder | null {
+/** The placeholder a job shows; `cid` is its pinned image directory once a placeholder job is done. */
+function placeholderOf(placeholder: JobPlaceholder, cid: string | null): RenderPlaceholder | null {
   return placeholder
     ? {
-        cid: '',
+        cid: cid ?? '',
         mediaType: placeholder.mediaType,
         imageUrl: servedUrl(placeholder.uploadId),
         uploadId: placeholder.uploadId,
@@ -82,9 +115,21 @@ function placeholderOf(placeholder: JobPlaceholder): RenderPlaceholder | null {
     : null
 }
 
-/** A render_jobs row as the Lock and upload screen's `RenderJob` (spec section 7). */
+/** The 1-based number of the lowest batch in state failed, or null. */
+function failedBatchOf(batchRows: BatchRow[]): number | null {
+  let lowest: number | null = null
+  for (const row of batchRows)
+    if (row.state === 'failed' && (lowest === null || row.index < lowest)) lowest = row.index
+  return lowest === null ? null : lowest + 1
+}
+
+/**
+ * A render_jobs row and its batch rows (none before the claim) as the Lock and upload screen's
+ * `RenderJob` (docs/specs/2026-10-12-render-job-state.md, section 9).
+ */
 export function toRenderJob(
   row: JobRow,
+  batchRows: BatchRow[],
   extra: { factory: Address | null; placeholder: JobPlaceholder },
 ): RenderJob {
   // The database trigger always sets the id; a null here would mean a row it never saw.
@@ -106,7 +151,7 @@ export function toRenderJob(
       factory: row.quote_factory ? getAddress(row.quote_factory) : extra.factory,
     },
     lockOptions: { allowDuplicates: row.allow_duplicates },
-    placeholder: placeholderOf(extra.placeholder),
+    placeholder: placeholderOf(extra.placeholder, row.placeholder_image_cid),
   }
   const payment = row.payment_tx_hash
     ? {
@@ -115,7 +160,7 @@ export function toRenderJob(
         amountWei: row.paid_amount_wei ?? '0',
       }
     : null
-  const batches = { total: row.batches_total, done: row.batches_done, size: row.batch_size }
+  const batches: RenderBatches = { total: row.batches_total, done: row.batches_done, size: row.batch_size }
   const startedAt = seconds(row.started_at ?? row.paid_at)
   switch (row.state) {
     case 'locked':
@@ -125,13 +170,35 @@ export function toRenderJob(
     case 'paid':
     case 'waived':
       return { ...base, state: row.state, payment, batches }
-    case 'failed':
-      return { ...base, state: 'failed', payment, batches, error: row.error }
     case 'rendering':
-      return { ...base, state: 'rendering', payment, batches, startedAt }
+      return {
+        ...base,
+        state: 'rendering',
+        payment,
+        batches,
+        startedAt,
+        failedBatch: failedBatchOf(batchRows),
+      }
     case 'finalizing':
       return { ...base, state: 'finalizing', payment, batches, startedAt }
-    case 'done':
+    case 'failed':
+      return {
+        ...base,
+        state: 'failed',
+        payment,
+        batches,
+        // Always set by the database: the worker's sentence, or 'unlocked' after an unlock.
+        error: row.error ?? '',
+        errorCode: row.error_code,
+        failedBatch: failedBatchOf(batchRows),
+        retries: row.retries,
+        retryable: row.error !== 'unlocked' && row.retries < MAX_RENDER_RETRIES,
+      }
+    case 'done': {
+      // render_jobs_done_complete makes a done row without them impossible.
+      if (row.metadata_cid === null || row.base_uri === null)
+        throw new Error(`Render job ${row.id} is done without its metadata.`)
+      const ordered = [...batchRows].sort((a, b) => a.index - b.index)
       return {
         ...base,
         state: 'done',
@@ -139,10 +206,13 @@ export function toRenderJob(
         batches,
         startedAt,
         finishedAt: seconds(row.finished_at),
-        // render_jobs.images_cid is gone: each batch directory has its CID on its batch row.
-        imagesCid: null,
         metadataCid: row.metadata_cid,
+        baseUri: row.base_uri,
+        batchCids: ordered.flatMap((b) => (b.images_cid ? [b.images_cid] : [])),
+        placeholderImageCid: row.placeholder_image_cid,
+        collageKey: row.collage_key,
       }
+    }
   }
 }
 
@@ -164,7 +234,7 @@ export function pendingJob(chainId: number | null, placeholder: JobPlaceholder):
       factory: null,
     },
     lockOptions: { allowDuplicates: false },
-    placeholder: placeholderOf(placeholder),
+    placeholder: placeholderOf(placeholder, null),
     state: 'locked',
   }
 }

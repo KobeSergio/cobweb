@@ -54,7 +54,7 @@ export default async function Page({
         totalMinted={sample.totalMinted}
         slug={collection.slug}
         // Seam: the real set is rendered when the collection's finished render job has its metadata CID.
-        realArtRendered={!ctx.artDeferred || DEMO_DEFERRED_RENDER_JOBS.done.metadataCid !== null}
+        realArtRendered={!ctx.artDeferred || DEMO_DEFERRED_RENDER_JOBS.done.placeholderImageCid === null}
       />
     </StagePage>
   )

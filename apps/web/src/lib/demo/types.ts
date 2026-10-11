@@ -89,7 +89,7 @@ export type ArtFeeQuote = {
 
 /**
  * The pre-reveal placeholder (MASTER_PLAN, Flow: pre-reveal): one file every token shows until the
- * reveal, pinned to its own small CID in Phase 4 (`cid` is '' until then).
+ * reveal, pinned to its own small CID (`cid` is '' until its placeholder job is done).
  */
 export type RenderPlaceholder = {
   cid: string
@@ -138,16 +138,12 @@ export type RenderJob =
     })
   | (RenderJobBase & { state: 'paid' | 'waived'; payment: RenderPayment | null; batches: RenderBatches })
   | (RenderJobBase & {
-      state: 'failed'
-      payment: RenderPayment | null
-      batches: RenderBatches
-      error: string | null
-    })
-  | (RenderJobBase & {
       state: 'rendering'
       payment: RenderPayment | null
       batches: RenderBatches
       startedAt: number
+      /** The 1-based number of the lowest batch that failed and waits for the worker's retry, or null. */
+      failedBatch: number | null
     })
   | (RenderJobBase & {
       /** Every batch is in; the metadata is being written and pinned. */
@@ -157,17 +153,36 @@ export type RenderJob =
       startedAt: number
     })
   | (RenderJobBase & {
+      state: 'failed'
+      payment: RenderPayment | null
+      batches: RenderBatches
+      /** The worker's sentence, or `unlocked` for a job an unlock cancelled. */
+      error: string
+      /** `RenderProblem.code` or the worker's own code; null for an unlock. */
+      errorCode: string | null
+      /** How many times the creator retried this job; the cap is five. */
+      retries: number
+      /** The 1-based number of the lowest failed batch, or null. */
+      failedBatch: number | null
+      /** False for a job an unlock cancelled (the creator locks the art again) and once the retry cap is reached. */
+      retryable: boolean
+    })
+  | (RenderJobBase & {
       state: 'done'
       payment: RenderPayment | null
       batches: RenderBatches
       startedAt: number
       finishedAt: number
-      /**
-       * The real set. Null when the art is deferred (MASTER_PLAN, Flow: pre-reveal) and this run rendered only the
-       * placeholder; the real set is locked and rendered in a second run once the art is finished.
-       */
-      imagesCid: string | null
-      metadataCid: string | null
+      /** The metadata directory, or the placeholder's metadata on a placeholder job. */
+      metadataCid: string
+      /** What the contract gets: `ipfs://<cid>/`, or `ipfs://<cid>/metadata.json` for a single asset and the placeholder. */
+      baseUri: string
+      /** Each batch directory's CID, in batch order. */
+      batchCids: string[]
+      /** The placeholder's image directory; set on a placeholder job only. */
+      placeholderImageCid: string | null
+      /** The storage key of the preview collage, or null. */
+      collageKey: string | null
     })
 
 // ---------------------------------------------------------------------------------------------

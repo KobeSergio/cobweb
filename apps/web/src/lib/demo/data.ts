@@ -231,18 +231,26 @@ export const DEMO_PLACEHOLDER_DESCRIPTION =
   'Something is stirring in the dark. Every Night Owl is revealed once the sale ends.'
 
 /** The states the sample shows on Lock and upload (`?job=`). */
-export type SampleJobState = Extract<RenderJobState, 'locked' | 'payment_due' | 'rendering' | 'done'>
+export type SampleJobState = Extract<
+  RenderJobState,
+  'locked' | 'payment_due' | 'rendering' | 'finalizing' | 'done'
+>
 
 type RenderJobsByState = {
   [S in SampleJobState]: Extract<RenderJob, { state: S }>
 }
+
+const SAMPLE_IMAGES_CID = 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi'
+const SAMPLE_METADATA_CID = 'bafybeihkoviema7g3gxyt6la7vd5ho32ictqbilu3wnlo3rs7ewhnp7lly'
+/** The deferred run's placeholder metadata: one file, `metadata.json`. */
+const SAMPLE_PLACEHOLDER_METADATA_CID = 'bafybeie5gq4jxvzmsym6hjlwxej4rwdoxt7wadqvmmwbqi7r27fclha2va'
 
 /**
  * The render job in each of its states, for the Lock and upload screen. "Reveal later" was on, so
  * every state after the lock carries the placeholder; the finished job has the real set too.
  */
 export const DEMO_RENDER_JOBS: Omit<RenderJobsByState, 'done'> & {
-  done: RenderJobsByState['done'] & { imagesCid: string; metadataCid: string; placeholder: RenderPlaceholder }
+  done: RenderJobsByState['done'] & { imagesCid: string; placeholder: RenderPlaceholder }
 } = {
   locked: { ...jobBase, state: 'locked', placeholder: null },
   payment_due: { ...jobBase, state: 'payment_due', placeholder: DEMO_PLACEHOLDER, payment: null },
@@ -253,6 +261,15 @@ export const DEMO_RENDER_JOBS: Omit<RenderJobsByState, 'done'> & {
     payment,
     batches: { total: batchTotal, done: 9, size: BATCH_SIZE },
     startedAt: payment.paidAt + 60,
+    failedBatch: null,
+  },
+  finalizing: {
+    ...jobBase,
+    state: 'finalizing',
+    placeholder: DEMO_PLACEHOLDER,
+    payment,
+    batches: { total: batchTotal, done: batchTotal, size: BATCH_SIZE },
+    startedAt: payment.paidAt + 60,
   },
   done: {
     ...jobBase,
@@ -262,8 +279,13 @@ export const DEMO_RENDER_JOBS: Omit<RenderJobsByState, 'done'> & {
     batches: { total: batchTotal, done: batchTotal, size: BATCH_SIZE },
     startedAt: payment.paidAt + 60,
     finishedAt: payment.paidAt + 60 + 26 * 60,
-    imagesCid: 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
-    metadataCid: 'bafybeihkoviema7g3gxyt6la7vd5ho32ictqbilu3wnlo3rs7ewhnp7lly',
+    // The upload screen's sample result reads this one images CID.
+    imagesCid: SAMPLE_IMAGES_CID,
+    metadataCid: SAMPLE_METADATA_CID,
+    baseUri: `ipfs://${SAMPLE_METADATA_CID}/`,
+    batchCids: [SAMPLE_IMAGES_CID],
+    placeholderImageCid: null,
+    collageKey: null,
   },
 }
 
@@ -297,6 +319,15 @@ export const DEMO_DEFERRED_RENDER_JOBS: RenderJobsByState = {
     payment: deferredPayment,
     batches: { total: 1, done: 0, size: 1 },
     startedAt: payment.paidAt + 60,
+    failedBatch: null,
+  },
+  finalizing: {
+    ...deferredBase,
+    state: 'finalizing',
+    placeholder: DEMO_PLACEHOLDER,
+    payment: deferredPayment,
+    batches: { total: 1, done: 1, size: 1 },
+    startedAt: payment.paidAt + 60,
   },
   done: {
     ...deferredBase,
@@ -306,8 +337,11 @@ export const DEMO_DEFERRED_RENDER_JOBS: RenderJobsByState = {
     batches: { total: 1, done: 1, size: 1 },
     startedAt: payment.paidAt + 60,
     finishedAt: payment.paidAt + 2 * 60,
-    imagesCid: null,
-    metadataCid: null,
+    metadataCid: SAMPLE_PLACEHOLDER_METADATA_CID,
+    baseUri: `ipfs://${SAMPLE_PLACEHOLDER_METADATA_CID}/metadata.json`,
+    batchCids: [DEMO_PLACEHOLDER.cid],
+    placeholderImageCid: DEMO_PLACEHOLDER.cid,
+    collageKey: null,
   },
 }
 

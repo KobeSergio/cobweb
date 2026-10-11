@@ -82,14 +82,25 @@ function revealFrom(job: RenderJob, deferred: boolean, description: string): Rev
 }
 
 function renderStartOf(job: RenderJob): RenderProgress {
-  return 'batches' in job
-    ? { phase: 'images', ...job.batches }
-    : {
-        phase: 'images',
-        total: Math.max(1, Math.ceil(job.tokenCount / RENDER_BATCH_SIZE)),
-        done: 0,
-        size: RENDER_BATCH_SIZE,
-      }
+  if (!('batches' in job))
+    return {
+      phase: 'images',
+      total: Math.max(1, Math.ceil(job.tokenCount / RENDER_BATCH_SIZE)),
+      done: 0,
+      size: RENDER_BATCH_SIZE,
+    }
+  // A finalizing job has every batch in; only the metadata is left.
+  return { phase: job.state === 'finalizing' ? 'metadata' : 'images', ...job.batches }
+}
+
+/**
+ * A finished job as the done step shows it. A placeholder job rendered no real set. The step shows one
+ * images CID, the first batch directory, until the screen lists `batchCids`.
+ */
+function resultOf(job: Extract<RenderJob, { state: 'done' }>): RenderResult {
+  if (job.placeholderImageCid !== null)
+    return { imagesCid: null, metadataCid: null, placeholder: job.placeholder }
+  return { imagesCid: job.batchCids[0] ?? null, metadataCid: job.metadataCid, placeholder: job.placeholder }
 }
 
 /**
@@ -132,7 +143,7 @@ export function UploadFlow({
   const renderStart = renderStartOf(job)
   const result: RenderResult =
     job.state === 'done'
-      ? job
+      ? resultOf(job)
       : {
           imagesCid: deferred ? null : sampleResult.imagesCid,
           metadataCid: deferred ? null : sampleResult.metadataCid,

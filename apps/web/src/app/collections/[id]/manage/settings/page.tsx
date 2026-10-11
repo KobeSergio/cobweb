@@ -39,7 +39,7 @@ export default async function Page({
         chain={chain}
         activity={DEMO_ACTIVITY}
         // Seam: the real set is rendered when the collection's finished render job has its metadata CID.
-        realArtRendered={!ctx.artDeferred || DEMO_DEFERRED_RENDER_JOBS.done.metadataCid !== null}
+        realArtRendered={!ctx.artDeferred || DEMO_DEFERRED_RENDER_JOBS.done.placeholderImageCid === null}
       />
     </StagePage>
   )

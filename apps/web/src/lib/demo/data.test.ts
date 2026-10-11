@@ -4,11 +4,14 @@ import {
   DEMO_AIRDROPS,
   DEMO_COLLECTION,
   DEMO_COLLECTIONS,
+  DEMO_DEFERRED_RENDER_JOBS,
   DEMO_LAYERS,
   DEMO_MINT_GROUPS,
+  DEMO_RENDER_JOBS,
   DEMO_RULES,
   DEMO_TOKENS,
   DEMO_TOTAL_MINTED,
+  getRenderJob,
   scaleSampleToSupply,
 } from '@/lib/demo'
 
@@ -90,5 +93,21 @@ describe('sample tokens', () => {
   it('pass the lock validator as the sample project stands', () => {
     const project = { layers: DEMO_LAYERS, rules: DEMO_RULES, collections: DEMO_COLLECTIONS }
     expect(validateTokenList(project, DEMO_TOKENS, { allowDuplicates: false })).toEqual({ ok: true })
+  })
+})
+
+describe('sample render jobs', () => {
+  it('have a finalizing job with every batch in, in both scenarios', () => {
+    for (const artDeferred of [false, true]) {
+      const job = getRenderJob('finalizing', { artDeferred })
+      expect(job.state).toBe('finalizing')
+      if (job.state === 'finalizing') expect(job.batches.done).toBe(job.batches.total)
+    }
+  })
+
+  it('mark the deferred run as the placeholder alone and the real run as the real set', () => {
+    expect(DEMO_DEFERRED_RENDER_JOBS.done.placeholderImageCid).not.toBeNull()
+    expect(DEMO_RENDER_JOBS.done.placeholderImageCid).toBeNull()
+    expect(DEMO_RENDER_JOBS.done.batchCids).toEqual([DEMO_RENDER_JOBS.done.imagesCid])
   })
 })

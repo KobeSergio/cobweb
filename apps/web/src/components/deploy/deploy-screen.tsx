@@ -59,7 +59,7 @@ export function DeployScreen({ artDeferred = false, ...props }: DeployScreenProp
         sampleWallet={DEMO_CREATOR}
         artSrc={artDeferred && job.placeholder ? job.placeholder.imageUrl : '/demo/tokens/1.svg'}
         // Empty: the real set is not rendered yet, and the summary says so.
-        metadataCid={job.metadataCid ?? ''}
+        metadataCid={job.placeholderImageCid === null ? job.metadataCid : ''}
       />
     </ArtDeferredProvider>
   )

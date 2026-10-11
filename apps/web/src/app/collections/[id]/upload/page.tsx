@@ -16,7 +16,7 @@ import {
   type SearchParams,
 } from '../_lib/stage'
 
-const SAMPLE_STATES: SampleJobState[] = ['locked', 'payment_due', 'rendering', 'done']
+const SAMPLE_STATES: SampleJobState[] = ['locked', 'payment_due', 'rendering', 'finalizing', 'done']
 
 type View = { job: RenderJob; pending: RenderJob; review: ReviewData | null }
 
@@ -48,7 +48,7 @@ async function realView(collection: Tables<'collections'>, artDeferred: boolean)
 /**
  * Stage 3, Lock and upload (docs/specs/2026-10-09-lock-and-pay.md, section 8). Review, lock, pay and
  * unlock are real; rendering is simulated until Phase 4. Sample mode only (`NEXT_PUBLIC_DEMO_DATA=1`):
- * `?job=locked|payment_due|rendering|done` picks the state,
+ * `?job=locked|payment_due|rendering|finalizing|done` picks the state,
  * `?outcome=rejected|reverted|balance|check-failed|batch-failed` makes the first attempt fail, and
  * `?art=deferred` shows the deferred-art scenario (the placeholder run, MASTER_PLAN, Flow: pre-reveal).
  */
