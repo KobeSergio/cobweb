@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compositeToken } from './composite'
+import { alphaOf, compositeToken, decodeOptions } from './composite'
 import { flatPng, halfAlphaSquarePng, pixel, pngChunks, sizeOf } from './fixtures'
 import { setConcurrency, sharp } from './png'
 import { forToken, RenderProblem } from './problems'
@@ -120,6 +120,40 @@ describe('compositeToken', () => {
     expect(await pixel(await compositeToken(64, [{ bytes: indexed, opacity: 1 }]), 5, 5)).toEqual([
       0, 0, 255, 255,
     ])
+  })
+})
+
+describe('decodeOptions', () => {
+  it('bounds a decode to the pixels of the canvas', () => {
+    expect(decodeOptions(64)).toEqual({ limitInputPixels: 4096 })
+    expect(decodeOptions(8)).toEqual({ limitInputPixels: 64 })
+  })
+
+  it('still names the size found for a 32 by 32 layer on a 64 canvas', async () => {
+    const error = await compositeToken(64, [{ bytes: await flatPng(RED, 32), opacity: 1 }]).catch(
+      (e: unknown) => e,
+    )
+    expect(error).toMatchObject({ code: 'layer-size', detail: { position: 0, width: 32, height: 32 } })
+  })
+
+  it('refuses an image larger than the canvas as layer-size, not decode', async () => {
+    const error = await compositeToken(8, [{ bytes: await flatPng(RED, 64), opacity: 1 }]).catch(
+      (e: unknown) => e,
+    )
+    expect(error).toMatchObject({ code: 'layer-size', detail: { position: 0, width: 64, height: 64 } })
+  })
+
+  it('wraps a canvas sharp cannot create as decode', async () => {
+    await expect(compositeToken(0, [])).rejects.toMatchObject({ code: 'decode' })
+  })
+})
+
+describe('alphaOf', () => {
+  it('reads NaN as 255, clamps out of range values and rounds', () => {
+    expect(alphaOf(Number.NaN)).toBe(255)
+    expect(alphaOf(1.5)).toBe(255)
+    expect(alphaOf(-1)).toBe(0)
+    expect(alphaOf(0.5)).toBe(128)
   })
 })
 

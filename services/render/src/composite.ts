@@ -4,9 +4,17 @@ import { PNG_OPTIONS, TRANSPARENT, bytesOf, sharp } from './png'
 type RawInput = { input: Buffer; raw: { width: number; height: number; channels: 4 } }
 
 /** Opacity as stored is 0 to 1. Out of range values are clamped; NaN counts as fully opaque. */
-function alphaOf(opacity: number): number {
+export function alphaOf(opacity: number): number {
   const clamped = Number.isNaN(opacity) ? 1 : Math.min(1, Math.max(0, opacity))
   return Math.round(clamped * 255)
+}
+
+/**
+ * Decode limits for every sharp call that reads pixels: nothing larger than the canvas is allocated,
+ * so a crafted or oversized image is refused before its pixels are decoded.
+ */
+export function decodeOptions(canvas: number): { limitInputPixels: number } {
+  return { limitInputPixels: canvas * canvas }
 }
 
 /** Positions count within the bytes given (blanks are already removed by the caller), 0-based in detail. */
@@ -23,6 +31,8 @@ async function dimensionsOf(
   position: number,
   total: number,
 ): Promise<{ width: number; height: number }> {
+  // Metadata reads the header only and allocates no pixels, so it is not bounded: an oversized image
+  // must reach the size check below and be refused as layer-size, not decode.
   try {
     const { width, height } = await sharp(bytes).metadata()
     return { width, height }
@@ -47,7 +57,7 @@ async function prepareLayer(
       { detail: { position, width, height } },
     )
   const alpha = alphaOf(opacity)
-  let image = sharp(bytes).toColourspace('srgb').ensureAlpha()
+  let image = sharp(bytes, decodeOptions(canvas)).toColourspace('srgb').ensureAlpha()
   if (alpha < 255)
     image = image.composite([
       {
