@@ -3,6 +3,15 @@ import { flatPng, halfAlphaSquarePng, owlImages, owlSpec, readCarFiles } from '.
 import { batchOf } from './generative'
 import type { GenerativeSpec, GenerativeToken } from './types'
 
+// Computed once with `pnpm --filter @cobweb/render exec vitest run src/render.e2e.test.ts`: placeholders
+// first, then the received values pasted in. Verified on darwin arm64 and on linux x64 (emulated, Docker).
+const GOLDEN_BATCH_CIDS = [
+  'bafybeibh4xrlihotzsodq23d4aqs5d35uc7jm7cwmn7ic6xut4dvxdbh5i',
+  'bafybeicscbz3yufd46xkos2wamdkihojgloawila5i36kyekmcapnq3pcm',
+  'bafybeie4hkkba67kvyptpg72zlojyq5kp4zaorcu4m24giqww7zj2doi5q',
+]
+const GOLDEN_METADATA_CID = 'bafybeibwjqs3ciz7ontmzxcywxaj7yncq3gvuqm7aecsop7m4sldbeyfm4'
+
 const png = (key: string) => ({ key, ext: 'png' as const })
 
 /**
@@ -111,6 +120,9 @@ describe('the render core, end to end', () => {
     expect(second.metadata.cid).toBe(first.metadata.cid)
     for (const [i, batch] of first.batches.entries()) expect(second.batches[i]!.car).toEqual(batch.car)
     expect(second.metadata.car).toEqual(first.metadata.car)
+
+    expect(first.batches.map((b) => b.cid)).toEqual(GOLDEN_BATCH_CIDS)
+    expect(first.metadata.cid).toBe(GOLDEN_METADATA_CID)
 
     expect(first.batches.map((b) => b.files.length)).toEqual([100, 100, 100])
     const batchByCid = new Map(first.batches.map((b) => [b.cid, new Set(b.files.map((f) => f.name))]))
