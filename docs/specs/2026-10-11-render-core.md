@@ -157,9 +157,15 @@ export async function compositeToken(
 
 - The base is a transparent RGBA canvas of `canvas` by `canvas`.
 - Each layer is decoded, checked to be exactly `canvas` by `canvas` (else `RenderProblem` code
-  `layer-size` naming the width and height found), given an alpha channel, multiplied by its opacity
-  when below 1 (a `dest-in` composite with a tiled 1 by 1 pixel of alpha `round(opacity * 255)`), then
-  composited `over` in order.
+  `layer-size` naming the width and height found), and decoded to raw 8-bit sRGBA with
+  `toColourspace('srgb').ensureAlpha().raw()`. Sharp does nothing else to pixels: it reads the size,
+  decodes to raw sRGBA and, at the end, encodes the PNG.
+- The canvas is a zeroed raw RGBA buffer. Each layer is blended over it, in order, by `blendOver` in
+  `src/blend.ts`, in integer arithmetic only, so the bytes do not depend on the CPU architecture (libvips
+  blends in floats, which round differently on x64 and arm64). With `alpha = round(clamp(opacity) * 255)`
+  (NaN is 255) and `div255(x) = trunc((x + 127) / 255)`, per pixel: `as = div255(sa * alpha)`,
+  `wd = div255(da * (255 - as))`, `oa = as + wd`, and for each colour channel
+  `oc = oa === 0 ? 0 : trunc(((sc * as + dc * wd) * 2 + oa) / (2 * oa))`; `oc` and `oa` are written back.
 - Output is PNG: `compressionLevel: 9`, `adaptiveFiltering: false`, `palette: false`, `effort` left at
   the default, no metadata (`withMetadata` is not called, so no EXIF, ICC or timestamps are written).
 - `sharp.cache(false)` and `sharp.concurrency(1)` are set once at module load, so results do not depend
@@ -287,7 +293,7 @@ export async function previewCollage(
 
 A grid of the images given (the worker passes the first 16 rendered tokens), 4 columns by default,
 each resized to `cell` (256) pixels with `fit: 'contain'` on a transparent background, PNG with the
-same pinned settings as section 6. The grid has `ceil(n / columns)` rows, so 3 images give one row of 4 with the last cell transparent. Zero images is
+same pinned settings as section 6. The worker passes PNG batch files only and filters GIF and MP4 files out first. The collage resizes in floats, so its bytes may differ across architectures and its CID is never pinned. The grid has `ceil(n / columns)` rows, so 3 images give one row of 4 with the last cell transparent. Zero images is
 `RenderProblem` code `empty-collage`.
 
 ## 11. Problems (`src/problems.ts`)
@@ -323,6 +329,9 @@ token id. Messages are plain sentences; the worker stores `code` and `message` o
 - Directory entries sorted by name bytes; chunking, hashing and sharding parameters fixed.
 - The end-to-end test (section 13) renders the same project twice in separate module instances and
   compares every CID and every byte.
+- Goldens pin the result across machines: the SHA-256 of a composited raw buffer for a fixed stack
+  (`composite.test.ts`) and the three batch CIDs and the metadata CID of the end-to-end project
+  (`render.e2e.test.ts`). They are verified on darwin arm64 and on linux x64 (emulated under Docker; a native x64 run is owed to the third sub-project).
 
 ## 13. Testing
 
@@ -331,7 +340,9 @@ alpha square), no binary fixtures committed.
 
 - `composite.test.ts`: order (top layer's pixel wins), opacity 0.5 halves alpha within 1 unit, a blank
   contributes nothing, a 32 by 32 layer on a 64 canvas is `layer-size`, output is PNG with no EXIF or
-  time chunk, two runs give identical bytes.
+  time chunk, two runs give identical bytes, the SHA-256 of a fixed three-layer composite is pinned.
+  `blend.test.ts` covers `alphaOf` and the integer blend (opaque, alpha 0, a hand-computed pixel, a
+  transparent destination, two layers in sequence).
 - `metadata.test.ts`: exact JSON string goldens for a generative token (with and without blanks shown,
   with `displayName`, with `inMetadata` false), an asset token, a token with its own description, extra
   fields appended in order, a reserved key refused, the placeholder shape.
@@ -339,8 +350,9 @@ alpha square), no binary fixtures committed.
   `bafybeiczsscdsbs7ffqz55asqdf3smv6klcw3gofszvwlyarci47bgf354`; one small file's directory CID equals
   the value computed once with the `ipfs-car` CLI and recorded in the test with the command used; two
   packs of the same files in different order give identical CAR bytes; duplicate names refused; a
-  directory built to exceed 262,144 bytes is sharded and still lists every entry when read back with
-  `@ipld/car` and `@ipld/unixfs`.
+  directory built to exceed 262,144 bytes is sharded, lists every entry when read back with
+  `@ipld/car` and `@ipld/unixfs`, and resolves the first, a middle and the last name by hash path with
+  `ipfs-unixfs-exporter` (a missing name does not resolve).
 - `batch.test.ts`: file names, `batch-range`, `bad-dna`, `missing-image` (the loader throws), one
   load per distinct key, passthrough keeps bytes and extension, a failing token rejects the whole batch.
 - `metadata-set.test.ts`: `image` points into the right batch for ids 1, 100, 101 and 300; bare id file
