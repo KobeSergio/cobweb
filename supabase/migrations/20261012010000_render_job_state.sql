@@ -356,3 +356,67 @@ $$;
 
 revoke all on function public.art_render_finish(uuid, text, text, text, text) from public, anon, authenticated;
 grant execute on function public.art_render_finish(uuid, text, text, text, text) to service_role;
+
+-- ---------------------------------------------------------------------------------------------
+-- art_render_retry: the creator retries a failed render; finished batches keep their CIDs
+-- ---------------------------------------------------------------------------------------------
+create function public.art_render_retry(p_collection_id uuid)
+returns public.render_jobs
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_collection public.collections;
+  v_job public.render_jobs;
+begin
+  -- The collection row first, then the job row: the order every writing function here uses.
+  v_collection := private.lock_owned_collection(p_collection_id, (select auth.uid()));
+  -- The collection's latest real job, or its placeholder job when the art is deferred and no real
+  -- job exists. A job cancelled by an unlock counts here, so it is refused by name below.
+  select j.* into v_job
+  from public.render_jobs j
+  where j.collection_id = v_collection.id and j.kind = 'real'
+  order by j.created_at desc, j.id desc
+  limit 1
+  for update;
+  if not found and v_collection.art_deferred then
+    select j.* into v_job
+    from public.render_jobs j
+    where j.collection_id = v_collection.id and j.kind = 'placeholder'
+    order by j.created_at desc, j.id desc
+    limit 1
+    for update;
+  end if;
+  -- A select into that finds nothing leaves every field null.
+  if v_job.id is null or v_job.state <> 'failed' then
+    raise exception 'This job has not failed.' using errcode = '23514';
+  end if;
+  if v_job.error = 'unlocked' then
+    raise exception 'This job was unlocked. Lock the art again to render it.' using errcode = '23514';
+  end if;
+  -- Attempts are kept; each batch's error stays until its next start clears it.
+  update public.render_batches b set state = 'queued' where b.job_id = v_job.id and b.state = 'failed';
+  -- With every batch done (a job-level failure in the metadata step) nothing is re-queued: the job
+  -- goes back to finalizing and the metadata step reruns. Otherwise it renders the queued batches.
+  update public.render_jobs j
+  set state = case
+        when exists (select 1 from public.render_batches b where b.job_id = j.id and b.state <> 'done')
+          then 'rendering'::public.render_state
+        else 'finalizing'::public.render_state
+      end,
+      error = null, error_code = null, finished_at = null
+  where j.id = v_job.id and j.collection_id = p_collection_id
+  returning * into v_job;
+  -- A deployed collection keeps its status: the reveal flow (Phase 5) owns it.
+  if v_job.kind = 'real' then
+    update public.collections c
+    set status = 'rendering'
+    where c.id = v_collection.id and c.status <> 'deployed';
+  end if;
+  return v_job;
+end;
+$$;
+
+revoke all on function public.art_render_retry(uuid) from public, anon;
+grant execute on function public.art_render_retry(uuid) to authenticated;

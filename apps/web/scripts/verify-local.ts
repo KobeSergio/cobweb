@@ -3043,6 +3043,8 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
   const three = await renderFixture(A, payer, 101)
   // Locked and waiting for payment; unlocked in group 7.
   const due = await renderFixture(A, payer, 103, false)
+  // Two batches (batch size 2): one finishes, one fails for good, then the retry.
+  const two = await renderFixture(A, payer, 104)
   // A collection already deployed: the render must not move its status (the reveal flow owns it).
   const shipped = await renderFixture(A, payer, 105)
   // One batch, brought to finalizing, then failed at job level.
@@ -3593,6 +3595,158 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
         state.status === 'art_locked'
         ? null
         : `${JSON.stringify(job)} ${JSON.stringify(batch)} ${JSON.stringify(state)}`
+    },
+  )
+
+  // Group 7: the retry.
+  await check("art_render_retry: the owner's retry queues the failed batch and renders again", async () => {
+    const { data, error } = await callArt(A.client, 'art_render_retry', { p_collection_id: one.cid })
+    if (error) return describe(error)
+    const job = await renderJob(one.jobId)
+    const batch = (await batchesOf(one.jobId))[0]
+    const status = (await lockState(one.cid)).status
+    return (data as { id?: string } | null)?.id === one.jobId &&
+      job.state === 'rendering' &&
+      job.error === null &&
+      job.error_code === null &&
+      job.finished_at === null &&
+      batch?.state === 'queued' &&
+      batch.attempts === 1 &&
+      status === 'rendering'
+      ? null
+      : `${JSON.stringify(job)} ${JSON.stringify(batch)} collection ${status}`
+  })
+
+  await check(
+    'art_render_retry: after a partial render the finished batch keeps its CID and only the failed batch is queued',
+    async () => {
+      const set = await admin
+        .from('render_jobs')
+        .update({ batch_size: 2, batches_total: 2 })
+        .eq('id', two.jobId)
+      if (set.error) return `setup: ${describe(set.error as DbError)}`
+      const { failed } = await runSteps(
+        [
+          ['art_claim_render', { p_job_id: two.jobId }],
+          [
+            'art_batch_done',
+            { p_job_id: two.jobId, p_index: 0, p_images_cid: CID('f'), p_images_size: 4096 },
+          ],
+          ['art_batch_start', { p_job_id: two.jobId, p_index: 1 }],
+          [
+            'art_batch_failed',
+            {
+              p_job_id: two.jobId,
+              p_index: 1,
+              p_code: 'render-timeout',
+              p_message: 'The batch took too long.',
+              p_final: true,
+            },
+          ],
+        ],
+        async () => '',
+      )
+      if (failed) return `setup: ${failed}`
+      const retry = await callArt(A.client, 'art_render_retry', { p_collection_id: two.cid })
+      if (retry.error) return describe(retry.error)
+      const job = await renderJob(two.jobId)
+      const batches = (await batchesOf(two.jobId))
+        .map((b) => `${b.index}:${b.state}:${b.images_cid ?? '-'}:${b.attempts}:${b.error_code ?? '-'}`)
+        .join(' ')
+      const expected = `0:done:${CID('f')}:0:- 1:queued:-:1:render-timeout`
+      if (job.state !== 'rendering' || job.batches_done !== 1 || batches !== expected)
+        return `${JSON.stringify(job)} ${batches}`
+      // The re-queued batch runs again: its attempts grow and its finish time is cleared.
+      const start = await callArt(admin, 'art_batch_start', { p_job_id: two.jobId, p_index: 1 })
+      if (start.error) return `restart: ${describe(start.error)}`
+      const again = (await batchesOf(two.jobId))[1]
+      return again?.state === 'running' && again.attempts === 2 && again.finished_at === null
+        ? null
+        : JSON.stringify(again)
+    },
+  )
+
+  await check(
+    'art_render_retry: after a job-level failure with every batch done, the job goes back to finalizing',
+    async () => {
+      const { error } = await callArt(A.client, 'art_render_retry', { p_collection_id: meta.cid })
+      if (error) return describe(error)
+      const job = await renderJob(meta.jobId)
+      const batches = (await batchesOf(meta.jobId))
+        .map((b) => `${b.index}:${b.state}:${b.images_cid ?? '-'}`)
+        .join(' ')
+      const status = (await lockState(meta.cid)).status
+      return job.state === 'finalizing' &&
+        job.error === null &&
+        job.error_code === null &&
+        job.finished_at === null &&
+        job.batches_done === 1 &&
+        batches === `0:done:${CID('i')}` &&
+        status === 'rendering'
+        ? null
+        : `${JSON.stringify(job)} ${batches} collection ${status}`
+    },
+  )
+
+  await check('art_render_retry: a job that has not failed is refused', async () => {
+    const { error } = await callArt(A.client, 'art_render_retry', { p_collection_id: one.cid })
+    return expectSentence(error, CHECK, 'This job has not failed.')
+  })
+
+  await check("art_render_retry: B's session on A's collection is refused as not found", async () => {
+    const { error } = await callArt(B.client, 'art_render_retry', { p_collection_id: one.cid })
+    return expectSentence(error, PERMISSION, 'collection not found')
+  })
+
+  await check('art_render_retry: a job cancelled by an unlock is refused by name', async () => {
+    const unlock = await callArt(A.client, 'art_unlock', { p_collection_id: due.cid })
+    if (unlock.error) return `setup: ${describe(unlock.error)}`
+    const { error } = await callArt(A.client, 'art_render_retry', { p_collection_id: due.cid })
+    return expectSentence(error, CHECK, 'This job was unlocked. Lock the art again to render it.')
+  })
+
+  // Group 8: who may call them. The five service functions take a job id and check nothing else, so
+  // only the service role may run them.
+  const renderCalls: [string, Record<string, unknown>][] = [
+    ['art_claim_render', { p_job_id: three.jobId }],
+    ['art_batch_start', { p_job_id: one.jobId, p_index: 0 }],
+    ['art_batch_done', { p_job_id: one.jobId, p_index: 0, p_images_cid: CID('e'), p_images_size: 1 }],
+    ['art_batch_failed', { p_job_id: one.jobId, p_index: 0, p_code: 'x', p_message: 'x', p_final: true }],
+    [
+      'art_render_finish',
+      { p_job_id: three.jobId, p_metadata_cid: CID('m'), p_base_uri: `ipfs://${CID('m')}/` },
+    ],
+  ]
+  await check(
+    "render functions: the owner's own session cannot execute the five service functions",
+    async () => {
+      const problems: string[] = []
+      for (const [fn, args] of renderCalls) {
+        const { error } = await callArt(A.client, fn, args)
+        const problem = expectSentence(error, PERMISSION, 'permission denied')
+        if (problem) problems.push(`${fn}: ${problem}`)
+      }
+      return problems.length ? problems.join('; ') : null
+    },
+  )
+
+  await check(
+    'render functions: a signed-out caller cannot execute any of them, and nothing changed',
+    async () => {
+      const problems: string[] = []
+      for (const [fn, args] of [
+        ...renderCalls,
+        ['art_render_retry', { p_collection_id: one.cid }] as [string, Record<string, unknown>],
+      ]) {
+        const { error } = await callArt(anon, fn, args)
+        const problem = expectError(error, PERMISSION)
+        if (problem) problems.push(`${fn}: ${problem}`)
+      }
+      const job = await renderJob(one.jobId)
+      const batch = (await batchesOf(one.jobId))[0]
+      if (job.state !== 'rendering' || batch?.state !== 'queued')
+        problems.push(`changed: ${JSON.stringify(job)} ${JSON.stringify(batch)}`)
+      return problems.length ? problems.join('; ') : null
     },
   )
 }
