@@ -56,6 +56,7 @@ Fifth and last of Phase 3's sub-projects.
 
 - Rendering: SQS, Lambdas, batch progress, images and metadata CIDs, `collections.status` moving
   to `rendering` or `rendered` (Phase 4). The job stays `paid` with `batches_total` set.
+  Specified in [2026-10-12-render-job-state.md](2026-10-12-render-job-state.md).
 - Waivers: `waived` is set by SQL as the factory admin; no screen.
 - Deploy, mint page, and anything after rendering.
 - A price feed or any USD conversion in code; the admin sets the rate.

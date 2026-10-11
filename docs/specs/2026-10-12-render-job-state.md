@@ -88,6 +88,11 @@ A placeholder job (`kind = 'placeholder'`, one batch) follows the same path. The
   collage the worker wrote; null when none.
 - Add `error_code text` (check null or length between 1 and 40), the `RenderProblem.code` or the
   worker's own code (`dead-letter`, `payment-mismatch`, `cid-mismatch`); `error` keeps the sentence.
+- `metadata_cid` gets the CID format check (null or `^[a-z2-7]{59}$`), and a table constraint
+  (`render_jobs_base_uri_matches_metadata`) ties `base_uri` to it: when both are set, `base_uri` starts with
+  `ipfs://` followed by the metadata CID and a slash.
+- Add `retries integer not null default 0` (check between 0 and 5), how many times the creator retried
+  the job; `art_render_retry` increments it and stops at five.
 - Replace `render_jobs_done_has_metadata` with `render_jobs_done_complete`: `state <> 'done' or
 (metadata_cid is not null and base_uri is not null)`.
 - `batches_done` keeps its check; the functions set it to the count of done batch rows.
@@ -97,6 +102,7 @@ A placeholder job (`kind = 'placeholder'`, one batch) follows the same path. The
 - Add `images_size bigint` (check null or `>= 0`), the CAR size the worker uploaded.
 - Add `error_code text` (same check as the job's), `started_at timestamptz`, `finished_at timestamptz`.
 - `images_cid` keeps its meaning (the batch directory CID); add check null or `^[a-z2-7]{59}$`.
+- Add the check `render_batches_done_has_cid`: `state <> 'done' or images_cid is not null`.
 - `attempts` keeps counting starts across retries.
 
 Both tables keep their owner-read policies; clients still have no write path. `collection_status`
@@ -125,10 +131,11 @@ ceil(token_count / batch_size)` with "The batch count does not match the token c
 art_batch_start(p_job_id uuid, p_index integer) returns public.render_batches
 ```
 
+- Batch `done`: return it unchanged whatever the job's state, checked before the job's state, so a
+  start redelivered after the flip or after the finish is skipped by the worker instead of refused.
 - Job not `rendering`: "This job is not rendering."
-- Batch `done`: return it unchanged (the worker skips a redelivered finished batch).
 - Batch `queued` or `failed`: set `running`, `attempts = attempts + 1`, `started_at = now()`, clear
-  `error` and `error_code`.
+  `finished_at`, `error` and `error_code`.
 - Batch `running`: return it with `attempts + 1` (a redelivery while another copy runs; the worker's
   output is idempotent, so running twice is wasteful but safe).
 - Unknown index: "There is no such batch."
@@ -139,6 +146,7 @@ art_batch_done(p_job_id uuid, p_index integer, p_images_cid text, p_images_size 
 ```
 
 - Job not `rendering` or `finalizing`: "This job is not rendering."
+- Unknown index: "There is no such batch."
 - Batch already `done` with the same CID: no change, `last = false`.
 - Batch already `done` with a different CID: "This batch was already recorded with a different result."
 - Otherwise set `done`, `images_cid`, `images_size`, `finished_at = now()`, clear the error; set the
@@ -153,9 +161,11 @@ art_batch_failed(p_job_id uuid, p_index integer, p_code text, p_message text, p_
   returns public.render_jobs
 ```
 
-- Job not `rendering` or `finalizing`: "This job is not rendering."
+- `p_index` null is a job-level failure (the metadata step or the worker's own checks), allowed only with `p_final` true; it touches no batch row. Null with `p_final` false: "A job-level failure must be final." This check runs before the job's state is checked.
+- Job not `rendering` or `finalizing`: "This job is not rendering." Exception: a final failure for a job that is already `failed` returns the job unchanged (the first code is kept), so a redelivered dead-letter message is acknowledged.
+- Unknown index: "There is no such batch."
 - Batch `done`: "This batch is already done." (a failure report after success is a worker bug).
-- `p_index` null is a job-level failure (the metadata step or the worker's own checks), allowed only with `p_final` true; it touches no batch row. Null with `p_final` false: "A job-level failure must be final."
+- `p_code` is clamped to its first 40 characters, and an empty or null code is stored as `unknown`, so a malformed code cannot roll back a failure report.
 - Set the batch `failed`, `error_code = p_code`, `error = p_message`, `finished_at = now()`.
 - When `p_final`: set the job `failed`, `error_code = p_code`, `error = p_message`, `finished_at =
 now()`; for a real job set the collection's status to `art_locked`.
@@ -185,8 +195,11 @@ job when the collection is deferred and has no real job (unlocked jobs included,
 
 - Job not `failed`: "This job has not failed."
 - `error = 'unlocked'`: "This job was unlocked. Lock the art again to render it."
-- Set every `failed` batch to `queued` (attempts kept, error kept until the next start clears it); set
-  the job `finalizing` when every batch row is already `done` (a job-level failure in the metadata step; the worker reruns that step) and `rendering` otherwise, clear `error`, `error_code` and `finished_at`; for a real job set the
+- `error_code = 'payment-mismatch'` (the worker could not verify the on-chain payment): "The payment for this job could not be verified. Tell support about it." (`PAYMENT_UNVERIFIED`).
+- `retries` is already 5: "This job has been retried too many times. Tell support about it." (`RETRY_LIMIT`). A support reset is a service-role update of `retries`.
+- A failed job with no batch rows (it failed before the claim): "This job is not ready to render."
+- Set every batch in state `failed` or `running` to `queued` (a batch left running belongs to a worker that died with the job; attempts kept, error kept until the next start clears it); set
+  the job `finalizing` when every batch row is already `done` (a job-level failure in the metadata step; the worker reruns that step) and `rendering` otherwise, clear `error`, `error_code` and `finished_at`, and increment `retries`; for a real job set the
   collection's status to `rendering`. Returns the job row.
 
 The fourth sub-project's `retryRender` action calls this, then the third sub-project's
@@ -195,7 +208,7 @@ sweep (third sub-project) can pick up.
 
 ## 8. Sentences
 
-Added to `LOCK_SENTENCES` in `apps/web/src/lib/art/db-error.ts` and exported from `result.ts`:
+Thirteen sentences, added to `LOCK_SENTENCES` in `apps/web/src/lib/art/db-error.ts` and exported from `result.ts`:
 
 - `JOB_NOT_READY = 'This job is not ready to render.'`
 - `BATCH_COUNT_MISMATCH = 'The batch count does not match the token count.'`
@@ -208,12 +221,14 @@ Added to `LOCK_SENTENCES` in `apps/web/src/lib/art/db-error.ts` and exported fro
 - `JOB_NOT_FAILED = 'This job has not failed.'`
 - `JOB_UNLOCKED = 'This job was unlocked. Lock the art again to render it.'`
 - `JOB_FAILURE_NEEDS_FINAL = 'A job-level failure must be final.'`
+- `RETRY_LIMIT = 'This job has been retried too many times. Tell support about it.'`
+- `PAYMENT_UNVERIFIED = 'The payment for this job could not be verified. Tell support about it.'`
 
 ## 9. The job model
 
 `apps/web/src/lib/art/render-job.ts`:
 
-- `JobRow` gains `base_uri`, `placeholder_image_cid`, `collage_key`, `error_code`, loses `images_cid`;
+- `JobRow` gains `base_uri`, `placeholder_image_cid`, `collage_key`, `error_code`, `retries`, loses `images_cid`;
   `JOB_COLUMNS` follows. A new `BatchRow` type (`index`, `state`, `attempts`, `images_cid`,
   `images_size`, `error`, `error_code`) and `BATCH_COLUMNS`.
 - `toRenderJob(row, batchRows, extra)` takes the job's batch rows ordered by index (empty before
@@ -235,6 +250,7 @@ type RenderBranches =
       error: string
       errorCode: string | null
       failedBatch: number | null
+      retries: number
       retryable: boolean
     }
   | {
@@ -252,11 +268,11 @@ type RenderBranches =
 
 (The `locked` and `payment_due` branches and the common fields are unchanged.) `failedBatch` is the
 1-based index of the lowest batch row in state `failed`, or null. `retryable` is `error !==
-'unlocked'`. `batchCids` is the ordered list of batch `images_cid` values. `placeholderOf` reads the
+'unlocked' && errorCode !== 'payment-mismatch' && retries < MAX_RENDER_RETRIES` (`MAX_RENDER_RETRIES` is 5). `batchCids` is the ordered list of batch `images_cid` values. `placeholderOf` reads the
 real CID from `placeholder_image_cid` when set and keeps `''` only for the sample data path.
 
 `renderJobCore` (lock-core.ts) loads the batch rows with the job under the creator's client (owner-read
-policy) and passes them to `toRenderJob`. `STAGE_FOR_JOB` maps `finalizing` to the render stage.
+policy) with one bounded select, only for rendering, finalizing, failed and done jobs (none exist before the claim), and passes them to `toRenderJob`. `STAGE_FOR_JOB` maps `finalizing` to the render stage.
 `render-sim.ts` is untouched here; the fourth sub-project replaces it.
 
 The sample data path (`NEXT_PUBLIC_DEMO_DATA`) gets a `finalizing` sample so the stage can be seen.
@@ -265,43 +281,57 @@ The sample data path (`NEXT_PUBLIC_DEMO_DATA`) gets a `finalizing` sample so the
 
 - `verify:local` section 9h, `artRenderState(A, B)`, after 9g, using the service client and two owner
   sessions, on fixtures locked and paid as 9g does (3 tokens; one fixture keeps batch size 100 for one
-  batch, a second has `batch_size` set to 1 through the service client before claim for three batches):
+  batch, others have `batch_size` set to 1 or 2 through the service client before the claim). Fifty
+  checks in all: two on the schema (the new job and batch columns exist and `images_cid` is gone from
+  `render_jobs`; `finalizing` is a render state and a done job needs its metadata and base URI), then
+  these groups:
   1. claim: three batch rows with the right token ranges, job `rendering` with `started_at`, collection
-     `rendering`; a second claim returns the same row and inserts nothing; claim on a `payment_due` job
-     is refused with `JOB_NOT_READY`.
-  2. start: batch 0 becomes `running` with `attempts` 1; a second start keeps `running` and counts 2;
-     an unknown index is refused with `NO_SUCH_BATCH`.
-  3. done: batch 0 done gives `batches_done` 1 and `last` false; the same call again changes nothing
-     and is `last` false; a different CID is refused with `BATCH_RESULT_DIFFERS`.
+     `rendering`; a second claim returns the same row and inserts nothing; a batch count that does not
+     match, a job waiting for payment and an unknown job id are refused (6 checks).
+  2. start: batch 0 becomes `running` with `attempts` 1; a redelivered start keeps `running` and counts
+     2; an unknown index is refused with `NO_SUCH_BATCH`; start and done on a job waiting for payment
+     are refused (4 checks).
+  3. done: batch 0 done gives `batches_done` 1 and `last` false; the same call again changes nothing;
+     a different CID is refused with `BATCH_RESULT_DIFFERS`; a start of a done batch returns it
+     unchanged; a missing or malformed CID is refused and the batch stays open (5 checks).
   4. the last two batches done concurrently (`Promise.all`): exactly one `last` true, job `finalizing`,
-     `batches_done` 3.
-  5. finish: job `done` with `metadata_cid`, `base_uri`, `finished_at`, collection `rendered`; the same
-     call again is unchanged; different values are refused with `JOB_RESULT_DIFFERS`; finish on a
-     `rendering` job is refused with `BATCHES_STILL_RENDERING`.
-  6. failure: on the one-batch fixture, start then `art_batch_failed` with `p_final` false leaves the
-     job `rendering` and the batch `failed` with its code; with `p_final` true the job is `failed`
-     with the code and the collection is `art_locked`.
+     `batches_done` 3; a redelivered last batch after the flip changes nothing and is not the last; a
+     start of a done batch on a finalizing job returns it unchanged (3 checks).
+  5. finish: a failure report for a done batch and a finish or failure on a job waiting for payment are
+     refused; a base URI built from another CID is refused; job `done` with `metadata_cid`, `base_uri`,
+     `finished_at`, collection `rendered`; the same call again is unchanged; different values are
+     refused with `JOB_RESULT_DIFFERS`; finish on a `rendering` job is refused with
+     `BATCHES_STILL_RENDERING`; a deployed collection keeps its status (8 checks).
+  6. failure: on the one-batch fixture, `art_batch_failed` with `p_final` false leaves the job
+     `rendering` and the batch `failed` with its code; with `p_final` true the job is `failed` with
+     the code and the collection is `art_locked`; a repeated final failure returns the job unchanged;
+     a long code is clamped; a deployed collection keeps its status; a job-level failure must be final
+     and fails a finalizing job (6 checks).
   7. retry: the owner's session calls `art_render_retry`: job `rendering`, batch `queued`, collection
-     `rendering`; a stranger gets 'collection not found'; anon is refused; on a job whose `error` is
-     `unlocked` (unlock a locked fixture first) the refusal is `JOB_UNLOCKED`.
-  8. access: every service function called with the owner's session and with anon is refused,
-     matching the 9g matrix.
+     `rendering`; after a partial render the finished batch keeps its CID; a job failed in the
+     metadata step returns to `finalizing`; a job that has not failed, a stranger ('collection not
+     found'), an unlocked job, the sixth retry, a job failed with `payment-mismatch` and a failed job
+     with no batch rows are refused; a deployed collection stays deployed; a batch left running is
+     queued again (11 checks).
+  8. access: every service function called with the owner's session and with anon is refused, and
+     anon cannot call the retry function (2 checks, each looping over the functions).
   9. placeholder: a deferred fixture's placeholder job claims (one batch), finishes with a slash-less
-     base URI and `placeholder_image_cid`, and the collection's status never changes.
+     base URI and `placeholder_image_cid`, and the collection's status never changes; a final failure
+     and the owner's retry pick the placeholder job and leave the status alone (3 checks).
 - Unit tests for `toRenderJob` (`render-job.test.ts`): each new state, `failedBatch`, `retryable`,
   `batchCids` order, the placeholder CID.
-- Typecheck, lint, the root test suite, `verify:local` (203 plus 9h), `verify:storage`, `verify:chain`,
+- Typecheck, lint, the root test suite, `verify:local` (203 plus 9h, 253 checks in all), `verify:storage`, `verify:chain`,
   `verify:sweep`, build.
 
 ## 11. Acceptance criteria
 
-- [ ] The migration applies on `supabase db reset`; `database.types.ts` regenerated; typecheck and lint
+- [x] The migration applies on `supabase db reset`; `database.types.ts` regenerated; typecheck and lint
       pass.
-- [ ] Every function of sections 6 and 7 exists with the signature, grants and refusals given; every
+- [x] Every function of sections 6 and 7 exists with the signature, grants and refusals given; every
       sentence of section 8 is in `LOCK_SENTENCES`.
-- [ ] `verify:local` 9h passes all nine groups, including the concurrent last-batch check.
-- [ ] `toRenderJob` produces every state of section 9 and the screen's stage mapping accepts
+- [x] `verify:local` 9h passes all nine groups, including the concurrent last-batch check.
+- [x] `toRenderJob` produces every state of section 9 and the screen's stage mapping accepts
       `finalizing`.
-- [ ] MASTER_PLAN's Phase 4 status line records the landing and the interfaces the third and fourth
+- [x] MASTER_PLAN's Phase 4 status line records the landing and the interfaces the third and fourth
       sub-projects consume: the six functions, the `RenderJob` union, `enqueueRender(jobId)` owed by
       the third, `retryRender` owed by the fourth.
