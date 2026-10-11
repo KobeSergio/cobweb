@@ -62,13 +62,13 @@ Out:
 
 `render_state` gains `finalizing` (`alter type ... add value 'finalizing' after 'rendering'`).
 
-| From                  | To         | By                            | Collection status           |
-| --------------------- | ---------- | ----------------------------- | --------------------------- |
-| paid, waived          | rendering  | `art_claim_render`            | rendering (real jobs only)  |
-| rendering             | finalizing | `art_batch_done` (last batch) | unchanged                   |
-| finalizing            | done       | `art_render_finish`           | rendered (real jobs only)   |
-| rendering, finalizing | failed     | `art_batch_failed` with final | art_locked (real jobs only) |
-| failed (not unlocked) | rendering  | `art_render_retry` (session)  | rendering (real jobs only)  |
+| From                  | To                                                | By                            | Collection status           |
+| --------------------- | ------------------------------------------------- | ----------------------------- | --------------------------- |
+| paid, waived          | rendering                                         | `art_claim_render`            | rendering (real jobs only)  |
+| rendering             | finalizing                                        | `art_batch_done` (last batch) | unchanged                   |
+| finalizing            | done                                              | `art_render_finish`           | rendered (real jobs only)   |
+| rendering, finalizing | failed                                            | `art_batch_failed` with final | art_locked (real jobs only) |
+| failed (not unlocked) | rendering, or finalizing when every batch is done | `art_render_retry` (session)  | rendering (real jobs only)  |
 
 A placeholder job (`kind = 'placeholder'`, one batch) follows the same path. The partial unique index
 `render_jobs_one_open_per_kind` treats `finalizing` as open (its predicate is `state not in ('done',
