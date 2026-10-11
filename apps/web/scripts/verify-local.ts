@@ -3062,7 +3062,10 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
     const set = await admin.from('render_jobs').update({ batch_size: 1 }).eq('id', three.jobId)
     if (set.error) return `setup: ${describe(set.error as DbError)}`
     const { error } = await callArt(admin, 'art_claim_render', { p_job_id: three.jobId })
-    return expectSentence(error, CHECK, 'The batch count does not match the token count.')
+    const refused = expectSentence(error, CHECK, 'The batch count does not match the token count.')
+    if (refused) return refused
+    const rows = await countRows('render_batches', 'job_id', three.jobId)
+    return rows === 0 ? null : `${rows} batch rows after the refusal`
   })
 
   await check(
@@ -3079,7 +3082,11 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
       const status = (await lockState(three.cid)).status
       const problems = [
         (data as { id?: string } | null)?.id === three.jobId ? null : `returned ${JSON.stringify(data)}`,
-        job.state === 'rendering' && job.started_at !== null && job.batches_done === 0
+        job.state === 'rendering' &&
+        job.started_at !== null &&
+        job.batches_done === 0 &&
+        job.error === null &&
+        job.error_code === null
           ? null
           : JSON.stringify(job),
         ranges === '0:1-1:queued:0 1:2-2:queued:0 2:3-3:queued:0' ? null : `batches ${ranges}`,
@@ -3095,7 +3102,9 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
     if (error) return describe(error)
     const after = await renderJob(three.jobId)
     const count = await countRows('render_batches', 'job_id', three.jobId)
-    return (data as { state?: string } | null)?.state === 'rendering' &&
+    const returned = data as { id?: string; state?: string } | null
+    return returned?.id === three.jobId &&
+      returned.state === 'rendering' &&
       after.started_at === before.started_at &&
       count === 3
       ? null
