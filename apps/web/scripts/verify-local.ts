@@ -2986,18 +2986,14 @@ async function artRenderState(A: Creator): Promise<void> {
         .limit(1)
       if (batch.error) return `render_batches: ${describe(batch.error as DbError)}`
       const gone = await admin.from('render_jobs').select('images_cid').limit(1)
-      return gone.error ? null : 'render_jobs.images_cid still exists'
+      return expectError(gone.error as DbError, ['42703'], gone.data)
     },
   )
 
   await check(
     'render state: finalizing is a render state, and a done job needs its metadata and base URI',
     async () => {
-      const finalizing = await admin
-        .from('render_jobs')
-        .update({ state: 'finalizing' })
-        .eq('id', NO_JOB)
-        .select('id')
+      const finalizing = await admin.from('render_jobs').select('id').eq('state', 'finalizing').limit(1)
       if (finalizing.error) return `finalizing: ${describe(finalizing.error as DbError)}`
       const done = await admin
         .from('render_jobs')

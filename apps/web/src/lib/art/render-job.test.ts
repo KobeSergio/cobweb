@@ -146,6 +146,7 @@ describe('toRenderJob', () => {
       state: 'done',
       finishedAt: at('2026-10-09T11:30:00Z'),
       metadataCid: 'bafymeta',
+      imagesCid: null,
     })
   })
 
