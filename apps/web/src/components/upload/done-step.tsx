@@ -55,7 +55,9 @@ export function DoneStep({ result, tokenCount }: { result: RenderResult; tokenCo
             name: result.placeholderUri ? 'Placeholder base URI' : 'Placeholder CID',
             cid: result.placeholderUri ?? placeholder.cid,
             href: result.placeholderUri ? gatewayUrl(result.placeholderUri) : undefined,
-            help: `${mediaLabel(placeholder.mediaType)}. Every token shows it until you reveal. The contract starts here.`,
+            help: result.placeholderUri
+              ? "The placeholder's metadata. Every token shows the placeholder until you reveal. The contract starts here."
+              : `${mediaLabel(placeholder.mediaType)}. Every token shows it until you reveal.`,
           },
         ]
       : []),
