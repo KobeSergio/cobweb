@@ -145,9 +145,11 @@ export function fakeJobs(
       return { ...record }
     },
 
-    async stuck() {
+    async stuck(_olderThanMinutes, onlyJobId) {
       fake.calls.push('stuck')
-      return fake.stuckJobs
+      return onlyJobId === undefined
+        ? fake.stuckJobs
+        : fake.stuckJobs.filter((stuck) => stuck.id === onlyJobId)
     },
   }
   if (options.claimed) {

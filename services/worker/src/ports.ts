@@ -115,9 +115,9 @@ export type Jobs = {
    * Jobs in `rendering` or `finalizing`, and jobs in `paid` or `waived`, that nothing has touched for
    * this many minutes. A paid job whose start message ran out of deliveries is still unclaimed, and
    * the database refuses to fail an unclaimed job for anything but a payment mismatch, so only the
-   * sweep can pick it up again.
+   * sweep can pick it up again. With `onlyJobId`, only that job can be returned.
    */
-  stuck(olderThanMinutes: number): Promise<{ id: string; retries: number }[]>
+  stuck(olderThanMinutes: number, onlyJobId?: string): Promise<{ id: string; retries: number }[]>
 }
 
 export type Store = {

@@ -789,6 +789,17 @@ describe('handleDead', () => {
 })
 
 describe('sweep', () => {
+  it('lets the Jobs port narrow stuck to one job id, which the fake honours', async () => {
+    const h = await harness()
+    const other = '11111111-2222-4333-8444-555555555555'
+    h.jobs.stuckJobs = [
+      { id: JOB_ID, retries: 1 },
+      { id: other, retries: 0 },
+    ]
+    expect(await h.jobs.stuck(15, other)).toEqual([{ id: other, retries: 0 }])
+    expect(await h.jobs.stuck(15)).toHaveLength(2)
+  })
+
   it('throws when the queue is down, so the next run tries again', async () => {
     const h = await harness()
     h.jobs.stuckJobs = [{ id: JOB_ID, retries: 0 }]

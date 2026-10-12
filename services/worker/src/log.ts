@@ -22,8 +22,13 @@ const mask = (run: string): string => {
 export function errorSummary(error: unknown): string {
   if (!(error instanceof Error)) return 'Unknown error'
   const short = (error as { shortMessage?: unknown }).shortMessage
-  const text = (typeof short === 'string' ? short : error.message).split('\n')[0] ?? ''
-  return `${error.name}: ${text.replace(URL_LIKE, '[url]').replace(KEY_LIKE, mask).slice(0, 200)}`
+  return `${error.name}: ${maskedLine(typeof short === 'string' ? short : error.message)}`
+}
+
+/** The first line of a text with URLs and keys masked, cut at 200 characters. */
+export function maskedLine(text: string): string {
+  const line = text.split('\n')[0] ?? ''
+  return line.replace(URL_LIKE, '[url]').replace(KEY_LIKE, mask).slice(0, 200)
 }
 
 /** Writes each line as one JSON object, which CloudWatch indexes by field. */
