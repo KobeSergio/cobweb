@@ -1,5 +1,5 @@
 /** The `RenderQueue` port on SQS. Imports only the SQS client, so the web app can use it for retries. */
-import { SendMessageBatchCommand } from '@aws-sdk/client-sqs'
+import { GetQueueAttributesCommand, SendMessageBatchCommand } from '@aws-sdk/client-sqs'
 import type { SQSClient } from '@aws-sdk/client-sqs'
 import type { RenderMessage, RenderQueue } from '@cobweb/shared/render-queue'
 
@@ -23,6 +23,18 @@ export function sqsRenderQueue(client: Pick<SQSClient, 'send'>, queueUrl: string
         // A partial failure is a failure: the caller throws and the whole step is redelivered.
         if (result.Failed?.length) throw new Error(`The queue refused ${result.Failed.length} message(s).`)
       }
+    },
+    /** Messages waiting to be received, as SQS approximates them. The sweep skips while there are any. */
+    async backlog() {
+      const found = await client.send(
+        new GetQueueAttributesCommand({
+          QueueUrl: queueUrl,
+          AttributeNames: ['ApproximateNumberOfMessages'],
+        }),
+      )
+      const count = Number(found.Attributes?.ApproximateNumberOfMessages)
+      if (!Number.isInteger(count) || count < 0) throw new Error('The queue did not report its backlog.')
+      return count
     },
   }
 }

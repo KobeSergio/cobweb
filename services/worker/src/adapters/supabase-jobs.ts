@@ -161,7 +161,8 @@ export function supabaseJobs(client: WorkerClient, options: { now?: () => number
   const now = options.now ?? Date.now
   const log = options.log ?? (() => undefined)
   // Art is frozen while its job is open (the lock), and a list is frozen at lock, so one job's data
-  // and list are read once and kept while the same container works through that job's batches.
+  // and list are read once and kept while the same container works through that job's batches. The
+  // collection's name and description are not frozen, so the metadata step reads them fresh.
   let dataCache: { jobId: string; data: RenderData } | null = null
   let listCache: { jobId: string; list: ListEntry[] } | null = null
 
@@ -177,8 +178,8 @@ export function supabaseJobs(client: WorkerClient, options: { now?: () => number
     return record
   }
 
-  async function renderData(record: JobRecord): Promise<RenderData> {
-    if (dataCache?.jobId === record.id) return { ...dataCache.data, job: record }
+  async function renderData(record: JobRecord, options: { fresh?: boolean } = {}): Promise<RenderData> {
+    if (!options.fresh && dataCache?.jobId === record.id) return { ...dataCache.data, job: record }
     const collectionId = record.collectionId
     const found = await client
       .from('collections')

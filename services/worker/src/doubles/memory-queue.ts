@@ -63,5 +63,8 @@ export function memoryQueue(
     size() {
       return waiting.length
     },
+    async backlog() {
+      return waiting.length
+    },
   }
 }

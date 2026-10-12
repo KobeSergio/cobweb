@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { SendMessageBatchCommand } from '@aws-sdk/client-sqs'
+import { GetQueueAttributesCommand, SendMessageBatchCommand } from '@aws-sdk/client-sqs'
 import type { SQSClient } from '@aws-sdk/client-sqs'
 import { parseRenderMessage } from '@cobweb/shared/render-queue'
 import type { RenderMessage } from '@cobweb/shared/render-queue'
@@ -71,5 +71,23 @@ describe('sqsRenderQueue', () => {
     ])
     for (const forbidden of ['./steps', '@cobweb/render', 'sharp', '@supabase/supabase-js'])
       for (const name of imports) expect(name?.startsWith(forbidden), `${name}`).toBe(false)
+  })
+
+  it('reads the backlog as the approximate number of visible messages', async () => {
+    const { client, sent } = stubAws<Sqs>(() => ({ Attributes: { ApproximateNumberOfMessages: '7' } }))
+    expect(await sqsRenderQueue(client, 'https://sqs.example/queue').backlog?.()).toBe(7)
+    expect(sent).toEqual([
+      {
+        name: GetQueueAttributesCommand.name,
+        input: { QueueUrl: 'https://sqs.example/queue', AttributeNames: ['ApproximateNumberOfMessages'] },
+      },
+    ])
+  })
+
+  it('throws when the queue does not report a number, rather than guess an empty queue', async () => {
+    for (const answer of [{}, { Attributes: {} }, { Attributes: { ApproximateNumberOfMessages: 'many' } }]) {
+      const { client } = stubAws<Sqs>(() => answer)
+      await expect(sqsRenderQueue(client, 'q').backlog?.()).rejects.toThrow('The queue did not report')
+    }
   })
 })

@@ -12,7 +12,7 @@ import {
   renderPlaceholder,
 } from '@cobweb/render'
 import type { AssetSpec, AssetToken, GenerativeSpec, GenerativeToken, PackedDirectory } from '@cobweb/render'
-import { enqueueRender } from '@cobweb/shared/render-queue'
+import { collageKey, enqueueRender, WORKER_FAILURE_CODES } from '@cobweb/shared/render-queue'
 import type { RenderMessage, RenderQueue } from '@cobweb/shared/render-queue'
 import { errorSummary } from './log.ts'
 import type { Log } from './log.ts'
@@ -74,6 +74,9 @@ const COLLAGE_TOKENS = 16
 const TOKEN_READS_IN_FLIGHT = 8
 
 type Token = GenerativeToken | AssetToken
+
+/** The codes only the worker writes, from the shared list the screen reads (spec, section 4). */
+const [PAYMENT_MISMATCH_CODE, CID_MISMATCH_CODE, DEAD_LETTER_CODE] = WORKER_FAILURE_CODES
 
 /** A message's batch index, or null for a job-level message. */
 const indexOf = (message: RenderMessage): number | null => (message.step === 'batch' ? message.index : null)
@@ -145,7 +148,7 @@ async function withStore<T>(store: Store, run: (load: Store['load']) => Promise<
 async function pinned(deps: Deps, message: RenderMessage, packed: PackedDirectory): Promise<boolean> {
   const cid = await retried(deps, 'pin', () => deps.pinner.pin(packed.car, packed.cid))
   if (cid === packed.cid) return true
-  await report(deps, message, indexOf(message), 'cid-mismatch', CID_MISMATCH)
+  await report(deps, message, indexOf(message), CID_MISMATCH_CODE, CID_MISMATCH)
   return false
 }
 
@@ -162,7 +165,7 @@ async function start(message: RenderMessage, deps: Deps): Promise<void> {
   if (job.state === 'paid' && !job.waived && job.quoteTotalWei > 0n) {
     const paid = await retried(deps, 'payment', () => deps.chain.jobPayment(job))
     if (paid < job.quoteTotalWei) {
-      await report(deps, message, null, 'payment-mismatch', PAYMENT_MISMATCH)
+      await report(deps, message, null, PAYMENT_MISMATCH_CODE, PAYMENT_MISMATCH)
       return
     }
   }
@@ -258,7 +261,7 @@ async function collage(
       .sort((a, b) => Number.parseInt(a.name, 10) - Number.parseInt(b.name, 10))
       .map((file) => file.bytes)
     if (stills.length === 0) return null
-    const key = `${job.collectionId}/collage/${job.id}.png`
+    const key = collageKey(job.collectionId, job.id)
     await deps.store.putCollage(key, await previewCollage(stills))
     return key
   } catch (error) {
@@ -274,7 +277,8 @@ async function metadata(message: RenderMessage, deps: Deps): Promise<void> {
     log('metadata skipped', { jobId: message.jobId, state: job?.state ?? 'missing' })
     return
   }
-  const data = await jobs.renderData(job)
+  // Fresh: the collection's text is not frozen by the lock, so one job's metadata comes from one read.
+  const data = await jobs.renderData(job, { fresh: true })
   const spec = renderSpec(data)
   if (spec.kind === 'placeholder') {
     const { image, metadata: set } = await withStore(store, (load) => renderPlaceholder(spec, load))
@@ -305,6 +309,23 @@ async function metadata(message: RenderMessage, deps: Deps): Promise<void> {
 }
 
 /**
+ * The sentence a creator reads for a render problem. A missing image is reported without its storage
+ * key (a key is not for a creator); the key goes to the log line.
+ */
+function creatorText(problem: Error & { code: string }, message: RenderMessage, deps: Deps): string {
+  if (problem.code !== 'missing-image') return problem.message
+  const { tokenId, detail } = problem as { tokenId?: number; detail?: Record<string, string | number> }
+  deps.log('image missing', {
+    jobId: message.jobId,
+    step: message.step,
+    index: indexOf(message),
+    tokenId: tokenId ?? null,
+    key: typeof detail?.key === 'string' ? detail.key : null,
+  })
+  return tokenId === undefined ? 'An image file is missing.' : `Token ${tokenId}: an image file is missing.`
+}
+
+/**
  * Handles one message. Returns normally when the message is done or needs no work, and throws when
  * it should be redelivered. A `RenderProblem` (bad art) fails the job at once, since a rerun cannot
  * fix it; a refusal from the database is the job having moved on; anything else is transient.
@@ -316,14 +337,14 @@ export async function handle(message: RenderMessage, deps: Deps): Promise<void> 
     else await metadata(message, deps)
   } catch (error) {
     if (isRenderProblem(error)) {
-      await report(deps, message, indexOf(message), error.code, error.message)
+      await report(deps, message, indexOf(message), error.code, creatorText(error, message, deps))
       return
     }
     if (!isJobRefusal(error)) throw error
     // The output was not the same twice. The batch named is already done under another CID and the
     // database refuses a failure that names a done batch, so this is recorded on the job.
     if (error.code === 'BATCH_RESULT_DIFFERS' || error.code === 'JOB_RESULT_DIFFERS') {
-      await report(deps, message, null, 'cid-mismatch', RESULT_DIFFERS)
+      await report(deps, message, null, CID_MISMATCH_CODE, RESULT_DIFFERS)
       return
     }
     // A refusal outside the expected set means the worker sent something the database never should
@@ -345,7 +366,7 @@ export async function handle(message: RenderMessage, deps: Deps): Promise<void> 
  * logged and the message acknowledged, and the sweep sends the job's start message again.
  */
 export async function handleDead(message: RenderMessage, deps: Deps): Promise<void> {
-  await report(deps, message, indexOf(message), 'dead-letter', DEAD_LETTER)
+  await report(deps, message, indexOf(message), DEAD_LETTER_CODE, DEAD_LETTER)
 }
 
 /** How long a job may sit with nothing touched before the sweep sends its start message again. */
@@ -355,9 +376,15 @@ export const SWEEP_MINUTES = 15
  * Re-enqueues a start message for each job left `rendering` or `finalizing`, or left `paid` or
  * `waived` and never claimed, with nothing touched for 15 minutes. The start step then claims an
  * unclaimed job, re-sends the open batches of a `rendering` one, or sends `metadata` for a
- * `finalizing` one.
+ * `finalizing` one. It does nothing while the queue has messages waiting.
  */
 export async function sweep(deps: Deps): Promise<number> {
+  // Messages waiting means work is queued, not stuck: sending starts again would only duplicate it.
+  const waiting = (await deps.queue.backlog?.()) ?? 0
+  if (waiting > 0) {
+    deps.log('sweep skipped', { backlog: waiting })
+    return 0
+  }
   const jobs = await deps.jobs.stuck(SWEEP_MINUTES)
   for (const job of jobs) await enqueueRender(deps.queue, job)
   deps.log('sweep', { requeued: jobs.length })

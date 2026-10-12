@@ -522,6 +522,48 @@ describe('batch', () => {
   })
 })
 
+describe('the creator-facing missing-image sentence', () => {
+  it('names the token and not the storage key, which goes to the log', async () => {
+    const h = await harness('generative', { claimed: true })
+    const logged: Record<string, string | number | boolean | null>[] = []
+    h.deps.log = (event, fields = {}) => void (event === 'image missing' && logged.push(fields))
+    h.store.remove(layerKey('wide'))
+    await handle(batchMessage(0), h.deps)
+    const [failure] = h.jobs.failures
+    expect(failure?.code).toBe('missing-image')
+    expect(failure?.message).toMatch(/^Token \d+: an image file is missing\.$/)
+    expect(failure?.message).not.toContain(COLLECTION_ID)
+    expect(logged).toMatchObject([{ jobId: JOB_ID, key: layerKey('wide') }])
+  })
+
+  it('says "An image file is missing." when no token is named (the placeholder)', async () => {
+    const h = await harness('placeholder', { claimed: true })
+    h.store.remove(PLACEHOLDER_KEY)
+    await handle(batchMessage(0), h.deps)
+    expect(h.jobs.failures).toMatchObject([
+      { code: 'missing-image', message: 'An image file is missing.', final: true },
+    ])
+  })
+})
+
+describe('the metadata step reads the render data fresh', () => {
+  it('asks for the data fresh, and only in the metadata step', async () => {
+    const h = await harness('generative', { claimed: true })
+    for (const index of [0, 1, 2]) await handle(batchMessage(index), h.deps)
+    expect(h.jobs.calls).not.toContain('renderData:fresh')
+    await handle(metadataMessage(), h.deps)
+    expect(h.jobs.calls.filter((call) => call === 'renderData:fresh')).toHaveLength(1)
+    expect(h.jobs.record.state).toBe('done')
+  })
+
+  it('does not ask for a fresh read in the batch step', async () => {
+    const h = await harness('generative', { claimed: true })
+    await handle(batchMessage(0), h.deps)
+    expect(h.jobs.calls).toContain('renderData')
+    expect(h.jobs.calls).not.toContain('renderData:fresh')
+  })
+})
+
 describe('failures', () => {
   it('throws anything that is not a render problem or a refusal', async () => {
     const h = await harness('generative', { claimed: true })
@@ -906,6 +948,36 @@ describe('handleDead', () => {
     const h = await harness('generative', { claimed: true })
     h.jobs.fail = () => Promise.reject(new Error('connection reset'))
     await expect(handleDead(startMessage(), h.deps)).rejects.toThrow('connection reset')
+  })
+})
+
+describe('sweep and the queue backlog', () => {
+  it('does nothing, and reads no stuck jobs, while the queue has visible messages', async () => {
+    const h = await harness()
+    h.jobs.stuckJobs = [{ id: JOB_ID, retries: 0 }]
+    const lines: string[] = []
+    h.deps.log = (event) => void lines.push(event)
+    h.deps.queue = { ...h.queue, backlog: async () => 3 }
+    expect(await sweep(h.deps)).toBe(0)
+    expect(h.queue.sent).toEqual([])
+    expect(h.jobs.calls).not.toContain('stuck')
+    expect(lines).toEqual(['sweep skipped'])
+  })
+
+  it('sweeps as usual when the backlog is zero or the queue cannot tell', async () => {
+    for (const backlog of [async () => 0, undefined]) {
+      const h = await harness()
+      h.jobs.stuckJobs = [{ id: JOB_ID, retries: 0 }]
+      h.deps.queue = { ...h.queue, backlog }
+      expect(await sweep(h.deps)).toBe(1)
+      expect(h.queue.sent).toEqual([startMessage(0)])
+    }
+  })
+
+  it('throws when the backlog cannot be read, so the next run tries again', async () => {
+    const h = await harness()
+    h.deps.queue = { ...h.queue, backlog: () => Promise.reject(new Error('queue down')) }
+    await expect(sweep(h.deps)).rejects.toThrow('queue down')
   })
 })
 

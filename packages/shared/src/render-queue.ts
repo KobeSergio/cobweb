@@ -9,8 +9,42 @@ export type RenderMessage =
   | { jobId: string; step: 'batch'; index: number; retries: number }
   | { jobId: string; step: 'metadata'; retries: number }
 
-/** Where messages go: SQS in production, an in-memory queue locally. */
-export type RenderQueue = { send(messages: RenderMessage[]): Promise<void> }
+/**
+ * Where messages go: SQS in production, an in-memory queue locally. `backlog` is how many messages
+ * are waiting to be received; a queue that cannot tell leaves it out.
+ */
+export type RenderQueue = {
+  send(messages: RenderMessage[]): Promise<void>
+  backlog?: () => Promise<number>
+}
+
+/**
+ * The `error_code` values only the worker writes (the others are render problem codes): the payment
+ * could not be verified, the pinning service returned another CID, the message ran out of tries.
+ */
+export const WORKER_FAILURE_CODES = ['payment-mismatch', 'cid-mismatch', 'dead-letter'] as const
+export type WorkerFailureCode = (typeof WORKER_FAILURE_CODES)[number]
+
+/**
+ * The render problem codes (services/render/src/problems.ts) that bad art causes and a retry cannot
+ * fix: the creator has to change the art. `empty-collage` is left out on purpose: it is thrown only
+ * by the preview collage, whose failure the worker logs and skips, so it never fails a job.
+ */
+export const ART_PROBLEM_CODES = [
+  'layer-size',
+  'bad-dna',
+  'missing-image',
+  'batch-range',
+  'missing-batch',
+  'reserved-key',
+  'duplicate-name',
+  'decode',
+] as const
+export type ArtProblemCode = (typeof ART_PROBLEM_CODES)[number]
+
+/** Where a job's preview collage lives in the render bucket: `<collection id>/collage/<job id>.png`. */
+export const collageKey = (collectionId: string, jobId: string): string =>
+  `${collectionId}/collage/${jobId}.png`
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 

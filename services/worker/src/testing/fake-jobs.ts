@@ -42,8 +42,8 @@ export function fakeJobs(
       return jobId === record.id ? { ...record } : null
     },
 
-    async renderData(job) {
-      fake.calls.push('renderData')
+    async renderData(job, options) {
+      fake.calls.push(options?.fresh ? 'renderData:fresh' : 'renderData')
       return { ...data, job }
     },
 

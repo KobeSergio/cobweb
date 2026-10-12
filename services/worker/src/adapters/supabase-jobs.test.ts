@@ -327,6 +327,21 @@ describe('supabaseJobs: reads', () => {
     expect(again.job.state).toBe('rendering')
   })
 
+  it('reads again for each fresh call, so two metadata steps in one process read twice', async () => {
+    const { client, calls } = stubClient((call) => {
+      if (call.table === 'collections') return { data: collectionRow('one_of_one') }
+      return firstPage(call, [{ id: 'u', storage_key: 'k.png' }])
+    })
+    const jobs = supabaseJobs(client)
+    await jobs.renderData(jobRecord(), { fresh: true })
+    await jobs.renderData(jobRecord(), { fresh: true })
+    expect(calls.filter((call) => call.table === 'collections')).toHaveLength(2)
+    // A plain call after them still keeps what it read, for the batch steps.
+    await jobs.renderData(jobRecord())
+    await jobs.renderData(jobRecord())
+    expect(calls.filter((call) => call.table === 'collections')).toHaveLength(2)
+  })
+
   it('reads only the placeholder file for a placeholder job', async () => {
     const { client, calls } = stubClient((call) =>
       call.table === 'collections'

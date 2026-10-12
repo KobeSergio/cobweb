@@ -1,15 +1,117 @@
+import { ChangeMessageVisibilityCommand } from '@aws-sdk/client-sqs'
 import type { SQSEvent, SQSRecord } from 'aws-lambda'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { Deps } from '../steps.ts'
 import { JOB_ID } from '../testing/fixtures.ts'
+import { stubAws } from '../testing/stub-aws.ts'
+import type { SqsLike } from './handler.ts'
 import { parseSecret } from './deps.ts'
-import { sqsHandler } from './handler.ts'
+import { FAILED_MESSAGE_VISIBILITY_SECONDS, sqsHandler } from './handler.ts'
 
 const record = (messageId: string, body: unknown): SQSRecord =>
   ({ messageId, body: typeof body === 'string' ? body : JSON.stringify(body) }) as SQSRecord
 const event = (...records: SQSRecord[]): SQSEvent => ({ Records: records })
 const deps = {} as Deps
 const start = { jobId: JOB_ID, step: 'start', retries: 0 }
+
+describe('sqsHandler: the visibility of a failed message', () => {
+  const withHandle = (receiptHandle: string, messageId: string, body: unknown): SQSRecord =>
+    ({ messageId, receiptHandle, body: JSON.stringify(body) }) as SQSRecord
+  const failing = async () => {
+    throw new Error('pin down')
+  }
+
+  afterEach(() => {
+    delete process.env.TEST_QUEUE_URL
+  })
+
+  it('is 120 seconds', () => {
+    expect(FAILED_MESSAGE_VISIBILITY_SECONDS).toBe(120)
+  })
+
+  it('sets the failed record to 120 seconds on the queue the named env points to, then reports it', async () => {
+    process.env.TEST_QUEUE_URL = 'https://sqs.example/queues/render'
+    const { client, sent } = stubAws<SqsLike>()
+    const handler = sqsHandler(
+      async () => deps,
+      async (message) => {
+        if (message.step === 'metadata') await failing()
+      },
+      () => {},
+      { queueUrlEnv: 'TEST_QUEUE_URL', client },
+    )
+    const response = await handler(
+      event(
+        withHandle('rh-1', 'm1', start),
+        withHandle('rh-2', 'm2', { jobId: JOB_ID, step: 'metadata', retries: 0 }),
+      ),
+    )
+    expect(response).toEqual({ batchItemFailures: [{ itemIdentifier: 'm2' }] })
+    expect(sent).toEqual([
+      {
+        name: ChangeMessageVisibilityCommand.name,
+        input: {
+          QueueUrl: 'https://sqs.example/queues/render',
+          ReceiptHandle: 'rh-2',
+          VisibilityTimeout: 120,
+        },
+      },
+    ])
+  })
+
+  it('logs a failure of the visibility call by name and masked line, and still reports the record', async () => {
+    process.env.TEST_QUEUE_URL = 'https://sqs.example/queues/render'
+    const lines: string[] = []
+    const client: SqsLike = {
+      send: () => Promise.reject(new Error('denied at https://sqs.example/queues/render')),
+    } as unknown as SqsLike
+    const handler = sqsHandler(
+      async () => deps,
+      failing,
+      (name, fields) => lines.push(`${name} ${String(fields?.error ?? '')}`.trim()),
+      {
+        queueUrlEnv: 'TEST_QUEUE_URL',
+        client,
+      },
+    )
+    expect(await handler(event(withHandle('rh-1', 'm1', start)))).toEqual({
+      batchItemFailures: [{ itemIdentifier: 'm1' }],
+    })
+    expect(lines).toEqual(['message failed Error: pin down', 'visibility not changed Error: denied at [url]'])
+  })
+
+  it('leaves the visibility alone, and says so, when the stack set no queue URL', async () => {
+    const lines: string[] = []
+    const { client, sent } = stubAws<SqsLike>()
+    const handler = sqsHandler(
+      async () => deps,
+      failing,
+      (name) => lines.push(name),
+      {
+        queueUrlEnv: 'TEST_QUEUE_URL',
+        client,
+      },
+    )
+    expect(await handler(event(withHandle('rh-1', 'm1', start)))).toEqual({
+      batchItemFailures: [{ itemIdentifier: 'm1' }],
+    })
+    expect(sent).toEqual([])
+    expect(lines).toContain('visibility not changed')
+  })
+
+  it('does not touch the visibility of a message that returned or was ignored', async () => {
+    process.env.TEST_QUEUE_URL = 'https://sqs.example/queues/render'
+    const { client, sent } = stubAws<SqsLike>()
+    const handler = sqsHandler(
+      async () => deps,
+      async () => {},
+      () => {},
+      { queueUrlEnv: 'TEST_QUEUE_URL', client },
+    )
+    await handler(event(withHandle('rh-1', 'm1', start), withHandle('rh-2', 'm2', 'not json')))
+    expect(sent).toEqual([])
+  })
+})
 
 describe('sqsHandler', () => {
   it('runs each message and reports no failure when all return', async () => {

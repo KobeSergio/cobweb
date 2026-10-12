@@ -93,7 +93,11 @@ export type TokenRows =
 
 export type Jobs = {
   job(jobId: string): Promise<JobRecord | null>
-  renderData(job: JobRecord): Promise<RenderData>
+  /**
+   * The rows the spec mapper needs. Kept per job for the batch steps; `fresh` reads them again, so the
+   * metadata step builds a job's metadata from one read of the collection's text.
+   */
+  renderData(job: JobRecord, options?: { fresh?: boolean }): Promise<RenderData>
   tokens(job: JobRecord, index: number): Promise<TokenRows>
   batches(jobId: string): Promise<BatchRecord[]>
   claim(jobId: string): Promise<JobRecord>

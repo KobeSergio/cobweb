@@ -1,20 +1,69 @@
+import { ChangeMessageVisibilityCommand, SQSClient } from '@aws-sdk/client-sqs'
 import { parseRenderMessage } from '@cobweb/shared/render-queue'
 import type { RenderMessage } from '@cobweb/shared/render-queue'
-import type { SQSBatchItemFailure, SQSBatchResponse, SQSEvent } from 'aws-lambda'
+import type { SQSBatchItemFailure, SQSBatchResponse, SQSEvent, SQSRecord } from 'aws-lambda'
 import { consoleLog, errorSummary } from '../log.ts'
 import type { Log } from '../log.ts'
 import type { Deps } from '../steps.ts'
 
 /**
+ * How long a message whose run threw stays invisible. The queue's own timeout is six times the
+ * function's (an hour for the render queue), which would make every transient fault wait that long.
+ */
+export const FAILED_MESSAGE_VISIBILITY_SECONDS = 120
+
+export type SqsLike = Pick<SQSClient, 'send'>
+
+/** Where to shorten a failed message's wait: the queue the stack names in the environment. */
+export type VisibilityOptions = { queueUrlEnv: string; client?: SqsLike }
+
+let sharedClient: SqsLike | null = null
+
+/**
+ * Sets the failed record's visibility to 120 seconds. A failure of this call is logged (name and
+ * masked line) and ignored: the record is reported as failed either way and returns after the
+ * queue's own timeout.
+ */
+async function shortenWait(
+  record: SQSRecord,
+  options: VisibilityOptions | undefined,
+  log: Log,
+): Promise<void> {
+  if (!options) return
+  try {
+    const queueUrl = process.env[options.queueUrlEnv]
+    if (!queueUrl) {
+      log('visibility not changed', { messageId: record.messageId, env: options.queueUrlEnv })
+      return
+    }
+    sharedClient ??= new SQSClient({})
+    await (options.client ?? sharedClient).send(
+      new ChangeMessageVisibilityCommand({
+        QueueUrl: queueUrl,
+        ReceiptHandle: record.receiptHandle,
+        VisibilityTimeout: FAILED_MESSAGE_VISIBILITY_SECONDS,
+      }),
+    )
+  } catch (error) {
+    try {
+      log('visibility not changed', { messageId: record.messageId, error: errorSummary(error) })
+    } catch {
+      // Nothing more can be said safely.
+    }
+  }
+}
+
+/**
  * An SQS handler around one of the worker's entry points. A body that is not a render message is
  * logged and acknowledged, never retried. A message whose run throws is reported as a partial batch
- * failure, so SQS redelivers that message alone. Anything unexpected outside a message's run marks
+ * failure, so SQS redelivers that message alone, after 120 seconds when the stack names its queue. Anything unexpected outside a message's run marks
  * every record of the event as failed.
  */
 export function sqsHandler(
   getDeps: () => Promise<Deps>,
   run: (message: RenderMessage, deps: Deps) => Promise<void>,
   log: Log = consoleLog,
+  visibility?: VisibilityOptions,
 ): (event: SQSEvent) => Promise<SQSBatchResponse> {
   return async (event) => {
     const records = Array.isArray(event?.Records) ? event.Records : []
@@ -35,6 +84,7 @@ export function sqsHandler(
             step: message.step,
             error: errorSummary(error),
           })
+          await shortenWait(record, visibility, log)
           batchItemFailures.push({ itemIdentifier: record.messageId })
         }
       }

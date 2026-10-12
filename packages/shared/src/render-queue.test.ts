@@ -1,6 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { enqueueRender, parseRenderMessage, type RenderMessage } from './render-queue.ts'
+import {
+  ART_PROBLEM_CODES,
+  collageKey,
+  enqueueRender,
+  parseRenderMessage,
+  WORKER_FAILURE_CODES,
+  type RenderMessage,
+} from './render-queue.ts'
 
 const JOB = '3f0c2f5e-8a51-4c0e-9d7b-0d0f5a3b9c11'
 const body = (value: unknown) => JSON.stringify(value)
@@ -76,6 +83,34 @@ describe('enqueueRender', () => {
   it('passes a queue failure on to the caller', async () => {
     const queue = { send: () => Promise.reject(new Error('queue down')) }
     await expect(enqueueRender(queue, { id: JOB, retries: 0 })).rejects.toThrow('queue down')
+  })
+})
+
+describe('the failure codes', () => {
+  it('lists the three codes only the worker writes', () => {
+    expect([...WORKER_FAILURE_CODES]).toEqual(['payment-mismatch', 'cid-mismatch', 'dead-letter'])
+  })
+
+  it('lists the eight render problems a retry cannot fix, none twice, none of them a worker code', () => {
+    expect([...ART_PROBLEM_CODES].sort()).toEqual([
+      'bad-dna',
+      'batch-range',
+      'decode',
+      'duplicate-name',
+      'layer-size',
+      'missing-batch',
+      'missing-image',
+      'reserved-key',
+    ])
+    for (const code of ART_PROBLEM_CODES) expect(WORKER_FAILURE_CODES).not.toContain(code)
+  })
+})
+
+describe('collageKey', () => {
+  it('is <collection id>/collage/<job id>.png', () => {
+    expect(collageKey('9a1b2c3d-0000-4000-8000-000000000001', JOB)).toBe(
+      `9a1b2c3d-0000-4000-8000-000000000001/collage/${JOB}.png`,
+    )
   })
 })
 
