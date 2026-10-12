@@ -3,3 +3,4 @@
 export * from './chains.ts'
 export * from './factory-abi.ts'
 export * from './job-id.ts'
+export * from './render-queue.ts'
