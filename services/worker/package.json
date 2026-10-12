@@ -1,0 +1,33 @@
+{
+  "name": "@cobweb/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./queue": "./src/queue.ts",
+    "./local": "./src/local.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "bench": "node --import ../../apps/web/scripts/resolve-ts.mjs scripts/bench.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1147.0",
+    "@aws-sdk/client-secrets-manager": "3.1147.0",
+    "@aws-sdk/client-sqs": "3.1147.0",
+    "@cobweb/render": "workspace:*",
+    "@cobweb/shared": "workspace:*",
+    "@ipld/car": "5.4.7",
+    "@supabase/supabase-js": "^2.117.2",
+    "sharp": "0.35.5",
+    "viem": "^2.57.2"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.164",
+    "@types/node": "^26.6.4",
+    "vitest": "^5.0.3"
+  }
+}
