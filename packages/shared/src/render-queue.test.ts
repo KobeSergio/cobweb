@@ -48,9 +48,16 @@ describe('parseRenderMessage', () => {
     ['negative retries', body({ jobId: JOB, step: 'start', retries: -1 })],
     ['fractional retries', body({ jobId: JOB, step: 'start', retries: 1.5 })],
     ['retries as text', body({ jobId: JOB, step: 'start', retries: '1' })],
+    ['retries beyond the safe integers', body({ jobId: JOB, step: 'start', retries: 9007199254740992 })],
     ['a batch without an index', body({ jobId: JOB, step: 'batch', retries: 0 })],
     ['a batch with a negative index', body({ jobId: JOB, step: 'batch', index: -1, retries: 0 })],
     ['a batch with a fractional index', body({ jobId: JOB, step: 'batch', index: 0.5, retries: 0 })],
+    [
+      'a batch with an index beyond the safe integers',
+      body({ jobId: JOB, step: 'batch', index: 9007199254740992, retries: 0 }),
+    ],
+    ['a metadata message with an index', body({ jobId: JOB, step: 'metadata', index: 0, retries: 0 })],
+    ['a __proto__ key', `{"jobId":"${JOB}","step":"start","retries":0,"__proto__":{"x":1}}`],
     ['a start with an index', body({ jobId: JOB, step: 'start', index: 0, retries: 0 })],
     ['an extra key', body({ jobId: JOB, step: 'metadata', retries: 0, range: [1, 100] })],
     ['an extra key on a batch', body({ jobId: JOB, step: 'batch', index: 0, retries: 0, final: true })],
@@ -77,5 +84,7 @@ describe('the module', () => {
     const source = readFileSync(new URL('./render-queue.ts', import.meta.url), 'utf8')
     expect(source).not.toMatch(/^\s*import\s/m)
     expect(source).not.toMatch(/\brequire\(/)
+    expect(source).not.toMatch(/^\s*export\s+(type\s+)?(\*|\{[^}]*\})(\s+as\s+\w+)?\s*from\s/m)
+    expect(source).not.toMatch(/\bimport\(/)
   })
 })
