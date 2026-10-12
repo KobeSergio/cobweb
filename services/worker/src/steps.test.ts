@@ -1059,6 +1059,76 @@ describe('sweep and the queue backlog', () => {
   })
 })
 
+describe('sweep touches the jobs it sends again', () => {
+  const OTHER = '11111111-2222-4333-8444-555555555555'
+
+  it('touches each job once, after its start message was sent', async () => {
+    const h = await harness()
+    h.jobs.stuckJobs = [
+      { id: JOB_ID, retries: 0 },
+      { id: OTHER, retries: 1 },
+    ]
+    const order: string[] = []
+    const send = h.queue.send
+    h.deps.queue = {
+      ...h.queue,
+      send: async (messages) => {
+        await send(messages)
+        order.push(`send:${messages[0]!.jobId}`)
+      },
+    }
+    h.jobs.touch = async (jobId) => void order.push(`touch:${jobId}`)
+    expect(await sweep(h.deps)).toBe(2)
+    expect(order).toEqual([`send:${JOB_ID}`, `touch:${JOB_ID}`, `send:${OTHER}`, `touch:${OTHER}`])
+  })
+
+  it('does not touch a job whose send threw, so it stays eligible', async () => {
+    const h = await harness()
+    h.jobs.stuckJobs = [{ id: JOB_ID, retries: 0 }]
+    const touched: string[] = []
+    h.jobs.touch = async (jobId) => void touched.push(jobId)
+    h.deps.queue = { ...h.queue, send: () => Promise.reject(new Error('queue down')) }
+    await expect(sweep(h.deps)).rejects.toThrow('queue down')
+    expect(touched).toEqual([])
+  })
+
+  it('logs a failed touch and goes on with the next job', async () => {
+    const h = await harness()
+    h.jobs.stuckJobs = [
+      { id: JOB_ID, retries: 0 },
+      { id: OTHER, retries: 0 },
+    ]
+    const lines: string[] = []
+    h.deps.log = (event) => void lines.push(event)
+    h.jobs.touch = () => Promise.reject(new Error('db down'))
+    expect(await sweep(h.deps)).toBe(2)
+    expect(h.queue.sent.map((message) => message.jobId)).toEqual([JOB_ID, OTHER])
+    expect(lines.filter((line) => line === 'touch failed')).toHaveLength(2)
+  })
+
+  it('re-enqueues a job at most once per threshold: a second sweep straight after finds nothing', async () => {
+    const h = await harness()
+    // A stuck that honours the touch time, like the database: a touched job is young again.
+    let clock = 0
+    const touchedAt = new Map<string, number>()
+    const updatedAt = new Map([[JOB_ID, -130]])
+    h.jobs.stuck = async (minutes) =>
+      [...updatedAt]
+        .filter(([id, at]) => clock - (touchedAt.get(id) ?? at) >= minutes)
+        .map(([id]) => ({ id, retries: 0 }))
+    h.jobs.touch = async (jobId) => void touchedAt.set(jobId, clock)
+    // The queue reads as idle, so the threshold is 15 minutes (the memory queue would count its own start).
+    h.deps.queue = { ...h.queue, backlog: async () => 0 }
+    expect(await sweep(h.deps)).toBe(1)
+    expect(await sweep(h.deps)).toBe(0)
+    clock += 14
+    expect(await sweep(h.deps)).toBe(0)
+    clock += 2
+    expect(await sweep(h.deps)).toBe(1)
+    expect(h.queue.sent).toHaveLength(2)
+  })
+})
+
 describe('sweep', () => {
   it('lets the Jobs port narrow stuck to one job id, which the fake honours', async () => {
     const h = await harness()

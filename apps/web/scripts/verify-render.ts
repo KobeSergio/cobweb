@@ -1038,7 +1038,19 @@ async function main(): Promise<void> {
     if (before !== 'finalizing') return `before the sweep: ${before}`
     const deps = depsFor(local.memoryQueue(), local.folderPinner(pins))
     if ((await deps.jobs.stuck(15, jobId)).length !== 0) return 'stuck after no time at all'
+    const stamp = async () => {
+      const { data, error } = await admin.from('render_jobs').select('updated_at').eq('id', jobId).single()
+      if (error) throw new Error(`updated_at: ${error.message}`)
+      return Date.parse(data.updated_at)
+    }
+    const swept = await stamp()
     if ((await worker.sweep(sweepDeps(deps, jobId))) !== 1) return 'the sweep did not find the job'
+    // The sweep marked the job as just swept, so it is not returned again until a threshold has passed.
+    // The forward clock cannot show that (16 minutes ahead still reads a job touched now as older than
+    // 15), so the row's own stamp is checked, and a clock only 10 minutes ahead must not see the job.
+    if ((await stamp()) <= swept) return 'the sweep did not touch the job'
+    const soon = worker.supabaseJobs(admin, { now: () => Date.now() + 10 * 60_000 })
+    if ((await soon.stuck(15, jobId)).length !== 0) return 'the job is still stuck right after the sweep'
     const run = await local.runLocal(deps)
     if (run.thrown || run.dead) return `run ${JSON.stringify(run)}`
     return doneProblem(jobId)

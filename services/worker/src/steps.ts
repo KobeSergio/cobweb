@@ -449,7 +449,17 @@ export async function sweep(deps: Deps): Promise<number> {
   }
   if (waiting > 0) deps.log('sweep busy', { backlog: waiting, minutes: STUCK_MINUTES_BUSY })
   const jobs = await deps.jobs.stuck(waiting > 0 ? STUCK_MINUTES_BUSY : STUCK_MINUTES)
-  for (const job of jobs) await enqueueRender(deps.queue, job)
+  for (const job of jobs) {
+    await enqueueRender(deps.queue, job)
+    // Only after the send went through: a failed send leaves the job eligible for the next sweep. Without
+    // this a job is returned on every sweep until something updates its row, and under a long backlog
+    // that sends all its open batches again four times an hour.
+    try {
+      await deps.jobs.touch(job.id)
+    } catch (error) {
+      deps.log('touch failed', { jobId: job.id, error: errorSummary(error) })
+    }
+  }
   deps.log('sweep', { requeued: jobs.length })
   return jobs.length
 }

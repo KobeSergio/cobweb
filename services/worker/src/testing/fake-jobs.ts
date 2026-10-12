@@ -21,6 +21,8 @@ export type FakeJobs = Jobs & {
   calls: string[]
   /** What `stuck` answers: rendering or finalizing jobs, and paid or waived jobs never claimed. */
   stuckJobs: { id: string; retries: number }[]
+  /** The ids `touch` was called with, in order. */
+  touched: string[]
 }
 
 export function fakeJobs(
@@ -36,6 +38,7 @@ export function fakeJobs(
     finished: null,
     calls: [],
     stuckJobs: [],
+    touched: [],
 
     async job(jobId) {
       fake.calls.push('job')
@@ -143,6 +146,11 @@ export function fakeJobs(
       record.state = 'done'
       fake.finished = result
       return { ...record }
+    },
+
+    async touch(jobId) {
+      fake.calls.push('touch')
+      fake.touched.push(jobId)
     },
 
     async stuck(_olderThanMinutes, onlyJobId) {

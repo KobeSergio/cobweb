@@ -505,6 +505,24 @@ describe('supabaseJobs: the job state functions', () => {
   })
 })
 
+describe('supabaseJobs: touch', () => {
+  const NOW = Date.parse('2026-10-12T12:00:00.000Z')
+
+  it('sets updated_at on that one job row and changes nothing else', async () => {
+    const { client, calls } = stubClient(() => ({ data: null }))
+    await supabaseJobs(client, { now: () => NOW }).touch(JOB_ID)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.table).toBe('render_jobs')
+    expect(opOf(calls[0]!, 'update')).toEqual([{ updated_at: '2026-10-12T12:00:00.000Z' }])
+    expect(opOf(calls[0]!, 'eq')).toEqual(['id', JOB_ID])
+  })
+
+  it('throws when the update fails, naming the call and not the database error', async () => {
+    const { client } = stubClient(() => ({ error: { code: 'XX000', message: 'boom' } }))
+    await expect(supabaseJobs(client).touch(JOB_ID)).rejects.toThrow('Touching the job failed: XX000 boom')
+  })
+})
+
 describe('supabaseJobs: stuck', () => {
   const NOW = Date.parse('2026-10-12T12:00:00.000Z')
   const CUTOFF = '2026-10-12T11:45:00.000Z'

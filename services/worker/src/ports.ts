@@ -123,6 +123,11 @@ export type Jobs = {
    * the database refuses to fail an unclaimed job for anything but a payment mismatch, so only the
    * sweep can pick it up again. With `onlyJobId`, only that job can be returned.
    */
+  /**
+   * Marks a job as just swept (`updated_at` is set to now, nothing else changes), so `stuck` does not
+   * return it again until a full threshold has passed. `updated_at` therefore also means "last swept".
+   */
+  touch(jobId: string): Promise<void>
   stuck(olderThanMinutes: number, onlyJobId?: string): Promise<{ id: string; retries: number }[]>
 }
 

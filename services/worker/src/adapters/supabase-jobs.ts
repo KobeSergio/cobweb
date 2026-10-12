@@ -407,6 +407,16 @@ export function supabaseJobs(client: WorkerClient, options: { now?: () => number
       return jobAfter(jobId)
     },
 
+    async touch(jobId) {
+      // Explicit, though the set_updated_at trigger would set it too: no business column changes, and
+      // the state and frozen-art guards only look at those.
+      const { error } = await client
+        .from('render_jobs')
+        .update({ updated_at: new Date(now()).toISOString() })
+        .eq('id', jobId)
+      if (error) throw failure('Touching the job', error)
+    },
+
     async stuck(olderThanMinutes, onlyJobId) {
       const cutoff = new Date(now() - olderThanMinutes * 60_000).toISOString()
       let query = client
