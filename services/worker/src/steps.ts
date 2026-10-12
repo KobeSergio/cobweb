@@ -16,7 +16,14 @@ import { collageKey, enqueueRender, WORKER_FAILURE_CODES } from '@cobweb/shared/
 import type { RenderMessage, RenderQueue } from '@cobweb/shared/render-queue'
 import { errorSummary } from './log.ts'
 import type { Log } from './log.ts'
-import { isJobRefusal, isMissingObject, isObjectTooLarge, isRenderProblem } from './ports.ts'
+import {
+  BatchTooLarge,
+  isBatchTooLarge,
+  isJobRefusal,
+  isMissingObject,
+  isObjectTooLarge,
+  isRenderProblem,
+} from './ports.ts'
 import type { Chain, JobRecord, Jobs, Pinner, RefusalCode, RenderData, Store } from './ports.ts'
 import { renderSpec, tokenSlice } from './spec.ts'
 
@@ -41,6 +48,8 @@ export type Deps = {
   queue: RenderQueue
   log: Log
   retry?: Retry
+  /** The ceiling on the real bytes of one pass-through batch; tests lower it. */
+  maxBatchBytes?: number
 }
 
 /**
@@ -66,6 +75,8 @@ export const PAYMENT_MISMATCH = 'The payment could not be verified on chain.'
 export const CID_MISMATCH = 'The pinning service returned a different CID.'
 export const RESULT_DIFFERS = 'The render gave a different result than the one already recorded.'
 export const DEAD_LETTER = 'The render did not finish after several tries.'
+export const BATCH_TOO_LARGE =
+  'This batch of files is larger than the worker can hold. Tell support about it.'
 export const FILE_TOO_LARGE = 'A file is larger than the upload limit.'
 
 /** How many tokens the collage shows, and so how many of batch 0 are composited again for it. */
@@ -76,7 +87,8 @@ const TOKEN_READS_IN_FLIGHT = 8
 type Token = GenerativeToken | AssetToken
 
 /** The codes only the worker writes, from the shared list the screen reads (spec, section 4). */
-const [PAYMENT_MISMATCH_CODE, CID_MISMATCH_CODE, DEAD_LETTER_CODE] = WORKER_FAILURE_CODES
+const [PAYMENT_MISMATCH_CODE, CID_MISMATCH_CODE, DEAD_LETTER_CODE, BATCH_TOO_LARGE_CODE] =
+  WORKER_FAILURE_CODES
 
 /** A message's batch index, or null for a job-level message. */
 const indexOf = (message: RenderMessage): number | null => (message.step === 'batch' ? message.index : null)
@@ -117,6 +129,32 @@ const EXPECTED_REFUSALS: readonly RefusalCode[] = [
 ]
 
 /**
+ * The most bytes one pass-through batch (1/1 or single asset) may load, counted from what is really
+ * read, not from the sizes the database holds: the lock sizes batches from `uploads.bytes`, a planning
+ * number. A batch is held about 2.8 times over while it is packed, which the 4 GB function takes at
+ * about 1.4 GB.
+ */
+export const MAX_BATCH_BYTES = 1_200_000_000
+
+/**
+ * A loader that adds up the bytes it has really returned, each distinct key once (editions of one
+ * file load it once), and throws `BatchTooLarge` when the total passes `max`.
+ */
+export function boundedLoad(load: Store['load'], max: number): Store['load'] {
+  const seen = new Set<string>()
+  let total = 0
+  return async (ref) => {
+    const bytes = await load(ref)
+    if (!seen.has(ref.key)) {
+      seen.add(ref.key)
+      total += bytes.byteLength
+      if (total > max) throw new BatchTooLarge()
+    }
+    return bytes
+  }
+}
+
+/**
  * Runs a render call with a loader that remembers a storage error that is not a `MissingObject`. The
  * render library turns every failed load into a `missing-image` problem; when one of those follows a
  * transient storage error, the remembered error is thrown instead, so the message is redelivered
@@ -138,6 +176,8 @@ async function withStore<T>(store: Store, run: (load: Store['load']) => Promise<
     if (transient.length > 0 && isRenderProblem(error) && error.code === 'missing-image') {
       // A file above the upload limit is bad art a retry cannot fix; any other remembered error is a fault.
       if (transient.some(isObjectTooLarge)) throw new RenderProblem('decode', FILE_TOO_LARGE)
+      const big = transient.find(isBatchTooLarge)
+      if (big) throw big
       throw transient[0]
     }
     throw error
@@ -196,11 +236,24 @@ async function batch(message: RenderMessage & { step: 'batch' }, deps: Deps): Pr
     const data = await jobs.renderData(job)
     const spec = renderSpec(data)
     // A placeholder job's one batch is the placeholder's image directory; its metadata is the metadata step's.
-    const rendered = await withStore(store, async (load) =>
-      spec.kind === 'placeholder'
-        ? (await renderPlaceholder(spec, load)).image
-        : await renderBatch(spec, index, tokenSlice(data, await jobs.tokens(job, index)), load),
-    )
+    // A pass-through batch (1/1, single asset) is bounded by the bytes it really loads.
+    const bounded = spec.kind === 'one_of_one' || spec.kind === 'single_asset'
+    let rendered: PackedDirectory
+    const limited: Store = bounded
+      ? { ...store, load: boundedLoad(store.load, deps.maxBatchBytes ?? MAX_BATCH_BYTES) }
+      : store
+    try {
+      rendered = await withStore(limited, async (load) =>
+        spec.kind === 'placeholder'
+          ? (await renderPlaceholder(spec, load)).image
+          : await renderBatch(spec, index, tokenSlice(data, await jobs.tokens(job, index)), load),
+      )
+    } catch (error) {
+      // Final: a rerun reads the same files.
+      if (!isBatchTooLarge(error)) throw error
+      await report(deps, message, index, BATCH_TOO_LARGE_CODE, BATCH_TOO_LARGE)
+      return
+    }
     if (!(await pinned(deps, message, rendered))) return
     done = (await jobs.batchDone(jobId, index, rendered.cid, rendered.size)).batchesDone
     log('batch done', { jobId, index, cid: rendered.cid, size: rendered.size, done })

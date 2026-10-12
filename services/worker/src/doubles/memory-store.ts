@@ -8,6 +8,8 @@ export type MemoryStore = Store & {
   collages: Map<string, Uint8Array>
   /** Makes the next `times` loads of a key throw a transient error (not a `MissingObject`). */
   failTransiently(key: string, times: number): void
+  /** The byte length of a held key. */
+  sizeOf(key: string): number
   /** Deletes a key, so it is missing from then on. */
   remove(key: string): void
 }
@@ -23,6 +25,9 @@ export function memoryStore(images: Record<string, Uint8Array>): MemoryStore {
     collages,
     failTransiently(key, times) {
       transient.set(key, times)
+    },
+    sizeOf(key) {
+      return held.get(key)?.byteLength ?? 0
     },
     remove(key) {
       held.delete(key)

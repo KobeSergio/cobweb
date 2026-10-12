@@ -4,10 +4,13 @@ import sharp from 'sharp'
 import { flatPng, sizeOf } from './doubles/draw.ts'
 import { memoryStore } from './doubles/memory-store.ts'
 import { wrongCidPinner } from './doubles/pinners.ts'
-import { JobRefusal, MissingObject, ObjectTooLarge } from './ports.ts'
+import { isBatchTooLarge, JobRefusal, MissingObject, ObjectTooLarge } from './ports.ts'
 import {
+  BATCH_TOO_LARGE,
+  boundedLoad,
   CID_MISMATCH,
   DEAD_LETTER,
+  MAX_BATCH_BYTES,
   handle,
   handleDead,
   PAYMENT_MISMATCH,
@@ -519,6 +522,54 @@ describe('batch', () => {
     expect(h.jobs.rows[0]!.imagesCid).toMatch(CID)
     expect(h.jobs.calls).not.toContain('tokens:0')
     expect(h.queue.sent).toEqual([metadataMessage()])
+  })
+})
+
+describe('the batch ceiling', () => {
+  const ref = (key: string) => ({ key, ext: 'png' as const })
+
+  it('is 1.2 GB, with a plain sentence', () => {
+    expect(MAX_BATCH_BYTES).toBe(1_200_000_000)
+    expect(BATCH_TOO_LARGE).toBe(
+      'This batch of files is larger than the worker can hold. Tell support about it.',
+    )
+  })
+
+  it('counts a key once however many editions load it, and throws BatchTooLarge past the ceiling', async () => {
+    const load = boundedLoad(async () => new Uint8Array(10), 25)
+    for (let edition = 0; edition < 50; edition++) await load(ref('a'))
+    await load(ref('b'))
+    const error = await load(ref('c')).catch((thrown: unknown) => thrown)
+    expect(isBatchTooLarge(error)).toBe(true)
+  })
+
+  it('fails the job for good, with batch-too-large and its sentence, and pins nothing', async () => {
+    const h = await harness('assets', { claimed: true })
+    const sizes = [assetKey('one'), assetKey('two')].map((key) => h.store.sizeOf(key))
+    h.deps.maxBatchBytes = sizes[0]! + sizes[1]! - 1
+    await handle(batchMessage(0), h.deps)
+    expect(h.jobs.failures).toMatchObject([
+      { index: 0, code: 'batch-too-large', message: BATCH_TOO_LARGE, final: true },
+    ])
+    expect(h.pins).toEqual([])
+    expect(h.jobs.record.state).toBe('failed')
+  })
+
+  it('lets the same batch through when the ceiling covers its real sizes', async () => {
+    const h = await harness('assets', { claimed: true })
+    const sizes = [assetKey('one'), assetKey('two')].map((key) => h.store.sizeOf(key))
+    h.deps.maxBatchBytes = sizes[0]! + sizes[1]!
+    await handle(batchMessage(0), h.deps)
+    expect(h.jobs.failures).toEqual([])
+    expect(h.jobs.rows[0]!.state).toBe('done')
+  })
+
+  it('does not apply to a generative batch, which composites its layers', async () => {
+    const h = await harness('generative', { claimed: true })
+    h.deps.maxBatchBytes = 1
+    await handle(batchMessage(0), h.deps)
+    expect(h.jobs.failures).toEqual([])
+    expect(h.jobs.rows[0]!.state).toBe('done')
   })
 })
 

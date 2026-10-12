@@ -20,9 +20,15 @@ export type RenderQueue = {
 
 /**
  * The `error_code` values only the worker writes (the others are render problem codes): the payment
- * could not be verified, the pinning service returned another CID, the message ran out of tries.
+ * could not be verified, the pinning service returned another CID, the message ran out of tries, the
+ * files of one batch passed the worker's memory ceiling. All fit the column's 40 characters.
  */
-export const WORKER_FAILURE_CODES = ['payment-mismatch', 'cid-mismatch', 'dead-letter'] as const
+export const WORKER_FAILURE_CODES = [
+  'payment-mismatch',
+  'cid-mismatch',
+  'dead-letter',
+  'batch-too-large',
+] as const
 export type WorkerFailureCode = (typeof WORKER_FAILURE_CODES)[number]
 
 /**
@@ -39,6 +45,8 @@ export const ART_PROBLEM_CODES = [
   'reserved-key',
   'duplicate-name',
   'decode',
+  // The worker's own: the files of one batch passed its memory ceiling, and the same files come back.
+  'batch-too-large',
 ] as const
 export type ArtProblemCode = (typeof ART_PROBLEM_CODES)[number]
 

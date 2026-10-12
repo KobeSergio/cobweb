@@ -6,6 +6,11 @@
 -- count to match. A generative job (no token list) and a placeholder job keep the 100 art_lock and
 -- art_lock_placeholder write, and art_lock is not redefined here.
 --
+-- The size at lock is a planning number: uploads.bytes is what record_upload was told, and a signed-in
+-- creator can call that function directly with any size. The worker does not rely on it; its batch
+-- step adds up the bytes it really loads and fails the job with batch-too-large past its own
+-- ceiling (docs/specs/2026-10-12-render-worker.md, section 7).
+--
 -- The function is security invoker: every insert into render_jobs comes from art_lock or
 -- art_lock_placeholder, both security definer functions, so it runs as their owner and reads
 -- uploads without any extra grant. A role that could not read the rows would see no upload and

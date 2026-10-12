@@ -162,6 +162,18 @@ export function isObjectTooLarge(error: unknown): boolean {
   return error instanceof Error && error.name === 'ObjectTooLarge'
 }
 
+/** The error the batch step's loader throws when the files of one batch pass the worker's ceiling. */
+export class BatchTooLarge extends Error {
+  constructor() {
+    super('The files of this batch are larger than the worker can hold.')
+    this.name = 'BatchTooLarge'
+  }
+}
+
+export function isBatchTooLarge(error: unknown): boolean {
+  return error instanceof Error && error.name === 'BatchTooLarge'
+}
+
 export type Pinner = { pin(car: Uint8Array, expectedCid: string): Promise<string> }
 export type Chain = { jobPayment(job: JobRecord): Promise<bigint> }
 

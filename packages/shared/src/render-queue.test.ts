@@ -87,14 +87,25 @@ describe('enqueueRender', () => {
 })
 
 describe('the failure codes', () => {
-  it('lists the three codes only the worker writes', () => {
-    expect([...WORKER_FAILURE_CODES]).toEqual(['payment-mismatch', 'cid-mismatch', 'dead-letter'])
+  it('lists the four codes only the worker writes', () => {
+    expect([...WORKER_FAILURE_CODES]).toEqual([
+      'payment-mismatch',
+      'cid-mismatch',
+      'dead-letter',
+      'batch-too-large',
+    ])
   })
 
-  it('lists the eight render problems a retry cannot fix, none twice, none of them a worker code', () => {
+  it('fits every code in the 40 character column', () => {
+    for (const code of [...WORKER_FAILURE_CODES, ...ART_PROBLEM_CODES])
+      expect(code.length).toBeLessThanOrEqual(40)
+  })
+
+  it('lists the render problems a retry cannot fix, and the worker batch-too-large, none twice', () => {
     expect([...ART_PROBLEM_CODES].sort()).toEqual([
       'bad-dna',
       'batch-range',
+      'batch-too-large',
       'decode',
       'duplicate-name',
       'layer-size',
@@ -102,7 +113,7 @@ describe('the failure codes', () => {
       'missing-image',
       'reserved-key',
     ])
-    for (const code of ART_PROBLEM_CODES) expect(WORKER_FAILURE_CODES).not.toContain(code)
+    expect(new Set(ART_PROBLEM_CODES).size).toBe(ART_PROBLEM_CODES.length)
   })
 })
 
