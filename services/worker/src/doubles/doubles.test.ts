@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { packDirectory } from '@cobweb/render'
 import type { RenderMessage } from '@cobweb/shared/render-queue'
 import { describe, expect, it } from 'vitest'
-import { flatPng, sizeOf } from './draw.ts'
+import { flatPng, rgbaAt, sizeOf } from './draw.ts'
 import { memoryQueue } from './memory-queue.ts'
 import { isMissingObject } from '../ports.ts'
 import { memoryStore } from './memory-store.ts'
@@ -164,5 +164,18 @@ describe('flatPng', () => {
     const png = await flatPng({ r: 10, g: 20, b: 30, alpha: 1 }, 32)
     expect([...png.subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47])
     expect(await sizeOf(png)).toEqual({ width: 32, height: 32 })
+  })
+})
+
+describe('rgbaAt', () => {
+  it('reads a pixel of a PNG as four channels, and the image size', async () => {
+    const png = await flatPng({ r: 10, g: 20, b: 30, alpha: 1 }, 8)
+    expect(await rgbaAt(png, 3, 5)).toEqual({ width: 8, height: 8, pixel: [10, 20, 30, 255] })
+  })
+
+  it('refuses a pixel outside the image', async () => {
+    await expect(rgbaAt(await flatPng({ r: 0, g: 0, b: 0, alpha: 1 }, 8), 8, 0)).rejects.toThrow(
+      'The pixel is outside the image.',
+    )
   })
 })

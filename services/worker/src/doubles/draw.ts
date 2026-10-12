@@ -15,3 +15,20 @@ export async function sizeOf(image: Uint8Array): Promise<{ width: number; height
   const { width, height } = await sharp(image).metadata()
   return { width, height }
 }
+
+/** One pixel (x across, y down) as red, green, blue and alpha bytes, and the image size. For verify:render. */
+export async function rgbaAt(
+  image: Uint8Array,
+  x: number,
+  y: number,
+): Promise<{ width: number; height: number; pixel: [number, number, number, number] }> {
+  const { data, info } = await sharp(image).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+  if (x < 0 || y < 0 || x >= info.width || y >= info.height)
+    throw new Error('The pixel is outside the image.')
+  const at = (y * info.width + x) * 4
+  return {
+    width: info.width,
+    height: info.height,
+    pixel: [data[at]!, data[at + 1]!, data[at + 2]!, data[at + 3]!],
+  }
+}

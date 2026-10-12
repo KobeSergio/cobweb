@@ -9,7 +9,7 @@ import { errorSummary } from './log.ts'
 import { handle, handleDead } from './steps.ts'
 import type { Deps } from './steps.ts'
 
-export { flatPng, sizeOf } from './doubles/draw.ts'
+export { flatPng, rgbaAt, sizeOf } from './doubles/draw.ts'
 export { memoryQueue } from './doubles/memory-queue.ts'
 export type { MemoryQueue, QueueEntry } from './doubles/memory-queue.ts'
 export { memoryStore } from './doubles/memory-store.ts'
