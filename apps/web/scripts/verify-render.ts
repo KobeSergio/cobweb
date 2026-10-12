@@ -2,18 +2,18 @@
 // (docs/specs/2026-10-12-render-worker.md, section 8): a signed-in creator's generative project with
 // drawn layers is locked and paid on Anvil, then the local runner takes the job through the same
 // steps the Lambdas run, on the production adapters for the database, storage and the chain, with a
-// folder standing in for the pinning service and a queue in memory. Fourteen checks: the full run,
+// folder standing in for the pinning service and a queue in memory. Fifteen checks: the full run,
 // duplicate delivery (serial, then two copies of one batch at once), a pin that fails once, a pin that
 // always fails and the retry after it, identical CIDs for identical input, a 1/1 project's attributes
-// reaching the pinned metadata, a short payment, a wrong CID (for a batch, then for the metadata set), a
+// reaching the pinned metadata, a short payment, a payment no node has seen, a wrong CID (for a batch, then for the metadata set), a
 // layer of the wrong size, the sweep (two cases) and a placeholder job.
 //
 // Numbering: the spec (section 8) lists ten checks. Its checks 1 to 5 are checks 1 to 5 here. Check 6
 // here is an addition (a 1/1 project's attributes), so the spec's checks 6 to 10 (a short payment, a
 // wrong-CID pinner, a wrong-size layer, the sweep, a placeholder job) are numbered 7 to 11 in the output.
-// Three more cases carry a letter: 2b (concurrent copies of one batch), 8b (a wrong CID for the metadata
+// Four more cases carry a letter: 2b (concurrent copies of one batch), 7b (a payment no node has seen), 8b (a wrong CID for the metadata
 // set only) and 10b (the sweep starting a paid job). With the two setup checks and the two cleanup checks
-// the script prints 18 PASS lines.
+// the script prints 19 PASS lines.
 //
 // Not covered here: the worker's rule that a payment which shows at the latest block but not yet at the
 // confirmation depth is unconfirmed (viemChain throws PaymentUnconfirmed, and the step is retried).
@@ -468,11 +468,16 @@ type Creator = { client: Client; userId: string; account: PrivateKeyAccount }
 /**
  * Locks a seeded project and pays for it on Anvil through the cores the server actions run, then
  * sets a batch size of 2 with the service client so five tokens make three batches. `short` pays 1
- * wei less and marks the job paid by hand. The product cannot produce this state (confirmCore
+ * wei less and marks the job paid by hand; `unseen` pays nothing and records a transaction hash no node has. The product cannot produce this state (confirmCore
  * refuses a short payment, and the database refuses `paid` without a full one), so it is what a
  * server bug would leave, and the worker's own payment check must catch it before the claim.
  */
-async function lockedAndPaid(creator: Creator, cid: string, short = false, tokens = TOKENS): Promise<string> {
+async function lockedAndPaid(
+  creator: Creator,
+  cid: string,
+  mode: 'paid' | 'short' | 'unseen' = 'paid',
+  tokens = TOKENS,
+): Promise<string> {
   const ctx = await contextFor(creator.client, creator.userId, creator.account.address, cid)
   const locked = await lockCore(ctx, { allowDuplicates: false, chainId: 31337 })
   if (!('data' in locked)) throw new Error(`lock: ${refusal(locked)}`)
@@ -481,7 +486,19 @@ async function lockedAndPaid(creator: Creator, cid: string, short = false, token
   const total = BigInt(job.quote.totalWei)
   // As verify-chain does: with a zero rate the payment read would compare 0 with 0 and prove nothing.
   if (total === 0n) throw new Error('The factory rate is 0, so the quote total is 0; set a rate above zero.')
-  if (short) {
+  if (mode === 'unseen') {
+    // Nothing is paid on chain, and the recorded hash is one no node has: a web app whose node is ahead
+    // of the worker's, as far as the worker can tell.
+    const forced = await admin
+      .from('render_jobs')
+      .update({
+        state: 'paid',
+        payment_tx_hash: `0x${createHash('sha256').update(job.id).digest('hex')}`,
+        paid_at: new Date().toISOString(),
+      })
+      .eq('id', job.id)
+    if (forced.error) throw new Error(`force paid: ${forced.error.message}`)
+  } else if (mode === 'short') {
     const hash = await pay(creator.account, job.jobId, total - 1n)
     const forced = await admin
       .from('render_jobs')
@@ -851,7 +868,7 @@ async function main(): Promise<void> {
     '6. a 1/1 project: stored { traitType, value } attributes reach the pinned metadata',
     async () => {
       const cid = await oneOfOneProject(creator.client, 'six')
-      const jobId = await lockedAndPaid(creator, cid, false, 2)
+      const jobId = await lockedAndPaid(creator, cid, 'paid', 2)
       const run = await render(jobId, depsFor(local.memoryQueue(), local.folderPinner(pins)))
       if (run.thrown || run.dead) return `the run had failures: ${JSON.stringify(run)}`
       const job = await jobRow(jobId)
@@ -879,12 +896,20 @@ async function main(): Promise<void> {
     },
   )
 
+  // The sweep's view 16 minutes from now of one job only: `render_jobs.updated_at` is kept by a trigger,
+  // so a job cannot be backdated, and a job another developer left open in the local database must not be
+  // touched. The id filter goes into the query itself, before its limit.
+  const sweepDeps = (deps: Deps & { queue: MemoryQueue }, jobId: string) => {
+    const later = worker.supabaseJobs(admin, { now: () => Date.now() + 16 * 60_000 })
+    return { ...deps, jobs: { ...deps.jobs, stuck: (minutes: number) => later.stuck(minutes, jobId) } }
+  }
+
   // 7. A short payment (the spec's check 6).
   await check(
     '7. a job paid 1 wei short on chain fails with payment-mismatch, never claimed, and cannot be retried',
     async () => {
       const cid = await seededProject(creator.client, 'seven')
-      const jobId = await lockedAndPaid(creator, cid, true)
+      const jobId = await lockedAndPaid(creator, cid, 'short')
       const pinner = local.folderPinner(pins)
       const run = await render(jobId, depsFor(local.memoryQueue(), pinner))
       if (run.thrown || run.dead) return `run ${JSON.stringify(run)}`
@@ -898,6 +923,33 @@ async function main(): Promise<void> {
       return retry.error?.message === web.PAYMENT_UNVERIFIED
         ? null
         : `retry: ${retry.error?.message ?? 'accepted'}`
+    },
+  )
+
+  // 7b. A payment the worker's node has not seen (Critical 1 of the final review).
+  await check(
+    '7b. a paid job with a recorded payment no node has is not failed: dead-lettered, still paid, and the sweep finds it',
+    async () => {
+      const cid = await seededProject(creator.client, 'seven b')
+      const jobId = await lockedAndPaid(creator, cid, 'unseen')
+      const pinner = local.folderPinner(pins)
+      const deps = depsFor(local.memoryQueue(), pinner)
+      const before = logLines.length
+      const run = await render(jobId, deps)
+      if (run.thrown !== 3 || run.dead !== 1) return `run ${JSON.stringify({ ...run, deadMessages: [] })}`
+      if (run.deadMessages.length !== 1 || run.deadMessages[0]?.step !== 'start')
+        return 'the dead message is not the start'
+      const lines = logLines.slice(before)
+      if (!lines.some((line) => line.startsWith('failure report refused')))
+        return 'no refused report was acknowledged'
+      if (!lines.some((line) => line.includes('PaymentUnproven')))
+        return 'the first failure was not PaymentUnproven'
+      const job = await jobRow(jobId)
+      if (job.state !== 'paid' || job.error_code !== null) return JSON.stringify(job)
+      if (job.started_at !== null || (await batchRows(jobId)).length !== 0) return 'the job was claimed'
+      if (pinner.pinned.length !== 0) return 'something was pinned'
+      const found = await sweepDeps(deps, jobId).jobs.stuck(15)
+      return found.length === 1 && found[0]?.id === jobId ? null : `stuck ${JSON.stringify(found)}`
     },
   )
 
@@ -974,14 +1026,6 @@ async function main(): Promise<void> {
       ? null
       : `model ${JSON.stringify({ errorCode: model.errorCode, retryable: model.retryable })}`
   })
-
-  // The sweep's view 16 minutes from now of one job only: `render_jobs.updated_at` is kept by a trigger,
-  // so a job cannot be backdated, and a job another developer left open in the local database must not be
-  // touched. The id filter goes into the query itself, before its limit.
-  const sweepDeps = (deps: Deps & { queue: MemoryQueue }, jobId: string) => {
-    const later = worker.supabaseJobs(admin, { now: () => Date.now() + 16 * 60_000 })
-    return { ...deps, jobs: { ...deps.jobs, stuck: (minutes: number) => later.stuck(minutes, jobId) } }
-  }
 
   // 10. The sweep, a job left finalizing (the spec's check 9).
   await check('10. the sweep re-enqueues a job left finalizing and it finishes', async () => {

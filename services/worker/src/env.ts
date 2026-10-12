@@ -17,6 +17,7 @@ import type { WorkerClient } from './adapters/supabase-jobs.ts'
 import { viemChain } from './adapters/viem-chain.ts'
 import { consoleLog } from './log.ts'
 import type { Log } from './log.ts'
+import { PRODUCTION_RETRY } from './steps.ts'
 import type { Deps } from './steps.ts'
 
 /** The fixed names. `RPC_URL_<chainId>` and `FACTORY_ADDRESS_<chainId>` are read per chain. */
@@ -107,5 +108,6 @@ export function productionDeps(env: Env, log: Log = consoleLog): Deps {
     chain: viemChain(env),
     queue: sqsRenderQueue(new SQSClient({}), need(env, 'RENDER_QUEUE_URL')),
     log,
+    retry: PRODUCTION_RETRY,
   }
 }

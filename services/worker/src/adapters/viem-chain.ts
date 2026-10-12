@@ -11,9 +11,11 @@ import { createPublicClient, http } from 'viem'
 import type { Address, Hex } from 'viem'
 import type { Chain } from '../ports.ts'
 
-/** The two reads the payment check makes, so a test can stand in for viem. */
+/** The three reads the payment check makes, so a test can stand in for viem. */
 export type PaymentReader = {
   getBlockNumber(args: { cacheTime: number }): Promise<bigint>
+  /** Throws an error named `TransactionReceiptNotFoundError` when the node has no such receipt. */
+  getTransactionReceipt(args: { hash: Hex }): Promise<{ blockNumber: bigint }>
   readContract(args: {
     address: Address
     abi: typeof factoryAbi
@@ -34,6 +36,18 @@ export class PaymentUnconfirmed extends Error {
   }
 }
 
+/**
+ * The payment is short at the latest block this node knows, and the node has not shown that it has
+ * seen the payment transaction (none is recorded, no receipt, or the receipt is above the block read).
+ * Thrown, so the message is redelivered and the job is never failed because a node lags.
+ */
+export class PaymentUnproven extends Error {
+  constructor() {
+    super('This node has not yet seen the payment transaction.')
+    this.name = 'PaymentUnproven'
+  }
+}
+
 function viemReader(chainId: number, env: Env): PaymentReader {
   const chain = chainById(chainId)
   const url = chain ? env[chain.rpcEnv] : undefined
@@ -41,6 +55,10 @@ function viemReader(chainId: number, env: Env): PaymentReader {
   const client = createPublicClient({ chain: chain.viem, transport: http(url) })
   return {
     getBlockNumber: (args) => client.getBlockNumber(args),
+    getTransactionReceipt: async (args) => {
+      const receipt = await client.getTransactionReceipt(args)
+      return { blockNumber: receipt.blockNumber }
+    },
     readContract: (args) => client.readContract(args),
   }
 }
@@ -76,11 +94,21 @@ export function viemChain(
       const depth = BigInt(chain.confirmations - 1)
       const buried = latest > depth ? latest - depth : 0n
       const paid = await read(buried)
-      if (paid >= job.quoteTotalWei || buried === latest) return paid
+      if (paid >= job.quoteTotalWei) return paid
       // Short at depth. If the latest block already shows the full amount, the payment exists and
-      // only lacks depth (or the node lags): ask for a redelivery. Short at latest too: really short.
-      const newest = await read(latest)
-      if (newest >= job.quoteTotalWei) throw new PaymentUnconfirmed()
+      // only lacks depth (or the node lags): ask for a redelivery.
+      if (buried !== latest && (await read(latest)) >= job.quoteTotalWei) throw new PaymentUnconfirmed()
+      // Short at latest too. That is final only when this node has seen the payment: a node that
+      // lags, or a transaction this chain view does not hold, must not fail a paid job for good.
+      if (job.paymentTxHash === null) throw new PaymentUnproven()
+      try {
+        const receipt = await reader.getTransactionReceipt({ hash: job.paymentTxHash as Hex })
+        if (receipt.blockNumber > latest) throw new PaymentUnproven()
+      } catch (error) {
+        if (error instanceof Error && error.name === 'TransactionReceiptNotFoundError')
+          throw new PaymentUnproven()
+        throw error
+      }
       return paid
     },
   }

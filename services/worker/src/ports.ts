@@ -30,6 +30,8 @@ export type JobRecord = {
   errorCode: string | null
   /** True when the job's state is `waived` or its `waived_by` column is set. Nothing to pay on chain. */
   waived: boolean
+  /** `payment_tx_hash`: the transaction the web app recorded as the payment, or null when none. */
+  paymentTxHash: string | null
 }
 
 export type BatchRecord = {

@@ -87,7 +87,8 @@ describe('filebaseS3Options', () => {
 describe('productionDeps', () => {
   it('builds every port without opening a connection', () => {
     const deps = productionDeps(LOCAL, () => {})
-    expect(Object.keys(deps).sort()).toEqual(['chain', 'jobs', 'log', 'pinner', 'queue', 'store'])
+    expect(Object.keys(deps).sort()).toEqual(['chain', 'jobs', 'log', 'pinner', 'queue', 'retry', 'store'])
+    expect(deps.retry?.delaysMs).toEqual([1000, 3000, 6000])
   })
 
   it('refuses an incomplete environment by name, without echoing any value', () => {

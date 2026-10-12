@@ -9,11 +9,26 @@ const FACTORY = '0x00000000000000000000000000000000000000fa'
  * A stand-in reader. `paidAt` answers each read by its block number, so a test can have a payment that
  * is short at one depth and covered at another.
  */
-const reader = (latest: bigint, paidAt: bigint | ((block: bigint) => bigint)) => {
+const reader = (
+  latest: bigint,
+  paidAt: bigint | ((block: bigint) => bigint),
+  receipt: { blockNumber: bigint } | 'missing' | Error = { blockNumber: 1n },
+) => {
   const reads: { address: string; args: readonly unknown[]; blockNumber: bigint }[] = []
+  const receipts: string[] = []
   const made: number[] = []
   const stub: PaymentReader = {
     getBlockNumber: async () => latest,
+    getTransactionReceipt: async ({ hash }) => {
+      receipts.push(hash)
+      if (receipt === 'missing') {
+        const notFound = new Error('The receipt could not be found.')
+        notFound.name = 'TransactionReceiptNotFoundError'
+        throw notFound
+      }
+      if (receipt instanceof Error) throw receipt
+      return receipt
+    },
     readContract: async (args) => {
       reads.push({ address: args.address, args: args.args, blockNumber: args.blockNumber })
       return typeof paidAt === 'function' ? paidAt(args.blockNumber) : paidAt
@@ -21,6 +36,7 @@ const reader = (latest: bigint, paidAt: bigint | ((block: bigint) => bigint)) =>
   }
   return {
     reads,
+    receipts,
     made,
     readerFor: (chainId: number) => {
       made.push(chainId)
@@ -77,6 +93,60 @@ describe('viemChain', () => {
     expect(reads.map((read) => read.blockNumber)).toEqual([96n, 100n])
   })
 
+  describe('a short payment at latest needs proof the node has seen the payment', () => {
+    const HASH = `0x${'ab'.repeat(32)}`
+
+    it('throws PaymentUnproven when the job has no recorded transaction hash, without reading a receipt', async () => {
+      const { receipts, readerFor } = reader(100n, 40n)
+      const error = await caught(() =>
+        viemChain({}, readerFor).jobPayment(jobRecord({ quoteChainId: 1, paymentTxHash: null })),
+      )
+      expect(error.name).toBe('PaymentUnproven')
+      expect(receipts).toEqual([])
+    })
+
+    it('throws PaymentUnproven when the receipt is not found', async () => {
+      const { receipts, readerFor } = reader(100n, 40n, 'missing')
+      const error = await caught(() => viemChain({}, readerFor).jobPayment(jobRecord({ quoteChainId: 1 })))
+      expect(error.name).toBe('PaymentUnproven')
+      expect(receipts).toEqual([HASH])
+    })
+
+    it('throws PaymentUnproven when the receipt is above the block read', async () => {
+      const { readerFor } = reader(100n, 40n, { blockNumber: 101n })
+      const error = await caught(() => viemChain({}, readerFor).jobPayment(jobRecord({ quoteChainId: 1 })))
+      expect(error.name).toBe('PaymentUnproven')
+    })
+
+    it('returns the short amount when the receipt is at or below the block read', async () => {
+      for (const blockNumber of [100n, 7n]) {
+        const { readerFor } = reader(100n, 40n, { blockNumber })
+        expect(await viemChain({}, readerFor).jobPayment(jobRecord({ quoteChainId: 1 }))).toBe(40n)
+      }
+    })
+
+    it('asks for the receipt on the depth-equals-latest path too', async () => {
+      const proven = reader(100n, 40n, { blockNumber: 50n })
+      expect(await viemChain({}, proven.readerFor).jobPayment(jobRecord())).toBe(40n)
+      const unproven = reader(100n, 40n, 'missing')
+      const error = await caught(() => viemChain({}, unproven.readerFor).jobPayment(jobRecord()))
+      expect(error.name).toBe('PaymentUnproven')
+    })
+
+    it('passes any other receipt error on', async () => {
+      const { readerFor } = reader(100n, 40n, new Error('rpc down'))
+      await expect(viemChain({}, readerFor).jobPayment(jobRecord({ quoteChainId: 1 }))).rejects.toThrow(
+        'rpc down',
+      )
+    })
+
+    it('reads no receipt when the payment covers the quote', async () => {
+      const { receipts, readerFor } = reader(100n, 125n, 'missing')
+      expect(await viemChain({}, readerFor).jobPayment(jobRecord())).toBe(125n)
+      expect(receipts).toEqual([])
+    })
+  })
+
   it('does not read twice when the depth block is the latest block', async () => {
     const { reads, readerFor } = reader(100n, 40n)
     expect(await viemChain({}, readerFor).jobPayment(jobRecord())).toBe(40n)
@@ -86,11 +156,13 @@ describe('viemChain', () => {
   it('passes an RPC error on, from either read', async () => {
     const failing = viemChain({}, () => ({
       getBlockNumber: () => Promise.reject(new Error('rpc down')),
+      getTransactionReceipt: async () => ({ blockNumber: 1n }),
       readContract: async () => 0n,
     }))
     await expect(failing.jobPayment(jobRecord())).rejects.toThrow('rpc down')
     const second = viemChain({}, () => ({
       getBlockNumber: async () => 100n,
+      getTransactionReceipt: async () => ({ blockNumber: 1n }),
       readContract: async (args) => {
         if (args.blockNumber === 100n) throw new Error('rpc lagging')
         return 0n

@@ -33,6 +33,7 @@ export function jobRecord(over: Partial<JobRecord> = {}): JobRecord {
     retries: 0,
     errorCode: null,
     waived: false,
+    paymentTxHash: `0x${'ab'.repeat(32)}`,
     ...over,
   }
 }

@@ -31,6 +31,7 @@ const row = (over: Partial<JobRow> = {}): JobRow => ({
   retries: 0,
   error_code: null,
   waived_by: null,
+  payment_tx_hash: `0x${'ab'.repeat(32)}`,
   ...over,
 })
 
@@ -104,6 +105,13 @@ describe('row mappers', () => {
     expect(
       toJobRecord(row({ state: 'rendering', waived_by: '11111111-2222-4333-8444-555555555555' })).waived,
     ).toBe(true)
+  })
+
+  it('reads the payment transaction hash, null when none is recorded', () => {
+    expect(JOB_COLUMNS).toContain('payment_tx_hash')
+    expect(toJobRecord(row({ payment_tx_hash: null })).paymentTxHash).toBeNull()
+    const hash = `0x${'ab'.repeat(32)}`
+    expect(toJobRecord(row({ payment_tx_hash: hash })).paymentTxHash).toBe(hash)
   })
 
   it('maps a null on-chain job id to an empty string rather than casting it', () => {

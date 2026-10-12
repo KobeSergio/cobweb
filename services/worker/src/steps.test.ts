@@ -27,6 +27,109 @@ import { batchMessage, harness, metadataMessage, startMessage } from './testing/
 
 const CID = /^[a-z2-7]{59}$/
 
+describe('in-process retries', () => {
+  const sleeps = () => {
+    const waited: number[] = []
+    return {
+      waited,
+      retry: { delaysMs: [1000, 3000, 6000], sleep: async (ms: number) => void waited.push(ms) },
+    }
+  }
+
+  it('retries the payment read after 1, 3 and 6 seconds and then throws the last error', async () => {
+    const h = await harness()
+    const { waited, retry } = sleeps()
+    let calls = 0
+    h.deps.retry = retry
+    h.deps.chain = {
+      jobPayment: async () => {
+        calls += 1
+        throw new Error(`rpc down ${calls}`)
+      },
+    }
+    await expect(handle(startMessage(), h.deps)).rejects.toThrow('rpc down 4')
+    expect(calls).toBe(4)
+    expect(waited).toEqual([1000, 3000, 6000])
+    expect(h.jobs.failures).toEqual([])
+  })
+
+  it('goes on with the start when a later try of the payment read succeeds', async () => {
+    const h = await harness()
+    const { waited, retry } = sleeps()
+    let calls = 0
+    h.deps.retry = retry
+    h.deps.chain = {
+      jobPayment: async (job) => {
+        calls += 1
+        if (calls < 3) throw new Error('PaymentUnproven')
+        return job.quoteTotalWei
+      },
+    }
+    await handle(startMessage(), h.deps)
+    expect(waited).toEqual([1000, 3000])
+    expect(h.jobs.record.state).toBe('rendering')
+  })
+
+  it('retries a pinning error and records the batch when a later try succeeds', async () => {
+    const h = await harness('generative', { claimed: true })
+    const { waited, retry } = sleeps()
+    let calls = 0
+    h.deps.retry = retry
+    const inner = h.deps.pinner
+    h.deps.pinner = {
+      pin: async (car, cid) => {
+        calls += 1
+        if (calls === 1) throw new Error('pin down')
+        return inner.pin(car, cid)
+      },
+    }
+    await handle(batchMessage(0), h.deps)
+    expect(calls).toBe(2)
+    expect(waited).toEqual([1000])
+    expect(h.jobs.rows[0]!.state).toBe('done')
+  })
+
+  it('retries a pinning error in the metadata step and throws the last one', async () => {
+    const h = await harness('generative', { claimed: true })
+    for (const i of [0, 1, 2]) await handle(batchMessage(i), h.deps)
+    const { waited, retry } = sleeps()
+    h.deps.retry = retry
+    h.deps.pinner = { pin: () => Promise.reject(new Error('pin down')) }
+    await expect(handle(metadataMessage(), h.deps)).rejects.toThrow('pin down')
+    expect(waited).toEqual([1000, 3000, 6000])
+  })
+
+  it('does not retry a wrong CID: it is a verdict, not a throw', async () => {
+    const h = await harness('generative', { claimed: true })
+    const { waited, retry } = sleeps()
+    let calls = 0
+    h.deps.retry = retry
+    h.deps.pinner = {
+      pin: async () => {
+        calls += 1
+        return wrongCidPinner().pin(new Uint8Array(), '')
+      },
+    }
+    await handle(batchMessage(0), h.deps)
+    expect(calls).toBe(1)
+    expect(waited).toEqual([])
+    expect(h.jobs.failures[0]?.code).toBe('cid-mismatch')
+  })
+
+  it('makes a single try when no retry is configured', async () => {
+    const h = await harness()
+    let calls = 0
+    h.deps.chain = {
+      jobPayment: async () => {
+        calls += 1
+        throw new Error('rpc down')
+      },
+    }
+    await expect(handle(startMessage(), h.deps)).rejects.toThrow('rpc down')
+    expect(calls).toBe(1)
+  })
+})
+
 describe('start', () => {
   it('checks the payment, claims the job and sends one batch message per batch', async () => {
     const h = await harness()

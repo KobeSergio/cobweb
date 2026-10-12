@@ -27,7 +27,7 @@ export const STUCK_LIMIT = 100
  * them: it reads the job again with this select.
  */
 export const JOB_COLUMNS =
-  'id, collection_id, kind, state, token_count, batch_size, batches_total, batches_done, quote_total_wei::text, quote_chain_id, quote_payer, quote_factory, onchain_job_id, placeholder_upload_id, retries, error_code, waived_by'
+  'id, collection_id, kind, state, token_count, batch_size, batches_total, batches_done, quote_total_wei::text, quote_chain_id, quote_payer, quote_factory, onchain_job_id, placeholder_upload_id, retries, error_code, waived_by, payment_tx_hash'
 
 export const BATCH_COLUMNS = 'index, state, attempts, first_token_id, last_token_id, images_cid'
 
@@ -49,6 +49,7 @@ export type JobRow = {
   retries: number
   error_code: string | null
   waived_by: string | null
+  payment_tx_hash: string | null
 }
 
 export type BatchRow = {
@@ -87,6 +88,7 @@ export function toJobRecord(row: JobRow): JobRecord {
     retries: row.retries,
     errorCode: row.error_code,
     waived: row.state === 'waived' || row.waived_by !== null,
+    paymentTxHash: row.payment_tx_hash,
   }
 }
 

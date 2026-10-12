@@ -13,7 +13,47 @@ import { isJobRefusal, isMissingObject, isRenderProblem } from './ports.ts'
 import type { Chain, JobRecord, Jobs, Pinner, RefusalCode, RenderData, Store } from './ports.ts'
 import { renderSpec, tokenSlice } from './spec.ts'
 
-export type Deps = { jobs: Jobs; store: Store; pinner: Pinner; chain: Chain; queue: RenderQueue; log: Log }
+/**
+ * In-process retries of the two calls most likely to fail for a moment: the payment read and the
+ * pin. `delaysMs` has one entry per retry; `sleep` is injected so tests never wait. Left out of
+ * `Deps`, a call is tried once (the local runner and the unit tests).
+ */
+export type Retry = { delaysMs: readonly number[]; sleep: (ms: number) => Promise<void> }
+
+/** About ten seconds in all: tries at 0, 1, 4 and 10 seconds. */
+export const PRODUCTION_RETRY: Retry = {
+  delaysMs: [1000, 3000, 6000],
+  sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+}
+
+export type Deps = {
+  jobs: Jobs
+  store: Store
+  pinner: Pinner
+  chain: Chain
+  queue: RenderQueue
+  log: Log
+  retry?: Retry
+}
+
+/**
+ * Runs `call`, and when it throws tries again after each delay of `deps.retry`, then throws the last
+ * error. A verdict is a return value (a wrong CID, a short payment), never a throw, so it is not
+ * retried. The error is logged by name and masked line only.
+ */
+async function retried<T>(deps: Deps, what: string, call: () => Promise<T>): Promise<T> {
+  const delays = deps.retry?.delaysMs ?? []
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await call()
+    } catch (error) {
+      const delay = delays[attempt]
+      if (delay === undefined || !deps.retry) throw error
+      deps.log('retrying', { what, attempt: attempt + 1, error: errorSummary(error) })
+      await deps.retry.sleep(delay)
+    }
+  }
+}
 
 export const PAYMENT_MISMATCH = 'The payment could not be verified on chain.'
 export const CID_MISMATCH = 'The pinning service returned a different CID.'
@@ -91,7 +131,7 @@ async function withStore<T>(store: Store, run: (load: Store['load']) => Promise<
 
 /** Pins a CAR and compares CIDs. False (after recording `cid-mismatch`) when the service answers with another. */
 async function pinned(deps: Deps, message: RenderMessage, packed: PackedDirectory): Promise<boolean> {
-  const cid = await deps.pinner.pin(packed.car, packed.cid)
+  const cid = await retried(deps, 'pin', () => deps.pinner.pin(packed.car, packed.cid))
   if (cid === packed.cid) return true
   await report(deps, message, indexOf(message), 'cid-mismatch', CID_MISMATCH)
   return false
@@ -105,9 +145,10 @@ async function start(message: RenderMessage, deps: Deps): Promise<void> {
     return
   }
   // The payment is checked before the claim and fails closed. A waived job and a free one have
-  // nothing to check. A read error throws out of here: the message is redelivered.
+  // nothing to check. A read error that outlasts the in-process retries throws out of here and the
+  // message is redelivered; a lagging node (PaymentUnproven) is such an error, never a verdict.
   if (job.state === 'paid' && !job.waived && job.quoteTotalWei > 0n) {
-    const paid = await deps.chain.jobPayment(job)
+    const paid = await retried(deps, 'payment', () => deps.chain.jobPayment(job))
     if (paid < job.quoteTotalWei) {
       await report(deps, message, null, 'payment-mismatch', PAYMENT_MISMATCH)
       return

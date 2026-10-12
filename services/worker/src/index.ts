@@ -8,11 +8,12 @@ export {
   handle,
   handleDead,
   PAYMENT_MISMATCH,
+  PRODUCTION_RETRY,
   RESULT_DIFFERS,
   sweep,
   SWEEP_MINUTES,
 } from './steps.ts'
-export type { Deps } from './steps.ts'
+export type { Deps, Retry } from './steps.ts'
 export { supabaseJobs } from './adapters/supabase-jobs.ts'
 export type { WorkerClient } from './adapters/supabase-jobs.ts'
 export { s3Store } from './adapters/s3-store.ts'
