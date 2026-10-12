@@ -98,7 +98,7 @@ export function productionDeps(env: Env, log: Log = consoleLog): Deps {
   // AWS the render bucket is the stack's own, reached with the function's role in its own region.
   const render = env.ART_S3_ENDPOINT ? art : new S3Client({ ...CHECKSUMS })
   return {
-    jobs: supabaseJobs(workerClient(env)),
+    jobs: supabaseJobs(workerClient(env), { log }),
     store: s3Store(
       { client: art, bucket: need(env, 'ART_S3_BUCKET') },
       { client: render, bucket: need(env, 'RENDER_S3_BUCKET') },

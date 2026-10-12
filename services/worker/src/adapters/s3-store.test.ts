@@ -29,7 +29,10 @@ describe('s3Store', () => {
   it('throws MissingObject at once, with no retry, when S3 says the key does not exist', async () => {
     for (const fault of [
       Object.assign(new Error('The specified key does not exist.'), { name: 'NoSuchKey' }),
-      Object.assign(new Error('Not Found'), { name: 'UnknownError', $metadata: { httpStatusCode: 404 } }),
+      Object.assign(new Error('The specified key does not exist.'), {
+        name: 'NoSuchKey',
+        $metadata: { httpStatusCode: 404 },
+      }),
     ]) {
       const missing = stubAws(() => {
         throw fault
@@ -81,6 +84,25 @@ describe('s3Store', () => {
     expect(isMissingObject(error)).toBe(false)
     expect(art.sent).toHaveLength(3)
     expect(waits).toHaveLength(2)
+  })
+
+  it('treats a 404 that is not NoSuchKey (a missing bucket, a bare NotFound) as transient', async () => {
+    for (const name of ['NoSuchBucket', 'NotFound', 'UnknownError']) {
+      const art = stubAws(() => {
+        throw Object.assign(new Error('Not Found'), { name, $metadata: { httpStatusCode: 404 } })
+      })
+      const { waits, options } = quick()
+      const store = s3Store(
+        { client: art.client, bucket: 'art' },
+        { client: art.client, bucket: 'render' },
+        options,
+      )
+      const error = await store.load(ref).catch((thrown: unknown) => thrown)
+      expect(isMissingObject(error)).toBe(false)
+      expect(error).toMatchObject({ name })
+      expect(art.sent).toHaveLength(3)
+      expect(waits).toHaveLength(2)
+    }
   })
 
   it('treats an access error as transient too, never as a missing object', async () => {

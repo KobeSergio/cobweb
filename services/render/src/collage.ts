@@ -1,8 +1,12 @@
 import { reasonOf, RenderProblem } from './problems'
 import { PNG_OPTIONS, TRANSPARENT, bytesOf, sharp } from './png'
 
-/** The product's largest image side (2048); an input with more pixels than a square of it is refused undecoded. */
-const MAX_INPUT_PIXELS = 2048 * 2048
+/**
+ * Assets are admitted up to 8192 pixels a side (2048 is only the limit for layer images), and the
+ * collage may be handed a rendered token of any of them, so an input with more pixels than a square
+ * of 8192 is refused undecoded.
+ */
+export const MAX_INPUT_PIXELS = 8192 * 8192
 
 /**
  * A preview grid of the images given (the worker passes the first 16 rendered tokens, PNG batch files only: it filters GIF and MP4 files out first, since the collage cannot read them): `columns`

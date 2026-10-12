@@ -11,7 +11,11 @@ import type { Store } from '../ports.ts'
 export type S3Like = Pick<S3Client, 'send'>
 export type Bucket = { client: S3Like; bucket: string }
 
-/** `<collection id>/collage/<job id>.png`: never the shape of an upload key (`<id>/<folder>/<sha256>.<ext>`). */
+/**
+ * `<collection id>/collage/<job id>.png`. This has the shape of an upload key (`<id>/<folder>/<name>.<ext>`);
+ * what keeps the upload sweep away from collages is that they live in the render bucket, which the
+ * sweep never lists.
+ */
 export const COLLAGE_KEY =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/collage\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.png$/
 
@@ -19,11 +23,13 @@ export const COLLAGE_KEY =
 export const LOAD_ATTEMPTS = 3
 const RETRY_DELAY_MS = 200
 
-/** True only when S3 answers that the key does not exist. Any other failure, 403 included, is not. */
+/**
+ * True only when S3 answers `NoSuchKey`. Any other failure is not, including a 404 with another name
+ * (`NoSuchBucket`, a bare `NotFound`): a wrong bucket is a deployment fault, not a missing layer.
+ */
 function isNoSuchKey(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false
-  const { name, $metadata } = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } }
-  return name === 'NoSuchKey' || $metadata?.httpStatusCode === 404
+  return (error as { name?: unknown }).name === 'NoSuchKey'
 }
 
 export function s3Store(

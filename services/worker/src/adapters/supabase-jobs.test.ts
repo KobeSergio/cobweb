@@ -68,6 +68,14 @@ describe('row mappers', () => {
     expect(record).toMatchObject(jobRecord({ quoteTotalWei: 123456789012345678901234567890n }))
   })
 
+  it('throws a plain error for a quote that is not a string of digits, never reading a JSON number', () => {
+    for (const bad of [9007199254740992, null, '', '12.5', '-1', '1e21', '0x10', ' 5']) {
+      expect(() => toJobRecord(row({ quote_total_wei: bad as unknown as string }))).toThrow(
+        'The job quote is not a string of digits.',
+      )
+    }
+  })
+
   it('maps a batch row', () => {
     expect(
       toBatchRecord({
@@ -442,7 +450,7 @@ describe('supabaseJobs: the job state functions', () => {
     expect(calls[2]?.args).toMatchObject({ p_index: 4, p_retries: 0 })
   })
 
-  it('leaves the optional finish arguments out when they are null', async () => {
+  it('passes the optional finish arguments as explicit nulls when they are absent', async () => {
     const { client, calls } = stubClient((call) => afterRpc(call))
     const jobs = supabaseJobs(client)
     await jobs.finish(JOB_ID, {
@@ -451,7 +459,13 @@ describe('supabaseJobs: the job state functions', () => {
       placeholderImageCid: null,
       collageKey: null,
     })
-    expect(calls[0]?.args).toEqual({ p_job_id: JOB_ID, p_metadata_cid: 'm', p_base_uri: 'ipfs://m/' })
+    expect(calls[0]?.args).toEqual({
+      p_job_id: JOB_ID,
+      p_metadata_cid: 'm',
+      p_base_uri: 'ipfs://m/',
+      p_placeholder_image_cid: null,
+      p_collage_key: null,
+    })
     await jobs.finish(JOB_ID, {
       metadataCid: 'm',
       baseUri: 'ipfs://m/',
@@ -523,6 +537,19 @@ describe('supabaseJobs: stuck', () => {
     expect(opOf(read, 'eq')).toEqual(['id', quiet])
     const names = read.ops.map((op) => op[0])
     expect(names.indexOf('eq')).toBeLessThan(names.indexOf('limit'))
+  })
+
+  it('logs one line when the query returns as many rows as its limit, and none below it', async () => {
+    const lines: [string, unknown][] = []
+    const log = (event: string, fields?: unknown) => void lines.push([event, fields])
+    const full = Array.from({ length: STUCK_LIMIT }, () => ({ id: JOB_ID, retries: 0, state: 'paid' }))
+    const { client } = stubClient(() => ({ data: full }))
+    await supabaseJobs(client, { now: () => NOW, log }).stuck(15)
+    expect(lines).toEqual([['stuck-limit-reached', { limit: STUCK_LIMIT }]])
+    lines.length = 0
+    const { client: short } = stubClient(() => ({ data: full.slice(1) }))
+    await supabaseJobs(short, { now: () => NOW, log }).stuck(15)
+    expect(lines).toEqual([])
   })
 
   it('throws on a database error', async () => {

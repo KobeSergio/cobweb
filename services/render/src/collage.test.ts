@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { previewCollage } from './collage'
+import { MAX_INPUT_PIXELS, previewCollage } from './collage'
 import { flatPng, pixel, sizeOf } from './fixtures'
 import { sharp } from './png'
 
@@ -50,9 +50,16 @@ describe('previewCollage', () => {
     expect(await sizeOf(png)).toEqual({ width: 64, height: 64, format: 'png' })
   })
 
+  it('bounds the input at the asset size limit, 8192 by 8192', async () => {
+    expect(MAX_INPUT_PIXELS).toBe(8192 * 8192)
+    const wide = await flatPng({ r: 1, g: 2, b: 3, alpha: 1 }, 8192)
+    const png = await previewCollage([wide], { columns: 1, cell: 64 })
+    expect(await sizeOf(png)).toEqual({ width: 64, height: 64, format: 'png' })
+  })
+
   it('refuses an image with more pixels than the maximum before it is decoded, as decode', async () => {
-    const huge = await flatPng({ r: 1, g: 2, b: 3, alpha: 1 }, 4096)
-    expect((await sharp(huge).metadata()).width).toBe(4096)
+    const huge = await flatPng({ r: 1, g: 2, b: 3, alpha: 1 }, 8193)
+    expect((await sharp(huge).metadata()).width).toBe(8193)
     await expect(previewCollage([huge])).rejects.toMatchObject({ code: 'decode', detail: { index: 0 } })
   })
 })

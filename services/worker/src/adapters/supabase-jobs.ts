@@ -10,6 +10,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 // A type-only import of the generated types: it is erased, so the worker never loads the web app.
 import type { Database } from '../../../../apps/web/src/lib/database.types.ts'
 import { maskedLine } from '../log.ts'
+import type { Log } from '../log.ts'
 import { refusalOf } from '../ports.ts'
 import type { BatchRecord, JobRecord, Jobs, RenderData, RenderState, TokenRows } from '../ports.ts'
 
@@ -59,6 +60,13 @@ export type BatchRow = {
   images_cid: string | null
 }
 
+/** The quote in wei: only a string of digits, since a JSON number above 2^53 has already lost wei. */
+function weiOf(value: unknown): bigint {
+  if (typeof value !== 'string' || !/^[0-9]+$/.test(value))
+    throw new Error('The job quote is not a string of digits.')
+  return BigInt(value)
+}
+
 export function toJobRecord(row: JobRow): JobRecord {
   return {
     id: row.id,
@@ -69,7 +77,7 @@ export function toJobRecord(row: JobRow): JobRecord {
     batchSize: row.batch_size,
     batchesTotal: row.batches_total,
     batchesDone: row.batches_done,
-    quoteTotalWei: BigInt(row.quote_total_wei),
+    quoteTotalWei: weiOf(row.quote_total_wei),
     quoteChainId: row.quote_chain_id,
     quotePayer: row.quote_payer,
     quoteFactory: row.quote_factory,
@@ -147,8 +155,9 @@ export function parseTokenList(value: unknown): ListEntry[] {
 const OPEN_STATES = ['rendering', 'finalizing'] as const
 const UNCLAIMED_STATES = ['paid', 'waived'] as const
 
-export function supabaseJobs(client: WorkerClient, options: { now?: () => number } = {}): Jobs {
+export function supabaseJobs(client: WorkerClient, options: { now?: () => number; log?: Log } = {}): Jobs {
   const now = options.now ?? Date.now
+  const log = options.log ?? (() => undefined)
   // Art is frozen while its job is open (the lock), and a list is frozen at lock, so one job's data
   // and list are read once and kept while the same container works through that job's batches.
   let dataCache: { jobId: string; data: RenderData } | null = null
@@ -386,10 +395,10 @@ export function supabaseJobs(client: WorkerClient, options: { now?: () => number
         p_job_id: jobId,
         p_metadata_cid: result.metadataCid,
         p_base_uri: result.baseUri,
-        ...(result.placeholderImageCid === null
-          ? {}
-          : { p_placeholder_image_cid: result.placeholderImageCid }),
-        ...(result.collageKey === null ? {} : { p_collage_key: result.collageKey }),
+        // Passed as null when absent, never left out: the function has one signature with both
+        // optional arguments, and PostgREST resolves a call by the names it is given.
+        p_placeholder_image_cid: result.placeholderImageCid as string,
+        p_collage_key: result.collageKey as string,
       })
       if (error) throw failure('Finishing the job', error)
       return jobAfter(jobId)
@@ -406,6 +415,8 @@ export function supabaseJobs(client: WorkerClient, options: { now?: () => number
       if (onlyJobId !== undefined) query = query.eq('id', onlyJobId)
       const { data, error } = await query.order('updated_at').limit(STUCK_LIMIT)
       if (error) throw failure('Reading stuck jobs', error)
+      // Oldest first, so a full page means younger stuck jobs may wait for the next sweep.
+      if ((data ?? []).length >= STUCK_LIMIT) log('stuck-limit-reached', { limit: STUCK_LIMIT })
       const stuck: { id: string; retries: number }[] = []
       for (const row of data ?? []) {
         // A paid or waived job has no batch rows: its own age is all there is to judge.
