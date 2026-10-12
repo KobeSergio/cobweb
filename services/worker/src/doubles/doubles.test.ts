@@ -52,9 +52,22 @@ describe('memoryQueue', () => {
     const queue = memoryQueue({ copies: 2 })
     await queue.send([start])
     expect(queue.size()).toBe(2)
-    expect(queue.take()?.message).toEqual(start)
-    expect(queue.take()?.message).toEqual(start)
+    const first = queue.take()
+    const second = queue.take()
+    expect(first?.message).toEqual(start)
+    expect(second?.message).toEqual(start)
+    expect(first?.receives).toBe(1)
+    expect(second?.receives).toBe(1)
+    expect(first).not.toBe(second)
     expect(queue.sent).toEqual([start])
+  })
+
+  it('treats a copies value that is not a positive integer as 1', async () => {
+    for (const copies of [Number.NaN, 0, -2, 0.5, 1.5]) {
+      const queue = memoryQueue({ copies })
+      await queue.send([start])
+      expect(queue.size()).toBe(1)
+    }
   })
 
   it('loses the messages the drop option picks', async () => {

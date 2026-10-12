@@ -63,7 +63,18 @@ describe('errorSummary', () => {
   })
 
   it('cuts a long message and names a thrown value that is not an error', () => {
-    expect(errorSummary(new Error('x'.repeat(500))).length).toBe('Error: '.length + 200)
+    expect(errorSummary(new Error('word '.repeat(100))).length).toBe('Error: '.length + 200)
     expect(errorSummary('boom')).toBe('Unknown error')
+  })
+
+  it('masks key-like runs and leaves ids and sentences readable', () => {
+    const hex = 'ab12cd34'.repeat(8)
+    expect(errorSummary(new Error(`bad key ${hex} here`))).toBe('Error: bad key [url] here')
+    const jwt = `${'a'.repeat(20)}.${'b'.repeat(20)}.${'c'.repeat(20)}`
+    expect(errorSummary(new Error(`token ${jwt} rejected`))).toBe('Error: token [url] rejected')
+    expect(errorSummary(new Error(`failed ?apikey=${'k'.repeat(40)}`))).toBe('Error: failed ?[url]')
+    const readable = 'job 3f0c2f5e-8a51-4c0e-9d7b-0d0f5a3b9c11 timed out'
+    expect(errorSummary(new Error(readable))).toBe(`Error: ${readable}`)
+    expect(errorSummary(new Error('short'))).toBe('Error: short')
   })
 })

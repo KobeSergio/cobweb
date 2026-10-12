@@ -38,7 +38,7 @@ export function folderPinner(dir: string): FolderPinner {
 /** A well-formed CID that no render produces. */
 export const WRONG_CID = `bafybei${'a'.repeat(52)}`
 
-/** A pinning service that answers with a different CID every time. */
+/** A pinning service that always returns one fixed CID, which differs from the expected one. */
 export function wrongCidPinner(): Pinner {
   return { pin: async () => WRONG_CID }
 }

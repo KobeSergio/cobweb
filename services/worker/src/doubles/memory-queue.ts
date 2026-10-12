@@ -27,7 +27,8 @@ export type MemoryQueue = RenderQueue & {
 export function memoryQueue(
   options: { copies?: number; drop?: (message: RenderMessage) => boolean } = {},
 ): MemoryQueue {
-  const copies = Math.max(1, Math.floor(options.copies ?? 1))
+  const wanted = options.copies ?? 1
+  const copies = Number.isInteger(wanted) && wanted > 0 ? wanted : 1
   const waiting: QueueEntry[] = []
   const sent: RenderMessage[] = []
   const dead: RenderMessage[] = []
