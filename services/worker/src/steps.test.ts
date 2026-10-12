@@ -70,11 +70,19 @@ describe('start', () => {
     expect(free.jobs.record.state).toBe('rendering')
   })
 
+  it('skips the payment check for a paid job marked waived, whatever its quote', async () => {
+    const h = await harness('generative', { job: { state: 'paid', quoteTotalWei: 125n, waived: true } })
+    await handle(startMessage(), h.deps)
+    expect(h.paymentReads).toEqual([])
+    expect(h.jobs.record.state).toBe('rendering')
+  })
+
   it('does not read the chain again for a job already rendering, and re-sends only open batches', async () => {
     const h = await harness('generative', { claimed: true })
     h.jobs.rows[0]!.state = 'done'
     h.jobs.rows[0]!.imagesCid = 'a'.repeat(59)
     h.jobs.rows[1]!.state = 'failed'
+    h.jobs.rows[2]!.state = 'running'
     await handle(startMessage(), h.deps)
     expect(h.paymentReads).toEqual([])
     expect(h.queue.sent).toEqual([batchMessage(1), batchMessage(2)])
@@ -86,6 +94,14 @@ describe('start', () => {
     h.jobs.record.state = 'finalizing'
     await handle(startMessage(), h.deps)
     expect(h.queue.sent).toEqual([metadataMessage()])
+  })
+
+  it('gives the metadata message the job retries when every batch is done', async () => {
+    const h = await harness('generative', { claimed: true, job: { retries: 2 } })
+    for (const row of h.jobs.rows) Object.assign(row, { state: 'done', imagesCid: 'a'.repeat(59) })
+    h.jobs.record.state = 'finalizing'
+    await handle(startMessage(0), h.deps)
+    expect(h.queue.sent).toEqual([metadataMessage(2)])
   })
 
   it('gives the messages it sends the job retries, not the retries of the message it handled', async () => {
@@ -262,6 +278,21 @@ describe('failures', () => {
     h.jobs.batchStart = () => Promise.reject(new Error('connection reset'))
     await expect(handle(batchMessage(0), h.deps)).rejects.toThrow('connection reset')
     expect(h.jobs.failures).toEqual([])
+  })
+
+  it('logs the state the database returned, so a report it ignored is not logged as a failed job', async () => {
+    const logged: Record<string, string | number | boolean | null>[] = []
+    const failed = await harness('generative', { claimed: true })
+    failed.deps.log = (event, fields = {}) => void (event === 'job failed' && logged.push(fields))
+    failed.deps.pinner = wrongCidPinner()
+    await handle(batchMessage(0), failed.deps)
+    expect(logged).toMatchObject([{ state: 'failed' }])
+    // A report older than the creator's latest retry is ignored by the database.
+    const stale = await harness('generative', { claimed: true, job: { retries: 3 } })
+    stale.deps.log = (event, fields = {}) => void (event === 'job failed' && logged.push(fields))
+    stale.deps.pinner = wrongCidPinner()
+    await handle(batchMessage(0, 2), stale.deps)
+    expect(logged[1]).toMatchObject({ state: 'rendering' })
   })
 
   it('throws when the failure report itself fails for another reason', async () => {

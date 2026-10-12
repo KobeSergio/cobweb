@@ -33,8 +33,9 @@ async function report(
   text: string,
 ): Promise<void> {
   try {
-    await deps.jobs.fail(message.jobId, index, code, text, true, message.retries)
-    deps.log('job failed', { jobId: message.jobId, step: message.step, index, code })
+    const job = await deps.jobs.fail(message.jobId, index, code, text, true, message.retries)
+    // The state the database returned: a report it ignored as stale leaves the job as it was.
+    deps.log('job failed', { jobId: message.jobId, step: message.step, index, code, state: job.state })
   } catch (error) {
     if (!isJobRefusal(error)) throw error
     deps.log('failure report refused', {
@@ -71,7 +72,7 @@ async function start(message: RenderMessage, deps: Deps): Promise<void> {
   }
   // The payment is checked before the claim and fails closed. A waived job and a free one have
   // nothing to check. A read error throws out of here: the message is redelivered.
-  if (job.state === 'paid' && job.quoteTotalWei > 0n) {
+  if (job.state === 'paid' && !job.waived && job.quoteTotalWei > 0n) {
     const paid = await deps.chain.jobPayment(job)
     if (paid < job.quoteTotalWei) {
       await report(deps, message, null, 'payment-mismatch', PAYMENT_MISMATCH)

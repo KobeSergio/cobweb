@@ -67,14 +67,20 @@ describe('errorSummary', () => {
     expect(errorSummary('boom')).toBe('Unknown error')
   })
 
-  it('masks key-like runs and leaves ids and sentences readable', () => {
+  it('masks key-like runs and leaves ids, CIDs and sentences readable', () => {
     const hex = 'ab12cd34'.repeat(8)
-    expect(errorSummary(new Error(`bad key ${hex} here`))).toBe('Error: bad key [url] here')
-    const jwt = `${'a'.repeat(20)}.${'b'.repeat(20)}.${'c'.repeat(20)}`
-    expect(errorSummary(new Error(`token ${jwt} rejected`))).toBe('Error: token [url] rejected')
-    expect(errorSummary(new Error(`failed ?apikey=${'k'.repeat(40)}`))).toBe('Error: failed ?[url]')
+    expect(errorSummary(new Error(`bad key ${hex} here`))).toBe('Error: bad key [key] here')
+    const jwt = `${'a-b_c'.repeat(4)}.${'d-e_f'.repeat(4)}.${'g-h_i'.repeat(4)}`
+    expect(errorSummary(new Error(`token ${jwt} rejected`))).toBe('Error: token [key] rejected')
+    expect(errorSummary(new Error(`key sb_secret_${'x'.repeat(40)} rejected`))).toBe(
+      'Error: key [key] rejected',
+    )
+    expect(errorSummary(new Error(`failed ?apikey=${'k'.repeat(40)}`))).toBe('Error: failed ?[key]')
+    expect(errorSummary(new Error('see https://rpc.example/v1/abc'))).toBe('Error: see [url]')
     const readable = 'job 3f0c2f5e-8a51-4c0e-9d7b-0d0f5a3b9c11 timed out'
     expect(errorSummary(new Error(readable))).toBe(`Error: ${readable}`)
+    const cid = `bafybei${'a'.repeat(52)}`
+    expect(errorSummary(new Error(`pinned ${cid} twice`))).toBe(`Error: pinned ${cid} twice`)
     expect(errorSummary(new Error('short'))).toBe('Error: short')
   })
 })

@@ -32,6 +32,7 @@ export function jobRecord(over: Partial<JobRecord> = {}): JobRecord {
     placeholderUploadId: null,
     retries: 0,
     errorCode: null,
+    waived: false,
     ...over,
   }
 }
@@ -132,7 +133,7 @@ export function assetRows(first: number, last: number): TokenRows {
     rows.push({
       id,
       uploadId: uploads[id - 1] ?? 'u-missing',
-      attributes: [{ traitType: 'Edition', value: id }],
+      attributes: [{ traitType: 'Edition', value: String(id) }],
     })
   return { kind: 'assets', rows }
 }

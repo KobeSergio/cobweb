@@ -28,6 +28,8 @@ export type JobRecord = {
   /** How many times the creator retried the job; messages carry the value they were made with. */
   retries: number
   errorCode: string | null
+  /** True when the job's state is `waived` or its `waived_by` column is set. Nothing to pay on chain. */
+  waived: boolean
 }
 
 export type BatchRecord = {
