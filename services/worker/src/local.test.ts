@@ -12,7 +12,7 @@ describe('runLocal', () => {
   it('takes a paid job to done: start, three batches, metadata', async () => {
     const h = await harness()
     await enqueueRender(h.queue, job)
-    expect(await runLocal(h.deps)).toEqual({ handled: 5, thrown: 0, dead: 0 })
+    expect(await runLocal(h.deps)).toMatchObject({ handled: 5, thrown: 0, dead: 0 })
     expect(h.jobs.record.state).toBe('done')
     expect(h.jobs.rows.every((row) => row.state === 'done')).toBe(true)
     expect(h.queue.size()).toBe(0)
@@ -41,7 +41,7 @@ describe('runLocal', () => {
     const pinner = failingPinner(h.deps.pinner, { nth: 1, times: 1 })
     await enqueueRender(h.queue, job)
     const run = await runLocal({ ...h.deps, pinner })
-    expect(run).toEqual({ handled: 5, thrown: 1, dead: 0 })
+    expect(run).toMatchObject({ handled: 5, thrown: 1, dead: 0 })
     expect(pinner.failures).toBe(1)
     expect(h.jobs.record.state).toBe('done')
     expect(h.jobs.rows[1]!.attempts).toBe(2)
@@ -52,7 +52,7 @@ describe('runLocal', () => {
     const pinner = failingPinner(h.deps.pinner, { nth: 1, times: Infinity })
     await enqueueRender(h.queue, job)
     const run = await runLocal({ ...h.deps, pinner })
-    expect(run).toEqual({ handled: 3, thrown: 3, dead: 1 })
+    expect(run).toMatchObject({ handled: 3, thrown: 3, dead: 1 })
     expect(h.jobs.record.state).toBe('failed')
     expect(h.jobs.record.errorCode).toBe('dead-letter')
     expect(h.jobs.failures).toMatchObject([{ index: 1, code: 'dead-letter', final: true }])
@@ -82,6 +82,31 @@ describe('runLocal', () => {
     const run = await runLocal({ ...h.deps, pinner }, { maxReceives: 1 })
     expect(run.thrown).toBe(1)
     expect(run.dead).toBe(1)
+  })
+
+  it('reports the messages that died, in order', async () => {
+    const h = await harness()
+    const pinner = failingPinner(h.deps.pinner, { nth: 1, times: Infinity })
+    await enqueueRender(h.queue, job)
+    const run = await runLocal({ ...h.deps, pinner })
+    expect(run.deadMessages).toEqual([{ jobId: JOB_ID, step: 'batch', index: 1, retries: 0 }])
+    expect(run.deadMessages).toHaveLength(run.dead)
+  })
+
+  it('has no dead messages when nothing died', async () => {
+    const h = await harness()
+    await enqueueRender(h.queue, job)
+    expect((await runLocal(h.deps)).deadMessages).toEqual([])
+  })
+
+  it('rejects with the handler error when the dead-letter handler throws', async () => {
+    const h = await harness()
+    const pinner = failingPinner(h.deps.pinner, { nth: 1, times: Infinity })
+    h.jobs.fail = async () => {
+      throw new Error('database unreachable')
+    }
+    await enqueueRender(h.queue, job)
+    await expect(runLocal({ ...h.deps, pinner })).rejects.toThrow('database unreachable')
   })
 
   it('stops with an error instead of looping for ever', async () => {

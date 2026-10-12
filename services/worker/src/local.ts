@@ -3,6 +3,7 @@
  * the way SQS and the Lambdas would, so the whole pipeline runs without AWS. Also the entry
  * (`@cobweb/worker/local`) that hands the doubles to scripts.
  */
+import type { RenderMessage } from '@cobweb/shared/render-queue'
 import type { MemoryQueue } from './doubles/memory-queue.ts'
 import { errorSummary } from './log.ts'
 import { handle, handleDead } from './steps.ts'
@@ -23,6 +24,8 @@ export type LocalRun = {
   thrown: number
   /** Messages handed to the dead-letter handler. */
   dead: number
+  /** The messages handed to the dead-letter handler, in order. */
+  deadMessages: RenderMessage[]
 }
 
 /**
@@ -36,12 +39,14 @@ export async function runLocal(
 ): Promise<LocalRun> {
   const maxReceives = options.maxReceives ?? 3
   const maxDeliveries = options.maxDeliveries ?? 100_000
-  const run: LocalRun = { handled: 0, thrown: 0, dead: 0 }
+  const run: LocalRun = { handled: 0, thrown: 0, dead: 0, deadMessages: [] }
   for (;;) {
     const entry = deps.queue.take()
     if (!entry) {
       const message = deps.queue.takeDead()
       if (!message) return run
+      // Recorded first, so the message is known even when the handler throws.
+      run.deadMessages.push(message)
       await handleDead(message, deps)
       run.dead += 1
       continue
