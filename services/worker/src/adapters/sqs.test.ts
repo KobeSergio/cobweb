@@ -57,7 +57,12 @@ describe('sqsRenderQueue', () => {
   it('has a package entry that loads nothing but the SQS adapter and the shared queue contract', () => {
     const entry = readFileSync(new URL('../queue.ts', import.meta.url), 'utf8')
     const adapter = readFileSync(new URL('./sqs.ts', import.meta.url), 'utf8')
-    const imports = [...`${entry}\n${adapter}`.matchAll(/from '([^']+)'/g)].map((match) => match[1])
+    const text = `${entry}\n${adapter}`
+    // Every way to load a module: `from '...'` or `from "..."`, a bare `import 'x'`, a dynamic `import(`.
+    expect(text).not.toMatch(/\bimport\s*\(/)
+    expect(text).not.toMatch(/(^|[;\s])import\s*['"]/)
+    expect(text).not.toMatch(/\brequire\s*\(/)
+    const imports = [...text.matchAll(/from\s*(['"])([^'"]+)\1/g)].map((match) => match[2])
     expect(imports.sort()).toEqual([
       './adapters/sqs.ts',
       '@aws-sdk/client-sqs',

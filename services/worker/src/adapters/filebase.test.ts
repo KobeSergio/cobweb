@@ -25,6 +25,18 @@ describe('filebasePinner', () => {
   const sleeps: number[] = []
   const sleep = async (ms: number) => void sleeps.push(ms)
 
+  it('trims whitespace around the CID before reading it', async () => {
+    const { client } = withHeads([`  ${V1}\n`])
+    expect(await filebasePinner(client, 'cobweb-pins', sleep).pin(bytes('car'), 'bafyexpected')).toBe(V1)
+  })
+
+  it('treats a value of only whitespace as no CID yet', async () => {
+    sleeps.length = 0
+    const { client } = withHeads(['  ', V1])
+    expect(await filebasePinner(client, 'cobweb-pins', sleep).pin(bytes('car'), 'bafyexpected')).toBe(V1)
+    expect(sleeps).toEqual([1000])
+  })
+
   it('uploads the CAR with the import metadata and returns the CID Filebase reports', async () => {
     sleeps.length = 0
     const { client, sent } = withHeads([V1])

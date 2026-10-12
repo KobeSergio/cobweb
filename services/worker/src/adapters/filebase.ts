@@ -56,7 +56,7 @@ export function filebasePinner(
       // may need a moment to import the CAR, so the read is repeated before the message is given back.
       for (let attempt = 1; attempt <= HEAD_TRIES; attempt += 1) {
         const head = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
-        const cid = head.Metadata?.[FILEBASE_CID_METADATA_KEY]
+        const cid = head.Metadata?.[FILEBASE_CID_METADATA_KEY]?.trim()
         if (cid) return normalise(cid)
         if (attempt < HEAD_TRIES) await sleep(HEAD_PAUSE_MS)
       }

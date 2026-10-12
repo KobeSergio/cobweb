@@ -69,10 +69,13 @@ describe('artS3Options', () => {
 
 describe('filebaseS3Options', () => {
   it('defaults to the documented endpoint and needs both keys', () => {
-    expect(filebaseS3Options(LOCAL)).toMatchObject({
+    expect(filebaseS3Options(LOCAL)).toEqual({
       region: 'us-east-1',
       endpoint: 'https://s3.filebase.com',
       forcePathStyle: true,
+      credentials: { accessKeyId: 'filebase-key-id', secretAccessKey: 'filebase-key-secret' },
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+      responseChecksumValidation: 'WHEN_REQUIRED',
     })
     expect(filebaseS3Options({ ...LOCAL, FILEBASE_S3_ENDPOINT: 'http://127.0.0.1:9000' }).endpoint).toBe(
       'http://127.0.0.1:9000',

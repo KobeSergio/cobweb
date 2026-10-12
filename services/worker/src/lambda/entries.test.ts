@@ -1,15 +1,16 @@
 import { readFileSync } from 'node:fs'
 import type { SQSEvent, SQSRecord } from 'aws-lambda'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { JobRefusal } from '../ports.ts'
 import { harness } from '../testing/harness.ts'
 import { JOB_ID } from '../testing/fixtures.ts'
 
 // The entry points read their ports from loadDeps; the test hands them the fakes.
-const built = vi.hoisted(() => ({ deps: null as unknown, loads: 0 }))
+const built = vi.hoisted(() => ({ deps: null as unknown, loads: 0, fail: null as Error | null }))
 vi.mock('./deps.ts', () => ({
   loadDeps: async () => {
     built.loads += 1
+    if (built.fail) throw built.fail
     return built.deps
   },
 }))
@@ -17,6 +18,89 @@ vi.mock('./deps.ts', () => ({
 const record = (messageId: string, body: unknown): SQSRecord =>
   ({ messageId, body: JSON.stringify(body) }) as SQSRecord
 const event = (...records: SQSRecord[]): SQSEvent => ({ Records: records })
+
+/** An error that carries a URL with a key in its message and a stack, as an SDK or viem error can. */
+const leaky = () => new Error('connect to https://rpc.example/v1/key-abcdefghijklmnop1234567890 failed')
+const logged = (spy: { mock: { calls: unknown[][] } }) => spy.mock.calls.map((call) => String(call[0]))
+const clean = (lines: string[]) => {
+  for (const line of lines) {
+    expect(line).not.toMatch(/https?:|rpc\.example|key-abcdef/)
+    expect(line).not.toMatch(/\bat .*\(|\.ts:\d|stack/i)
+  }
+}
+
+afterEach(() => {
+  built.fail = null
+  vi.restoreAllMocks()
+})
+
+describe('a failure outside the step', () => {
+  for (const [name, file] of [
+    ['render', './render.ts'],
+    ['dead', './dead.ts'],
+  ] as const) {
+    it(`marks every record of the ${name} event failed when the ports cannot load, logging a masked line`, async () => {
+      const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
+      built.fail = leaky()
+      const { handler } = await import(file)
+      const response = await handler(
+        event(
+          record('m1', { jobId: JOB_ID, step: 'start', retries: 0 }),
+          record('m2', { jobId: JOB_ID, step: 'metadata', retries: 0 }),
+        ),
+      )
+      expect(response).toEqual({ batchItemFailures: [{ itemIdentifier: 'm1' }, { itemIdentifier: 'm2' }] })
+      const lines = logged(spy)
+      expect(lines.length).toBeGreaterThan(0)
+      expect(lines.join('\n')).toContain('Error: connect to [url] failed')
+      clean(lines)
+    })
+
+    it(`marks every record of the ${name} event failed when the handler body throws outside the step`, async () => {
+      const spy = vi.spyOn(console, 'log').mockImplementationOnce(() => {
+        throw leaky()
+      })
+      spy.mockImplementation(() => {})
+      const h = await harness()
+      built.deps = h.deps
+      const { handler } = await import(file)
+      const response = await handler(
+        event(record('m1', { hello: 'world' }), record('m2', { jobId: JOB_ID, step: 'start', retries: 0 })),
+      )
+      expect(response).toEqual({ batchItemFailures: [{ itemIdentifier: 'm1' }, { itemIdentifier: 'm2' }] })
+      const lines = logged(spy)
+      expect(lines.join('\n')).toContain('handler failed')
+      clean(lines)
+    })
+  }
+
+  it('fails the sweep with a fixed plain error when the ports cannot load', async () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    built.fail = leaky()
+    const { handler } = await import('./sweep.ts')
+    const thrown = await handler().catch((error: unknown) => error)
+    expect(thrown).toBeInstanceOf(Error)
+    expect((thrown as Error).message).toBe('The sweep failed.')
+    expect((thrown as Error).cause).toBeUndefined()
+    const lines = logged(spy)
+    expect(lines.join('\n')).toContain('sweep failed')
+    expect(lines.join('\n')).toContain('Error: connect to [url] failed')
+    clean(lines)
+  })
+
+  it('fails the sweep with the same fixed error when the sweep itself throws', async () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const h = await harness()
+    h.jobs.stuck = async () => {
+      throw leaky()
+    }
+    built.deps = h.deps
+    const { handler } = await import('./sweep.ts')
+    await expect(handler()).rejects.toThrow(/^The sweep failed\.$/)
+    clean(logged(spy))
+    expect(logged(spy).join('\n')).toContain('Error: connect to [url] failed')
+  })
+})
 
 describe('the dead-letter entry point', () => {
   it('fails the job and reports no batch item failure', async () => {
