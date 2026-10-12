@@ -42,8 +42,10 @@ pnpm --filter @cobweb/web verify:sweep    # the upload sweep against local stora
 pnpm --filter @cobweb/web sweep:uploads --dry-run   # unrecorded objects older than a day; drop --dry-run to delete
 pnpm --filter @cobweb/render test         # render core: compositing, metadata JSON, CARs and local CIDs
 pnpm --filter @cobweb/web verify:render   # the render worker end to end against local Supabase, local storage and Anvil
+pnpm --filter @cobweb/worker test         # the render worker: steps, adapters, Lambda entry points
 pnpm --filter @cobweb/worker bench        # one batch of 100 tokens at 2048 x 2048: time, memory, CAR size
 pnpm --filter @cobweb/infra test          # CDK template assertions; no bundling, no credentials
+pnpm --filter @cobweb/infra synth         # full CDK synthesis with bundling into infra/cdk.out; no credentials
 ```
 
 ## Rules

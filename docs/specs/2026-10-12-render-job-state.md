@@ -96,6 +96,7 @@ A placeholder job (`kind = 'placeholder'`, one batch) follows the same path. The
 - Replace `render_jobs_done_has_metadata` with `render_jobs_done_complete`: `state <> 'done' or
 (metadata_cid is not null and base_uri is not null)`.
 - `batches_done` keeps its check; the functions set it to the count of done batch rows.
+- For a real job with a token list (1/1 and single asset), `batch_size` and `batches_total` are set at insert by bytes, not fixed at 100 (migration `20261012020000_asset_batch_size.sql`, described in `docs/specs/2026-10-12-render-worker.md`, section 7).
 
 `render_batches`:
 
