@@ -88,25 +88,55 @@ export function workerClient(env: Env): WorkerClient {
   })
 }
 
-/** Every port on its production adapter. Building it opens no connection. */
-export function productionDeps(env: Env, log: Log = consoleLog): Deps {
-  // Checked before any client is built. The upload sweep deletes every object in the art bucket that
-  // no upload row records, so a collage written there would be swept away.
-  if (need(env, 'RENDER_S3_BUCKET') === need(env, 'ART_S3_BUCKET'))
+/** Which entry point the ports are for. The dead-letter and sweep functions only ever use "jobs". */
+export type DepsKind = 'render' | 'jobs'
+
+/** A port a function does not use: it fails loudly, by name, if it is ever called. */
+class NotAvailable extends Error {
+  constructor(what: string) {
+    super(`${what} is not available in this function.`)
+    this.name = 'NotAvailable'
+  }
+}
+
+/**
+ * Every port on its production adapter. Building it opens no connection. For "jobs" (the dead-letter
+ * and sweep functions) only the jobs, queue and log ports are built, from the Supabase URL and
+ * service key and the queue URL; storage, the pinning service and the chain are ports that throw,
+ * so those functions never need, and never get, the render function's keys.
+ */
+export function productionDeps(env: Env, log: Log = consoleLog, kind: DepsKind = 'render'): Deps {
+  // For the render function, checked before any client is built. The upload sweep deletes every object in
+  // the art bucket that no upload row records, so a collage written there would be swept away.
+  if (kind === 'render' && need(env, 'RENDER_S3_BUCKET') === need(env, 'ART_S3_BUCKET'))
     throw new Error('RENDER_S3_BUCKET must not be the art bucket.')
+  const jobs = supabaseJobs(workerClient(env), { log })
+  const queue = sqsRenderQueue(new SQSClient({}), need(env, 'RENDER_QUEUE_URL'))
+  if (kind === 'jobs') {
+    const unused = (what: string) => () => Promise.reject(new NotAvailable(what))
+    return {
+      jobs,
+      queue,
+      log,
+      store: { load: unused('Storage'), putCollage: unused('Storage') },
+      pinner: { pin: unused('The pinning service') },
+      chain: { jobPayment: unused('The chain') },
+      retry: PRODUCTION_RETRY,
+    }
+  }
   const art = new S3Client(artS3Options(env))
   // With an endpoint set (Supabase Storage, locally) both buckets live behind the art client. On
   // AWS the render bucket is the stack's own, reached with the function's role in its own region.
   const render = env.ART_S3_ENDPOINT ? art : new S3Client({ ...CHECKSUMS })
   return {
-    jobs: supabaseJobs(workerClient(env), { log }),
+    jobs,
     store: s3Store(
       { client: art, bucket: need(env, 'ART_S3_BUCKET') },
       { client: render, bucket: need(env, 'RENDER_S3_BUCKET') },
     ),
     pinner: filebasePinner(new S3Client(filebaseS3Options(env)), need(env, 'FILEBASE_BUCKET')),
     chain: viemChain(env),
-    queue: sqsRenderQueue(new SQSClient({}), need(env, 'RENDER_QUEUE_URL')),
+    queue,
     log,
     retry: PRODUCTION_RETRY,
   }

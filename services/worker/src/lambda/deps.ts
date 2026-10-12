@@ -1,11 +1,12 @@
 /**
  * The Lambda side of configuration: the stack sets plain values as environment variables and the
- * ARN of one Secrets Manager secret, read once per container at cold start. The secret is a JSON
+ * ARN of the Secrets Manager secret the function may read, read once per container at cold start. The secret is a JSON
  * object of text values (infra/README.md lists its keys); it is merged over the environment and
  * never logged.
  */
 import { GetSecretValueCommand, SecretsManagerClient } from '@aws-sdk/client-secrets-manager'
 import { productionDeps } from '../env.ts'
+import type { DepsKind } from '../env.ts'
 import type { Deps } from '../steps.ts'
 
 export function parseSecret(text: string | undefined): Record<string, string> {
@@ -22,20 +23,31 @@ export function parseSecret(text: string | undefined): Record<string, string> {
   return Object.fromEntries(entries) as Record<string, string>
 }
 
-async function build(): Promise<Deps> {
-  const arn = process.env.RENDER_SECRET_ARN
-  if (!arn) throw new Error('RENDER_SECRET_ARN is not set.')
+/** The environment name that holds the ARN of the secret each entry point reads. */
+const SECRET_ARN: Record<DepsKind, string> = { render: 'RENDER_SECRET_ARN', jobs: 'JOBS_SECRET_ARN' }
+
+async function build(kind: DepsKind): Promise<Deps> {
+  const arn = process.env[SECRET_ARN[kind]]
+  if (!arn) throw new Error(`${SECRET_ARN[kind]} is not set.`)
   const found = await new SecretsManagerClient({}).send(new GetSecretValueCommand({ SecretId: arn }))
-  return productionDeps({ ...process.env, ...parseSecret(found.SecretString) })
+  return productionDeps({ ...process.env, ...parseSecret(found.SecretString) }, undefined, kind)
 }
 
-let cached: Promise<Deps> | null = null
+const cached = new Map<DepsKind, Promise<Deps>>()
 
-/** The production ports, built once per container. A failed build is tried again on the next message. */
-export function loadDeps(): Promise<Deps> {
-  cached ??= build().catch((error: unknown) => {
-    cached = null
-    throw error
-  })
-  return cached
+/**
+ * The production ports, built once per container. The render function reads RenderSecrets ("render");
+ * the dead-letter and sweep functions read JobsSecrets ("jobs"), which holds the Supabase key only.
+ * A failed build is tried again on the next message.
+ */
+export function loadDeps(kind: DepsKind = 'render'): Promise<Deps> {
+  let pending = cached.get(kind)
+  if (!pending) {
+    pending = build(kind).catch((error: unknown) => {
+      cached.delete(kind)
+      throw error
+    })
+    cached.set(kind, pending)
+  }
+  return pending
 }

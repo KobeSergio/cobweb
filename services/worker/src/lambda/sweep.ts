@@ -5,7 +5,7 @@ import { loadDeps } from './deps.ts'
 
 export async function handler(): Promise<void> {
   try {
-    await sweep(await loadDeps())
+    await sweep(await loadDeps('jobs'))
   } catch (error) {
     // The logger may be what threw; a logging failure must not replace the fixed error below.
     try {

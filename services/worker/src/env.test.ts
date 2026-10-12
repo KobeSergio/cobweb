@@ -91,6 +91,41 @@ describe('productionDeps', () => {
     expect(deps.retry?.delaysMs).toEqual([1000, 3000, 6000])
   })
 
+  describe('for the dead-letter and sweep entry points ("jobs")', () => {
+    const JOBS_ONLY = {
+      SUPABASE_URL: LOCAL.SUPABASE_URL,
+      SUPABASE_SERVICE_ROLE_KEY: LOCAL.SUPABASE_SERVICE_ROLE_KEY,
+      RENDER_QUEUE_URL: LOCAL.RENDER_QUEUE_URL,
+    }
+
+    it('builds from the Supabase URL and key and the queue URL alone', () => {
+      const deps = productionDeps(JOBS_ONLY, () => {}, 'jobs')
+      expect(Object.keys(deps).sort()).toEqual(['chain', 'jobs', 'log', 'pinner', 'queue', 'retry', 'store'])
+    })
+
+    it('never requires storage, Filebase or chain settings, and does not compare the buckets', () => {
+      expect(() => productionDeps(JOBS_ONLY, () => {}, 'jobs')).not.toThrow()
+      expect(() => productionDeps(JOBS_ONLY, () => {}, 'render')).toThrow('RENDER_S3_BUCKET is not set.')
+    })
+
+    it('still names what it does need', () => {
+      for (const name of Object.keys(JOBS_ONLY))
+        expect(() => productionDeps({ ...JOBS_ONLY, [name]: undefined }, () => {}, 'jobs')).toThrow(
+          `${name} is not set.`,
+        )
+    })
+
+    it('gives the ports it cannot use an error named NotAvailable, not a quiet success', async () => {
+      const deps = productionDeps(JOBS_ONLY, () => {}, 'jobs')
+      const named = async (run: () => Promise<unknown>) =>
+        ((await run().catch((error: unknown) => error)) as Error).name
+      expect(await named(() => deps.store.load({ key: 'k.png', ext: 'png' }))).toBe('NotAvailable')
+      expect(await named(() => deps.store.putCollage('k', new Uint8Array()))).toBe('NotAvailable')
+      expect(await named(() => deps.pinner.pin(new Uint8Array(), 'cid'))).toBe('NotAvailable')
+      expect(await named(() => deps.chain.jobPayment({} as never))).toBe('NotAvailable')
+    })
+  })
+
   it('refuses an incomplete environment by name, without echoing any value', () => {
     for (const name of [
       'SUPABASE_SERVICE_ROLE_KEY',
