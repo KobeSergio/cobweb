@@ -141,6 +141,9 @@ export function assetRows(first: number, last: number): TokenRows {
 /** A minimal GIF header padded to the 12 bytes the library's sniffer needs. */
 export const GIF_BYTES = new Uint8Array([...new TextEncoder().encode('GIF89a'), 1, 0, 1, 0, 0, 0, 0, 59])
 
+/** A minimal MP4: a 12 byte box header, which is all the library's sniffer reads. */
+export const MP4_BYTES = new Uint8Array([0, 0, 0, 12, ...new TextEncoder().encode('ftypisom')])
+
 export async function assetImages(): Promise<Record<string, Uint8Array>> {
   return {
     [assetKey('one')]: await flatPng({ r: 10, g: 200, b: 10, alpha: 1 }),

@@ -7,7 +7,11 @@ const KEY_LIKE = /[A-Za-z0-9_+/=.-]{32,}/g
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 /** A CID is public and needed to debug a mismatch. */
 const CID = /^baf[a-z2-7]{56,}$/
-const mask = (run: string): string => (UUID.test(run) || CID.test(run) ? run : '[key]')
+/** Trailing dots are trimmed before the test, so an id that ends a sentence stays readable. */
+const mask = (run: string): string => {
+  const bare = run.replace(/\.+$/, '')
+  return UUID.test(bare) || CID.test(bare) ? run : '[key]'
+}
 
 /**
  * An error as a log field: its name and a short message. viem and AWS errors can carry an RPC or

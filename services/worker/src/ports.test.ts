@@ -91,6 +91,15 @@ describe('errorSummary', () => {
     expect(errorSummary(new Error(`pinned ${cid} twice`))).toBe(`Error: pinned ${cid} twice`)
     expect(errorSummary(new Error('short'))).toBe('Error: short')
   })
+
+  it('keeps a uuid or a CID that ends a sentence readable', () => {
+    const id = '3f0c2f5e-8a51-4c0e-9d7b-0d0f5a3b9c11'
+    expect(errorSummary(new Error(`gave up on job ${id}.`))).toBe(`Error: gave up on job ${id}.`)
+    const cid = `bafybei${'a'.repeat(52)}`
+    expect(errorSummary(new Error(`pinned ${cid}...`))).toBe(`Error: pinned ${cid}...`)
+    // A key with a trailing dot is still a key.
+    expect(errorSummary(new Error(`bad key ${'ab12cd34'.repeat(8)}.`))).toBe('Error: bad key [key]')
+  })
 })
 
 describe('MissingObject', () => {

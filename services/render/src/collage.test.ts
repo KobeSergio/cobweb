@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { previewCollage } from './collage'
 import { flatPng, pixel, sizeOf } from './fixtures'
+import { sharp } from './png'
 
 const colours = (count: number) =>
   Promise.all(Array.from({ length: count }, (_, i) => flatPng({ r: i * 15, g: 100, b: 200, alpha: 1 })))
@@ -41,5 +42,17 @@ describe('previewCollage', () => {
       code: 'decode',
       detail: { index: 0 },
     })
+  })
+
+  it('accepts an image of the product maximum, 2048 by 2048', async () => {
+    const big = await flatPng({ r: 1, g: 2, b: 3, alpha: 1 }, 2048)
+    const png = await previewCollage([big], { columns: 1, cell: 64 })
+    expect(await sizeOf(png)).toEqual({ width: 64, height: 64, format: 'png' })
+  })
+
+  it('refuses an image with more pixels than the maximum before it is decoded, as decode', async () => {
+    const huge = await flatPng({ r: 1, g: 2, b: 3, alpha: 1 }, 4096)
+    expect((await sharp(huge).metadata()).width).toBe(4096)
+    await expect(previewCollage([huge])).rejects.toMatchObject({ code: 'decode', detail: { index: 0 } })
   })
 })

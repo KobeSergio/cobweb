@@ -1,6 +1,8 @@
 import { RenderProblem } from '@cobweb/render'
 import { describe, expect, it } from 'vitest'
+import sharp from 'sharp'
 import { flatPng, sizeOf } from './doubles/draw.ts'
+import { memoryStore } from './doubles/memory-store.ts'
 import { wrongCidPinner } from './doubles/pinners.ts'
 import { JobRefusal, MissingObject } from './ports.ts'
 import {
@@ -12,7 +14,15 @@ import {
   RESULT_DIFFERS,
   sweep,
 } from './steps.ts'
-import { COLLECTION_ID, JOB_ID, layerKey, PLACEHOLDER_KEY } from './testing/fixtures.ts'
+import {
+  assetKey,
+  COLLECTION_ID,
+  GIF_BYTES,
+  JOB_ID,
+  layerKey,
+  MP4_BYTES,
+  PLACEHOLDER_KEY,
+} from './testing/fixtures.ts'
 import { batchMessage, harness, metadataMessage, startMessage } from './testing/harness.ts'
 
 const CID = /^[a-z2-7]{59}$/
@@ -602,14 +612,62 @@ describe('metadata', () => {
     expect(h.lines).toContain('failure report refused:JOB_NOT_RENDERING')
   })
 
-  it('makes a collage of the still files of a 1/1 job and leaves the GIF out', async () => {
-    const h = await finalizing('assets')
+  it('makes the collage from the stills only when a GIF is among the first 16 tokens, never reading the GIF', async () => {
+    // Three tokens in one batch: two PNGs and a GIF, all among the first 16.
+    const h = await harness('assets', { claimed: true, job: { batchSize: 3, batchesTotal: 1 } })
+    await handle(batchMessage(0), h.deps)
+    expect(h.store.loads).toContain(assetKey('three', 'gif'))
+    h.store.loads.length = 0
     await handle(metadataMessage(), h.deps)
     const key = `${COLLECTION_ID}/collage/${JOB_ID}.png`
     expect(h.jobs.finished?.collageKey).toBe(key)
     expect(h.jobs.finished?.baseUri).toBe(`ipfs://${h.jobs.finished?.metadataCid}/`)
-    // Batch 0 holds tokens 1 and 2, both PNG: one row of four cells.
+    // Only the two stills are read and packed: one row of four cells.
+    expect(h.store.loads).toEqual([assetKey('one'), assetKey('two')])
     expect(await sizeOf(h.store.collages.get(key)!)).toEqual({ width: 1024, height: 256 })
+  })
+
+  it('makes a collage of a 1/1 job whose only file is a JPG', async () => {
+    const h = await harness('assets', {
+      claimed: true,
+      job: { tokenCount: 1, batchSize: 1, batchesTotal: 1 },
+    })
+    const data = await h.jobs.renderData(h.jobs.record)
+    const key = assetKey('one', 'jpg')
+    data.uploads[0]!.storageKey = key
+    const jpg = new Uint8Array(
+      await sharp({ create: { width: 64, height: 64, channels: 3, background: { r: 9, g: 99, b: 199 } } })
+        .jpeg()
+        .toBuffer(),
+    )
+    const store = memoryStore({ [key]: jpg })
+    h.deps.store = store
+    await handle(batchMessage(0), h.deps)
+    await handle(metadataMessage(), h.deps)
+    const collageKey = `${COLLECTION_ID}/collage/${JOB_ID}.png`
+    expect(h.jobs.finished?.collageKey).toBe(collageKey)
+    expect(await sizeOf(store.collages.get(collageKey)!)).toEqual({ width: 1024, height: 256 })
+  })
+
+  it('skips the collage, without a storage read, when the first 16 files are all GIF or MP4', async () => {
+    const h = await harness('assets', { claimed: true, job: { batchSize: 3, batchesTotal: 1 } })
+    const data = await h.jobs.renderData(h.jobs.record)
+    const keys = [assetKey('one', 'gif'), assetKey('two', 'mp4'), assetKey('three', 'gif')]
+    data.uploads.forEach((upload, at) => (upload.storageKey = keys[at]!))
+    const store = memoryStore({
+      [keys[0]!]: GIF_BYTES,
+      [keys[1]!]: MP4_BYTES,
+      [keys[2]!]: GIF_BYTES,
+    })
+    h.deps.store = store
+    await handle(batchMessage(0), h.deps)
+    expect(store.loads).toHaveLength(3)
+    store.loads.length = 0
+    await handle(metadataMessage(), h.deps)
+    expect(h.jobs.record.state).toBe('done')
+    expect(h.jobs.finished?.collageKey).toBeNull()
+    expect(store.loads).toEqual([])
+    expect(store.collages.size).toBe(0)
   })
 
   it('writes one shared file and no collage for a single asset, reading only batch 0', async () => {
@@ -623,6 +681,39 @@ describe('metadata', () => {
     expect(h.jobs.finished?.baseUri).toBe(`ipfs://${h.jobs.finished?.metadataCid}/metadata.json`)
     expect(h.jobs.finished?.collageKey).toBeNull()
     expect(h.jobs.calls.filter((call) => call.startsWith('tokens:'))).toEqual(['tokens:0'])
+    expect(h.store.collages.size).toBe(0)
+  })
+
+  it('finishes with the same four values and the same collage key when the first finish threw after the pin', async () => {
+    const h = await finalizing()
+    const finish = h.jobs.finish
+    h.jobs.finish = () => Promise.reject(new Error('database down'))
+    await expect(handle(metadataMessage(), h.deps)).rejects.toThrow('database down')
+    expect(h.jobs.record.state).toBe('finalizing')
+    const key = `${COLLECTION_ID}/collage/${JOB_ID}.png`
+    const written = h.store.collages.get(key)!
+    const pinsBefore = h.pins.at(-1)
+    h.jobs.finish = finish
+    await handle(metadataMessage(), h.deps)
+    expect(h.jobs.record.state).toBe('done')
+    expect(h.jobs.finished).toEqual({
+      metadataCid: pinsBefore,
+      baseUri: `ipfs://${pinsBefore}/`,
+      placeholderImageCid: null,
+      collageKey: key,
+    })
+    expect(h.store.collages.get(key)).toEqual(written)
+    expect(h.jobs.failures).toEqual([])
+  })
+
+  it('throws a transient token read in the metadata step and records nothing', async () => {
+    const h = await finalizing()
+    h.jobs.tokens = () => Promise.reject(new Error('database down'))
+    await expect(handle(metadataMessage(), h.deps)).rejects.toThrow('database down')
+    expect(h.jobs.failures).toEqual([])
+    expect(h.jobs.finished).toBeNull()
+    expect(h.jobs.record.state).toBe('finalizing')
+    expect(h.pins).toHaveLength(3)
     expect(h.store.collages.size).toBe(0)
   })
 

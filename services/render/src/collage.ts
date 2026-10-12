@@ -1,6 +1,9 @@
 import { reasonOf, RenderProblem } from './problems'
 import { PNG_OPTIONS, TRANSPARENT, bytesOf, sharp } from './png'
 
+/** The product's largest image side (2048); an input with more pixels than a square of it is refused undecoded. */
+const MAX_INPUT_PIXELS = 2048 * 2048
+
 /**
  * A preview grid of the images given (the worker passes the first 16 rendered tokens, PNG batch files only: it filters GIF and MP4 files out first, since the collage cannot read them): `columns`
  * across (4), as many rows as needed, each image fitted inside a `cell` (256) pixel square on
@@ -24,7 +27,7 @@ export async function previewCollage(
   for (const [index, bytes] of images.entries()) {
     let input: Buffer
     try {
-      input = await sharp(bytes)
+      input = await sharp(bytes, { limitInputPixels: MAX_INPUT_PIXELS })
         .resize(cell, cell, { fit: 'contain', background: TRANSPARENT })
         .toColourspace('srgb')
         .ensureAlpha()

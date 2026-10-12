@@ -192,9 +192,12 @@ async function collage(
   deps: Deps,
 ): Promise<string | null> {
   try {
+    // GIF and MP4 files are dropped here, before anything is read or packed: the collage cannot show them.
     const first = tokenSlice(data, await deps.jobs.tokens(job, 0))
       .sort((a, b) => a.id - b.id)
       .slice(0, COLLAGE_TOKENS)
+      .filter((token) => !('image' in token) || (token.image.ext !== 'gif' && token.image.ext !== 'mp4'))
+    if (first.length === 0) return null
     // With a batch size of 16, ids 1 to 16 are exactly batch 0, whatever the job's own batch size.
     const rendered = await renderBatch({ ...spec, batchSize: COLLAGE_TOKENS }, 0, first, deps.store.load)
     const stills = rendered.files
