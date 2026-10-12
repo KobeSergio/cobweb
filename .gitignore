@@ -15,6 +15,7 @@ out/
 cache/
 contracts/broadcast/
 coverage/
+cdk.out/
 
 # Local tooling
 .DS_Store
