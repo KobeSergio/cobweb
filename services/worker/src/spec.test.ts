@@ -104,6 +104,46 @@ describe('renderSpec: generative', () => {
     expect(problem(() => renderSpec(data))).toMatchObject({ name: 'RenderProblem', code: 'missing-image' })
   })
 
+  it('gives each art collection only its own layers', () => {
+    const data = generativeData()
+    const layer = data.layers[0]!
+    data.artCollections = [
+      { id: 'art-a', position: 0 },
+      { id: 'art-b', position: 1 },
+    ]
+    data.layers = [
+      { ...layer, id: 'l-a', artCollectionId: 'art-a', position: 0 },
+      { ...layer, id: 'l-b', artCollectionId: 'art-b', position: 0 },
+    ]
+    data.traits = []
+    const spec = renderSpec(data)
+    if (spec.kind !== 'generative') throw new Error('not generative')
+    expect(spec.collections.map((c) => [c.id, c.layers.map((l) => l.id)])).toEqual([
+      ['art-a', ['l-a']],
+      ['art-b', ['l-b']],
+    ])
+  })
+
+  it('maps inMetadata false and showBlankTraits true through', () => {
+    const data = generativeData()
+    data.traits = data.traits.map((trait) => (trait.id === 't-cap' ? { ...trait, inMetadata: false } : trait))
+    data.collection.showBlankTraits = true
+    const spec = renderSpec(data)
+    if (spec.kind !== 'generative') throw new Error('not generative')
+    expect(spec.collections[0]?.layers[2]?.traits[1]?.inMetadata).toBe(false)
+    expect(spec.text.showBlankTraits).toBe(true)
+  })
+
+  it('refuses a trait whose file is of an unsupported type with its own sentence', () => {
+    const data = generativeData()
+    data.uploads = data.uploads.map((upload) =>
+      upload.id === 'u-wide' ? { ...upload, storageKey: upload.storageKey.replace('.png', '.jpeg') } : upload,
+    )
+    const error = problem(() => renderSpec(data))
+    expect(error).toMatchObject({ code: 'missing-image' })
+    expect(error.message).toMatch(/^The file for trait .+ is not a supported type\.$/)
+  })
+
   it('refuses a project with no canvas', () => {
     const data = generativeData()
     data.collection.canvasWidth = null
@@ -179,8 +219,9 @@ describe('tokenSlice', () => {
     const rows = assetRows(1, 1)
     if (rows.kind !== 'assets') throw new Error('not assets')
     rows.rows[0]!.attributes = [
-      { trait_type: 'Mood', value: 'Calm' },
-      { trait_type: 7, value: 'x' },
+      { traitType: 'Mood', value: 'Calm' },
+      { traitType: 7, value: 'x' },
+      { value: 'no key' },
       'loose',
       null,
       { trait_type: 'Deep', value: { a: 1 } },
@@ -192,12 +233,47 @@ describe('tokenSlice', () => {
     expect(tokenSlice(assetData(), rows)[0]).toMatchObject({ attributes: [] })
   })
 
-  it('refuses an entry whose upload id is unknown', () => {
-    expect(problem(() => tokenSlice(assetData(), assetRows(4, 4)))).toMatchObject({
+  it('maps the stored traitType key, and accepts trait_type too', () => {
+    const rows = assetRows(1, 1)
+    if (rows.kind !== 'assets') throw new Error('not assets')
+    rows.rows[0]!.attributes = [
+      { traitType: 'Artist', value: 'Ada' },
+      { trait_type: 'Mood', value: 'Calm' },
+    ]
+    expect(tokenSlice(assetData(), rows)[0]).toMatchObject({
+      attributes: [
+        { trait_type: 'Artist', value: 'Ada' },
+        { trait_type: 'Mood', value: 'Calm' },
+      ],
+    })
+  })
+
+  it('refuses an entry whose upload id is unknown, naming the token', () => {
+    const error = problem(() => tokenSlice(assetData(), assetRows(4, 4)))
+    expect(error).toMatchObject({
       name: 'RenderProblem',
       code: 'missing-image',
       message: 'Token 4 names a file the project does not have.',
     })
+    expect((error as { tokenId?: number }).tokenId).toBe(4)
+  })
+
+  it('refuses a file of an unsupported type with its own sentence', () => {
+    const data = assetData()
+    data.uploads = data.uploads.map((upload) =>
+      upload.id === 'u-two' ? { ...upload, storageKey: assetKey('two', 'jpeg') } : upload,
+    )
+    expect(problem(() => tokenSlice(data, assetRows(2, 2)))).toMatchObject({
+      code: 'missing-image',
+      message: 'The file for token 2 is not a supported type.',
+    })
+  })
+
+  it('sees an uploads array that was replaced', () => {
+    const data = assetData()
+    tokenSlice(data, assetRows(1, 1))
+    data.uploads = []
+    expect(problem(() => tokenSlice(data, assetRows(1, 1)))).toMatchObject({ code: 'missing-image' })
   })
 
   it('refuses rows of the wrong kind for the project', () => {

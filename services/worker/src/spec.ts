@@ -26,21 +26,16 @@ export function imageRef(key: string): ImageRef | null {
 
 const byPosition = (a: { position: number }, b: { position: number }) => a.position - b.position
 
-// One lookup per data object, so a batch of tokens does not rebuild it for every token.
-const uploadIndexes = new WeakMap<RenderData, Map<string, string>>()
+type Uploads = Map<string, string>
 
-function uploadKeys(data: RenderData): Map<string, string> {
-  let index = uploadIndexes.get(data)
-  if (!index) {
-    index = new Map(data.uploads.map((upload) => [upload.id, upload.storageKey]))
-    uploadIndexes.set(data, index)
-  }
-  return index
-}
+const uploadsOf = (data: RenderData): Uploads =>
+  new Map(data.uploads.map((upload) => [upload.id, upload.storageKey]))
 
-function refOf(data: RenderData, uploadId: string | null): ImageRef | null {
-  const key = uploadId === null ? undefined : uploadKeys(data).get(uploadId)
-  return key === undefined ? null : imageRef(key)
+/** The file for an upload id: its reference, null when the project does not have it, or 'unsupported'. */
+function refOf(uploads: Uploads, uploadId: string | null): ImageRef | null | 'unsupported' {
+  const key = uploadId === null ? undefined : uploads.get(uploadId)
+  if (key === undefined) return null
+  return imageRef(key) ?? 'unsupported'
 }
 
 function textOf(data: RenderData): MetadataText {
@@ -53,7 +48,9 @@ function textOf(data: RenderData): MetadataText {
 }
 
 function placeholderSpec(data: RenderData): PlaceholderSpec {
-  const image = refOf(data, data.job.placeholderUploadId)
+  const image = refOf(uploadsOf(data), data.job.placeholderUploadId)
+  if (image === 'unsupported')
+    throw new RenderProblem('missing-image', 'The file for the placeholder is not a supported type.')
   if (!image) throw new RenderProblem('missing-image', 'The placeholder file is missing from the project.')
   return {
     kind: 'placeholder',
@@ -67,6 +64,7 @@ function generativeSpec(data: RenderData): GenerativeSpec {
   const canvas = data.collection.canvasWidth
   if (canvas === null)
     throw new RenderProblem('missing-image', 'The project has no canvas size, so it has no layer images.')
+  const uploads = uploadsOf(data)
   const collections: RenderArtCollection[] = [...data.artCollections].sort(byPosition).map((art) => ({
     id: art.id,
     layers: data.layers
@@ -81,7 +79,14 @@ function generativeSpec(data: RenderData): GenerativeSpec {
           .filter((trait) => trait.layerId === layer.id)
           .sort(byPosition)
           .map((trait) => {
-            const image = trait.blank ? null : refOf(data, trait.uploadId)
+            const found = trait.blank ? null : refOf(uploads, trait.uploadId)
+            if (found === 'unsupported')
+              throw new RenderProblem(
+                'missing-image',
+                `The file for trait ${trait.name} is not a supported type.`,
+                { detail: { trait: trait.id, layer: layer.id } },
+              )
+            const image = found
             if (!trait.blank && !image)
               throw new RenderProblem(
                 'missing-image',
@@ -102,12 +107,17 @@ export function renderSpec(data: RenderData): GenerativeSpec | AssetSpec | Place
   return { kind: data.collection.projectType, text: textOf(data), batchSize: data.job.batchSize }
 }
 
-/** The attribute list stored at lock, kept as it is: entries with a text `trait_type` and a text or number `value`. */
+/**
+ * The attribute list stored at lock: entries with a text `traitType` (the app's key; `trait_type` is
+ * accepted too) and a text or number `value`, written out in the render library's `trait_type` form.
+ */
 function attributesOf(value: unknown): { trait_type: string; value: string }[] {
   if (!Array.isArray(value)) return []
   return value.flatMap((entry: unknown) => {
     if (typeof entry !== 'object' || entry === null) return []
-    const { trait_type: type, value: text } = entry as { trait_type?: unknown; value?: unknown }
+    const stored = entry as { traitType?: unknown; trait_type?: unknown; value?: unknown }
+    const type = stored.traitType ?? stored.trait_type
+    const text = stored.value
     if (typeof type !== 'string') return []
     if (typeof text === 'string') return [{ trait_type: type, value: text }]
     return typeof text === 'number' ? [{ trait_type: type, value: String(text) }] : []
@@ -132,8 +142,14 @@ export function tokenSlice(data: RenderData, rows: TokenRows): (GenerativeToken 
   }
   if (generative)
     throw new RenderProblem('bad-dna', 'The job has a file list, but the project is generative.')
+  const uploads = uploadsOf(data)
   return rows.rows.map((row) => {
-    const image = refOf(data, row.uploadId)
+    const image = refOf(uploads, row.uploadId)
+    if (image === 'unsupported')
+      throw new RenderProblem('missing-image', `The file for token ${row.id} is not a supported type.`, {
+        tokenId: row.id,
+        detail: { upload: row.uploadId },
+      })
     if (!image)
       throw new RenderProblem('missing-image', `Token ${row.id} names a file the project does not have.`, {
         tokenId: row.id,

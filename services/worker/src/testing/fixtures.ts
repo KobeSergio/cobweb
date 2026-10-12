@@ -132,7 +132,7 @@ export function assetRows(first: number, last: number): TokenRows {
     rows.push({
       id,
       uploadId: uploads[id - 1] ?? 'u-missing',
-      attributes: [{ trait_type: 'Edition', value: id }],
+      attributes: [{ traitType: 'Edition', value: id }],
     })
   return { kind: 'assets', rows }
 }
