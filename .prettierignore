@@ -8,3 +8,4 @@ contracts/lib/
 .next/
 .turbo/
 dist/
+packages/ui/src/components/
