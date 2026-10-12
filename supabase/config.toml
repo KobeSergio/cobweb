@@ -130,6 +130,13 @@ public = false
 file_size_limit = "50MiB"
 allowed_mime_types = ["image/png", "image/jpeg", "image/webp", "image/gif", "video/mp4"]
 
+# Preview collages the render worker writes (docs/specs/2026-10-12-render-worker.md). Private, PNG
+# only, and apart from the `art` bucket so the upload sweep never sees worker output.
+[storage.buckets.render]
+public = false
+file_size_limit = "50MiB"
+allowed_mime_types = ["image/png"]
+
 # Allow connections via S3 compatible clients
 [storage.s3_protocol]
 enabled = true

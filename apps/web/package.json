@@ -15,12 +15,17 @@
     "chain:local": "node scripts/chain-local.ts",
     "verify:chain": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-chain.ts",
     "sweep:uploads": "node --conditions=react-server scripts/sweep-uploads.ts",
-    "verify:sweep": "node --conditions=react-server scripts/verify-sweep.ts"
+    "verify:sweep": "node --conditions=react-server scripts/verify-sweep.ts",
+    "verify:render": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-render.ts"
   },
   "devDependencies": {
+    "@cobweb/worker": "workspace:^",
+    "@ipld/car": "5.4.7",
+    "@ipld/unixfs": "3.0.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "multiformats": "14.0.5",
     "tailwindcss": "^4.3.3"
   },
   "dependencies": {
