@@ -2,9 +2,9 @@ import { RenderProblem } from '@cobweb/render'
 import { describe, expect, it } from 'vitest'
 import { flatPng, sizeOf } from './doubles/draw.ts'
 import { wrongCidPinner } from './doubles/pinners.ts'
-import { JobRefusal } from './ports.ts'
+import { JobRefusal, MissingObject } from './ports.ts'
 import { CID_MISMATCH, handle, PAYMENT_MISMATCH, RESULT_DIFFERS } from './steps.ts'
-import { COLLECTION_ID, JOB_ID, layerKey } from './testing/fixtures.ts'
+import { COLLECTION_ID, JOB_ID, layerKey, PLACEHOLDER_KEY } from './testing/fixtures.ts'
 import { batchMessage, harness, metadataMessage, startMessage } from './testing/harness.ts'
 
 const CID = /^[a-z2-7]{59}$/
@@ -226,9 +226,108 @@ describe('batch', () => {
 
   it('fails the job for a layer image missing from storage', async () => {
     const h = await harness('generative', { claimed: true })
-    h.deps.store = { ...h.store, load: () => Promise.reject(new Error('NoSuchKey')) }
+    h.deps.store = { ...h.store, load: () => Promise.reject(new MissingObject('art/x.png')) }
     await handle(batchMessage(0), h.deps)
     expect(h.jobs.failures[0]).toMatchObject({ index: 0, code: 'missing-image', final: true })
+  })
+
+  it('fails the job with a final missing-image when the store has no such object', async () => {
+    const h = await harness('generative', { claimed: true })
+    h.store.remove(layerKey('wide'))
+    await handle(batchMessage(0), h.deps)
+    expect(h.jobs.failures).toMatchObject([{ index: 0, code: 'missing-image', final: true }])
+    expect(h.jobs.record.state).toBe('failed')
+  })
+
+  it('throws a transient storage error and reports no failure, leaving the batch running', async () => {
+    const h = await harness('generative', { claimed: true })
+    h.store.failTransiently(layerKey('wide'), 1)
+    await expect(handle(batchMessage(0), h.deps)).rejects.toThrow('storage is not answering')
+    expect(h.jobs.failures).toEqual([])
+    expect(h.jobs.rows[0]!.state).toBe('running')
+    expect(h.jobs.record.state).toBe('rendering')
+    // The redelivery finds the store back and finishes the batch.
+    await handle(batchMessage(0), h.deps)
+    expect(h.jobs.rows[0]!.state).toBe('done')
+  })
+
+  it('throws a transient storage error that the render library turned into missing-image', async () => {
+    const h = await harness('generative', { claimed: true })
+    h.deps.store = {
+      ...h.store,
+      load: () => Promise.reject(Object.assign(new Error('socket hang up'), { name: 'TimeoutError' })),
+    }
+    await expect(handle(batchMessage(0), h.deps)).rejects.toThrow('socket hang up')
+    expect(h.jobs.failures).toEqual([])
+  })
+
+  it('delivers a second copy of a batch message while the first is in flight, and ends with one done batch', async () => {
+    const h = await harness('generative', { claimed: true })
+    for (const index of [0, 1]) await handle(batchMessage(index), h.deps)
+    await Promise.all([handle(batchMessage(2), h.deps), handle(batchMessage(2), h.deps)])
+    expect(h.jobs.rows[2]).toMatchObject({ state: 'done', attempts: 2 })
+    // Both copies reached batchDone; the second found the batch done with the same CID and changed nothing.
+    expect(h.jobs.calls.filter((call) => call === 'batchDone:2')).toHaveLength(2)
+    expect(h.jobs.record.batchesDone).toBe(3)
+    expect(h.jobs.record.state).toBe('finalizing')
+    expect(h.jobs.failures).toEqual([])
+    expect(new Set(h.pins).size).toBe(3)
+  })
+
+  it('starts the batch again on the delivery after a pin throw, and completes it', async () => {
+    const h = await harness('generative', { claimed: true })
+    const real = h.deps.pinner
+    let thrown = false
+    h.deps.pinner = {
+      pin: async (car, cid) => {
+        if (!thrown) {
+          thrown = true
+          throw new Error('pin down')
+        }
+        return real.pin(car, cid)
+      },
+    }
+    await expect(handle(batchMessage(0), h.deps)).rejects.toThrow('pin down')
+    expect(h.jobs.rows[0]).toMatchObject({ state: 'running', attempts: 1 })
+    await handle(batchMessage(0), h.deps)
+    expect(h.jobs.rows[0]).toMatchObject({ state: 'done', attempts: 2 })
+    expect(h.jobs.failures).toEqual([])
+  })
+
+  it('throws when the metadata send fails after the batch was recorded, and the redelivery only sends', async () => {
+    const h = await harness('generative', { claimed: true })
+    for (const index of [0, 1]) await handle(batchMessage(index), h.deps)
+    const queue = h.deps.queue
+    h.deps.queue = { ...queue, send: () => Promise.reject(new Error('queue down')) }
+    await expect(handle(batchMessage(2), h.deps)).rejects.toThrow('queue down')
+    expect(h.jobs.record.state).toBe('finalizing')
+    expect(h.jobs.rows[2]!.state).toBe('done')
+    const pins = h.pins.length
+    const loads = h.store.loads.length
+    const renders = h.jobs.calls.filter((call) => call === 'renderData').length
+    h.deps.queue = queue
+    await handle(batchMessage(2), h.deps)
+    expect(h.queue.sent).toEqual([metadataMessage()])
+    expect(h.pins).toHaveLength(pins)
+    expect(h.store.loads).toHaveLength(loads)
+    expect(h.jobs.calls.filter((call) => call === 'renderData')).toHaveLength(renders)
+    expect(h.lines).toContain('batch already done')
+  })
+
+  it('logs and acknowledges a failure report the database refuses in the batch step', async () => {
+    const h = await harness('generative', { claimed: true })
+    h.deps.pinner = wrongCidPinner()
+    h.jobs.fail = () => Promise.reject(new JobRefusal('JOB_NOT_RENDERING'))
+    await handle(batchMessage(0), h.deps)
+    expect(h.lines).toContain('failure report refused:JOB_NOT_RENDERING')
+  })
+
+  it('logs a vanished job after the batch was started instead of returning silently', async () => {
+    const h = await harness('generative', { claimed: true })
+    h.jobs.job = async () => null
+    await handle(batchMessage(0), h.deps)
+    expect(h.lines).toContain('job vanished')
+    expect(h.pins).toEqual([])
   })
 
   it('throws on a pinning error, so the message is redelivered, and records nothing', async () => {
@@ -261,6 +360,18 @@ describe('batch', () => {
     await handle(batchMessage(1), h.deps)
     expect(h.jobs.rows.map((row) => row.state)).toEqual(['done', 'done'])
     expect(h.jobs.record.state).toBe('finalizing')
+  })
+
+  it('separates a missing placeholder object from a transient read in the batch step', async () => {
+    const missing = await harness('placeholder', { claimed: true })
+    missing.store.remove(PLACEHOLDER_KEY)
+    await handle(batchMessage(0), missing.deps)
+    expect(missing.jobs.failures).toMatchObject([{ index: 0, code: 'missing-image', final: true }])
+    const transient = await harness('placeholder', { claimed: true })
+    transient.store.failTransiently(PLACEHOLDER_KEY, 1)
+    await expect(handle(batchMessage(0), transient.deps)).rejects.toThrow('storage is not answering')
+    expect(transient.jobs.failures).toEqual([])
+    expect(transient.jobs.rows[0]!.state).toBe('running')
   })
 
   it('renders a placeholder job batch as the placeholder image directory', async () => {
@@ -308,7 +419,7 @@ describe('failures', () => {
     await expect(handle(batchMessage(0), h.deps)).rejects.toThrow('layer-size')
   })
 
-  it('fails the job for a render problem thrown by the mapper', async () => {
+  it('fails the job for a render problem thrown by the token read', async () => {
     const h = await harness('generative', { claimed: true })
     h.jobs.tokens = () =>
       Promise.reject(new RenderProblem('batch-range', 'Batch 0 has 1 token stored; 2 are expected.'))
@@ -505,6 +616,18 @@ describe('metadata', () => {
     expect(h.jobs.finished?.collageKey).toBeNull()
     expect(h.jobs.calls.filter((call) => call.startsWith('tokens:'))).toEqual(['tokens:0'])
     expect(h.store.collages.size).toBe(0)
+  })
+
+  it('fails a placeholder job for a missing object and throws for a transient read in the metadata step', async () => {
+    const missing = await finalizing('placeholder')
+    missing.store.remove(PLACEHOLDER_KEY)
+    await handle(metadataMessage(), missing.deps)
+    expect(missing.jobs.failures).toMatchObject([{ index: null, code: 'missing-image', final: true }])
+    const transient = await finalizing('placeholder')
+    transient.store.failTransiently(PLACEHOLDER_KEY, 1)
+    await expect(handle(metadataMessage(), transient.deps)).rejects.toThrow('storage is not answering')
+    expect(transient.jobs.failures).toEqual([])
+    expect(transient.jobs.record.state).toBe('finalizing')
   })
 
   it('finishes a placeholder job with both CIDs and a slash-less base URI', async () => {

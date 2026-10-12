@@ -6,6 +6,7 @@ import type { RenderMessage } from '@cobweb/shared/render-queue'
 import { describe, expect, it } from 'vitest'
 import { flatPng, sizeOf } from './draw.ts'
 import { memoryQueue } from './memory-queue.ts'
+import { isMissingObject } from '../ports.ts'
 import { memoryStore } from './memory-store.ts'
 import { carRoot, failingPinner, folderPinner, WRONG_CID, wrongCidPinner } from './pinners.ts'
 
@@ -85,6 +86,27 @@ describe('memoryStore', () => {
     expect(await store.load({ key: 'a.png', ext: 'png' })).toEqual(text('a'))
     await expect(store.load({ key: 'b.png', ext: 'png' })).rejects.toThrow('No object at b.png')
     expect(store.loads).toEqual(['a.png', 'b.png'])
+  })
+
+  it('throws a MissingObject for an unknown key and a transient error the chosen number of times', async () => {
+    const store = memoryStore({ 'a.png': text('a') })
+    const missing = await store.load({ key: 'b.png', ext: 'png' }).catch((error: unknown) => error)
+    expect(isMissingObject(missing)).toBe(true)
+    store.failTransiently('a.png', 2)
+    for (let time = 0; time < 2; time++) {
+      const error = await store.load({ key: 'a.png', ext: 'png' }).catch((caught: unknown) => caught)
+      expect(error).toBeInstanceOf(Error)
+      expect(isMissingObject(error)).toBe(false)
+    }
+    expect(await store.load({ key: 'a.png', ext: 'png' })).toEqual(text('a'))
+  })
+
+  it('removes a key, so it is missing afterwards', async () => {
+    const store = memoryStore({ 'a.png': text('a') })
+    store.remove('a.png')
+    expect(isMissingObject(await store.load({ key: 'a.png', ext: 'png' }).catch((e: unknown) => e))).toBe(
+      true,
+    )
   })
 
   it('keeps collages by key', async () => {

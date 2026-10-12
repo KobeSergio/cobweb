@@ -2,7 +2,15 @@ import { readFileSync } from 'node:fs'
 import { RenderProblem } from '@cobweb/render'
 import { describe, expect, it } from 'vitest'
 import { errorSummary } from './log.ts'
-import { isJobRefusal, isRenderProblem, JobRefusal, refusalOf, SENTENCES } from './ports.ts'
+import {
+  isJobRefusal,
+  isMissingObject,
+  isRenderProblem,
+  JobRefusal,
+  MissingObject,
+  refusalOf,
+  SENTENCES,
+} from './ports.ts'
 
 describe('SENTENCES', () => {
   it('are raised, character for character, by the job state migration', () => {
@@ -82,5 +90,16 @@ describe('errorSummary', () => {
     const cid = `bafybei${'a'.repeat(52)}`
     expect(errorSummary(new Error(`pinned ${cid} twice`))).toBe(`Error: pinned ${cid} twice`)
     expect(errorSummary(new Error('short'))).toBe('Error: short')
+  })
+})
+
+describe('MissingObject', () => {
+  it('is recognised by name, and no other error is', () => {
+    const error = new MissingObject('art/x.png')
+    expect(error.name).toBe('MissingObject')
+    expect(isMissingObject(error)).toBe(true)
+    expect(isMissingObject(Object.assign(new Error('gone'), { name: 'MissingObject' }))).toBe(true)
+    expect(isMissingObject(new Error('No such key'))).toBe(false)
+    expect(isMissingObject('MissingObject')).toBe(false)
   })
 })

@@ -111,12 +111,36 @@ export type Jobs = {
     retries: number,
   ): Promise<JobRecord>
   finish(jobId: string, result: FinishResult): Promise<JobRecord>
+  /**
+   * Jobs in `rendering` or `finalizing`, and jobs in `paid` or `waived`, that nothing has touched for
+   * this many minutes. A paid job whose start message ran out of deliveries is still unclaimed, and
+   * the database refuses to fail an unclaimed job for anything but a payment mismatch, so only the
+   * sweep can pick it up again.
+   */
   stuck(olderThanMinutes: number): Promise<{ id: string; retries: number }[]>
 }
 
 export type Store = {
+  /**
+   * Reads one image. When the key does not exist it throws an error whose `name` is `MissingObject`
+   * (a `MissingObject`); any other error is transient (the network, the service, a timeout) and the
+   * message is redelivered rather than the job failed for bad art.
+   */
   load(ref: ImageRef): Promise<Uint8Array>
   putCollage(key: string, png: Uint8Array): Promise<void>
+}
+
+/** The error `Store.load` throws for a key that does not exist. */
+export class MissingObject extends Error {
+  constructor(key: string) {
+    super(`No object at ${key}`)
+    this.name = 'MissingObject'
+  }
+}
+
+/** Checked by name, not `instanceof`, like the other error checks here. */
+export function isMissingObject(error: unknown): boolean {
+  return error instanceof Error && error.name === 'MissingObject'
 }
 
 export type Pinner = { pin(car: Uint8Array, expectedCid: string): Promise<string> }

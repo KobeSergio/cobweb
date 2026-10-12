@@ -8,7 +8,7 @@ import type { AssetSpec, AssetToken, GenerativeSpec, GenerativeToken, PackedDire
 import type { RenderMessage, RenderQueue } from '@cobweb/shared/render-queue'
 import { errorSummary } from './log.ts'
 import type { Log } from './log.ts'
-import { isJobRefusal, isRenderProblem } from './ports.ts'
+import { isJobRefusal, isMissingObject, isRenderProblem } from './ports.ts'
 import type { Chain, JobRecord, Jobs, Pinner, RefusalCode, RenderData, Store } from './ports.ts'
 import { renderSpec, tokenSlice } from './spec.ts'
 
@@ -63,6 +63,30 @@ const EXPECTED_REFUSALS: readonly RefusalCode[] = [
   'BATCHES_STILL_RENDERING',
 ]
 
+/**
+ * Runs a render call with a loader that remembers a storage error that is not a `MissingObject`. The
+ * render library turns every failed load into a `missing-image` problem; when one of those follows a
+ * transient storage error, the remembered error is thrown instead, so the message is redelivered
+ * and the job is not failed for art that is there.
+ */
+async function withStore<T>(store: Store, run: (load: Store['load']) => Promise<T>): Promise<T> {
+  const transient: unknown[] = []
+  const load: Store['load'] = async (ref) => {
+    try {
+      return await store.load(ref)
+    } catch (error) {
+      if (!isMissingObject(error)) transient.push(error)
+      throw error
+    }
+  }
+  try {
+    return await run(load)
+  } catch (error) {
+    if (transient.length > 0 && isRenderProblem(error) && error.code === 'missing-image') throw transient[0]
+    throw error
+  }
+}
+
 /** Pins a CAR and compares CIDs. False (after recording `cid-mismatch`) when the service answers with another. */
 async function pinned(deps: Deps, message: RenderMessage, packed: PackedDirectory): Promise<boolean> {
   const cid = await deps.pinner.pin(packed.car, packed.cid)
@@ -105,16 +129,20 @@ async function batch(message: RenderMessage & { step: 'batch' }, deps: Deps): Pr
   const { jobId, index } = message
   const started = await jobs.batchStart(jobId, index)
   const job = await jobs.job(jobId)
-  if (!job) return
+  if (!job) {
+    log('job vanished', { jobId, index })
+    return
+  }
   let done = job.batchesDone
   if (started.state !== 'done') {
     const data = await jobs.renderData(job)
     const spec = renderSpec(data)
     // A placeholder job's one batch is the placeholder's image directory; its metadata is the metadata step's.
-    const rendered =
+    const rendered = await withStore(store, async (load) =>
       spec.kind === 'placeholder'
-        ? (await renderPlaceholder(spec, store.load)).image
-        : await renderBatch(spec, index, tokenSlice(data, await jobs.tokens(job, index)), store.load)
+        ? (await renderPlaceholder(spec, load)).image
+        : await renderBatch(spec, index, tokenSlice(data, await jobs.tokens(job, index)), load),
+    )
     if (!(await pinned(deps, message, rendered))) return
     done = (await jobs.batchDone(jobId, index, rendered.cid, rendered.size)).batchesDone
     log('batch done', { jobId, index, cid: rendered.cid, size: rendered.size, done })
@@ -191,7 +219,7 @@ async function metadata(message: RenderMessage, deps: Deps): Promise<void> {
   const data = await jobs.renderData(job)
   const spec = renderSpec(data)
   if (spec.kind === 'placeholder') {
-    const { image, metadata: set } = await renderPlaceholder(spec, store.load)
+    const { image, metadata: set } = await withStore(store, (load) => renderPlaceholder(spec, load))
     if (!(await pinned(deps, message, image)) || !(await pinned(deps, message, set))) return
     await jobs.finish(job.id, {
       metadataCid: set.cid,
