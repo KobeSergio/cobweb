@@ -1,10 +1,10 @@
 import { RenderProblem } from '@cobweb/render'
 import { describe, expect, it } from 'vitest'
-import { flatPng } from './doubles/draw.ts'
+import { flatPng, sizeOf } from './doubles/draw.ts'
 import { wrongCidPinner } from './doubles/pinners.ts'
 import { JobRefusal } from './ports.ts'
 import { CID_MISMATCH, handle, PAYMENT_MISMATCH, RESULT_DIFFERS } from './steps.ts'
-import { layerKey } from './testing/fixtures.ts'
+import { COLLECTION_ID, JOB_ID, layerKey } from './testing/fixtures.ts'
 import { batchMessage, harness, metadataMessage, startMessage } from './testing/harness.ts'
 
 const CID = /^[a-z2-7]{59}$/
@@ -337,4 +337,183 @@ describe('failures', () => {
       expect(h.lines).toContain(`refused:${code}`)
     },
   )
+})
+
+async function finalizing(project: 'generative' | 'assets' | 'placeholder' = 'generative') {
+  const h = await harness(project, { claimed: true })
+  for (const row of [...h.jobs.rows]) await handle(batchMessage(row.index), h.deps)
+  expect(h.jobs.record.state).toBe('finalizing')
+  return h
+}
+
+describe('metadata', () => {
+  it('pins the metadata set, writes the collage and finishes the job', async () => {
+    const h = await finalizing()
+    await handle(metadataMessage(), h.deps)
+    const key = `${COLLECTION_ID}/collage/${JOB_ID}.png`
+    expect(h.jobs.record.state).toBe('done')
+    expect(h.jobs.finished).toEqual({
+      metadataCid: h.pins.at(-1),
+      baseUri: `ipfs://${h.pins.at(-1)}/`,
+      placeholderImageCid: null,
+      collageKey: key,
+    })
+    expect(h.jobs.finished?.metadataCid).toMatch(CID)
+    // Batch 0 holds tokens 1 and 2 at this batch size: one row of four 256 pixel cells.
+    expect(await sizeOf(h.store.collages.get(key)!)).toEqual({ width: 1024, height: 256 })
+  })
+
+  it('shows at most the first 16 tokens of batch 0 in the collage', async () => {
+    const key = `${COLLECTION_ID}/collage/${JOB_ID}.png`
+    const five = await harness('generative', { claimed: true, job: { batchSize: 100, batchesTotal: 1 } })
+    await handle(batchMessage(0), five.deps)
+    await handle(metadataMessage(), five.deps)
+    expect(await sizeOf(five.store.collages.get(key)!)).toEqual({ width: 1024, height: 512 })
+    const twenty = await harness('generative', {
+      claimed: true,
+      job: { tokenCount: 20, batchSize: 100, batchesTotal: 1 },
+    })
+    await handle(batchMessage(0), twenty.deps)
+    await handle(metadataMessage(), twenty.deps)
+    expect(twenty.jobs.record.state).toBe('done')
+    expect(await sizeOf(twenty.store.collages.get(key)!)).toEqual({ width: 1024, height: 1024 })
+  })
+
+  it('reads every batch of tokens for the set', async () => {
+    const h = await finalizing()
+    h.jobs.calls.length = 0
+    await handle(metadataMessage(), h.deps)
+    expect(h.jobs.calls.filter((call) => call.startsWith('tokens:')).sort()).toEqual([
+      'tokens:0',
+      'tokens:0',
+      'tokens:1',
+      'tokens:2',
+    ])
+  })
+
+  it('returns for a job that is not finalizing', async () => {
+    for (const state of ['rendering', 'done', 'failed'] as const) {
+      const h = await harness('generative', { claimed: true })
+      h.jobs.record.state = state
+      await handle(metadataMessage(), h.deps)
+      expect(h.lines).toEqual(['metadata skipped'])
+      expect(h.jobs.calls).toEqual(['job'])
+    }
+  })
+
+  it('delivered twice, finishes once and leaves the same result', async () => {
+    const h = await finalizing()
+    await handle(metadataMessage(), h.deps)
+    const finished = h.jobs.finished
+    const pins = h.pins.length
+    await handle(metadataMessage(), h.deps)
+    expect(h.jobs.finished).toBe(finished)
+    expect(h.pins).toHaveLength(pins)
+  })
+
+  it('renders the same metadata CID for the same project', async () => {
+    const first = await finalizing()
+    const second = await finalizing()
+    await handle(metadataMessage(), first.deps)
+    await handle(metadataMessage(), second.deps)
+    expect(first.jobs.finished?.metadataCid).toBe(second.jobs.finished?.metadataCid)
+  })
+
+  it('fails the job at job level when the pinning service answers with another CID', async () => {
+    const h = await finalizing()
+    h.deps.pinner = wrongCidPinner()
+    await handle(metadataMessage(1), h.deps)
+    expect(h.jobs.failures).toEqual([
+      { index: null, code: 'cid-mismatch', message: CID_MISMATCH, final: true, retries: 1 },
+    ])
+    expect(h.jobs.finished).toBeNull()
+  })
+
+  it('fails the job at job level for a render problem', async () => {
+    const h = await finalizing()
+    h.jobs.rows[1]!.imagesCid = null
+    await handle(metadataMessage(), h.deps)
+    expect(h.jobs.failures[0]).toMatchObject({ index: null, code: 'missing-batch', final: true })
+  })
+
+  it('finishes without a collage when the collage cannot be written', async () => {
+    const h = await finalizing()
+    h.deps.store = { ...h.store, putCollage: () => Promise.reject(new Error('bucket down')) }
+    await handle(metadataMessage(), h.deps)
+    expect(h.jobs.record.state).toBe('done')
+    expect(h.jobs.finished?.collageKey).toBeNull()
+    expect(h.lines).toContain('collage skipped')
+    expect(h.jobs.failures).toEqual([])
+  })
+
+  it('finishes without a collage when its images cannot be composited', async () => {
+    const h = await finalizing()
+    h.deps.store = { ...h.store, load: () => Promise.reject(new Error('NoSuchKey')) }
+    await handle(metadataMessage(), h.deps)
+    expect(h.jobs.record.state).toBe('done')
+    expect(h.jobs.finished?.collageKey).toBeNull()
+  })
+
+  it('throws on a pinning error and leaves the job finalizing', async () => {
+    const h = await finalizing()
+    h.deps.pinner = { pin: () => Promise.reject(new Error('pin down')) }
+    await expect(handle(metadataMessage(), h.deps)).rejects.toThrow('pin down')
+    expect(h.jobs.record.state).toBe('finalizing')
+  })
+
+  it('logs and returns when the database says batches are still rendering', async () => {
+    const h = await finalizing()
+    h.jobs.finish = () => Promise.reject(new JobRefusal('BATCHES_STILL_RENDERING'))
+    await handle(metadataMessage(), h.deps)
+    expect(h.lines).toContain('refused:BATCHES_STILL_RENDERING')
+    expect(h.jobs.failures).toEqual([])
+  })
+
+  it('records a different finish result as a cid-mismatch and does not loop when that is refused too', async () => {
+    const h = await finalizing()
+    h.jobs.finish = () => Promise.reject(new JobRefusal('JOB_RESULT_DIFFERS'))
+    h.jobs.fail = async (_job, index, code, message, final, retries) => {
+      h.jobs.failures.push({ index, code, message, final, retries })
+      throw new JobRefusal('JOB_NOT_RENDERING')
+    }
+    await handle(metadataMessage(), h.deps)
+    expect(h.jobs.failures).toEqual([
+      { index: null, code: 'cid-mismatch', message: RESULT_DIFFERS, final: true, retries: 0 },
+    ])
+    expect(h.lines).toContain('failure report refused:JOB_NOT_RENDERING')
+  })
+
+  it('makes a collage of the still files of a 1/1 job and leaves the GIF out', async () => {
+    const h = await finalizing('assets')
+    await handle(metadataMessage(), h.deps)
+    const key = `${COLLECTION_ID}/collage/${JOB_ID}.png`
+    expect(h.jobs.finished?.collageKey).toBe(key)
+    expect(h.jobs.finished?.baseUri).toBe(`ipfs://${h.jobs.finished?.metadataCid}/`)
+    // Batch 0 holds tokens 1 and 2, both PNG: one row of four cells.
+    expect(await sizeOf(h.store.collages.get(key)!)).toEqual({ width: 1024, height: 256 })
+  })
+
+  it('writes one shared file and no collage for a single asset, reading only batch 0', async () => {
+    const h = await harness('assets', { claimed: true })
+    for (const row of [...h.jobs.rows]) await handle(batchMessage(row.index), h.deps)
+    const data = await h.jobs.renderData(h.jobs.record)
+    data.collection.projectType = 'single_asset'
+    h.jobs.renderData = async (job) => ({ ...data, job })
+    h.jobs.calls.length = 0
+    await handle(metadataMessage(), h.deps)
+    expect(h.jobs.finished?.baseUri).toBe(`ipfs://${h.jobs.finished?.metadataCid}/metadata.json`)
+    expect(h.jobs.finished?.collageKey).toBeNull()
+    expect(h.jobs.calls.filter((call) => call.startsWith('tokens:'))).toEqual(['tokens:0'])
+    expect(h.store.collages.size).toBe(0)
+  })
+
+  it('finishes a placeholder job with both CIDs and a slash-less base URI', async () => {
+    const h = await finalizing('placeholder')
+    await handle(metadataMessage(), h.deps)
+    const finished = h.jobs.finished!
+    expect(finished.placeholderImageCid).toBe(h.jobs.rows[0]!.imagesCid)
+    expect(finished.baseUri).toBe(`ipfs://${finished.metadataCid}/metadata.json`)
+    expect(finished.collageKey).toBeNull()
+    expect(h.pins.slice(-2)).toEqual([finished.placeholderImageCid, finished.metadataCid])
+  })
 })
