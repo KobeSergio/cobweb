@@ -423,22 +423,32 @@ export async function handleDead(message: RenderMessage, deps: Deps): Promise<vo
 }
 
 /** How long a job may sit with nothing touched before the sweep sends its start message again. */
-export const SWEEP_MINUTES = 15
+export const STUCK_MINUTES = 15
+
+/**
+ * The same, while the render queue has messages waiting: work is queued behind others, so only jobs
+ * untouched for two hours are sent again. The queue is shared by every creator, so a busy queue makes
+ * the sweep more patient and never makes it skip.
+ */
+export const STUCK_MINUTES_BUSY = 120
 
 /**
  * Re-enqueues a start message for each job left `rendering` or `finalizing`, or left `paid` or
  * `waived` and never claimed, with nothing touched for 15 minutes. The start step then claims an
  * unclaimed job, re-sends the open batches of a `rendering` one, or sends `metadata` for a
- * `finalizing` one. It does nothing while the queue has messages waiting.
+ * `finalizing` one. With messages waiting in the queue it waits two hours instead.
  */
 export async function sweep(deps: Deps): Promise<number> {
-  // Messages waiting means work is queued, not stuck: sending starts again would only duplicate it.
-  const waiting = (await deps.queue.backlog?.()) ?? 0
-  if (waiting > 0) {
-    deps.log('sweep skipped', { backlog: waiting })
-    return 0
+  // A backlog means work may be waiting, not stuck, so the sweep is more patient. A backlog that cannot
+  // be read counts as none: the sweep fails toward recovering jobs, never toward skipping them.
+  let waiting = 0
+  try {
+    waiting = (await deps.queue.backlog?.()) ?? 0
+  } catch (error) {
+    deps.log('backlog unknown', { error: errorSummary(error) })
   }
-  const jobs = await deps.jobs.stuck(SWEEP_MINUTES)
+  if (waiting > 0) deps.log('sweep busy', { backlog: waiting, minutes: STUCK_MINUTES_BUSY })
+  const jobs = await deps.jobs.stuck(waiting > 0 ? STUCK_MINUTES_BUSY : STUCK_MINUTES)
   for (const job of jobs) await enqueueRender(deps.queue, job)
   deps.log('sweep', { requeued: jobs.length })
   return jobs.length

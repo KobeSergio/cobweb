@@ -15,6 +15,8 @@ import {
   handleDead,
   PAYMENT_MISMATCH,
   RESULT_DIFFERS,
+  STUCK_MINUTES,
+  STUCK_MINUTES_BUSY,
   sweep,
 } from './steps.ts'
 import {
@@ -1003,32 +1005,57 @@ describe('handleDead', () => {
 })
 
 describe('sweep and the queue backlog', () => {
-  it('does nothing, and reads no stuck jobs, while the queue has visible messages', async () => {
+  /** A harness whose `stuck` records the threshold it was asked for. */
+  const asked = async (backlog: (() => Promise<number>) | undefined) => {
     const h = await harness()
-    h.jobs.stuckJobs = [{ id: JOB_ID, retries: 0 }]
+    const minutes: number[] = []
     const lines: string[] = []
     h.deps.log = (event) => void lines.push(event)
-    h.deps.queue = { ...h.queue, backlog: async () => 3 }
-    expect(await sweep(h.deps)).toBe(0)
-    expect(h.queue.sent).toEqual([])
-    expect(h.jobs.calls).not.toContain('stuck')
-    expect(lines).toEqual(['sweep skipped'])
-  })
-
-  it('sweeps as usual when the backlog is zero or the queue cannot tell', async () => {
-    for (const backlog of [async () => 0, undefined]) {
-      const h = await harness()
-      h.jobs.stuckJobs = [{ id: JOB_ID, retries: 0 }]
-      h.deps.queue = { ...h.queue, backlog }
-      expect(await sweep(h.deps)).toBe(1)
-      expect(h.queue.sent).toEqual([startMessage(0)])
+    h.jobs.stuck = async (threshold) => {
+      minutes.push(threshold)
+      return []
     }
+    h.deps.queue = { ...h.queue, backlog }
+    await sweep(h.deps)
+    return { minutes, lines }
+  }
+
+  it('names its two thresholds: 15 minutes, and 120 while the queue is busy', () => {
+    expect(STUCK_MINUTES).toBe(15)
+    expect(STUCK_MINUTES_BUSY).toBe(120)
   })
 
-  it('throws when the backlog cannot be read, so the next run tries again', async () => {
+  it('uses 15 minutes with no backlog', async () => {
+    expect((await asked(async () => 0)).minutes).toEqual([15])
+  })
+
+  it('uses 120 minutes while the queue has messages, and never skips', async () => {
+    const { minutes, lines } = await asked(async () => 3)
+    expect(minutes).toEqual([120])
+    expect(lines).toContain('sweep busy')
+  })
+
+  it('re-enqueues a job untouched for 130 minutes and leaves one untouched for 30, while busy', async () => {
     const h = await harness()
-    h.deps.queue = { ...h.queue, backlog: () => Promise.reject(new Error('queue down')) }
-    await expect(sweep(h.deps)).rejects.toThrow('queue down')
+    const ages = new Map([
+      [JOB_ID, 130],
+      ['11111111-2222-4333-8444-555555555555', 30],
+    ])
+    h.jobs.stuck = async (threshold) =>
+      [...ages].filter(([, age]) => age >= threshold).map(([id]) => ({ id, retries: 0 }))
+    h.deps.queue = { ...h.queue, backlog: async () => 5 }
+    expect(await sweep(h.deps)).toBe(1)
+    expect(h.queue.sent).toEqual([startMessage(0)])
+  })
+
+  it('falls back to 15 minutes, and logs one line, when the backlog cannot be read', async () => {
+    const { minutes, lines } = await asked(() => Promise.reject(new Error('queue down')))
+    expect(minutes).toEqual([15])
+    expect(lines.filter((line) => line === 'backlog unknown')).toHaveLength(1)
+  })
+
+  it('uses 15 minutes for a queue port with no backlog', async () => {
+    expect((await asked(undefined)).minutes).toEqual([15])
   })
 })
 
