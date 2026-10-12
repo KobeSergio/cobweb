@@ -7,8 +7,11 @@ import type { Log } from '../log.ts'
 import type { Deps } from '../steps.ts'
 
 /**
- * How long a message whose run threw stays invisible. The queue's own timeout is six times the
- * function's (an hour for the render queue), which would make every transient fault wait that long.
+ * How long a message whose run threw for the first time stays invisible. The queue's own timeout is
+ * six times the function's (an hour for the render queue), which would make every transient fault
+ * wait that long. Only the first failure is shortened: a second failure means the fault outlasted a
+ * quick retry (an outage, a bad secret), and three quick tries would dead-letter every message in
+ * flight and spend a creator's retries, so later receives keep the queue's own long wait.
  */
 export const FAILED_MESSAGE_VISIBILITY_SECONDS = 120
 
@@ -20,7 +23,7 @@ export type VisibilityOptions = { queueUrlEnv: string; client?: SqsLike }
 let sharedClient: SqsLike | null = null
 
 /**
- * Sets the failed record's visibility to 120 seconds. A failure of this call is logged (name and
+ * Sets a record's visibility to 120 seconds after its first failed run. A failure of this call is logged (name and
  * masked line) and ignored: the record is reported as failed either way and returns after the
  * queue's own timeout.
  */
@@ -30,6 +33,9 @@ async function shortenWait(
   log: Log,
 ): Promise<void> {
   if (!options) return
+  // A record without the attribute (a test event) counts as a first receive.
+  const receives = Number(record.attributes?.ApproximateReceiveCount ?? '1')
+  if (!(receives <= 1)) return
   try {
     const queueUrl = process.env[options.queueUrlEnv]
     if (!queueUrl) {

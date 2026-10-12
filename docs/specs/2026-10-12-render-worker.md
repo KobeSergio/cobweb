@@ -288,7 +288,8 @@ redelivered.
    the worker can hold. Tell support about it.", without pinning, because a rerun reads the same
    files. A
    generative batch is not subject to it. The batch size set at lock (migration
-   `20261012020000_asset_batch_size.sql`, from the largest `uploads.bytes` the list names) is a
+   `20261012020000_asset_batch_size.sql`, from the largest `uploads.bytes` the list names, and left at 100 when all the list's distinct files
+   together stay under the target, since a batch holds each distinct file once) is a
    planning number: `record_upload` accepts the size its caller gives, so the worker enforces the
    real ceiling.
 3. `pinner.pin(car, cid)`. A different CID: `fail(job, index, 'cid-mismatch', 'The pinning service
@@ -411,11 +412,13 @@ One stack, `CobwebRender`, in `us-east-1`, defined in `infra/lib/render-stack.ts
 - `RenderQueue` (SQS standard) with `RenderDeadLetters` as its dead-letter queue, `maxReceiveCount`
   3, visibility timeout 6 times the render function's timeout. `RenderDeadLetters` keeps messages for
   14 days and its visibility timeout is 6 times the dead-letter function's timeout (6 minutes). When
-  a message's run throws, the queue handler sets that message's visibility to 120 seconds
+  a message's run throws on its first receive, the queue handler sets that message's visibility to 120 seconds
   (`ChangeMessageVisibility`, on the queue named by `RENDER_QUEUE_URL` or
   `RENDER_DEAD_LETTER_QUEUE_URL`; a failure of that call is logged and ignored) before reporting it as
-  a batch item failure, so a transient fault is retried in two minutes and a dead-letter verdict
-  follows in minutes; the 6 times rule stays as the queue's default.
+  a batch item failure, so a transient fault is retried once after two minutes. A later failure keeps
+  the queue's own wait: a fault that outlasts the quick retry is an outage or a bad secret, and three
+  quick tries would dead-letter every message in flight and spend creators' retries. The bundling hook
+  also fails the synth unless the bundle holds sharp's linux arm64 package.
 - `RenderDeadLettersAlarm`: a CloudWatch alarm on the `Invocations` of `DeadLetterFunction` (sum over
   5 minutes, at least 1, one evaluation period, missing data not breaching), because that function
   acknowledges every message and the queue is never left with visible messages for long. It has no
@@ -494,7 +497,7 @@ functions need only `SUPABASE_URL`, `RENDER_QUEUE_URL` and the Supabase key from
   `filebasePinner` against a stubbed client; the Lambda handlers' partial-failure response.
 - `verify:render` (section 8), run three times in a row to show it is stable.
 - CDK template assertions (section 9).
-- The existing suite: typecheck, lint, tests, `verify:local` (273), `verify:storage`, `verify:sweep`,
+- The existing suite: typecheck, lint, tests, `verify:local` (274), `verify:storage`, `verify:sweep`,
   `verify:chain`, build.
 
 As landed, the unit tests count 309 in `@cobweb/worker`, 44 in `@cobweb/shared` (32 of them for the

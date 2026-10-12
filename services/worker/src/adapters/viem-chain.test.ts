@@ -118,10 +118,19 @@ describe('viemChain', () => {
       expect(error.name).toBe('PaymentUnproven')
     })
 
-    it('returns the short amount when the receipt is at or below the block read', async () => {
-      for (const blockNumber of [100n, 7n]) {
+    it('returns the short amount only when the receipt is buried at the confirmation depth', async () => {
+      // Chain 1 has 5 confirmations, so with latest 100 the buried block is 96.
+      for (const blockNumber of [96n, 7n]) {
         const { readerFor } = reader(100n, 40n, { blockNumber })
         expect(await viemChain({}, readerFor).jobPayment(jobRecord({ quoteChainId: 1 }))).toBe(40n)
+      }
+    })
+
+    it('throws PaymentUnconfirmed when the receipt is seen but not yet buried, since a reorg could still change it', async () => {
+      for (const blockNumber of [97n, 100n]) {
+        const { readerFor } = reader(100n, 40n, { blockNumber })
+        const error = await caught(() => viemChain({}, readerFor).jobPayment(jobRecord({ quoteChainId: 1 })))
+        expect(error.name).toBe('PaymentUnconfirmed')
       }
     })
 

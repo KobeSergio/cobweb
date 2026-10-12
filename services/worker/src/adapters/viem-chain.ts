@@ -52,7 +52,8 @@ function viemReader(chainId: number, env: Env): PaymentReader {
   const chain = chainById(chainId)
   const url = chain ? env[chain.rpcEnv] : undefined
   if (!chain || !url) throw new Error(`The RPC URL for chain ${chainId} is not configured.`)
-  const client = createPublicClient({ chain: chain.viem, transport: http(url) })
+  // No retries inside viem: the step retries the whole read itself, and stacked retries could outlast the function.
+  const client = createPublicClient({ chain: chain.viem, transport: http(url, { retryCount: 0 }) })
   return {
     getBlockNumber: (args) => client.getBlockNumber(args),
     getTransactionReceipt: async (args) => {
@@ -104,6 +105,8 @@ export function viemChain(
       try {
         const receipt = await reader.getTransactionReceipt({ hash: job.paymentTxHash as Hex })
         if (receipt.blockNumber > latest) throw new PaymentUnproven()
+        // Seen but not yet buried: a reorg between the two reads could still change it, so wait.
+        if (receipt.blockNumber > buried) throw new PaymentUnconfirmed()
       } catch (error) {
         if (error instanceof Error && error.name === 'TransactionReceiptNotFoundError')
           throw new PaymentUnproven()

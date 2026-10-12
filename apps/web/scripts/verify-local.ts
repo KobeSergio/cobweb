@@ -3151,6 +3151,15 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
     },
   )
 
+  await check(
+    'render_jobs: a job whose distinct files fit in one batch keeps 100 tokens a batch, however large one file is',
+    async () => {
+      // Five distinct files, the largest 50 MiB: at most 5 x 52,428,800 bytes in a batch, under 1 GB.
+      const job = await lockedOneOfOne(A, 5, 50 * 1024 * 1024)
+      return job.batch_size === 100 && job.batches_total === 1 ? null : JSON.stringify(job)
+    },
+  )
+
   await check('render_jobs: a 1/1 job with small files keeps 100 tokens a batch', async () => {
     const job = await lockedOneOfOne(A, 3, null)
     return job.batch_size === 100 && job.batches_total === 1 ? null : JSON.stringify(job)

@@ -24,7 +24,7 @@ export function sqsRenderQueue(client: Pick<SQSClient, 'send'>, queueUrl: string
         if (result.Failed?.length) throw new Error(`The queue refused ${result.Failed.length} message(s).`)
       }
     },
-    /** Messages waiting to be received, as SQS approximates them. The sweep skips while there are any. */
+    /** Messages waiting to be received, as SQS approximates them. The sweep waits longer before calling a job stuck while there are any. */
     async backlog() {
       const found = await client.send(
         new GetQueueAttributesCommand({

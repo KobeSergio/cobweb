@@ -65,6 +65,8 @@ const BUNDLING: BundlingOptions = {
     afterBundling: (_inputDir: string, outputDir: string) => [
       `cp "${lambdaDepsDir}/package.json" "${lambdaDepsDir}/package-lock.json" "${outputDir}/"`,
       `cd "${outputDir}" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund --os=linux --cpu=arm64 --libc=glibc`,
+      // An npm that ignored the platform flags would bundle the build host's sharp: fail the synth instead.
+      `test -d "${outputDir}/node_modules/@img/sharp-linux-arm64"`,
     ],
   },
 }

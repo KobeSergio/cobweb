@@ -29,6 +29,28 @@ describe('sqsHandler: the visibility of a failed message', () => {
     expect(FAILED_MESSAGE_VISIBILITY_SECONDS).toBe(120)
   })
 
+  it('shortens the wait only after the first failure, so a longer outage is not three quick tries', async () => {
+    process.env.TEST_QUEUE_URL = 'https://sqs.example/queues/render'
+    const { client, sent } = stubAws<SqsLike>()
+    const received = (count: string, receiptHandle: string, messageId: string): SQSRecord =>
+      ({
+        messageId,
+        receiptHandle,
+        body: JSON.stringify({ jobId: JOB_ID, step: 'metadata', retries: 0 }),
+        attributes: { ApproximateReceiveCount: count },
+      }) as unknown as SQSRecord
+    const handler = sqsHandler(
+      async () => deps,
+      failing,
+      () => {},
+      { queueUrlEnv: 'TEST_QUEUE_URL', client },
+    )
+    const response = await handler(event(received('1', 'rh-1', 'm1'), received('2', 'rh-2', 'm2')))
+    // Both are reported failed; only the first receive comes back early.
+    expect(response).toEqual({ batchItemFailures: [{ itemIdentifier: 'm1' }, { itemIdentifier: 'm2' }] })
+    expect(sent.map((call) => (call.input as { ReceiptHandle: string }).ReceiptHandle)).toEqual(['rh-1'])
+  })
+
   it('sets the failed record to 120 seconds on the queue the named env points to, then reports it', async () => {
     process.env.TEST_QUEUE_URL = 'https://sqs.example/queues/render'
     const { client, sent } = stubAws<SqsLike>()

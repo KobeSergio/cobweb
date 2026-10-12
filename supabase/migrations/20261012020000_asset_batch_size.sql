@@ -23,17 +23,24 @@ set search_path = ''
 as $$
 declare
   v_max_bytes bigint;
+  v_files bigint;
 begin
   if new.kind <> 'real' or new.token_list is null then
     return new;
   end if;
-  select max(u.bytes) into v_max_bytes
+  select max(u.bytes), count(*) into v_max_bytes, v_files
   from public.uploads u
   where u.collection_id = new.collection_id
     and u.id in (
       select (entry ->> 'uploadId')::uuid from jsonb_array_elements(new.token_list) as entry
     );
   if v_max_bytes is null then
+    return new;
+  end if;
+  -- A batch holds each distinct file once, however many tokens share it (a single asset, or
+  -- editions of a few files). When every distinct file together stays under the target, the
+  -- default of 100 tokens a batch is already safe.
+  if v_files * v_max_bytes <= 1000000000 then
     return new;
   end if;
   new.batch_size := greatest(1, least(100, floor(1000000000::numeric / v_max_bytes)))::integer;
