@@ -34,6 +34,36 @@ database. It runs locally end to end for development and tests, and on SQS and L
 - The collage is written to a separate render bucket, never to the `art` bucket, so the upload sweep
   cannot see it.
 
+Settled while planning (each is a "Decision:" in the plan):
+
+- A batch whose stored result differs from a fresh render cannot be failed against the batch, since
+  the database refuses a failure naming a done batch. It is recorded as a job-level `cid-mismatch`
+  with the sentence "The render gave a different result than the one already recorded."
+- The metadata step of a large job reads its tokens batch by batch through `Jobs.tokens`, eight reads
+  in flight. A 100,000 token job makes 1,000 reads and peaks near 300 MB.
+- All three Lambda functions carry sharp, because each imports the steps and the render library loads
+  sharp on import. Moving the dead-letter and sweep handlers off the render library is a later
+  saving.
+- `filebasePinner` writes the CAR with object metadata `import=car` and reads the CID from
+  `x-amz-meta-cid` with a head request after the upload. The endpoint, the header and the metadata
+  key come from Filebase's public documentation and are not verified against a live account.
+- `verify:render` check 6 pays 1 wei short on Anvil and sets the job to `paid` through the service
+  client, since the product cannot produce a paid job with a short payment. Check 9 uses a second
+  `supabaseJobs` whose clock runs 16 minutes ahead, since `updated_at` is kept by a trigger.
+- The stack takes the art bucket's ARN and region, the Supabase URL and the Filebase bucket as
+  parameters, creates the secret with a generated value, and passes its ARN as `RENDER_SECRET_ARN`.
+  The real secret JSON is set by a command in the README.
+- The collage is built with `renderBatch` on a 16 token slice with `batchSize` 16, and keeps PNG, JPG
+  and WebP stills, dropping GIF and MP4, so a JPG 1/1 project still gets a collage.
+- A placeholder job's one batch pins the placeholder's image directory; its metadata step renders
+  again, pins both CARs and finishes.
+- A batch with fewer stored tokens than its id range fails with `batch-range`: the render library
+  checks only that each token belongs to the batch, not that the batch is complete.
+- The quote total is read as text, never as a JSON number, so a value above 2^53 wei is not rounded.
+- The worker imports the generated database types, type only, by relative path from the web app.
+- AWS SDK clients are pinned exactly to the web app's `@aws-sdk/client-s3` version; a newer one
+  installs a second core package and breaks the web app's type check.
+
 ## 3. Scope
 
 In:
