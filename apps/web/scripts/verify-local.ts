@@ -3036,6 +3036,53 @@ async function runSteps(
   return { seen, failed: null }
 }
 
+/**
+ * Locks a 1/1 project of `files` asset uploads through art_lock, as the server action does, after
+ * setting the `bytes` of the first upload to `biggest` (a number of bytes, set through the service
+ * client: no real file is stored). Returns the new job's batch columns.
+ */
+async function lockedOneOfOne(A: Creator, files: number, biggest: number | null) {
+  const col = await insertCollection(A.client, { project_type: 'one_of_one' })
+  if (!col.row) throw new Error(`setup: ${describe(col.error)}`)
+  const cid = col.row.id
+  for (let n = 0; n < files; n++) {
+    const hash = HEX64(++nameCount)
+    const { id, error } = await recordUpload(A.client, cid, {
+      kind: 'asset',
+      storage_key: `${cid}/assets/${hash}.png`,
+      content_hash: hash,
+      width: 800,
+      height: 600,
+    })
+    if (error || !id) throw new Error(`setup: asset: ${describe(error)}`)
+  }
+  const rows = await admin
+    .from('uploads')
+    .select('id')
+    .eq('collection_id', cid)
+    .order('created_at')
+    .order('id')
+  if (rows.error || !rows.data) throw new Error(`setup: uploads: ${describe(rows.error as DbError)}`)
+  if (biggest !== null) {
+    const sized = await admin.from('uploads').update({ bytes: biggest }).eq('id', rows.data[0]!.id)
+    if (sized.error) throw new Error(`setup: bytes: ${describe(sized.error as DbError)}`)
+  }
+  const list = rows.data.map((row, i) => ({ id: i + 1, uploadId: row.id, attributes: [] }))
+  const lock = await callArt(
+    admin,
+    'art_lock',
+    lockArgs(A.userId, cid, list, A.account.address.toLowerCase(), { p_kind: 'one_of_one' }),
+  )
+  if (lock.error) throw new Error(`setup: lock: ${describe(lock.error)}`)
+  const job = await admin
+    .from('render_jobs')
+    .select('token_count, batch_size, batches_total')
+    .eq('id', idOf(lock.data))
+    .single()
+  if (job.error) throw new Error(`setup: job: ${describe(job.error as DbError)}`)
+  return job.data
+}
+
 async function artRenderState(A: Creator, B: Creator): Promise<void> {
   const payer = A.account.address.toLowerCase()
   // One batch (batch size 100, three tokens).
@@ -3091,6 +3138,30 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
       return expectError(gone.error as DbError, ['42703'], gone.data)
     },
   )
+
+  // Asset batches are sized by bytes at insert (docs/specs/2026-10-12-render-worker.md, section 9).
+  await check(
+    'render_jobs: a 1/1 job with a 50 MiB file gets 19 tokens a batch and the batch count to match',
+    async () => {
+      const job = await lockedOneOfOne(A, 45, 50 * 1024 * 1024)
+      // floor(1,000,000,000 / 52,428,800) = 19; ceil(45 / 19) = 3.
+      return job.batch_size === 19 && job.batches_total === 3 && job.token_count === 45
+        ? null
+        : JSON.stringify(job)
+    },
+  )
+
+  await check('render_jobs: a 1/1 job with small files keeps 100 tokens a batch', async () => {
+    const job = await lockedOneOfOne(A, 3, null)
+    return job.batch_size === 100 && job.batches_total === 1 ? null : JSON.stringify(job)
+  })
+
+  await check('render_jobs: a generative job keeps 100 tokens a batch', async () => {
+    const { jobId } = await renderFixture(A, payer, 123, false)
+    const job = await admin.from('render_jobs').select('batch_size, batches_total').eq('id', jobId).single()
+    if (job.error) return describe(job.error as DbError)
+    return job.data.batch_size === 100 && job.data.batches_total === 1 ? null : JSON.stringify(job.data)
+  })
 
   await check(
     'render state: finalizing is a render state, and a done job needs its metadata and base URI',

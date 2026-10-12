@@ -126,7 +126,8 @@ export type Store = {
   /**
    * Reads one image. When the key does not exist it throws an error whose `name` is `MissingObject`
    * (a `MissingObject`); any other error is transient (the network, the service, a timeout) and the
-   * message is redelivered rather than the job failed for bad art.
+   * message is redelivered rather than the job failed for bad art. An object above the upload limit
+   * throws an `ObjectTooLarge`, which the steps treat as bad art.
    */
   load(ref: ImageRef): Promise<Uint8Array>
   putCollage(key: string, png: Uint8Array): Promise<void>
@@ -143,6 +144,18 @@ export class MissingObject extends Error {
 /** Checked by name, not `instanceof`, like the other error checks here. */
 export function isMissingObject(error: unknown): boolean {
   return error instanceof Error && error.name === 'MissingObject'
+}
+
+/** The error `Store.load` throws for an object above the upload limit (50 MiB): bad art, not a fault. */
+export class ObjectTooLarge extends Error {
+  constructor(key: string) {
+    super(`The object at ${key} is larger than the upload limit.`)
+    this.name = 'ObjectTooLarge'
+  }
+}
+
+export function isObjectTooLarge(error: unknown): boolean {
+  return error instanceof Error && error.name === 'ObjectTooLarge'
 }
 
 export type Pinner = { pin(car: Uint8Array, expectedCid: string): Promise<string> }

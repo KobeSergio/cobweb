@@ -3,13 +3,20 @@
  * (docs/specs/2026-10-12-render-worker.md, section 7). Messages may arrive more than once and in
  * any order; every step is idempotent against the database, so a repeat does no harm.
  */
-import { mapLimit, previewCollage, renderBatch, renderMetadataSet, renderPlaceholder } from '@cobweb/render'
+import {
+  mapLimit,
+  previewCollage,
+  RenderProblem,
+  renderBatch,
+  renderMetadataSet,
+  renderPlaceholder,
+} from '@cobweb/render'
 import type { AssetSpec, AssetToken, GenerativeSpec, GenerativeToken, PackedDirectory } from '@cobweb/render'
 import { enqueueRender } from '@cobweb/shared/render-queue'
 import type { RenderMessage, RenderQueue } from '@cobweb/shared/render-queue'
 import { errorSummary } from './log.ts'
 import type { Log } from './log.ts'
-import { isJobRefusal, isMissingObject, isRenderProblem } from './ports.ts'
+import { isJobRefusal, isMissingObject, isObjectTooLarge, isRenderProblem } from './ports.ts'
 import type { Chain, JobRecord, Jobs, Pinner, RefusalCode, RenderData, Store } from './ports.ts'
 import { renderSpec, tokenSlice } from './spec.ts'
 
@@ -59,6 +66,7 @@ export const PAYMENT_MISMATCH = 'The payment could not be verified on chain.'
 export const CID_MISMATCH = 'The pinning service returned a different CID.'
 export const RESULT_DIFFERS = 'The render gave a different result than the one already recorded.'
 export const DEAD_LETTER = 'The render did not finish after several tries.'
+export const FILE_TOO_LARGE = 'A file is larger than the upload limit.'
 
 /** How many tokens the collage shows, and so how many of batch 0 are composited again for it. */
 const COLLAGE_TOKENS = 16
@@ -124,7 +132,11 @@ async function withStore<T>(store: Store, run: (load: Store['load']) => Promise<
   try {
     return await run(load)
   } catch (error) {
-    if (transient.length > 0 && isRenderProblem(error) && error.code === 'missing-image') throw transient[0]
+    if (transient.length > 0 && isRenderProblem(error) && error.code === 'missing-image') {
+      // A file above the upload limit is bad art a retry cannot fix; any other remembered error is a fault.
+      if (transient.some(isObjectTooLarge)) throw new RenderProblem('decode', FILE_TOO_LARGE)
+      throw transient[0]
+    }
     throw error
   }
 }

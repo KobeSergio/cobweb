@@ -4,7 +4,7 @@ import sharp from 'sharp'
 import { flatPng, sizeOf } from './doubles/draw.ts'
 import { memoryStore } from './doubles/memory-store.ts'
 import { wrongCidPinner } from './doubles/pinners.ts'
-import { JobRefusal, MissingObject } from './ports.ts'
+import { JobRefusal, MissingObject, ObjectTooLarge } from './ports.ts'
 import {
   CID_MISMATCH,
   DEAD_LETTER,
@@ -357,6 +357,24 @@ describe('batch', () => {
     h.store.remove(layerKey('wide'))
     await handle(batchMessage(0), h.deps)
     expect(h.jobs.failures).toMatchObject([{ index: 0, code: 'missing-image', final: true }])
+    expect(h.jobs.record.state).toBe('failed')
+  })
+
+  it('fails the job as bad art, code decode, for a file above the upload limit, with no retry', async () => {
+    const h = await harness('generative', { claimed: true })
+    let loads = 0
+    h.deps.store = {
+      ...h.store,
+      load: () => {
+        loads += 1
+        return Promise.reject(new ObjectTooLarge('art/x.png'))
+      },
+    }
+    await handle(batchMessage(0), h.deps)
+    expect(h.jobs.failures).toMatchObject([
+      { index: 0, code: 'decode', message: 'A file is larger than the upload limit.', final: true },
+    ])
+    expect(loads).toBeGreaterThan(0)
     expect(h.jobs.record.state).toBe('failed')
   })
 

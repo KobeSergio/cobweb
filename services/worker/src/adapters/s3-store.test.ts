@@ -1,9 +1,9 @@
 import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
 import { describe, expect, it } from 'vitest'
-import { isMissingObject } from '../ports.ts'
+import { isMissingObject, isObjectTooLarge } from '../ports.ts'
 import { COLLECTION_ID, JOB_ID } from '../testing/fixtures.ts'
 import { bytes, stubAws } from '../testing/stub-aws.ts'
-import { COLLAGE_KEY, s3Store } from './s3-store.ts'
+import { COLLAGE_KEY, MAX_OBJECT_BYTES, s3Store } from './s3-store.ts'
 
 const body = (text: string) => ({ Body: { transformToByteArray: async () => bytes(text) } })
 const ref = { key: 'c/layers/a.png', ext: 'png' } as const
@@ -13,6 +13,84 @@ const quick = () => {
   const waits: number[] = []
   return { waits, options: { sleep: async (ms: number) => void waits.push(ms) } }
 }
+
+describe('s3Store: the upload limit', () => {
+  const stores = (answer: () => unknown) => {
+    const art = stubAws(answer)
+    const { waits, options } = quick()
+    return {
+      art,
+      waits,
+      store: s3Store(
+        { client: art.client, bucket: 'art' },
+        { client: art.client, bucket: 'render' },
+        options,
+      ),
+    }
+  }
+
+  it('is 50 MiB, the upload limit', () => {
+    expect(MAX_OBJECT_BYTES).toBe(52_428_800)
+  })
+
+  it('refuses a ContentLength above the limit before reading the body, once, with no retry', async () => {
+    let read = false
+    const { art, waits, store } = stores(() => ({
+      ContentLength: MAX_OBJECT_BYTES + 1,
+      Body: {
+        transformToByteArray: async () => {
+          read = true
+          return new Uint8Array()
+        },
+      },
+    }))
+    const error = await store.load(ref).catch((thrown: unknown) => thrown)
+    expect(isObjectTooLarge(error)).toBe(true)
+    expect(isMissingObject(error)).toBe(false)
+    expect(read).toBe(false)
+    expect(art.sent).toHaveLength(1)
+    expect(waits).toEqual([])
+  })
+
+  it('reads a body at exactly the limit', async () => {
+    const { store } = stores(() => ({ ContentLength: MAX_OBJECT_BYTES, ...body('png') }))
+    expect(await store.load(ref)).toEqual(bytes('png'))
+  })
+
+  it('stops reading a streamed body that grows past the limit, whatever its ContentLength says', async () => {
+    let chunks = 0
+    const big = new Uint8Array(MAX_OBJECT_BYTES / 2)
+    const { waits, store } = stores(() => ({
+      ContentLength: 10,
+      Body: {
+        transformToByteArray: async () => new Uint8Array(),
+        async *[Symbol.asyncIterator]() {
+          for (let i = 0; i < 10; i++) {
+            chunks += 1
+            yield big
+          }
+        },
+      },
+    }))
+    const error = await store.load(ref).catch((thrown: unknown) => thrown)
+    expect(isObjectTooLarge(error)).toBe(true)
+    expect(chunks).toBe(3)
+    expect(waits).toEqual([])
+  })
+
+  it('joins the chunks of a streamed body within the limit', async () => {
+    const { store } = stores(() => ({
+      Body: {
+        transformToByteArray: async () => new Uint8Array(),
+        async *[Symbol.asyncIterator]() {
+          yield bytes('pn')
+          yield bytes('g')
+        },
+      },
+    }))
+    expect(await store.load(ref)).toEqual(bytes('png'))
+  })
+})
 
 describe('s3Store', () => {
   it('loads an object from the art bucket by its key', async () => {
