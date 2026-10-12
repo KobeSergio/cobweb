@@ -134,7 +134,7 @@ export type Jobs = {
     retries: number,
   ): Promise<JobRecord>
   finish(jobId: string, result: FinishResult): Promise<JobRecord>
-  stuck(olderThanMinutes: number): Promise<{ id: string; retries: number }[]>
+  stuck(olderThanMinutes: number, onlyJobId?: string): Promise<{ id: string; retries: number }[]>
 }
 
 export type Store = {
@@ -150,7 +150,17 @@ export type Chain = { jobPayment(job: JobRecord): Promise<bigint> }
   (not the web app's, which is bound to Next). A refusal from a database function is thrown as a
   `JobRefusal` carrying the sentence, so steps can tell "already handled" from a real error.
 - `Jobs.fail` hides the null-index cast the generated type needs.
-- `Store.load` reads `uploads.storage_key` from the art bucket with read-only credentials.
+- `Store.load` reads `uploads.storage_key` from the art bucket with read-only credentials. It throws
+  an error named `MissingObject` only for a key that does not exist: the S3 adapter treats only the
+  error `NoSuchKey` as missing, and everything else (a throttle, a reset, a timeout, another 404 such
+  as a wrong bucket) is transient, tried again a few times and then thrown, so the message is
+  redelivered and the job is not failed for art that is there.
+- `JobRecord.waived` is true when the job's state is `waived` or its `waived_by` column is set, so a
+  waiver stored on a job that reads `paid` is still a waiver. `JobRecord.quoteTotalWei` is a bigint
+  read from `quote_total_wei` as text, never as a JSON number.
+- `Jobs.stuck(olderThanMinutes, onlyJobId?)`: with `onlyJobId` the answer can hold that job only,
+  and the filter goes into the query before its limit. `verify:render` uses it so that it never
+  touches a job another developer left in the local database.
 - `Pinner.pin` returns the CID the pinning service reports. The step compares it with the CID the
   render library computed.
 
@@ -179,9 +189,16 @@ export function tokenSlice(data: RenderData, rows: TokenRows): (GenerativeToken 
   `uploadId` resolved to an `ImageRef` through the job's uploads.
 - Placeholder: the job's `placeholder_upload_id` resolved to an `ImageRef`, with the collection's
   name and description.
+- Asset attributes are read from the shape the Assets screen stores, `[{ traitType, value }]` (a
+  `trait_type` key is accepted too, and a number value becomes text), and written to the render
+  library as `trait_type`.
 - A row that cannot be mapped (a trait that is not blank and has no upload, an unknown upload id, a
   missing canvas) throws a `RenderProblem` with code `missing-image` or `bad-dna`, so it fails the job
-  like any other art problem.
+  like any other art problem. A file whose type is not a supported image has its own sentence,
+  "The file for trait <name> is not a supported type." (with token and placeholder variants), under
+  `missing-image`.
+- A batch with fewer stored tokens than its id range, or a stored list that cannot be read, is
+  refused as `batch-range`. The check is in `Jobs.tokens`, where the rows are counted.
 
 ## 7. Steps (`services/worker/src/steps.ts`)
 
@@ -198,11 +215,16 @@ redelivered.
 1. Read the job. Missing, `done` or `failed`: return.
 2. Only when the job is `paid` or `waived`: check the payment, unless `quote_total_wei` is 0 or the
    job is waived. The check is `chain.jobPayment(job) >= quote_total_wei`, read from the job's
-   `quote_factory` on `quote_chain_id` at the chain's confirmation depth. A read error throws
-   (redelivery). A short amount calls `fail(job, null, 'payment-mismatch', 'The payment could not be
+   `quote_factory` on `quote_chain_id` at the chain's confirmation depth. The check is skipped when
+   `JobRecord.waived` is true or the quote is 0. The chain adapter reads at the confirmation depth;
+   when that is short but the latest block already shows the full amount, the payment exists and is
+   only unconfirmed, so it throws `PaymentUnconfirmed` (redelivery) and does not answer short. For a
+   job with no on-chain id, chain or payer it answers 0, so the job fails closed with
+   `payment-mismatch`. A read error throws (redelivery). A short amount calls `fail(job, null, 'payment-mismatch', 'The payment could not be
 verified on chain.', true, retries)` and returns.
 3. `claim(job)`. It is idempotent: a job already `rendering` or `finalizing` comes back unchanged.
 4. Read the batches. Send one `batch` message per batch not `done`; if all are done, send `metadata`.
+   The messages carry the `retries` value of the job as returned by the claim, read after it.
 
 **batch**
 
@@ -223,7 +245,10 @@ returned a different CID.', true, retries)` and return.
 3. Collage, for real generative and 1/1 jobs only: the worker keeps no batch output, so it composites
    the first 16 tokens of batch 0 again, calls `previewCollage`, and writes the PNG with
    `store.putCollage('<collectionId>/collage/<jobId>.png', png)`. A collage failure is logged and
-   skipped (`collage_key` stays null); it never fails a job.
+   skipped (`collage_key` stays null); it never fails a job. GIF and MP4 files are dropped from the
+   16 before anything is rendered, and each input is decoded with a bound of 8192 by 8192 pixels (the
+   size assets are admitted at; 2048 is the limit for layer images only), so one larger image costs
+   the collage and nothing else.
 4. `finish(job, { metadataCid, baseUri, placeholderImageCid, collageKey })`.
 
 **Failures**
@@ -233,15 +258,24 @@ retries)` and return. In the metadata step the index is null.
 - A `JobRefusal`: `BATCH_RESULT_DIFFERS` and `JOB_RESULT_DIFFERS` become final `cid-mismatch` failures
   (the output was not the same twice); `JOB_NOT_RENDERING`, `JOB_NOT_READY`, `NO_SUCH_BATCH` and
   `BATCHES_STILL_RENDERING` are logged and returned.
+- Any other `JobRefusal` is logged under the event `refused-unexpected`, with its sentence, and
+  acknowledged: it means the worker sent something the database should never see.
+- A `missing-image` problem that follows a transient storage error from `Store.load` is not an art
+  problem: the remembered storage error is thrown instead, so the message is redelivered.
 - Anything else is thrown.
 
 **Dead letter** (`handleDead(message, deps)`): `fail(job, index, 'dead-letter', 'The render did not
 finish after several tries.', true, retries)`, where the index is the message's for a `batch` message
-and null otherwise.
+and null otherwise. For a job that was never claimed (a `start` message that ran out of deliveries)
+the database refuses the report; that refusal is logged and the message is acknowledged, and the
+sweep starts the job again.
 
 **Sweep** (`sweep(deps)`): `jobs.stuck(15)` returns jobs in `rendering` or `finalizing` whose job row
-and batch rows were all last updated more than 15 minutes ago; each gets `enqueueRender`. The `start`
-step then re-sends the open batches of a `rendering` job, or `metadata` for a `finalizing` one.
+and batch rows were all last updated more than 15 minutes ago, and jobs in `paid` or `waived` whose
+row has not been touched for 15 minutes (they have no batch rows, and a start message that
+dead-lettered leaves them unclaimed); each gets `enqueueRender`. The `start` step then claims an
+unclaimed job, re-sends the open batches of a `rendering` job, or sends `metadata` for a `finalizing`
+one. A paid job whose start can never pass is sent again every 15 minutes, with no cap on the age.
 
 ## 8. Local runner and scripts
 
@@ -263,6 +297,32 @@ step then re-sends the open batches of a `rendering` job, or `metadata` for a `f
   8. a layer of the wrong size fails the job with the `layer-size` code and its sentence;
   9. the sweep re-enqueues a job left `finalizing` and it finishes;
   10. a placeholder job on a deferred collection finishes with its slash-less base URI.
+
+  As built, the script runs 14 numbered cases and prints 18 PASS lines (two setup checks, the 14
+  cases and two cleanup checks) and then `18 passed, 0 failed`. The numbering differs from the list
+  above: its checks 1 to 5 are checks 1 to 5 in the output; check 6 in the output is an addition (a
+  1/1 project whose attributes are stored as the Assets screen stores them reach the pinned
+  metadata), so the list's checks 6 to 10 are checks 7 to 11 in the output. Three cases carry a
+  letter: 2b (two copies of one batch handled at the same moment by two worker instances), 8b (a
+  pinner that answers with a wrong CID for the metadata set only: the job fails with `cid-mismatch`
+  at job level and every batch stays done) and 10b (the sweep starts a paid job whose start message
+  was lost). The checks assert pixels exactly, worked by hand with the render core's integer blend
+  (the second Eyes trait included), count the pins and the attempts under duplicate delivery, and
+  read the placeholder's bytes back out of the pinned CAR. The script also leaves nothing behind,
+  and says so in its two cleanup checks.
+
+  Not covered by the script, only by unit tests: the payment that shows at the latest block but not
+  yet at the confirmation depth (`PaymentUnconfirmed`). Anvil's confirmation depth is 1, so the two
+  blocks are the same and that state cannot be reached.
+
+  Honest limits. Check 2 delivers serially, so a second copy always meets finished work; it asserts
+  the pin and attempt counts, which a redone batch would change. Check 2b is truly concurrent, but
+  two copies that both render end in the same state as one, so it does not show that the work was
+  done once. The script sets `batch_size` to 2 with the service client so that five tokens make
+  three batches; the app's own batch sizing is not exercised. The worker's `stuck` is read through a
+  clock moved 16 minutes ahead, because `updated_at` is kept by a trigger and a job cannot be
+  backdated.
+
 - `services/worker/scripts/bench.ts` (`pnpm --filter @cobweb/worker bench`): renders one batch of 100
   tokens from generated 2048 by 2048 layers (7 layers) in process and prints wall time, peak resident
   memory and CAR size. It is the input to the Lambda settings in section 9; it is not a test.
@@ -272,19 +332,27 @@ step then re-sends the open batches of a `rendering` job, or `metadata` for a `f
 One stack, `CobwebRender`, in `us-east-1`, defined in `infra/lib/render-stack.ts`:
 
 - `RenderQueue` (SQS standard) with `RenderDeadLetters` as its dead-letter queue, `maxReceiveCount`
-  3, visibility timeout 6 times the render function's timeout.
+  3, visibility timeout 6 times the render function's timeout. `RenderDeadLetters` keeps messages for
+  14 days and its visibility timeout is 6 times the dead-letter function's timeout (6 minutes).
+- `RenderDeadLettersAlarm`: a CloudWatch alarm on the dead-letter queue's visible messages (maximum
+  over 5 minutes, at least 1). It has no notification target: none has been chosen, and
+  `infra/README.md` says where to attach one.
 - `RenderFunction`: Node 22, arm64, handler `services/worker/src/lambda/render.ts`, bundled with
   esbuild including sharp's `linux-arm64` package, event source `RenderQueue` with batch size 1 and
   `reportBatchItemFailures`. Memory 4,096 MB, timeout 10 minutes, ephemeral storage 4,096 MB. These
   three numbers are starting points from PLAN.md; the benchmark on Lambda itself is owed.
-- `DeadLetterFunction`: handler `lambda/dead.ts`, event source `RenderDeadLetters`.
+- `DeadLetterFunction`: handler `lambda/dead.ts`, event source `RenderDeadLetters` with batch size 1
+  and `reportBatchItemFailures`, so a dead message survives a database outage.
 - `SweepFunction`: handler `lambda/sweep.ts`, on an EventBridge rule every 15 minutes.
 - `RenderBucket`: private, for collages, with public access blocked.
-- Configuration from environment variables set by the stack; secrets (the Supabase service key, the
+- Parameters: `ArtBucketArn`, `ArtBucketRegion`, `SupabaseUrl` and `FilebaseBucket`.
+- Configuration from environment variables set by the stack, which include `RENDER_SECRET_ARN`, the
+  secret's ARN; secrets (the Supabase service key, the
   Filebase keys, RPC URLs) from one Secrets Manager secret read at cold start, never written to the
   template or the logs.
-- Roles: the render function may read the art bucket (`s3:GetObject` on its ARN, passed as a stack
-  parameter), write the render bucket, send to and receive from the queue, and read the secret. The
+- Roles: the render function may read the art bucket (`s3:GetObject` on its objects and
+  `s3:ListBucket` on the bucket, so that S3 answers 404 and not 403 for a missing key; the ARN is a
+  stack parameter), write the render bucket, send to and receive from the queue, and read the secret. The
   other two functions get only what they use. No wildcard resources.
 - `infra/test/render-stack.test.ts` asserts the synthesized template: the redrive policy, the event
   source settings, the runtime and architecture, that no policy statement has a `*` resource, and
@@ -308,7 +376,8 @@ the browser, none is printed):
 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ART_S3_ENDPOINT`, `ART_S3_REGION`, `ART_S3_BUCKET`,
 `ART_S3_ACCESS_KEY_ID`, `ART_S3_SECRET_ACCESS_KEY`, `ART_S3_FORCE_PATH_STYLE`, `RENDER_S3_BUCKET`,
 `FILEBASE_S3_ENDPOINT`, `FILEBASE_BUCKET`, `FILEBASE_ACCESS_KEY_ID`, `FILEBASE_SECRET_ACCESS_KEY`,
-`RENDER_QUEUE_URL`, `RPC_URL_<chainId>`, `FACTORY_ADDRESS_<chainId>`.
+`RENDER_QUEUE_URL`, `RPC_URL_<chainId>`, `FACTORY_ADDRESS_<chainId>`, and on Lambda only
+`RENDER_SECRET_ARN`, which the stack sets.
 
 `supabase/config.toml` gains a local `render` bucket (private, PNG only) for `verify:render`.
 
@@ -325,17 +394,24 @@ the browser, none is printed):
 - The existing suite: typecheck, lint, tests, `verify:local` (270), `verify:storage`, `verify:sweep`,
   `verify:chain`, build.
 
+As landed, the unit tests count 250 in `@cobweb/worker`, 40 in `@cobweb/shared` (28 of them for the
+render queue contract), 23 in `@cobweb/infra`, 117 in `@cobweb/render`, 282 in `@cobweb/web` and 60
+in `@cobweb/dna`.
+
 ## 12. Acceptance criteria
 
-- [ ] `enqueueRender` and the message type are importable from `@cobweb/shared` without pulling in the
+- [x] `enqueueRender` and the message type are importable from `@cobweb/shared` without pulling in the
       worker or sharp.
-- [ ] `verify:render` passes its ten checks three times in a row against local Supabase, local
-      storage and Anvil.
-- [ ] The step tests cover every failure path of section 7.
-- [ ] `cdk synth` succeeds without AWS credentials and the template assertions pass.
-- [ ] No secret value is printed, logged or written to a template; no env name starts with
+- [x] `verify:render` passes its checks (section 8: 14 cases, 18 PASS lines) three times in a row
+      against local Supabase, local storage and Anvil.
+- [x] The step tests cover every failure path of section 7.
+- [x] `cdk synth` succeeds without AWS credentials and the template assertions pass.
+- [x] No secret value is printed, logged or written to a template; no env name starts with
       `NEXT_PUBLIC_`.
-- [ ] MASTER_PLAN's Phase 4 status line records the landing, what is owed (the deploy, the Filebase
+- [x] MASTER_PLAN's Phase 4 status line records the landing, what is owed (the deploy, the Filebase
       checks, the Lambda benchmark, native x64 goldens in CI, ICC and 16-bit layers across
       architectures) and what the fourth sub-project consumes (`enqueueRender`, the SQS queue adapter,
       the collage key and how to sign it).
+
+The deploy itself is not done and is not an acceptance criterion of this sub-project: it is owed to
+the owner, with the two Filebase checks and the Lambda benchmark (`infra/README.md`).

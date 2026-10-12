@@ -14,11 +14,13 @@ A no-code NFT launchpad with one linear flow: Details, Art (Layers, Rules, Gener
 ```
 apps/web           Next.js app: creator dashboard and mint page
 apps/freshness     Railway service that reads chain state for mint pages
-services/render    Render and metadata Lambdas
+services/render    Render library: layers to images, CARs and CIDs (pure; no network)
+services/worker    Render worker: ports, steps, adapters, local runner, Lambda entry points
+infra/             AWS CDK stack for the render pipeline (defined and tested; not deployed)
 contracts/         Foundry: factory and collection
 packages/dna       Trait assignment engine
 packages/ui        Component library
-packages/shared    Chain config, factory ABI and addresses, job ids (browser entry) and viem clients (server entry)
+packages/shared    Chain config, factory ABI and addresses, job ids, the render queue contract (browser entry) and viem clients (server entry)
 supabase/          Migrations and policies
 legacy/            Old Kingdomly repos. Not in git. Read-only
 ```
@@ -33,12 +35,15 @@ cd contracts && forge test                # contracts
 supabase start && pnpm --filter @cobweb/web dev      # web app against local Supabase
 pnpm --filter @cobweb/web verify:local    # sign-in and access-rule checks; run after any migration change
 pnpm --filter @cobweb/web verify:storage  # presigned PUT, HEAD, signed GET, delete, the 5 GB cap and the canvas, against local storage
-supabase seed buckets                     # creates the local `art` bucket from config.toml (a restart alone does not)
+supabase seed buckets                     # creates the local `art` and `render` buckets from config.toml (a restart alone does not)
 pnpm --filter @cobweb/web chain:local     # Anvil with the factory deployed; prints the .env.local lines
 pnpm --filter @cobweb/web verify:chain    # lock, pay and the refusals against Anvil
 pnpm --filter @cobweb/web verify:sweep    # the upload sweep against local storage
 pnpm --filter @cobweb/web sweep:uploads --dry-run   # unrecorded objects older than a day; drop --dry-run to delete
 pnpm --filter @cobweb/render test         # render core: compositing, metadata JSON, CARs and local CIDs
+pnpm --filter @cobweb/web verify:render   # the render worker end to end against local Supabase, local storage and Anvil
+pnpm --filter @cobweb/worker bench        # one batch of 100 tokens at 2048 x 2048: time, memory, CAR size
+pnpm --filter @cobweb/infra test          # CDK template assertions; no bundling, no credentials
 ```
 
 ## Rules
