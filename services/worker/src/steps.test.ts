@@ -3,7 +3,15 @@ import { describe, expect, it } from 'vitest'
 import { flatPng, sizeOf } from './doubles/draw.ts'
 import { wrongCidPinner } from './doubles/pinners.ts'
 import { JobRefusal, MissingObject } from './ports.ts'
-import { CID_MISMATCH, handle, PAYMENT_MISMATCH, RESULT_DIFFERS } from './steps.ts'
+import {
+  CID_MISMATCH,
+  DEAD_LETTER,
+  handle,
+  handleDead,
+  PAYMENT_MISMATCH,
+  RESULT_DIFFERS,
+  sweep,
+} from './steps.ts'
 import { COLLECTION_ID, JOB_ID, layerKey, PLACEHOLDER_KEY } from './testing/fixtures.ts'
 import { batchMessage, harness, metadataMessage, startMessage } from './testing/harness.ts'
 
@@ -638,5 +646,97 @@ describe('metadata', () => {
     expect(finished.baseUri).toBe(`ipfs://${finished.metadataCid}/metadata.json`)
     expect(finished.collageKey).toBeNull()
     expect(h.pins.slice(-2)).toEqual([finished.placeholderImageCid, finished.metadataCid])
+  })
+})
+
+describe('handleDead', () => {
+  it('fails the job with dead-letter, naming the batch of a batch message', async () => {
+    const h = await harness('generative', { claimed: true })
+    await handleDead(batchMessage(1, 0), h.deps)
+    expect(h.jobs.failures).toEqual([
+      { index: 1, code: 'dead-letter', message: DEAD_LETTER, final: true, retries: 0 },
+    ])
+    expect(h.jobs.record.state).toBe('failed')
+    expect(h.jobs.record.errorCode).toBe('dead-letter')
+  })
+
+  it('fails the job at job level for a start and a metadata message', async () => {
+    for (const message of [startMessage(2), metadataMessage(2)]) {
+      const h = await harness('generative', { claimed: true, job: { retries: 2 } })
+      await handleDead(message, h.deps)
+      expect(h.jobs.failures).toEqual([
+        { index: null, code: 'dead-letter', message: DEAD_LETTER, final: true, retries: 2 },
+      ])
+    }
+  })
+
+  it('acknowledges a dead message whose job cannot be failed', async () => {
+    const h = await harness('generative', { job: { state: 'done' } })
+    await handleDead(startMessage(), h.deps)
+    expect(h.lines).toContain('failure report refused:JOB_NOT_RENDERING')
+    const done = await harness('generative', { claimed: true })
+    await handle(batchMessage(0), done.deps)
+    await handleDead(batchMessage(0), done.deps)
+    expect(done.lines).toContain('failure report refused:BATCH_ALREADY_DONE')
+    expect(done.jobs.record.state).toBe('rendering')
+  })
+
+  it('acknowledges a dead start message for a job that was never claimed, which the sweep picks up', async () => {
+    for (const state of ['paid', 'waived'] as const) {
+      const h = await harness('generative', { job: { state } })
+      await handleDead(startMessage(), h.deps)
+      expect(h.lines).toContain('failure report refused:JOB_NOT_RENDERING')
+      expect(h.jobs.record.state).toBe(state)
+    }
+  })
+
+  it('throws when the database cannot be reached, so the dead message is kept', async () => {
+    const h = await harness('generative', { claimed: true })
+    h.jobs.fail = () => Promise.reject(new Error('connection reset'))
+    await expect(handleDead(startMessage(), h.deps)).rejects.toThrow('connection reset')
+  })
+})
+
+describe('sweep', () => {
+  it('throws when the queue is down, so the next run tries again', async () => {
+    const h = await harness()
+    h.jobs.stuckJobs = [{ id: JOB_ID, retries: 0 }]
+    h.deps.queue = { ...h.queue, send: () => Promise.reject(new Error('queue down')) }
+    await expect(sweep(h.deps)).rejects.toThrow('queue down')
+  })
+
+  it('sends a start message for each stuck job, with its retries', async () => {
+    const h = await harness()
+    const other = '11111111-2222-4333-8444-555555555555'
+    h.jobs.stuckJobs = [
+      { id: JOB_ID, retries: 1 },
+      { id: other, retries: 0 },
+    ]
+    expect(await sweep(h.deps)).toBe(2)
+    expect(h.queue.sent).toEqual([startMessage(1), { jobId: other, step: 'start', retries: 0 }])
+  })
+
+  it('sends a start message for a paid or waived job that was never claimed, and the job then starts', async () => {
+    for (const state of ['paid', 'waived'] as const) {
+      const h = await harness('generative', { job: { state, retries: 2 } })
+      h.jobs.stuckJobs = [{ id: JOB_ID, retries: 2 }]
+      expect(await sweep(h.deps)).toBe(1)
+      expect(h.queue.sent).toEqual([startMessage(2)])
+      await handle(startMessage(2), h.deps)
+      expect(h.jobs.record.state).toBe('rendering')
+      expect(h.queue.sent.slice(1)).toEqual([batchMessage(0, 2), batchMessage(1, 2), batchMessage(2, 2)])
+    }
+  })
+
+  it('asks for jobs untouched for 15 minutes and sends nothing when there are none', async () => {
+    const h = await harness()
+    const asked: number[] = []
+    h.jobs.stuck = async (minutes) => {
+      asked.push(minutes)
+      return []
+    }
+    expect(await sweep(h.deps)).toBe(0)
+    expect(asked).toEqual([15])
+    expect(h.queue.sent).toEqual([])
   })
 })

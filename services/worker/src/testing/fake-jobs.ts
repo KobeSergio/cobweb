@@ -19,6 +19,7 @@ export type FakeJobs = Jobs & {
   finished: FinishResult | null
   /** Method names in call order. */
   calls: string[]
+  /** What `stuck` answers: rendering or finalizing jobs, and paid or waived jobs never claimed. */
   stuckJobs: { id: string; retries: number }[]
 }
 

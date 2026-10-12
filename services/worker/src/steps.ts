@@ -5,6 +5,7 @@
  */
 import { mapLimit, previewCollage, renderBatch, renderMetadataSet, renderPlaceholder } from '@cobweb/render'
 import type { AssetSpec, AssetToken, GenerativeSpec, GenerativeToken, PackedDirectory } from '@cobweb/render'
+import { enqueueRender } from '@cobweb/shared/render-queue'
 import type { RenderMessage, RenderQueue } from '@cobweb/shared/render-queue'
 import { errorSummary } from './log.ts'
 import type { Log } from './log.ts'
@@ -17,6 +18,7 @@ export type Deps = { jobs: Jobs; store: Store; pinner: Pinner; chain: Chain; que
 export const PAYMENT_MISMATCH = 'The payment could not be verified on chain.'
 export const CID_MISMATCH = 'The pinning service returned a different CID.'
 export const RESULT_DIFFERS = 'The render gave a different result than the one already recorded.'
+export const DEAD_LETTER = 'The render did not finish after several tries.'
 
 /** How many tokens the collage shows, and so how many of batch 0 are composited again for it. */
 const COLLAGE_TOKENS = 16
@@ -279,4 +281,29 @@ export async function handle(message: RenderMessage, deps: Deps): Promise<void> 
       ...(expected ? {} : { sentence: error.message }),
     })
   }
+}
+
+/**
+ * Fails the job of a message that was received three times without success. For a job that was never
+ * claimed (a start message that ran out of deliveries) the database refuses the report: that is
+ * logged and the message acknowledged, and the sweep sends the job's start message again.
+ */
+export async function handleDead(message: RenderMessage, deps: Deps): Promise<void> {
+  await report(deps, message, indexOf(message), 'dead-letter', DEAD_LETTER)
+}
+
+/** How long a job may sit with nothing touched before the sweep sends its start message again. */
+export const SWEEP_MINUTES = 15
+
+/**
+ * Re-enqueues a start message for each job left `rendering` or `finalizing`, or left `paid` or
+ * `waived` and never claimed, with nothing touched for 15 minutes. The start step then claims an
+ * unclaimed job, re-sends the open batches of a `rendering` one, or sends `metadata` for a
+ * `finalizing` one.
+ */
+export async function sweep(deps: Deps): Promise<number> {
+  const jobs = await deps.jobs.stuck(SWEEP_MINUTES)
+  for (const job of jobs) await enqueueRender(deps.queue, job)
+  deps.log('sweep', { requeued: jobs.length })
+  return jobs.length
 }
