@@ -2,16 +2,18 @@
 // (docs/specs/2026-10-12-render-worker.md, section 8): a signed-in creator's generative project with
 // drawn layers is locked and paid on Anvil, then the local runner takes the job through the same
 // steps the Lambdas run, on the production adapters for the database, storage and the chain, with a
-// folder standing in for the pinning service and a queue in memory. Thirteen checks: the full run,
-// duplicate delivery (serial, then two copies of one batch at once), a pin that fails once, a pin that always fails and the retry after it, identical
-// CIDs for identical input, a 1/1 project's attributes reaching the pinned metadata, a short payment, a
-// wrong CID, a layer of the wrong size, the sweep (two cases) and a placeholder job.
+// folder standing in for the pinning service and a queue in memory. Fourteen checks: the full run,
+// duplicate delivery (serial, then two copies of one batch at once), a pin that fails once, a pin that
+// always fails and the retry after it, identical CIDs for identical input, a 1/1 project's attributes
+// reaching the pinned metadata, a short payment, a wrong CID (for a batch, then for the metadata set), a
+// layer of the wrong size, the sweep (two cases) and a placeholder job.
 //
 // Numbering: the spec (section 8) lists ten checks. Its checks 1 to 5 are checks 1 to 5 here. Check 6
 // here is an addition (a 1/1 project's attributes), so the spec's checks 6 to 10 (a short payment, a
 // wrong-CID pinner, a wrong-size layer, the sweep, a placeholder job) are numbered 7 to 11 in the output.
-// Two more cases carry a letter: 2b (concurrent copies of one batch) and 10b (the sweep starting a paid
-// job). With the two setup checks and the two cleanup checks the script prints 17 PASS lines.
+// Three more cases carry a letter: 2b (concurrent copies of one batch), 8b (a wrong CID for the metadata
+// set only) and 10b (the sweep starting a paid job). With the two setup checks and the two cleanup checks
+// the script prints 18 PASS lines.
 //
 // Not covered here: the worker's rule that a payment which shows at the latest block but not yet at the
 // confirmation depth is unconfirmed (viemChain throws PaymentUnconfirmed, and the step is retried).
@@ -269,8 +271,9 @@ const TOKENS = 5
  * A generative project of five tokens over three layers of two traits, 64 by 64, owned by the
  * client's creator, its layer images drawn and stored. The same every time, so two of them render
  * to identical CIDs. `wrongSize` stores one Eyes image at 32 by 32 while recording it as 64 by 64.
- * `reverse` inserts the layers, and the traits of each layer, in the opposite order with the same
- * `position` values, so a worker that ordered by insertion and not by `position` would render different art.
+ * `reverse` inserts the layers in the opposite order with the same `position` values, so a worker that
+ * stacked them in creation order would render different art. That is all it proves: the tokens name
+ * their traits by id, so the order of the traits within a layer changes nothing.
  */
 async function seededProject(
   client: Client,
@@ -301,9 +304,7 @@ async function seededProject(
       .single()
     if (row.error || !row.data) throw new Error(`layer: ${row.error?.message ?? 'no row'}`)
     const ids: string[] = []
-    const traitOrder = [...layer.traits.entries()]
-    if (reverse) traitOrder.reverse()
-    for (const [index, colour] of traitOrder) {
+    for (const [index, colour] of layer.traits.entries()) {
       const small = wrongSize && layer.name === 'Eyes' && index === 1
       const png = await local.flatPng(colour, small ? 32 : 64)
       const name = index === 0 ? 'One' : 'Two'
@@ -630,10 +631,20 @@ async function main(): Promise<void> {
     const head = await s3.send(new HeadObjectCommand({ Bucket: RENDER_BUCKET, Key: key }))
     if (head.ContentType !== 'image/png' || !head.ContentLength) return 'the collage is not a PNG object'
     // The collage shows the first tokens of batch 0, which holds 2 tokens here (batch size 2): a grid of
-    // 4 columns of 256 pixel cells, so one row, 1024 by 256. Token 1 (bits 0, 0, 0) is Background One,
-    // Body One, Eyes One: Body (240,240,240) over (20,20,60) = (130,130,150), Eyes (255,255,0) over that
-    // = (192.5,192.5,75). Token 2 (bits 1, 0, 0) is Background Two: (200,120,60), then (220,180,150), then
-    // (237.5,217.5,75). The centre of each cell is checked, to within 2.
+    // 4 columns of 256 pixel cells, so one row, 1024 by 256. The centre of each cell is checked exactly.
+    // The expected pixels are worked by hand with the render core's integer blend (render core spec,
+    // section 6). div255(x) = trunc((x + 127) / 255). At a layer opacity of 1 (alpha 255), as = div255(sa * 255)
+    // = sa, wd = div255(da * (255 - as)), oa = as + wd, and oc = trunc(((sc * as + dc * wd) * 2 + oa) / (2 * oa)).
+    // A drawn alpha of 0.5 is stored as 128, so Body and Eyes have sa = 128. Over an opaque pixel (da = 255)
+    // as = 128, wd = div255(255 * 127) = 127 and oa = 255, so oc = trunc(((sc * 128 + dc * 127) * 2 + 255) / 510).
+    // Token 1 (bits 0, 0, 0) is Background One (20,20,60), Body One (240,240,240), Eyes One (255,255,0):
+    //   Body over Background: r and g = trunc(66775 / 510) = 130 (240 * 128 + 20 * 127 = 33260), b = trunc(76935 / 510)
+    //   = 150 (240 * 128 + 60 * 127 = 38340), so (130,130,150). Eyes over that: r and g = trunc(98555 / 510) = 193
+    //   (255 * 128 + 130 * 127 = 49150), b = trunc(38355 / 510) = 75 (0 * 128 + 150 * 127 = 19050). Pixel (193,193,75,255).
+    // Token 2 (bits 1, 0, 0) is Background Two (200,120,60), Body One, Eyes One:
+    //   Body over Background: r = trunc(112495 / 510) = 220, g = trunc(92175 / 510) = 180, b = 150, so (220,180,150).
+    //   Eyes over that: r = trunc(121415 / 510) = 238, g = trunc(111255 / 510) = 218, b = trunc(38355 / 510) = 75.
+    //   Pixel (238,218,75,255).
     const object = await s3.send(new GetObjectCommand({ Bucket: RENDER_BUCKET, Key: key }))
     const collageBytes = await bodyBytes(object.Body)
     for (const [x, want] of [
@@ -643,8 +654,8 @@ async function main(): Promise<void> {
       const got = await local.rgbaAt(collageBytes, x, 128).catch((e: unknown) => String(e))
       if (typeof got === 'string') return `the collage does not decode as an image: ${got}`
       if (got.width !== 1024 || got.height !== 256) return `the collage is ${got.width} by ${got.height}`
-      if (got.pixel.some((value, at) => Math.abs(value - want[at]!) > 2))
-        return `collage pixel ${x} is ${JSON.stringify(got.pixel)}, expected about ${JSON.stringify(want)}`
+      if (got.pixel.some((value, at) => value !== want[at]))
+        return `collage pixel ${x} is ${JSON.stringify(got.pixel)}, expected ${JSON.stringify(want)}`
     }
     const status = await statusOf(firstCid)
     if (status !== 'rendered') return `collection ${status}`
@@ -667,32 +678,49 @@ async function main(): Promise<void> {
     const metaFiles = [...(await readCarFiles(readPin(job.metadata_cid ?? ''))).keys()].sort()
     if (JSON.stringify(metaFiles) !== '["1","2","3","4","5"]')
       return `the metadata CAR holds ${JSON.stringify(metaFiles)}`
-    // The second batch's archive: its two files, decoded, and their pixels checked against the colours
-    // of the drawn layers (LAYERS), written out here and not computed by the worker or the render
-    // library. Token n picks the bits of n - 1, so token 3 (bits 0, 1, 0) is Background One, Body Two,
-    // Eyes One, and token 4 (bits 1, 1, 0) is Background Two, Body Two, Eyes One. Background is opaque;
-    // Body and Eyes are drawn at alpha 0.5, so each pixel is the layers blended over each other, bottom
-    // to top (c = (top + below) / 2):
-    //   token 3: Body (90,60,30) over (20,20,60) = (55,40,45); Eyes (255,255,0) over that = (155,147.5,22.5)
-    //   token 4: Body (90,60,30) over (200,120,60) = (145,90,45); Eyes over that = (200,172.5,22.5)
-    // Every layer shows in the result, so the wrong layer order or a trait wired to another image moves
-    // the pixel (stacking Eyes below Body would give (159,124,30) for token 4). A pixel may differ by 2:
-    // an alpha of 0.5 is stored as 128 of 255.
-    const second = await readCarFiles(readPin(batches[1]?.images_cid ?? ''))
-    const names = [...second.keys()].sort()
-    if (JSON.stringify(names) !== '["3.png","4.png"]')
-      return `the second batch holds ${JSON.stringify(names)}`
-    for (const [name, want] of [
-      ['3.png', [155, 148, 23, 255]],
-      ['4.png', [200, 173, 23, 255]],
-    ] as const) {
-      const got = await local
-        .rgbaAt(second.get(name) ?? new Uint8Array(), 32, 32)
-        .catch((e: unknown) => String(e))
-      if (typeof got === 'string') return `${name} does not decode as an image: ${got}`
-      if (got.width !== 64 || got.height !== 64) return `${name} is ${got.width} by ${got.height}`
-      if (got.pixel.some((value, at) => Math.abs(value - want[at]!) > 2))
-        return `${name} pixel is ${JSON.stringify(got.pixel)}, expected about ${JSON.stringify(want)}`
+    // The second and third batches' archives: their files, decoded, and their pixels checked exactly against
+    // the colours of the drawn layers (LAYERS), worked by hand here and not computed by the worker or the
+    // render library. Token n picks the bits of n - 1. The blend is the one worked above for the collage:
+    // each of Body and Eyes (alpha 128) goes over an opaque pixel, oc = trunc(((sc * 128 + dc * 127) * 2 + 255) / 510).
+    //   Token 3 (bits 0, 1, 0) is Background One (20,20,60), Body Two (90,60,30), Eyes One (255,255,0).
+    //     Body over Background: r = trunc(28375 / 510) = 55, g = trunc(20695 / 510) = 40, b = trunc(23175 / 510) = 45.
+    //     Eyes over (55,40,45): r = trunc(79505 / 510) = 155, g = trunc(75695 / 510) = 148, b = trunc(11685 / 510) = 22.
+    //     Pixel (155,148,22,255).
+    //   Token 4 (bits 1, 1, 0) is Background Two (200,120,60), Body Two, Eyes One.
+    //     Body over Background: r = trunc(74095 / 510) = 145, g = trunc(46095 / 510) = 90, b = trunc(23175 / 510) = 45.
+    //     Eyes over (145,90,45): r = trunc(102365 / 510) = 200, g = trunc(88395 / 510) = 173, b = 22.
+    //     Pixel (200,173,22,255).
+    //   Token 5 (bits 0, 0, 1) is Background One, Body One (240,240,240), Eyes Two (0,255,255), the second
+    //     Eyes trait, so an Eyes trait wired to the wrong image within its layer changes this pixel.
+    //     Body over Background: (130,130,150) as for token 1. Eyes over that: r = trunc(33275 / 510) = 65
+    //     (0 * 128 + 130 * 127 = 16510), g = trunc(98555 / 510) = 193, b = trunc(103635 / 510) = 203
+    //     (255 * 128 + 150 * 127 = 51690). Pixel (65,193,203,255).
+    // Every layer shows in the result, so the wrong layer order moves the pixel too (stacking Eyes below
+    // Body would give (159,124,30) for token 4).
+    const archives: [number, [string, number[]][]][] = [
+      [
+        1,
+        [
+          ['3.png', [155, 148, 22, 255]],
+          ['4.png', [200, 173, 22, 255]],
+        ],
+      ],
+      [2, [['5.png', [65, 193, 203, 255]]]],
+    ]
+    for (const [batch, files] of archives) {
+      const archive = await readCarFiles(readPin(batches[batch]?.images_cid ?? ''))
+      const names = [...archive.keys()].sort()
+      if (JSON.stringify(names) !== JSON.stringify(files.map(([name]) => name)))
+        return `batch ${batch} holds ${JSON.stringify(names)}`
+      for (const [name, want] of files) {
+        const got = await local
+          .rgbaAt(archive.get(name) ?? new Uint8Array(), 32, 32)
+          .catch((e: unknown) => String(e))
+        if (typeof got === 'string') return `${name} does not decode as an image: ${got}`
+        if (got.width !== 64 || got.height !== 64) return `${name} is ${got.width} by ${got.height}`
+        if (got.pixel.some((value, at) => value !== want[at]))
+          return `${name} pixel is ${JSON.stringify(got.pixel)}, expected ${JSON.stringify(want)}`
+      }
     }
     return null
   })
@@ -703,13 +731,23 @@ async function main(): Promise<void> {
     const jobId = await lockedAndPaid(creator, cid)
     // Delivery here is serial: the local runner handles one message at a time, so a second copy always
     // meets finished work. Check 2b is the case that is not serial.
-    const run = await render(jobId, depsFor(local.memoryQueue({ copies: 2 }), local.folderPinner(pins)))
+    const pinner = local.folderPinner(pins)
+    const run = await render(jobId, depsFor(local.memoryQueue({ copies: 2 }), pinner))
     if (run.thrown || run.dead) return `the run had failures: ${JSON.stringify(run)}`
     if (run.handled < 2 * firstHandled)
       return `${run.handled} deliveries, expected at least twice check 1's ${firstHandled}`
     const problem = await doneProblem(jobId)
     if (problem) return problem
-    if ((await batchRows(jobId)).some((batch) => batch.attempts < 1)) return 'a batch was never started'
+    // The worker pins each CAR once: three batch directories and the metadata set, four in all. A copy of
+    // a message meets work already recorded and pins nothing, so the pins equal the distinct CARs.
+    const distinct = new Set(pinner.pinned).size
+    if (pinner.pinned.length !== distinct || distinct !== 4)
+      return `${pinner.pinned.length} pins of ${distinct} distinct CARs, expected 4 of 4`
+    // Each batch has exactly one attempt: art_batch_start counts an attempt only on a batch that is not
+    // done, and the first copy of each batch message finishes the batch before the next copy arrives.
+    const attempts = (await batchRows(jobId)).map((batch) => batch.attempts)
+    if (JSON.stringify(attempts) !== '[1,1,1]')
+      return `attempts ${JSON.stringify(attempts)}, expected [1,1,1]`
     if ((await cidsOf(jobId)) !== (await cidsOf(firstJob))) return 'the CIDs differ from the single run'
     const [mine, first] = [await jobRow(jobId), await jobRow(firstJob)]
     if (mine.base_uri !== first.base_uri || mine.metadata_cid !== first.metadata_cid)
@@ -733,7 +771,10 @@ async function main(): Promise<void> {
     if (row?.state !== 'done' || row.attempts !== 2) return `batch 0 ${JSON.stringify(row)}`
     const [first] = await batchRows(firstJob)
     if (row.images_cid !== first?.images_cid) return `CID ${row.images_cid} is not ${first?.images_cid}`
+    // Batch 0 of 3 is done and the other two have not been sent: the job is still rendering, with no error.
     const job = await jobRow(jobId)
+    if (job.state !== 'rendering' || job.error_code !== null || job.error !== null)
+      return `job ${job.state} (${job.error_code}: ${job.error})`
     return job.batches_done === 1 ? null : `batches_done ${job.batches_done}`
   })
 
@@ -793,7 +834,9 @@ async function main(): Promise<void> {
 
   // 5. Determinism across projects.
   await check('5. a second project with the same input renders to identical CIDs', async () => {
-    // Inserted in the opposite order with the same positions: the CIDs match only if the worker orders by position.
+    // The layers are inserted in the opposite order with the same positions: the CIDs match only if the
+    // worker does not stack them in creation order. (The tokens name their traits by id, so this does not
+    // test ordering by position among the traits.)
     const cid = await seededProject(creator.client, 'five', false, true)
     const jobId = await lockedAndPaid(creator, cid)
     await render(jobId, depsFor(local.memoryQueue(), local.folderPinner(pins)))
@@ -870,6 +913,37 @@ async function main(): Promise<void> {
       if (job.state !== 'failed' || job.error_code !== 'cid-mismatch') return JSON.stringify(job)
       if (job.error !== worker.CID_MISMATCH) return `error "${job.error}"`
       if ((await batchRows(jobId)).some((batch) => batch.state === 'done')) return 'a batch was recorded'
+      return (await statusOf(cid)) === 'art_locked' ? null : `collection ${await statusOf(cid)}`
+    },
+  )
+
+  // 8b. A wrong CID for the metadata set only.
+  await check(
+    '8b. a pinning service that answers with another CID for the metadata set fails the job with cid-mismatch',
+    async () => {
+      const cid = await seededProject(creator.client, 'eight b')
+      const jobId = await lockedAndPaid(creator, cid)
+      const inner = local.folderPinner(pins)
+      const seen: string[] = []
+      // Three batch directories pin first, so the fourth distinct CAR is the metadata set.
+      const pinner: Pinner = {
+        async pin(car, expectedCid) {
+          if (!seen.includes(expectedCid)) seen.push(expectedCid)
+          return seen.indexOf(expectedCid) === 3 ? local.WRONG_CID : inner.pin(car, expectedCid)
+        },
+      }
+      const run = await render(jobId, depsFor(local.memoryQueue(), pinner))
+      if (run.thrown || run.dead) return `run ${JSON.stringify(run)}`
+      if (seen.length !== 4) return `${seen.length} distinct CARs were pinned, expected 4`
+      const job = await jobRow(jobId)
+      if (job.state !== 'failed' || job.error_code !== 'cid-mismatch') return JSON.stringify(job)
+      if (job.error !== worker.CID_MISMATCH) return `error "${job.error}"`
+      if (job.metadata_cid !== null || job.base_uri !== null) return 'the job recorded a metadata CID'
+      // The failure is the job's, not a batch's: every batch stays done with its CID.
+      const batches = await batchRows(jobId)
+      const bad = batches.filter((batch) => batch.state !== 'done' || !CID.test(batch.images_cid ?? ''))
+      if (batches.length !== 3 || bad.length > 0 || batches.some((batch) => batch.error_code !== null))
+        return `batches ${JSON.stringify(batches)}`
       return (await statusOf(cid)) === 'art_locked' ? null : `collection ${await statusOf(cid)}`
     },
   )
@@ -964,6 +1038,12 @@ async function main(): Promise<void> {
       if (batch?.images_cid !== job.placeholder_image_cid)
         return 'the batch CID is not the placeholder image CID'
       if (job.collage_key !== null) return 'a placeholder job has a collage'
+      // The pinned image directory holds the uploaded placeholder, byte for byte.
+      const pinnedImage = (await readCarFiles(readPin(job.placeholder_image_cid ?? ''))).get(
+        'placeholder.png',
+      )
+      if (!pinnedImage || !Buffer.from(pinnedImage).equals(Buffer.from(png)))
+        return 'the pinned placeholder image is not the uploaded bytes'
       if ((await statusOf(cid)) !== before) return `collection ${before} became ${await statusOf(cid)}`
       // The pinned metadata points at the placeholder image directory.
       const meta = await pinnedMetadata(job.metadata_cid ?? '', 'metadata.json')

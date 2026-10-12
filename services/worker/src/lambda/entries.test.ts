@@ -100,6 +100,18 @@ describe('a failure outside the step', () => {
     clean(logged(spy))
     expect(logged(spy).join('\n')).toContain('Error: connect to [url] failed')
   })
+
+  it('still throws the fixed sweep error when the log call itself throws', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {
+      throw leaky()
+    })
+    built.fail = leaky()
+    const { handler } = await import('./sweep.ts')
+    const thrown = await handler().catch((error: unknown) => error)
+    expect(thrown).toBeInstanceOf(Error)
+    expect((thrown as Error).message).toBe('The sweep failed.')
+    expect((thrown as Error).cause).toBeUndefined()
+  })
 })
 
 describe('the dead-letter entry point', () => {
