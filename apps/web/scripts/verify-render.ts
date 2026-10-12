@@ -2,11 +2,19 @@
 // (docs/specs/2026-10-12-render-worker.md, section 8): a signed-in creator's generative project with
 // drawn layers is locked and paid on Anvil, then the local runner takes the job through the same
 // steps the Lambdas run, on the production adapters for the database, storage and the chain, with a
-// folder standing in for the pinning service and a queue in memory. Ten checks: the full run,
+// folder standing in for the pinning service and a queue in memory. Eleven checks: the full run,
 // duplicate delivery, a pin that fails once, a pin that always fails and the retry after it, identical
-// CIDs for identical input, a short payment, a wrong CID, a layer of the wrong size, the sweep and a
-// placeholder job. A check of the pinned metadata for a 1/1 project whose attributes are stored the way
-// the Assets screen stores them comes first among the extra checks.
+// CIDs for identical input, a 1/1 project's attributes reaching the pinned metadata, a short payment, a
+// wrong CID, a layer of the wrong size, the sweep (two cases) and a placeholder job.
+//
+// Numbering: the spec (section 8) lists ten checks. Its checks 1 to 5 are checks 1 to 5 here. Check 6
+// here is an addition (a 1/1 project's attributes), so the spec's checks 6 to 10 (a short payment, a
+// wrong-CID pinner, a wrong-size layer, the sweep, a placeholder job) are numbered 7 to 11 in the output.
+//
+// Not covered here: the worker's rule that a payment which shows at the latest block but not yet at the
+// confirmation depth is unconfirmed (viemChain throws PaymentUnconfirmed, and the step is retried).
+// Anvil's chain has a confirmation depth of 1, so the depth equals the latest block locally and that
+// state cannot be reached; it is covered by unit tests only.
 //
 //   supabase start && supabase seed buckets
 //   pnpm --filter @cobweb/web chain:local    (then copy its two lines into apps/web/.env.local)
@@ -115,7 +123,7 @@ for (const endpoint of [url, rpc, storage.ART_S3_ENDPOINT])
 const factory = getAddress(factoryEnv)
 
 // Imported after the environment is set, so the shared clients read the local chain settings.
-const { confirmCore, lockCore } = await import('../src/lib/art/lock-core.ts')
+const { confirmCore, loadJob, lockCore, lockPlaceholderCore } = await import('../src/lib/art/lock-core.ts')
 const { readLockCollection } = await import('../src/lib/art/lock-collection.ts')
 const web = await import('../src/lib/art/result.ts')
 const schemas = await import('../src/lib/art/schemas.ts')
@@ -388,7 +396,10 @@ async function readCarFiles(car: Uint8Array): Promise<CarFiles> {
 }
 
 /** One token's metadata JSON from the metadata CAR the pinner wrote, parsed. */
-async function pinnedMetadata(metadataCid: string, tokenId: number): Promise<Record<string, unknown>> {
+async function pinnedMetadata(
+  metadataCid: string,
+  tokenId: number | string,
+): Promise<Record<string, unknown>> {
   const car = new Uint8Array(readFileSync(join(pins, `${metadataCid}.car`)))
   const file = (await readCarFiles(car)).get(String(tokenId))
   if (!file) throw new Error(`the metadata CAR has no file ${tokenId}`)
@@ -424,8 +435,9 @@ type Creator = { client: Client; userId: string; account: PrivateKeyAccount }
 /**
  * Locks a seeded project and pays for it on Anvil through the cores the server actions run, then
  * sets a batch size of 2 with the service client so five tokens make three batches. `short` pays 1
- * wei less and marks the job paid by hand: the state a server bug would leave, which the worker's
- * own payment check must catch.
+ * wei less and marks the job paid by hand. The product cannot produce this state (confirmCore
+ * refuses a short payment, and the database refuses `paid` without a full one), so it is what a
+ * server bug would leave, and the worker's own payment check must catch it before the claim.
  */
 async function lockedAndPaid(creator: Creator, cid: string, short = false, tokens = TOKENS): Promise<string> {
   const ctx = await contextFor(creator.client, creator.userId, creator.account.address, cid)
@@ -489,7 +501,7 @@ async function jobRow(jobId: string) {
 async function batchRows(jobId: string) {
   const { data, error } = await admin
     .from('render_batches')
-    .select('index, state, attempts, images_cid')
+    .select('index, state, attempts, images_cid, error, error_code')
     .eq('job_id', jobId)
     .order('index')
   if (error) throw new Error(`batches: ${error.message}`)
@@ -693,6 +705,143 @@ async function main(): Promise<void> {
       return null
     },
   )
+
+  // 7. A short payment (the spec's check 6).
+  await check(
+    '7. a job paid 1 wei short on chain fails with payment-mismatch, never claimed, and cannot be retried',
+    async () => {
+      const cid = await seededProject(creator.client, 'seven')
+      const jobId = await lockedAndPaid(creator, cid, true)
+      const pinner = local.folderPinner(pins)
+      const run = await render(jobId, depsFor(local.memoryQueue(), pinner))
+      if (run.thrown || run.dead) return `run ${JSON.stringify(run)}`
+      const job = await jobRow(jobId)
+      if (job.state !== 'failed' || job.error_code !== 'payment-mismatch') return JSON.stringify(job)
+      if (job.error !== worker.PAYMENT_MISMATCH) return `error "${job.error}"`
+      if (job.started_at !== null || (await batchRows(jobId)).length !== 0) return 'the job was claimed'
+      if (pinner.pinned.length !== 0) return 'something was pinned'
+      if ((await statusOf(cid)) !== 'art_locked') return `collection ${await statusOf(cid)}`
+      const retry = await creator.client.rpc('art_render_retry', { p_collection_id: cid })
+      return retry.error?.message === web.PAYMENT_UNVERIFIED
+        ? null
+        : `retry: ${retry.error?.message ?? 'accepted'}`
+    },
+  )
+
+  // 8. A wrong CID from the pinning service (the spec's check 7).
+  await check(
+    '8. a pinning service that answers with another CID fails the job with cid-mismatch',
+    async () => {
+      const cid = await seededProject(creator.client, 'eight')
+      const jobId = await lockedAndPaid(creator, cid)
+      const run = await render(jobId, depsFor(local.memoryQueue(), local.wrongCidPinner()))
+      if (run.thrown || run.dead) return `run ${JSON.stringify(run)}`
+      const job = await jobRow(jobId)
+      if (job.state !== 'failed' || job.error_code !== 'cid-mismatch') return JSON.stringify(job)
+      if (job.error !== worker.CID_MISMATCH) return `error "${job.error}"`
+      if ((await batchRows(jobId)).some((batch) => batch.state === 'done')) return 'a batch was recorded'
+      return (await statusOf(cid)) === 'art_locked' ? null : `collection ${await statusOf(cid)}`
+    },
+  )
+
+  // 9. A layer of the wrong size (the spec's check 8).
+  await check('9. a layer of the wrong size fails the job with layer-size and its sentence', async () => {
+    const cid = await seededProject(creator.client, 'nine', true)
+    const jobId = await lockedAndPaid(creator, cid)
+    const run = await render(jobId, depsFor(local.memoryQueue(), local.folderPinner(pins)))
+    if (run.thrown || run.dead) return `a bad layer was retried: ${JSON.stringify(run)}`
+    const job = await jobRow(jobId)
+    if (job.state !== 'failed' || job.error_code !== 'layer-size') return JSON.stringify(job)
+    // The render library's own sentence, stored as the job's error with the worker's token prefix. Token 5
+    // is the only one that picks the small Eyes image (n = 4, bit 2), and Eyes is image 3 of 3.
+    const sentence = 'Token 5: Image 3 of 3 in the stack is 32 by 32 pixels; the canvas is 64 by 64.'
+    if (job.error !== sentence) return `error "${job.error}"`
+    const failedBatches = (await batchRows(jobId)).filter((batch) => batch.state === 'failed')
+    if (failedBatches.length !== 1) return `failed batches ${JSON.stringify(failedBatches)}`
+    if (failedBatches[0]?.error_code !== 'layer-size' || failedBatches[0].error !== job.error)
+      return `batch error ${JSON.stringify(failedBatches[0])}`
+    if ((await statusOf(cid)) !== 'art_locked') return `collection ${await statusOf(cid)}`
+    // The web app's model of the job. The creator can fix this art only by unlocking it, so a retry
+    // fails the same way; the model still calls the job retryable. A known gap, recorded for the
+    // screen sub-project, which should offer the unlock first.
+    const model = await loadJob(creator.client, jobId)
+    if (model.state !== 'failed') return `the web model says ${model.state}`
+    return model.errorCode === 'layer-size' && model.retryable
+      ? null
+      : `model ${JSON.stringify({ errorCode: model.errorCode, retryable: model.retryable })}`
+  })
+
+  // The sweep's view 16 minutes from now of one job only: `render_jobs.updated_at` is kept by a trigger,
+  // so a job cannot be backdated, and a job another developer left open in the local database must not be
+  // touched. The id filter goes into the query itself, before its limit.
+  const sweepDeps = (deps: Deps & { queue: MemoryQueue }, jobId: string) => {
+    const later = worker.supabaseJobs(admin, { now: () => Date.now() + 16 * 60_000 })
+    return { ...deps, jobs: { ...deps.jobs, stuck: (minutes: number) => later.stuck(minutes, jobId) } }
+  }
+
+  // 10. The sweep, a job left finalizing (the spec's check 9).
+  await check('10. the sweep re-enqueues a job left finalizing and it finishes', async () => {
+    const cid = await seededProject(creator.client, 'ten')
+    const jobId = await lockedAndPaid(creator, cid)
+    // The metadata message is lost, as after a crash between the last batch and the send.
+    const lossy = local.memoryQueue({ drop: (message) => message.step === 'metadata' })
+    await render(jobId, depsFor(lossy, local.folderPinner(pins)))
+    const before = (await jobRow(jobId)).state
+    if (before !== 'finalizing') return `before the sweep: ${before}`
+    const deps = depsFor(local.memoryQueue(), local.folderPinner(pins))
+    if ((await deps.jobs.stuck(15, jobId)).length !== 0) return 'stuck after no time at all'
+    if ((await worker.sweep(sweepDeps(deps, jobId))) !== 1) return 'the sweep did not find the job'
+    const run = await local.runLocal(deps)
+    if (run.thrown || run.dead) return `run ${JSON.stringify(run)}`
+    return doneProblem(jobId)
+  })
+
+  // 10b. The sweep, a paid job whose start message was never delivered.
+  await check('10b. the sweep starts a paid job whose start message was lost and it finishes', async () => {
+    const cid = await seededProject(creator.client, 'ten b')
+    const jobId = await lockedAndPaid(creator, cid)
+    const deps = depsFor(local.memoryQueue(), local.folderPinner(pins))
+    if ((await deps.jobs.stuck(15, jobId)).length !== 0) return 'stuck after no time at all'
+    const job = await jobRow(jobId)
+    if (job.state !== 'paid' || job.started_at !== null) return `before the sweep: ${job.state}`
+    if ((await worker.sweep(sweepDeps(deps, jobId))) !== 1) return 'the sweep did not find the job'
+    const run = await local.runLocal(deps)
+    if (run.thrown || run.dead) return `run ${JSON.stringify(run)}`
+    return doneProblem(jobId)
+  })
+
+  // 11. A placeholder job (the spec's check 10). Nothing is paid: a placeholder job is free.
+  await check(
+    '11. a placeholder job on a deferred collection finishes with its slash-less base URI',
+    async () => {
+      const cid = await newCollection(creator.client, 'eleven')
+      const deferred = await creator.client.from('collections').update({ art_deferred: true }).eq('id', cid)
+      if (deferred.error) return `defer: ${deferred.error.message}`
+      const png = await local.flatPng({ r: 30, g: 30, b: 30, alpha: 1 })
+      const uploadId = await upload(creator.client, cid, 'placeholder', png, 'Hidden.png')
+      const ctx = await contextFor(creator.client, creator.userId, account.address, cid)
+      const locked = await lockPlaceholderCore(ctx, uploadId)
+      if (!('data' in locked)) return `lock: ${refusal(locked)}`
+      const jobId = locked.data.id
+      const before = await statusOf(cid)
+      const run = await render(jobId, depsFor(local.memoryQueue(), local.folderPinner(pins)))
+      if (run.thrown || run.dead) return `run ${JSON.stringify(run)}`
+      const job = await jobRow(jobId)
+      if (job.state !== 'done') return `state ${job.state} (${job.error_code}: ${job.error})`
+      if (job.base_uri !== `ipfs://${job.metadata_cid}/metadata.json`) return `base URI ${job.base_uri}`
+      if (!CID.test(job.placeholder_image_cid ?? '')) return `placeholder CID ${job.placeholder_image_cid}`
+      const [batch] = await batchRows(jobId)
+      if (batch?.images_cid !== job.placeholder_image_cid)
+        return 'the batch CID is not the placeholder image CID'
+      if (job.collage_key !== null) return 'a placeholder job has a collage'
+      if ((await statusOf(cid)) !== before) return `collection ${before} became ${await statusOf(cid)}`
+      // The pinned metadata points at the placeholder image directory.
+      const meta = await pinnedMetadata(job.metadata_cid ?? '', 'metadata.json')
+      return meta.image === `ipfs://${job.placeholder_image_cid}/placeholder.png`
+        ? null
+        : `placeholder metadata ${JSON.stringify(meta)}`
+    },
+  )
 }
 
 async function deleteKeys(bucket: string, keys: string[]): Promise<string | null> {
@@ -727,7 +876,8 @@ async function collageKeys(cid: string): Promise<string[]> {
 }
 
 // Children before parents, so a table that refuses a cascade is never the reason a row survives.
-const CHILD_TABLES = ['tokens', 'traits', 'layers', 'art_collections', 'uploads', 'render_jobs'] as const
+// `render_jobs` comes before `uploads`: a placeholder job points at its upload.
+const CHILD_TABLES = ['tokens', 'traits', 'layers', 'art_collections', 'render_jobs', 'uploads'] as const
 
 async function cleanup(): Promise<void> {
   await check('cleanup: the run leaves no object, row or user behind', async () => {
