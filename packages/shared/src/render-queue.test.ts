@@ -10,6 +10,7 @@ import {
   RENDER_TOPIC,
   WORKER_FAILURE_CODES,
   type RenderMessage,
+  type RenderQueue,
 } from './render-queue.ts'
 
 const JOB = '3f0c2f5e-8a51-4c0e-9d7b-0d0f5a3b9c11'
@@ -159,6 +160,13 @@ describe('collageKey', () => {
 })
 
 describe('the module', () => {
+  it('has no backlog: duplicates are stopped by idempotency keys, not by reading the queue', () => {
+    // @ts-expect-error: the contract has send and nothing else
+    const extra: keyof RenderQueue = 'backlog'
+    const only: keyof RenderQueue = 'send'
+    expect([extra, only]).toEqual(['backlog', 'send'])
+  })
+
   it('imports nothing, so the web app can use it without the worker or sharp', () => {
     const source = readFileSync(new URL('./render-queue.ts', import.meta.url), 'utf8')
     expect(source).not.toMatch(/^\s*import\s/m)

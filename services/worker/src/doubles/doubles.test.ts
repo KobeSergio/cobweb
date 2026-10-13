@@ -15,20 +15,6 @@ const start: RenderMessage = { jobId: JOB, step: 'start', retries: 0 }
 const batch = (index: number): RenderMessage => ({ jobId: JOB, step: 'batch', index, retries: 0 })
 const text = (value: string) => new TextEncoder().encode(value)
 
-describe('memoryQueue backlog', () => {
-  it('counts the messages waiting to be received', async () => {
-    const queue = memoryQueue()
-    expect(await queue.backlog?.()).toBe(0)
-    await queue.send([
-      { jobId: JOB, step: 'start', retries: 0 },
-      { jobId: JOB, step: 'metadata', retries: 0 },
-    ])
-    expect(await queue.backlog?.()).toBe(2)
-    queue.take()
-    expect(await queue.backlog?.()).toBe(1)
-  })
-})
-
 describe('memoryQueue', () => {
   it('delivers in order and counts each receive', async () => {
     const queue = memoryQueue()

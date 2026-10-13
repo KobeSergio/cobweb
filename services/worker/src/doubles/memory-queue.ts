@@ -19,7 +19,7 @@ export type MemoryQueue = RenderQueue & {
 }
 
 /**
- * A queue in memory with the delivery rules of SQS that matter to the worker: a message that fails
+ * A queue in memory with the delivery rules that matter to the worker: a message that fails
  * comes back, and after `maxReceives` receives it goes to the dead-letter list. `copies: 2` delivers
  * every message twice, which is how the checks exercise duplicate delivery. `drop` loses the
  * messages it picks, as a crash between a database write and a send would.
@@ -61,9 +61,6 @@ export function memoryQueue(
       return dead.shift() ?? null
     },
     size() {
-      return waiting.length
-    },
-    async backlog() {
       return waiting.length
     },
   }

@@ -10,12 +10,11 @@ export type RenderMessage =
   | { jobId: string; step: 'metadata'; retries: number }
 
 /**
- * Where messages go: SQS in production, an in-memory queue locally. `backlog` is how many messages
- * are waiting to be received; a queue that cannot tell leaves it out.
+ * Where messages go: Vercel Queues in production (the worker's `vercelRenderQueue`), an in-memory
+ * queue locally. Each message is sent with `messageKey(message)` as its idempotency key.
  */
 export type RenderQueue = {
   send(messages: RenderMessage[]): Promise<void>
-  backlog?: () => Promise<number>
 }
 
 /**

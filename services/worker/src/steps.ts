@@ -426,34 +426,18 @@ export async function handleDead(message: RenderMessage, deps: Deps): Promise<vo
 export const STUCK_MINUTES = 15
 
 /**
- * The same, while the render queue has messages waiting: work is queued behind others, so only jobs
- * untouched for two hours are sent again. The queue is shared by every creator, so a busy queue makes
- * the sweep more patient and never makes it skip.
- */
-export const STUCK_MINUTES_BUSY = 120
-
-/**
  * Re-enqueues a start message for each job left `rendering` or `finalizing`, or left `paid` or
  * `waived` and never claimed, with nothing touched for 15 minutes. The start step then claims an
  * unclaimed job, re-sends the open batches of a `rendering` one, or sends `metadata` for a
- * `finalizing` one. With messages waiting in the queue it waits two hours instead.
+ * `finalizing` one. The message carries the job's key (`messageKey`), so a start the queue already
+ * took within the last day is dropped as a duplicate instead of being run twice.
  */
 export async function sweep(deps: Deps): Promise<number> {
-  // A backlog means work may be waiting, not stuck, so the sweep is more patient. A backlog that cannot
-  // be read counts as none: the sweep fails toward recovering jobs, never toward skipping them.
-  let waiting = 0
-  try {
-    waiting = (await deps.queue.backlog?.()) ?? 0
-  } catch (error) {
-    deps.log('backlog unknown', { error: errorSummary(error) })
-  }
-  if (waiting > 0) deps.log('sweep busy', { backlog: waiting, minutes: STUCK_MINUTES_BUSY })
-  const jobs = await deps.jobs.stuck(waiting > 0 ? STUCK_MINUTES_BUSY : STUCK_MINUTES)
+  const jobs = await deps.jobs.stuck(STUCK_MINUTES)
   for (const job of jobs) {
     await enqueueRender(deps.queue, job)
-    // Only after the send went through: a failed send leaves the job eligible for the next sweep. Without
-    // this a job is returned on every sweep until something updates its row, and under a long backlog
-    // that sends all its open batches again four times an hour.
+    // Only after the send went through: a failed send leaves the job eligible for the next sweep.
+    // Without this a job is returned on every sweep until something updates its row.
     try {
       await deps.jobs.touch(job.id)
     } catch (error) {
