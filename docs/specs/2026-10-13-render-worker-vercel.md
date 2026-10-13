@@ -31,17 +31,27 @@ and produced the same CID as the arm64 laptop.
 4. **Layers and collages live in Cloudflare R2**, through its S3 endpoint. R2 has no egress charge,
    and the worker reads each token's layers from storage. The code already takes any S3 endpoint;
    locally both buckets stay on Supabase Storage. No code depends on R2.
-5. **A bounded layer cache per batch** (512 MB) in the batch step, so a trait used by many tokens in
-   a batch is read from storage once.
+5. **No worker-side layer cache.** The render library already reads each distinct layer once per
+   `renderBatch` call (`cachedLoader` in `services/render/src/batch.ts`, unbounded, so a batch's
+   distinct layers sit in memory beside the CAR; a few hundred 4 MB files fit the 4 GB instance). A
+   cache across batches is impossible on functions that scale to zero, and the egress a batch's
+   reads cost is answered by R2, not by code. (The design conversation first planned a 512 MB
+   cache; planning found it redundant and it was dropped on 13 October 2026.)
 6. **Duplicates are stopped by idempotency keys**, not by a backlog read. Every message carries a
    key of job id, step, batch index and retry count; Vercel drops a duplicate for 24 hours. The
-   sweep's "wait two hours while the queue is busy" rule and `RenderQueue.backlog` go.
+   sweep's "wait two hours while the queue is busy" rule and `RenderQueue.backlog` go. A
+   consequence, accepted: a sweep re-send for a job whose start message with the same retry count
+   was published less than 24 hours ago is dropped. Inside that day Vercel's own retries are the
+   recovery path (a message is retried until it is acknowledged or expires), so the sweep's job
+   within the day is the start message that was never published (the send after payment failed)
+   and, after the day, anything else.
 7. **Dead-lettering is in the consumer.** Vercel Queues has no dead-letter queue. A message whose run
    has thrown on its third delivery is handed to `handleDead` and acknowledged; a first failure is
    retried after 120 seconds, later failures after an hour, as on SQS.
-8. **The start message is sent when the payment is recorded**, in the pay flow, so a paid job starts
-   within seconds. A failed send is logged and left to the sweep. This was owed to the screen
-   sub-project and moves here.
+8. **The start message is sent when a job becomes `paid` or `waived`**: in the pay flow when the
+   payment is recorded, and in the lock flow when `art_lock` returns a job already `waived` (a
+   single asset with no fee), so the job starts within seconds. A failed send is logged and left
+   to the sweep. This was owed to the screen sub-project and moves here.
 9. **1/1 and single-asset batches target 500 MB** at lock (was 1 GB); the worker's ceiling becomes
    600 MB (was 1.2 GB). Generative batches stay at 100 tokens. The owner's experience is that
    marketplaces cache and cap video assets around 5 to 10 MB, so 1 GB batches were far above need.
@@ -57,7 +67,7 @@ and produced the same CID as the arm64 laptop.
 ## 3. Scope
 
 In: the Vercel queue adapter and consumer, the sweep cron route, the web app's queue module and the
-start send in the pay flow, the layer cache, the batch target and ceiling, `vercel.json`, the Next
+start send in the pay and lock flows, the batch target and ceiling, `vercel.json`, the Next
 config for the worker packages, the deletions, docs, a preview deployment.
 
 Out: the retry action and the screen's polling (screen wiring, next sub-project); production env
@@ -128,10 +138,11 @@ export function retryAfter(metadata: { deliveryCount: number }): { afterSeconds:
   `render not queued (no queue here)` with the job id and returns, so local development and the
   verify scripts, which drive the local runner themselves, never reach Vercel.
 - The pay flow (`apps/web/src/lib/art/lock-core.ts`): after `art_record_payment` succeeds and the
-  payment is not short, `enqueueRender(ctx.queue, { id: row.id, retries: 0 })`. A throw from the send
-  is logged with the job id and swallowed: the payment is recorded, and the sweep starts the job
-  within 15 minutes. `LockContext` gains `queue: RenderQueue`, supplied by the server action layer
-  from `renderQueue()`.
+  payment is not short, `enqueueRender(ctx.queue, { id: row.id, retries: 0 })`. The lock flow does
+  the same when the job `art_lock` returns is already `waived`. A throw from the send is logged with
+  the job id and swallowed: the row is recorded, and the sweep starts the job within 15 minutes.
+  `LockContext` gains `queue: RenderQueue`, supplied by the server action layer from
+  `renderQueue()`.
 - `apps/web/vercel.json`: `regions: ["iad1"]`; the trigger on the consumer route
   (`type: queue/v2beta`, `topic: render`, `retryAfterSeconds: 120`, `maxDeliveries: 10`,
   `maxConcurrency: 25`); `crons: [{ path: "/api/cron/render-sweep", schedule: "*/15 * * * *" }]`.
@@ -144,19 +155,14 @@ export function retryAfter(metadata: { deliveryCount: number }): { afterSeconds:
 
 - `productionDeps(env, { queue, log?, kind? })`: the queue is injected; the function builds no queue
   client. `WORKER_ENV` loses `RENDER_QUEUE_URL`. `env.ts` imports no SQS or Secrets Manager client.
-- `services/worker/src/cache.ts`: `cachedLoad(load, maxBytes)` wraps a `Store['load']` with a map
-  keyed by storage key, newest last. A hit returns the bytes without a load. A miss loads, then
-  stores the entry if it fits alone under `maxBytes`, evicting the oldest entries until the total
-  fits. The batch step wraps the store with it for generative and placeholder batches only (a 1/1 or
-  single-asset batch loads each distinct file once already, and its bounded loader counts bytes).
-  `Deps.layerCacheBytes` overrides the default `LAYER_CACHE_BYTES = 512 MB` for tests.
-- `MAX_BATCH_BYTES` becomes 600,000,000.
+- `MAX_BATCH_BYTES` becomes 600,000,000. No layer cache is added (decision 5).
 - `sweep` loses the busy branch and `STUCK_MINUTES_BUSY`; it always uses `STUCK_MINUTES`.
   `memoryQueue` loses `backlog`.
-- Deleted: `src/lambda/` (all files), `src/adapters/sqs.ts` and its test, `src/testing/stub-aws.ts`.
+- Deleted: `src/lambda/` (all files), `src/adapters/sqs.ts` and its test. `src/testing/stub-aws.ts`
+  is renamed `stub-s3.ts`: it is a generic S3 stand-in the Filebase and store tests use.
   `src/queue.ts` re-exports the Vercel adapter instead of the SQS one. `index.ts` exports
-  `vercelRenderQueue`, `queueConsumer`, `retryAfter`, `cachedLoad` and the new constants, and no
-  longer exports `sqsRenderQueue` or `STUCK_MINUTES_BUSY`.
+  `vercelRenderQueue`, `queueConsumer`, `retryAfter` and the new constants, and no longer exports
+  `sqsRenderQueue` or `STUCK_MINUTES_BUSY`.
 - `package.json` drops `@aws-sdk/client-sqs`, `@aws-sdk/client-secrets-manager` and
   `@types/aws-lambda`.
 
@@ -188,11 +194,11 @@ on the layer bucket allowing `PUT` from the app's origin (browser uploads are pr
 - Unit (Vitest): the message keys; the adapter (order, key and retention per message, a throw
   propagates); the consumer (a non-message acknowledged; a throw rethrown below three deliveries;
   the third delivery calls `handleDead` and resolves; a `handleDead` throw rethrown; deps built once
-  and rebuilt after a failed build); `retryAfter`; the cache (hit, miss, eviction order, an entry
-  larger than the cap not stored, bytes counted once); the sweep without a busy branch;
+  and rebuilt after a failed build); `retryAfter`; the sweep without a busy branch;
   `productionDeps` with an injected queue and without `RENDER_QUEUE_URL`. In the web app: the queue
   module's choice by environment; the pay flow sends one start message with `retries` 0 after a
-  recorded payment, sends nothing for a short payment, and reports success when the send throws.
+  recorded payment, sends nothing for a short payment, and reports success when the send throws;
+  the lock flow sends one for a job returned `waived` and none for a job returned `payment_due`.
 - `verify:render`, three times. The runner and its doubles are unchanged apart from `backlog`.
 - `verify:local` with the new batch-size numbers.
 - `pnpm build` of the web app with the worker packages transpiled and sharp external.
@@ -212,7 +218,7 @@ on the layer bucket allowing `PUT` from the app's origin (browser uploads are pr
   AWS to-dos (the deploy, the Lambda benchmark, the alarm target); the owner's remaining to-dos are
   the production env values and the live Filebase checks.
 - `CLAUDE.md`: the layout loses `infra/`; the commands lose the two infra lines; the worker line says
-  where it runs.
+  where it runs. The root `README.md` loses its SQS, Lambda and S3 wording the same way.
 - `services/worker/README.md` (new): what runs where, the env names, the Vercel settings, the R2
   setup, the two Filebase behaviours to confirm, the cap and how to raise it, and how to run the
   local runner. `infra/README.md` goes with the package.
