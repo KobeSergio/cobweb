@@ -23,4 +23,13 @@ export { filebasePinner } from './adapters/filebase.ts'
 export { sqsRenderQueue } from './adapters/sqs.ts'
 export { vercelRenderQueue } from './adapters/vercel-queue.ts'
 export type { QueueSender } from './adapters/vercel-queue.ts'
+export {
+  FIRST_RETRY_SECONDS,
+  LATER_RETRY_SECONDS,
+  MAX_DELIVERIES,
+  MessageFailed,
+  queueConsumer,
+  retryAfter,
+} from './vercel/consumer.ts'
+export type { DeliveryMetadata } from './vercel/consumer.ts'
 export { artS3Options, productionDeps, WORKER_ENV, workerClient } from './env.ts'
