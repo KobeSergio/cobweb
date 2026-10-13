@@ -37,7 +37,7 @@ local runner) and [docs/specs/2026-10-13-render-worker-vercel.md](../../docs/spe
 
 ## Environment
 
-Every name is server only and none starts with `NEXT_PUBLIC_`. They live in the web app's environment
+Every name except `NEXT_PUBLIC_SUPABASE_URL` is server only, and no new name starts with `NEXT_PUBLIC_`. They live in the web app's environment
 (`apps/web/.env.example`); `services/worker/.env.example` lists the worker's own view of them.
 
 | Name                                                   | Secret | What                                                          |
