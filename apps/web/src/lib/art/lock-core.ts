@@ -1,9 +1,17 @@
 import { hashTokenList } from '@cobweb/dna'
-import { chainById, confirmationsFor, factoryAbi, factoryAddress, hasConfirmations } from '@cobweb/shared'
+import {
+  chainById,
+  confirmationsFor,
+  factoryAbi,
+  factoryAddress,
+  hasConfirmations,
+  type RenderQueue,
+} from '@cobweb/shared'
 import { publicClientFor } from '@cobweb/shared/server'
 import { TransactionReceiptNotFoundError, type Address, type Hex, type PublicClient } from 'viem'
 import type { Json } from '@/lib/database.types'
 import { matchArtPaid } from '@/lib/chain/art-paid'
+import { startIfReady, startRender } from '@/lib/render/start'
 import type { RenderJob } from '@/lib/demo/types'
 import { buildAssetTokenList, hashAssetTokenList, type AssetUploadRow } from './asset-tokens'
 import type { DbError } from './db-error'
@@ -43,6 +51,11 @@ export type LockContext = {
   owner: string
   wallet: string
   collection: LockCollection
+  /**
+   * Where the pay flow sends a newly paid job's start message: Vercel Queues on Vercel, a queue that
+   * only logs anywhere else (lib/render/queue.ts). The verify scripts pass their own.
+   */
+  queue: RenderQueue
 }
 
 /** A step's outcome: its data, a database error for `lockWriteError`, or a sentence the creator reads. */
@@ -255,7 +268,10 @@ export async function lockCore(
     p_factory: factoryOn(chainId)?.toLowerCase(),
   })
   if (error) return { error }
-  return { data: await loadJob(supabase, (data as { id: string }).id) }
+  const job = await loadJob(supabase, (data as { id: string }).id)
+  // A lock that owes nothing (a single asset, or a zero fee) comes back `paid`: start its render now.
+  await startIfReady(ctx.queue, job)
+  return { data: job }
 }
 
 export async function unlockCore(ctx: LockContext): Promise<LockOutcome<null>> {
@@ -275,7 +291,10 @@ export async function lockPlaceholderCore(
     p_placeholder_upload_id: uploadId,
   })
   if (error) return { error }
-  return { data: await loadJob(ctx.supabase, (data as { id: string }).id) }
+  const job = await loadJob(ctx.supabase, (data as { id: string }).id)
+  // A placeholder lock costs nothing and comes back `paid`: start its render now.
+  await startIfReady(ctx.queue, job)
+  return { data: job }
 }
 
 /** The open job, quoted again from the current rate when its quote expired (spec section 7, quoteArt). */
@@ -376,6 +395,8 @@ export async function confirmCore(
   })
   if (recorded.error) return { error: recorded.error }
   if (short) return { refused: `${SHORT_PAYMENT} Tell support about job ${row.onchain_job_id}.` }
+  // The job is paid: start its render now. A failed send is logged and left to the sweep.
+  await startRender(ctx.queue, row.id)
   return { data: await loadJob(supabase, row.id) }
 }
 

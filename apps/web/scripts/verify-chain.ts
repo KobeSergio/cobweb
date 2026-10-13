@@ -30,6 +30,7 @@ import { anvil } from 'viem/chains'
 import { createSiweMessage, generateSiweNonce } from 'viem/siwe'
 import type { Database } from '../src/lib/database.types.ts'
 import type { RenderJob } from '../src/lib/demo/types.ts'
+import type { RenderMessage, RenderQueue } from '@cobweb/shared/render-queue'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(here, '../../..')
@@ -218,17 +219,27 @@ async function seededCollection(client: ReturnType<typeof createClient<Database>
   return cid
 }
 
-/** The context `lockWrite` builds: the creator's RLS client, the service client, the owner's id. */
+/** The context `lockWrite` builds: the creator's RLS client, the service client, the owner's id, a queue. */
 async function contextFor(
   client: ReturnType<typeof createClient<Database>>,
   owner: string,
   wallet: string,
   cid: string,
+  queue: RenderQueue,
 ): Promise<LockContext> {
   const collection = await readLockCollection(client, cid)
   if (!collection || collection.owner_id !== owner) throw new Error('the creator cannot read the collection')
-  return { supabase: client, service: () => admin, owner, wallet: wallet.toLowerCase(), collection }
+  return { supabase: client, service: () => admin, owner, wallet: wallet.toLowerCase(), collection, queue }
 }
+
+/** A queue that keeps what the pay flow sends, so a check can read it. */
+function recordingQueue(): RenderQueue & { sent: RenderMessage[] } {
+  const sent: RenderMessage[] = []
+  return { sent, send: async (messages) => void sent.push(...messages) }
+}
+
+/** A queue that refuses every send, as Vercel Queues would during an outage. */
+const refusingQueue: RenderQueue = { send: () => Promise.reject(new Error('the queue is down')) }
 
 const refusal = <T>(outcome: LockOutcome<T>) =>
   'refused' in outcome ? outcome.refused : 'error' in outcome ? `db ${outcome.error?.code}` : 'accepted'
@@ -267,46 +278,63 @@ async function main(): Promise<void> {
   await chain.setBalance({ address: stranger.address, value: parseEther('10') })
   const { client, userId } = await signIn(creator)
 
-  const first = await contextFor(client, userId, creator.address, await seededCollection(client))
+  const firstQueue = recordingQueue()
+  const first = await contextFor(client, userId, creator.address, await seededCollection(client), firstQueue)
   let job1: RenderJob | null = null
   let paidHash: Hex | null = null
 
-  await check('lockArt: the creator locks a three-token set, quoted from the factory rate', async () => {
-    const outcome = await lockCore(first, { allowDuplicates: false, chainId: 31337 })
-    if (!('data' in outcome)) return refusal(outcome)
-    job1 = outcome.data
-    const rate = await chain.readContract({
-      address: factory,
-      abi: factoryAbi,
-      functionName: 'artFeePerToken',
-    })
-    const want = quoteTotalWei('generative', rate, 3).toString()
-    return job1.state === 'payment_due' &&
-      job1.quote.totalWei === want &&
-      job1.quote.payer === creator.address.toLowerCase() &&
-      job1.quote.factory === factory
-      ? null
-      : JSON.stringify({ state: job1.state, quote: job1.quote, want })
-  })
+  await check(
+    'lockArt: the creator locks a three-token set, quoted from the factory rate, and nothing is queued',
+    async () => {
+      const outcome = await lockCore(first, { allowDuplicates: false, chainId: 31337 })
+      if (!('data' in outcome)) return refusal(outcome)
+      job1 = outcome.data
+      const rate = await chain.readContract({
+        address: factory,
+        abi: factoryAbi,
+        functionName: 'artFeePerToken',
+      })
+      const want = quoteTotalWei('generative', rate, 3).toString()
+      if (firstQueue.sent.length > 0) return `queued at lock ${JSON.stringify(firstQueue.sent)}`
+      return job1.state === 'payment_due' &&
+        job1.quote.totalWei === want &&
+        job1.quote.payer === creator.address.toLowerCase() &&
+        job1.quote.factory === factory
+        ? null
+        : JSON.stringify({ state: job1.state, quote: job1.quote, want })
+    },
+  )
 
   await check(
-    'pay: payForArt from the quote wallet with the exact total; confirm marks the job paid',
+    'pay: payForArt from the quote wallet with the exact total; confirm marks the job paid and queues one start',
     async () => {
       if (!job1) return 'no job'
       paidHash = await pay(creator, job1.jobId, BigInt(job1.quote.totalWei))
       const outcome = await confirmCore(first, job1.id, paidHash)
       if (!('data' in outcome)) return refusal(outcome)
       const job = outcome.data
-      return job.state === 'paid' &&
+      if (!(
+        job.state === 'paid' &&
         'payment' in job &&
         job.payment?.txHash === paidHash &&
         job.payment.amountWei === job1.quote.totalWei
+      ))
+        return JSON.stringify(job)
+      const want = [{ jobId: job1.id, step: 'start', retries: 0 }]
+      return JSON.stringify(firstQueue.sent) === JSON.stringify(want)
         ? null
-        : JSON.stringify(job)
+        : `queued ${JSON.stringify(firstQueue.sent)}`
     },
   )
 
-  const second = await contextFor(client, userId, creator.address, await seededCollection(client))
+  const secondQueue = recordingQueue()
+  const second = await contextFor(
+    client,
+    userId,
+    creator.address,
+    await seededCollection(client),
+    secondQueue,
+  )
   let job2: RenderJob | null = null
   await check('lockArt: a second collection locks for the refusals', async () => {
     const outcome = await lockCore(second, { allowDuplicates: false, chainId: 31337 })
@@ -323,7 +351,7 @@ async function main(): Promise<void> {
   })
 
   await check(
-    'confirm: a payment short of the quote is refused and recorded, the job stays due',
+    'confirm: a payment short of the quote is refused and recorded, the job stays due and nothing is queued',
     async () => {
       if (!job2) return 'no job'
       const hash = await pay(creator, job2.jobId, BigInt(job2.quote.totalWei) - 1n)
@@ -333,6 +361,7 @@ async function main(): Promise<void> {
       if (!sentence.includes(job2.jobId)) return `the sentence does not name the job: ${sentence}`
       const row = await admin.from('render_jobs').select('state, payment_tx_hash').eq('id', job2.id).single()
       if (row.error) return row.error.message
+      if (secondQueue.sent.length > 0) return `queued ${JSON.stringify(secondQueue.sent)}`
       return row.data.state === 'payment_due' && row.data.payment_tx_hash === hash.toLowerCase()
         ? null
         : JSON.stringify(row.data)
@@ -365,7 +394,13 @@ async function main(): Promise<void> {
   })
 
   // A payment that mined but was never recorded must not be stranded by an unlock or a new quote.
-  const third = await contextFor(client, userId, creator.address, await seededCollection(client))
+  const third = await contextFor(
+    client,
+    userId,
+    creator.address,
+    await seededCollection(client),
+    refusingQueue,
+  )
   let job3: RenderJob | null = null
   let unrecorded: Hex | null = null
   await check(
@@ -389,16 +424,19 @@ async function main(): Promise<void> {
     },
   )
 
-  await check('confirm: the payment left unrecorded is recorded and the job is paid', async () => {
-    if (!job3 || !unrecorded) return 'no payment'
-    const outcome = await confirmCore(third, job3.id, unrecorded)
-    if (!('data' in outcome)) return refusal(outcome)
-    return outcome.data.state === 'paid' &&
-      'payment' in outcome.data &&
-      outcome.data.payment?.txHash === unrecorded
-      ? null
-      : JSON.stringify(outcome.data)
-  })
+  await check(
+    'confirm: the payment left unrecorded is recorded and the job is paid, even when the queue refuses the start message',
+    async () => {
+      if (!job3 || !unrecorded) return 'no payment'
+      const outcome = await confirmCore(third, job3.id, unrecorded)
+      if (!('data' in outcome)) return refusal(outcome)
+      return outcome.data.state === 'paid' &&
+        'payment' in outcome.data &&
+        outcome.data.payment?.txHash === unrecorded
+        ? null
+        : JSON.stringify(outcome.data)
+    },
+  )
 }
 
 async function cleanup(): Promise<void> {

@@ -1,5 +1,6 @@
 import 'server-only'
 import { createServiceClient } from '@/lib/supabase/service'
+import { renderQueue } from '@/lib/render/queue'
 import { lockWriteError } from './db-error'
 import { errorSummary, type LockContext, type LockOutcome } from './lock-core'
 import { ownedCollection } from './owned'
@@ -27,6 +28,7 @@ export async function lockWrite<T>(
       owner: owned.user.id,
       wallet: owned.user.walletAddress,
       collection: owned.collection,
+      queue: renderQueue(),
     })
     if ('refused' in outcome) return fail(outcome.refused)
     if ('error' in outcome) return fail(lockWriteError(outcome.error))

@@ -1,7 +1,7 @@
 // Checks the render worker end to end against LOCAL Supabase, LOCAL storage and a LOCAL Anvil chain
 // (docs/specs/2026-10-12-render-worker.md, section 8): a signed-in creator's generative project with
 // drawn layers is locked and paid on Anvil, then the local runner takes the job through the same
-// steps the Lambdas run, on the production adapters for the database, storage and the chain, with a
+// steps the queue consumer runs, on the production adapters for the database, storage and the chain, with a
 // folder standing in for the pinning service and a queue in memory. Fifteen checks: the full run,
 // duplicate delivery (serial, then two copies of one batch at once), a pin that fails once, a pin that
 // always fails and the retry after it, identical CIDs for identical input, a 1/1 project's attributes
@@ -443,7 +443,15 @@ async function pinnedMetadata(
 async function contextFor(client: Client, owner: string, wallet: string, cid: string): Promise<LockContext> {
   const collection = await readLockCollection(client, cid)
   if (!collection || collection.owner_id !== owner) throw new Error('the creator cannot read the collection')
-  return { supabase: client, service: () => admin, owner, wallet: wallet.toLowerCase(), collection }
+  // The script drives the runner itself, so the pay flow's start message goes nowhere.
+  return {
+    supabase: client,
+    service: () => admin,
+    owner,
+    wallet: wallet.toLowerCase(),
+    collection,
+    queue: { send: async () => {} },
+  }
 }
 
 const refusal = <T>(outcome: LockOutcome<T>) =>
@@ -541,7 +549,7 @@ function depsFor(queue: MemoryQueue, pinner: Pinner): Deps & { queue: MemoryQueu
   }
 }
 
-/** Enqueues the job's start message and drains the queue, as SQS and the Lambdas would. */
+/** Enqueues the job's start message and drains the queue, as Vercel Queues and the consumer would. */
 async function render(jobId: string, deps: Deps & { queue: MemoryQueue }, retries = 0) {
   await enqueueRender(deps.queue, { id: jobId, retries })
   return local.runLocal(deps)

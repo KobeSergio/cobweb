@@ -19,7 +19,6 @@
     "verify:render": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-render.ts"
   },
   "devDependencies": {
-    "@cobweb/worker": "workspace:^",
     "@ipld/car": "5.4.7",
     "@ipld/unixfs": "3.0.0",
     "@tailwindcss/postcss": "^4.3.3",
@@ -32,8 +31,10 @@
     "@aws-sdk/client-s3": "^3.1147.0",
     "@aws-sdk/s3-request-presigner": "^3.1147.0",
     "@cobweb/dna": "workspace:^",
+    "@cobweb/render": "workspace:^",
     "@cobweb/shared": "workspace:^",
     "@cobweb/ui": "workspace:^",
+    "@cobweb/worker": "workspace:^",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
@@ -41,6 +42,7 @@
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.2",
     "@tanstack/react-query": "^5.104.1",
+    "@vercel/queue": "0.8.0",
     "lucide-react": "^1.50.0",
     "motion": "^14.0.0",
     "next": "^16.3.8",
