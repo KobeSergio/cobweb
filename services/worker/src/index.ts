@@ -13,6 +13,7 @@ export {
   RESULT_DIFFERS,
   sweep,
   STUCK_MINUTES,
+  SWEEP_SLOT_MS,
 } from './steps.ts'
 export type { Deps, Retry } from './steps.ts'
 export { supabaseJobs } from './adapters/supabase-jobs.ts'

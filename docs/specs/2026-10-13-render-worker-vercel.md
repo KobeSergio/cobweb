@@ -45,6 +45,9 @@ and produced the same CID as the arm64 laptop.
    recovery path (a message is retried until it is acknowledged or expires), so the sweep's job
    within the day is the start message that was never published (the send after payment failed)
    and, after the day, anything else.
+   Note, 13 October 2026 (final review): the sweep's start message carries a `sweep` slot (see section
+   4), so its key is new every 15 minutes and the consequence above no longer holds for the sweep: a
+   dead-lettered start for an unclaimed job is re-sent by the next sweep and not dropped.
 7. **Dead-lettering is in the consumer.** Vercel Queues has no dead-letter queue. A message whose run
    has thrown on its third delivery is handed to `handleDead` and acknowledged; a first failure is
    retried after 120 seconds, later failures after an hour, as on SQS.
@@ -86,6 +89,12 @@ alerting (Phase 7).
 256. `RENDER_TOPIC = 'render'` and `RENDER_RETENTION_SECONDS = 604800` (7 days, the maximum, so a
 long backlog never expires a message; the deduplication window is 24 hours regardless). Everything
 else in the contract is unchanged.
+
+Note, 13 October 2026 (final review): the `start` message gains an optional `sweep` field, the number of
+the 15-minute slot (`Math.floor(Date.now() / 900000)`) the sweep sent it in, and its key becomes
+`<jobId>:start:<retries>:sweep:<slot>`. Without it, a start message dead-lettered while the job was still
+unclaimed would be refused and acknowledged, and the sweep's re-send with the same key would be dropped
+as a duplicate for 24 hours, stalling a paid job for a day. Messages without `sweep` keep their keys.
 
 ## 5. The Vercel queue adapter (`services/worker/src/adapters/vercel-queue.ts`)
 

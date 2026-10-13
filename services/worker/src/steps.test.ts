@@ -1,5 +1,6 @@
 import { RenderProblem } from '@cobweb/render'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { messageKey } from '@cobweb/shared/render-queue'
 import sharp from 'sharp'
 import { flatPng, sizeOf } from './doubles/draw.ts'
 import { memoryStore } from './doubles/memory-store.ts'
@@ -16,6 +17,7 @@ import {
   PAYMENT_MISMATCH,
   RESULT_DIFFERS,
   STUCK_MINUTES,
+  SWEEP_SLOT_MS,
   sweep,
 } from './steps.ts'
 import {
@@ -1089,7 +1091,37 @@ describe('sweep touches the jobs it sends again', () => {
   })
 })
 
+const NOW = Date.parse('2026-10-13T12:07:00Z')
+const SLOT = Math.floor(NOW / SWEEP_SLOT_MS)
+
 describe('sweep', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('sends the start message with the 15-minute slot it was sent in', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    const h = await harness()
+    h.jobs.stuckJobs = [{ id: JOB_ID, retries: 0 }]
+    await sweep(h.deps)
+    expect(SWEEP_SLOT_MS).toBe(STUCK_MINUTES * 60 * 1000)
+    expect(h.queue.sent).toEqual([{ jobId: JOB_ID, step: 'start', retries: 0, sweep: SLOT }])
+  })
+
+  it('gives sweeps 15 minutes apart different keys, so the second is not dropped as a duplicate', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    const h = await harness()
+    h.jobs.stuckJobs = [{ id: JOB_ID, retries: 0 }]
+    await sweep(h.deps)
+    vi.setSystemTime(NOW + SWEEP_SLOT_MS)
+    await sweep(h.deps)
+    const [first, second] = h.queue.sent
+    expect(messageKey(first!)).not.toBe(messageKey(second!))
+    expect(messageKey(first!)).not.toBe(messageKey(startMessage(0)))
+  })
+
   it('lets the Jobs port narrow stuck to one job id, which the fake honours', async () => {
     const h = await harness()
     const other = '11111111-2222-4333-8444-555555555555'
@@ -1115,16 +1147,23 @@ describe('sweep', () => {
       { id: JOB_ID, retries: 1 },
       { id: other, retries: 0 },
     ]
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
     expect(await sweep(h.deps)).toBe(2)
-    expect(h.queue.sent).toEqual([startMessage(1), { jobId: other, step: 'start', retries: 0 }])
+    expect(h.queue.sent).toEqual([
+      { ...startMessage(1), sweep: SLOT },
+      { jobId: other, step: 'start', retries: 0, sweep: SLOT },
+    ])
   })
 
   it('sends a start message for a paid or waived job that was never claimed, and the job then starts', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
     for (const state of ['paid', 'waived'] as const) {
       const h = await harness('generative', { job: { state, retries: 2 } })
       h.jobs.stuckJobs = [{ id: JOB_ID, retries: 2 }]
       expect(await sweep(h.deps)).toBe(1)
-      expect(h.queue.sent).toEqual([startMessage(2)])
+      expect(h.queue.sent).toEqual([{ ...startMessage(2), sweep: SLOT }])
       await handle(startMessage(2), h.deps)
       expect(h.jobs.record.state).toBe('rendering')
       expect(h.queue.sent.slice(1)).toEqual([batchMessage(0, 2), batchMessage(1, 2), batchMessage(2, 2)])

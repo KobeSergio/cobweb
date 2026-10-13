@@ -5,7 +5,7 @@
  */
 
 export type RenderMessage =
-  | { jobId: string; step: 'start'; retries: number }
+  | { jobId: string; step: 'start'; retries: number; sweep?: number }
   | { jobId: string; step: 'batch'; index: number; retries: number }
   | { jobId: string; step: 'metadata'; retries: number }
 
@@ -65,7 +65,7 @@ function hasExactly(value: Record<string, unknown>, keys: string[]): boolean {
 
 /**
  * A queue message body as a `RenderMessage`, or null for anything that is not exactly one of the
- * three shapes: a lower-case uuid job id, non-negative whole numbers, no other key. The caller
+ * three shapes (a `start` may also carry a `sweep` slot): a lower-case uuid job id, non-negative whole numbers, no other key. The caller
  * acknowledges and logs a null; it is never retried.
  */
 export function parseRenderMessage(body: string): RenderMessage | null {
@@ -77,9 +77,15 @@ export function parseRenderMessage(body: string): RenderMessage | null {
   }
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
   const message = value as Record<string, unknown>
-  const { jobId, step, retries, index } = message
+  const { jobId, step, retries, index, sweep } = message
   if (typeof jobId !== 'string' || !UUID.test(jobId) || !isCount(retries)) return null
-  if (step === 'start' || step === 'metadata')
+  if (step === 'start') {
+    if (hasExactly(message, ['jobId', 'step', 'retries'])) return { jobId, step, retries }
+    if (hasExactly(message, ['jobId', 'step', 'retries', 'sweep']) && isCount(sweep))
+      return { jobId, step, retries, sweep }
+    return null
+  }
+  if (step === 'metadata')
     return hasExactly(message, ['jobId', 'step', 'retries']) ? { jobId, step, retries } : null
   if (step === 'batch' && isCount(index))
     return hasExactly(message, ['jobId', 'step', 'index', 'retries']) ? { jobId, step, index, retries } : null
@@ -105,11 +111,15 @@ export const RENDER_RETENTION_SECONDS = 604_800
 
 /**
  * A message's idempotency key: `<jobId>:start:<retries>`, `<jobId>:batch:<index>:<retries>` or
- * `<jobId>:metadata:<retries>`. The queue drops a second message with the same key for 24 hours, so a
+ * `<jobId>:metadata:<retries>`. The sweep's re-send of a start message carries the 15-minute slot it was
+ * sent in, and its key ends `:sweep:<slot>`, so a start message that was dead-lettered while the job was
+ * unclaimed does not block the sweep's re-send for a day. The queue drops a second message with the same key for 24 hours, so a
  * step that is rerun after a partial send, or a sweep that sends a start already sent, does no work
  * twice. A creator's retry raises `retries` and so gets new keys. Under 64 characters.
  */
 export function messageKey(message: RenderMessage): string {
   if (message.step === 'batch') return `${message.jobId}:batch:${message.index}:${message.retries}`
+  if (message.step === 'start' && message.sweep !== undefined)
+    return `${message.jobId}:start:${message.retries}:sweep:${message.sweep}`
   return `${message.jobId}:${message.step}:${message.retries}`
 }

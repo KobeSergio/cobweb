@@ -69,11 +69,26 @@ describe('parseRenderMessage', () => {
     ],
     ['a metadata message with an index', body({ jobId: JOB, step: 'metadata', index: 0, retries: 0 })],
     ['a __proto__ key', `{"jobId":"${JOB}","step":"start","retries":0,"__proto__":{"x":1}}`],
+    ['a start with a negative sweep slot', body({ jobId: JOB, step: 'start', retries: 0, sweep: -1 })],
+    ['a start with a sweep slot as text', body({ jobId: JOB, step: 'start', retries: 0, sweep: '3' })],
+    ['a batch with a sweep slot', body({ jobId: JOB, step: 'batch', index: 0, retries: 0, sweep: 3 })],
+    ['a metadata message with a sweep slot', body({ jobId: JOB, step: 'metadata', retries: 0, sweep: 3 })],
     ['a start with an index', body({ jobId: JOB, step: 'start', index: 0, retries: 0 })],
     ['an extra key', body({ jobId: JOB, step: 'metadata', retries: 0, range: [1, 100] })],
     ['an extra key on a batch', body({ jobId: JOB, step: 'batch', index: 0, retries: 0, final: true })],
   ])('returns null for %s', (_name, text) => {
     expect(parseRenderMessage(text)).toBeNull()
+  })
+})
+
+describe('parseRenderMessage, the sweep slot', () => {
+  it('accepts a start message with a sweep slot', () => {
+    expect(parseRenderMessage(body({ jobId: JOB, step: 'start', retries: 0, sweep: 3 }))).toEqual({
+      jobId: JOB,
+      step: 'start',
+      retries: 0,
+      sweep: 3,
+    })
   })
 })
 
@@ -95,6 +110,11 @@ describe('messageKey', () => {
     expect(messageKey({ jobId: JOB, step: 'start', retries: 0 })).toBe(`${JOB}:start:0`)
     expect(messageKey({ jobId: JOB, step: 'batch', index: 7, retries: 2 })).toBe(`${JOB}:batch:7:2`)
     expect(messageKey({ jobId: JOB, step: 'metadata', retries: 5 })).toBe(`${JOB}:metadata:5`)
+  })
+
+  it('adds the sweep slot to a start message that carries one', () => {
+    expect(messageKey({ jobId: JOB, step: 'start', retries: 0, sweep: 5 })).toBe(`${JOB}:start:0:sweep:5`)
+    expect(messageKey({ jobId: JOB, step: 'start', retries: 0 })).toBe(`${JOB}:start:0`)
   })
 
   it('differs for every message a job can send, and across retries', () => {

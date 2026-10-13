@@ -12,7 +12,7 @@ import {
   renderPlaceholder,
 } from '@cobweb/render'
 import type { AssetSpec, AssetToken, GenerativeSpec, GenerativeToken, PackedDirectory } from '@cobweb/render'
-import { collageKey, enqueueRender, WORKER_FAILURE_CODES } from '@cobweb/shared/render-queue'
+import { collageKey, WORKER_FAILURE_CODES } from '@cobweb/shared/render-queue'
 import type { RenderMessage, RenderQueue } from '@cobweb/shared/render-queue'
 import { errorSummary } from './log.ts'
 import type { Log } from './log.ts'
@@ -416,7 +416,8 @@ export async function handle(message: RenderMessage, deps: Deps): Promise<void> 
 /**
  * Fails the job of a message that was received three times without success. For a job that was never
  * claimed (a start message that ran out of deliveries) the database refuses the report: that is
- * logged and the message acknowledged, and the sweep sends the job's start message again.
+ * logged and the message acknowledged, and the next sweep sends a start message with a fresh key, so the
+ * job is picked up within about 15 minutes once the fault clears.
  */
 export async function handleDead(message: RenderMessage, deps: Deps): Promise<void> {
   await report(deps, message, indexOf(message), DEAD_LETTER_CODE, DEAD_LETTER)
@@ -425,17 +426,22 @@ export async function handleDead(message: RenderMessage, deps: Deps): Promise<vo
 /** How long a job may sit with nothing touched before the sweep sends its start message again. */
 export const STUCK_MINUTES = 15
 
+/** One slot per sweep cadence; the slot number is the key suffix of the sweep's start message. */
+export const SWEEP_SLOT_MS = STUCK_MINUTES * 60 * 1000
+
 /**
  * Re-enqueues a start message for each job left `rendering` or `finalizing`, or left `paid` or
  * `waived` and never claimed, with nothing touched for 15 minutes. The start step then claims an
  * unclaimed job, re-sends the open batches of a `rendering` one, or sends `metadata` for a
- * `finalizing` one. The message carries the job's key (`messageKey`), so a start the queue already
- * took within the last day is dropped as a duplicate instead of being run twice.
+ * `finalizing` one. The re-send carries the slot it was sent in, so it is not dropped against an earlier
+ * start with the same retries; two sweeps in one slot still share a key and do the work once.
  */
 export async function sweep(deps: Deps): Promise<number> {
   const jobs = await deps.jobs.stuck(STUCK_MINUTES)
   for (const job of jobs) {
-    await enqueueRender(deps.queue, job)
+    await deps.queue.send([
+      { jobId: job.id, step: 'start', retries: job.retries, sweep: Math.floor(Date.now() / SWEEP_SLOT_MS) },
+    ])
     // Only after the send went through: a failed send leaves the job eligible for the next sweep.
     // Without this a job is returned on every sweep until something updates its row.
     try {
