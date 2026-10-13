@@ -12,11 +12,10 @@ A no-code NFT launchpad with one linear flow: Details, Art (Layers, Rules, Gener
 ## Layout
 
 ```
-apps/web           Next.js app: creator dashboard and mint page
+apps/web           Next.js app: creator dashboard, mint page, and the render queue consumer and sweep cron (Vercel)
 apps/freshness     Railway service that reads chain state for mint pages
 services/render    Render library: layers to images, CARs and CIDs (pure; no network)
-services/worker    Render worker: ports, steps, adapters, local runner, Lambda entry points
-infra/             AWS CDK stack for the render pipeline (defined and tested; not deployed)
+services/worker    Render worker: ports, steps, adapters, queue consumer, local runner. Runs inside apps/web on Vercel
 contracts/         Foundry: factory and collection
 packages/dna       Trait assignment engine
 packages/ui        Component library
@@ -42,10 +41,8 @@ pnpm --filter @cobweb/web verify:sweep    # the upload sweep against local stora
 pnpm --filter @cobweb/web sweep:uploads --dry-run   # unrecorded objects older than a day; drop --dry-run to delete
 pnpm --filter @cobweb/render test         # render core: compositing, metadata JSON, CARs and local CIDs
 pnpm --filter @cobweb/web verify:render   # the render worker end to end against local Supabase, local storage and Anvil
-pnpm --filter @cobweb/worker test         # the render worker: steps, adapters, Lambda entry points
+pnpm --filter @cobweb/worker test         # the render worker: steps, adapters, the queue consumer
 pnpm --filter @cobweb/worker bench        # one batch of 100 tokens at 2048 x 2048: time, memory, CAR size
-pnpm --filter @cobweb/infra test          # CDK template assertions; no bundling, no credentials
-pnpm --filter @cobweb/infra synth         # full CDK synthesis with bundling into infra/cdk.out; no credentials
 ```
 
 ## Rules

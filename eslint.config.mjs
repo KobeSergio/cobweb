@@ -3,15 +3,7 @@ import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
   {
-    ignores: [
-      '**/node_modules/**',
-      '**/dist/**',
-      '**/.next/**',
-      '**/.turbo/**',
-      '**/cdk.out/**',
-      'legacy/**',
-      'contracts/**',
-    ],
+    ignores: ['**/node_modules/**', '**/dist/**', '**/.next/**', '**/.turbo/**', 'legacy/**', 'contracts/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

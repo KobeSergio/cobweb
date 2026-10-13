@@ -3,8 +3,8 @@
  * `import=car` object metadata that makes Filebase import a CAR, and `x-amz-meta-cid` as where the
  * CID comes back) come from Filebase's public documentation
  * (filebase.com/docs/ipfs/pinning/pinning-files). They are not verified against a live account: no
- * Filebase key exists on the development machine, so infra/README.md lists confirming them as the
- * first thing to do on a first deploy.
+ * Filebase key exists on the development machine, so services/worker/README.md lists confirming them
+ * as the first thing to do on a first deploy.
  */
 import { HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
 import { CID } from 'multiformats/cid'

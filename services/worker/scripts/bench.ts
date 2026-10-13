@@ -1,7 +1,7 @@
 // Renders one batch in process and prints wall time, peak resident memory and CAR size
-// (docs/specs/2026-10-12-render-worker.md, section 8). It is the local input to the Lambda settings
-// in infra/lib/render-stack.ts (memory, timeout, ephemeral storage); the same run on Lambda itself is
-// owed. Not a test: nothing asserts on its numbers.
+// (docs/specs/2026-10-12-render-worker.md, section 8). The same batch on a Vercel Function took 187
+// seconds at a 779 MB peak (docs/specs/2026-10-13-render-worker-vercel.md, section 2). Not a test:
+// nothing asserts on its numbers.
 //
 //   pnpm --filter @cobweb/worker bench
 //   options: --tokens <n> (default 100), --size <pixels> (default 2048), --layers <n> (default 7)

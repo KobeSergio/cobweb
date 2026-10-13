@@ -15,7 +15,6 @@ out/
 cache/
 contracts/broadcast/
 coverage/
-cdk.out/
 
 # Local tooling
 .DS_Store
@@ -28,3 +27,4 @@ cdk.out/
 # Next.js
 next-env.d.ts
 *.tsbuildinfo
+.superpowers/

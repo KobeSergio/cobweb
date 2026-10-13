@@ -1,9 +1,0 @@
-{
-  "name": "cobweb-render-lambda-deps",
-  "version": "0.0.0",
-  "private": true,
-  "description": "What the Lambda bundles install beside the code: sharp, pinned to the render library's version, from package-lock.json for linux arm64. See infra/README.md.",
-  "dependencies": {
-    "sharp": "0.35.5"
-  }
-}
