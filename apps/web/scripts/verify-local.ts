@@ -3141,11 +3141,11 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
 
   // Asset batches are sized by bytes at insert (docs/specs/2026-10-12-render-worker.md, section 9).
   await check(
-    'render_jobs: a 1/1 job with a 50 MiB file gets 19 tokens a batch and the batch count to match',
+    'render_jobs: a 1/1 job with a 50 MiB file gets 9 tokens a batch and the batch count to match',
     async () => {
       const job = await lockedOneOfOne(A, 45, 50 * 1024 * 1024)
-      // floor(1,000,000,000 / 52,428,800) = 19; ceil(45 / 19) = 3.
-      return job.batch_size === 19 && job.batches_total === 3 && job.token_count === 45
+      // floor(500,000,000 / 52,428,800) = 9; ceil(45 / 9) = 5.
+      return job.batch_size === 9 && job.batches_total === 5 && job.token_count === 45
         ? null
         : JSON.stringify(job)
     },
@@ -3154,7 +3154,7 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
   await check(
     'render_jobs: a job whose distinct files fit in one batch keeps 100 tokens a batch, however large one file is',
     async () => {
-      // Five distinct files, the largest 50 MiB: at most 5 x 52,428,800 bytes in a batch, under 1 GB.
+      // Five distinct files, the largest 50 MiB: at most 5 x 52,428,800 = 262,144,000 bytes, under 500 MB.
       const job = await lockedOneOfOne(A, 5, 50 * 1024 * 1024)
       return job.batch_size === 100 && job.batches_total === 1 ? null : JSON.stringify(job)
     },
