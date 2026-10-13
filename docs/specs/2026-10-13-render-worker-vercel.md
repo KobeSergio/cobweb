@@ -51,7 +51,11 @@ and produced the same CID as the arm64 laptop.
 8. **The start message is sent when a job becomes `paid` or `waived`**: in the pay flow when the
    payment is recorded, and in the lock flow when `art_lock` returns a job already `waived` (a
    single asset with no fee), so the job starts within seconds. A failed send is logged and left
-   to the sweep. This was owed to the screen sub-project and moves here.
+   to the sweep. This was owed to the screen sub-project and moves here. Erratum, 13 October
+   2026, found at pre-flight: `art_lock` and `art_lock_placeholder` create a zero-fee job as
+   `paid`, not `waived`. The lock-time send therefore fires for a returned job in state `paid` or
+   `waived` (`startIfReady`); a `payment_due` job sends nothing and gets its start with the
+   payment.
 9. **1/1 and single-asset batches target 500 MB** at lock (was 1 GB); the worker's ceiling becomes
    600 MB (was 1.2 GB). Generative batches stay at 100 tokens. The owner's experience is that
    marketplaces cache and cap video assets around 5 to 10 MB, so 1 GB batches were far above need.
@@ -139,7 +143,7 @@ export function retryAfter(metadata: { deliveryCount: number }): { afterSeconds:
   verify scripts, which drive the local runner themselves, never reach Vercel.
 - The pay flow (`apps/web/src/lib/art/lock-core.ts`): after `art_record_payment` succeeds and the
   payment is not short, `enqueueRender(ctx.queue, { id: row.id, retries: 0 })`. The lock flow does
-  the same when the job `art_lock` returns is already `waived`. A throw from the send is logged with
+  the same when the job `art_lock` or `art_lock_placeholder` returns is already `paid` or `waived`. A throw from the send is logged with
   the job id and swallowed: the row is recorded, and the sweep starts the job within 15 minutes.
   `LockContext` gains `queue: RenderQueue`, supplied by the server action layer from
   `renderQueue()`.
@@ -198,7 +202,8 @@ on the layer bucket allowing `PUT` from the app's origin (browser uploads are pr
   `productionDeps` with an injected queue and without `RENDER_QUEUE_URL`. In the web app: the queue
   module's choice by environment; the pay flow sends one start message with `retries` 0 after a
   recorded payment, sends nothing for a short payment, and reports success when the send throws;
-  the lock flow sends one for a job returned `waived` and none for a job returned `payment_due`.
+  the lock flow sends one for a job returned `paid` or `waived` and none for one returned
+  `payment_due`.
 - `verify:render`, three times. The runner and its doubles are unchanged apart from `backlog`.
 - `verify:local` with the new batch-size numbers.
 - `pnpm build` of the web app with the worker packages transpiled and sharp external.
