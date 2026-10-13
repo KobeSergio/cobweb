@@ -14,7 +14,7 @@ const mask = (run: string): string => {
 }
 
 /**
- * An error as a log field: its name and a short message. viem and AWS errors can carry an RPC or
+ * An error as a log field: its name and a short message. viem and storage errors can carry an RPC or
  * endpoint URL with a key in it, so viem's `shortMessage` is preferred, only the first line is kept,
  * a URL is replaced by `[url]` and a key (a run of 32 or more key characters, other than a uuid or a CID) by `[key]`, and the text
  * is cut at 200 characters.
@@ -31,7 +31,7 @@ export function maskedLine(text: string): string {
   return line.replace(URL_LIKE, '[url]').replace(KEY_LIKE, mask).slice(0, 200)
 }
 
-/** Writes each line as one JSON object, which CloudWatch indexes by field. */
+/** Writes each line as one JSON object, which Vercel's logs show by field. */
 export const consoleLog: Log = (event, fields = {}) => {
   console.log(JSON.stringify({ event, ...fields }))
 }

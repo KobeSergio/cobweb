@@ -1,5 +1,5 @@
 /**
- * The `Store` port on S3 (AWS in production, Supabase Storage locally). It reads layer images,
+ * The `Store` port on S3 (Cloudflare R2 in production, Supabase Storage locally). It reads layer images,
  * assets and placeholders from the art bucket and writes collages to the render bucket. There is no
  * way to write to the art bucket here, so the upload sweep can never see worker output.
  */

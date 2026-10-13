@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import type { RenderQueue } from '@cobweb/shared/render-queue'
 import { describe, expect, it } from 'vitest'
 import { artS3Options, filebaseS3Options, need, productionDeps, WORKER_ENV } from './env.ts'
 
@@ -15,12 +16,19 @@ const LOCAL = {
   FILEBASE_BUCKET: 'cobweb-pins',
   FILEBASE_ACCESS_KEY_ID: 'filebase-key-id',
   FILEBASE_SECRET_ACCESS_KEY: 'filebase-key-secret',
-  RENDER_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/000000000000/render',
 }
+
+/** The queue the wiring is given; nothing is sent in these tests. */
+const queue: RenderQueue = { send: async () => {} }
+const quiet = { queue, log: () => {} }
 
 describe('the env names', () => {
   it('never start with NEXT_PUBLIC_', () => {
     for (const name of WORKER_ENV) expect(name.startsWith('NEXT_PUBLIC_')).toBe(false)
+  })
+
+  it('have no queue URL: the queue is passed in', () => {
+    expect(WORKER_ENV).not.toContain('RENDER_QUEUE_URL')
   })
 
   it('are all in .env.example, which sets no secret and no public name', () => {
@@ -30,6 +38,8 @@ describe('the env names', () => {
     for (const name of WORKER_ENV) expect(names, name).toContain(name)
     expect(names).toContain('RPC_URL_31337')
     expect(names).toContain('FACTORY_ADDRESS_31337')
+    expect(names).not.toContain('RENDER_QUEUE_URL')
+    expect(names).not.toContain('RENDER_SECRET_ARN')
     expect(example).not.toContain('NEXT_PUBLIC_SUPABASE')
     for (const line of lines)
       if (/KEY|SECRET|RPC_URL/.test(line.split('=')[0] ?? '')) expect(line.endsWith('=')).toBe(true)
@@ -56,7 +66,7 @@ describe('artS3Options', () => {
     })
   })
 
-  it('leaves credentials to the role on AWS', () => {
+  it('leaves credentials to the SDK default chain when no keys are set', () => {
     expect(artS3Options({ ART_S3_REGION: 'us-east-1' })).toEqual({
       region: 'us-east-1',
       forcePathStyle: false,
@@ -85,38 +95,44 @@ describe('filebaseS3Options', () => {
 })
 
 describe('productionDeps', () => {
+  const JOBS_ONLY = {
+    SUPABASE_URL: LOCAL.SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY: LOCAL.SUPABASE_SERVICE_ROLE_KEY,
+  }
+
   it('builds every port without opening a connection', () => {
-    const deps = productionDeps(LOCAL, () => {})
+    const deps = productionDeps(LOCAL, quiet)
     expect(Object.keys(deps).sort()).toEqual(['chain', 'jobs', 'log', 'pinner', 'queue', 'retry', 'store'])
     expect(deps.retry?.delaysMs).toEqual([1000, 3000, 6000])
   })
 
-  describe('for the dead-letter and sweep entry points ("jobs")', () => {
-    const JOBS_ONLY = {
-      SUPABASE_URL: LOCAL.SUPABASE_URL,
-      SUPABASE_SERVICE_ROLE_KEY: LOCAL.SUPABASE_SERVICE_ROLE_KEY,
-      RENDER_QUEUE_URL: LOCAL.RENDER_QUEUE_URL,
-    }
+  it('uses the queue it is given, for either kind', () => {
+    expect(productionDeps(LOCAL, quiet).queue).toBe(queue)
+    expect(productionDeps(JOBS_ONLY, { ...quiet, kind: 'jobs' }).queue).toBe(queue)
+  })
 
-    it('builds from the Supabase URL and key and the queue URL alone', () => {
-      const deps = productionDeps(JOBS_ONLY, () => {}, 'jobs')
+  describe('for the sweep ("jobs")', () => {
+    it('builds from the Supabase URL and key alone', () => {
+      const deps = productionDeps(JOBS_ONLY, { ...quiet, kind: 'jobs' })
       expect(Object.keys(deps).sort()).toEqual(['chain', 'jobs', 'log', 'pinner', 'queue', 'retry', 'store'])
     })
 
     it('never requires storage, Filebase or chain settings, and does not compare the buckets', () => {
-      expect(() => productionDeps(JOBS_ONLY, () => {}, 'jobs')).not.toThrow()
-      expect(() => productionDeps(JOBS_ONLY, () => {}, 'render')).toThrow('RENDER_S3_BUCKET is not set.')
+      expect(() => productionDeps(JOBS_ONLY, { ...quiet, kind: 'jobs' })).not.toThrow()
+      expect(() => productionDeps(JOBS_ONLY, { ...quiet, kind: 'render' })).toThrow(
+        'RENDER_S3_BUCKET is not set.',
+      )
     })
 
     it('still names what it does need', () => {
       for (const name of Object.keys(JOBS_ONLY))
-        expect(() => productionDeps({ ...JOBS_ONLY, [name]: undefined }, () => {}, 'jobs')).toThrow(
+        expect(() => productionDeps({ ...JOBS_ONLY, [name]: undefined }, { ...quiet, kind: 'jobs' })).toThrow(
           `${name} is not set.`,
         )
     })
 
     it('gives the ports it cannot use an error named NotAvailable, not a quiet success', async () => {
-      const deps = productionDeps(JOBS_ONLY, () => {}, 'jobs')
+      const deps = productionDeps(JOBS_ONLY, { ...quiet, kind: 'jobs' })
       const named = async (run: () => Promise<unknown>) =>
         ((await run().catch((error: unknown) => error)) as Error).name
       expect(await named(() => deps.store.load({ key: 'k.png', ext: 'png' }))).toBe('NotAvailable')
@@ -127,15 +143,10 @@ describe('productionDeps', () => {
   })
 
   it('refuses an incomplete environment by name, without echoing any value', () => {
-    for (const name of [
-      'SUPABASE_SERVICE_ROLE_KEY',
-      'RENDER_S3_BUCKET',
-      'FILEBASE_BUCKET',
-      'RENDER_QUEUE_URL',
-    ]) {
+    for (const name of ['SUPABASE_SERVICE_ROLE_KEY', 'RENDER_S3_BUCKET', 'FILEBASE_BUCKET']) {
       let message = ''
       try {
-        productionDeps({ ...LOCAL, [name]: undefined }, () => {})
+        productionDeps({ ...LOCAL, [name]: undefined }, quiet)
       } catch (error) {
         message = (error as Error).message
       }
@@ -147,9 +158,25 @@ describe('productionDeps', () => {
   it('refuses the art bucket as the render bucket, before building any client or reading anything else', () => {
     // Nothing else in this environment is set, so a client built first would fail on another name.
     const env = { ART_S3_BUCKET: 'art', RENDER_S3_BUCKET: 'art', ART_S3_REGION: 'local' }
-    expect(() => productionDeps(env, () => {})).toThrow('RENDER_S3_BUCKET must not be the art bucket.')
-    expect(() => productionDeps({ ...LOCAL, RENDER_S3_BUCKET: LOCAL.ART_S3_BUCKET }, () => {})).toThrow(
+    expect(() => productionDeps(env, quiet)).toThrow('RENDER_S3_BUCKET must not be the art bucket.')
+    expect(() => productionDeps({ ...LOCAL, RENDER_S3_BUCKET: LOCAL.ART_S3_BUCKET }, quiet)).toThrow(
       'RENDER_S3_BUCKET must not be the art bucket.',
     )
+  })
+})
+
+describe('the package', () => {
+  it('has no SQS, Secrets Manager or Lambda package, and keeps the S3 client', () => {
+    const source = readFileSync(new URL('./env.ts', import.meta.url), 'utf8')
+    expect(source).not.toMatch(/client-sqs|client-secrets-manager|aws-lambda/)
+    const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+      dependencies: Record<string, string>
+      devDependencies: Record<string, string>
+    }
+    const names = [...Object.keys(manifest.dependencies), ...Object.keys(manifest.devDependencies)]
+    expect(names).not.toContain('@aws-sdk/client-sqs')
+    expect(names).not.toContain('@aws-sdk/client-secrets-manager')
+    expect(names).not.toContain('@types/aws-lambda')
+    expect(names).toContain('@aws-sdk/client-s3')
   })
 })

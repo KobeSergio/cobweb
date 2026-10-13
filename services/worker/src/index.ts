@@ -21,7 +21,6 @@ export type { WorkerClient } from './adapters/supabase-jobs.ts'
 export { s3Store } from './adapters/s3-store.ts'
 export { viemChain } from './adapters/viem-chain.ts'
 export { filebasePinner } from './adapters/filebase.ts'
-export { sqsRenderQueue } from './adapters/sqs.ts'
 export { vercelRenderQueue } from './adapters/vercel-queue.ts'
 export type { QueueSender } from './adapters/vercel-queue.ts'
 export {
@@ -34,3 +33,4 @@ export {
 } from './vercel/consumer.ts'
 export type { DeliveryMetadata } from './vercel/consumer.ts'
 export { artS3Options, productionDeps, WORKER_ENV, workerClient } from './env.ts'
+export type { DepsKind, DepsOptions } from './env.ts'

@@ -2,7 +2,7 @@ import { HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
 import { CID } from 'multiformats/cid'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { describe, expect, it } from 'vitest'
-import { bytes, stubAws } from '../testing/stub-aws.ts'
+import { bytes, stubS3 } from '../testing/stub-s3.ts'
 import { FILEBASE_CID_METADATA_KEY, filebasePinner } from './filebase.ts'
 
 const DAG_PB = 0x70
@@ -13,7 +13,7 @@ const V0 = CID.createV0(digest).toString()
 /** A client whose head answers come from `heads`, one a call; the last one repeats. */
 function withHeads(heads: (string | undefined)[]) {
   let head = 0
-  return stubAws((name) => {
+  return stubS3((name) => {
     if (name !== HeadObjectCommand.name) return {}
     const cid = heads[Math.min(head, heads.length - 1)]
     head += 1
@@ -89,7 +89,7 @@ describe('filebasePinner', () => {
   })
 
   it('throws when the upload fails and does not ask for the CID', async () => {
-    const { client, sent } = stubAws((name) => {
+    const { client, sent } = stubS3((name) => {
       if (name === PutObjectCommand.name) throw new Error('503')
       return {}
     })

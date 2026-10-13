@@ -1,6 +1,6 @@
 /**
  * The local runner (docs/specs/2026-10-12-render-worker.md, section 8): drains an in-memory queue
- * the way SQS and the Lambdas would, so the whole pipeline runs without AWS. Also the entry
+ * the way Vercel Queues and the queue consumer would, so the whole pipeline runs locally. Also the entry
  * (`@cobweb/worker/local`) that hands the doubles to scripts.
  */
 import type { RenderMessage } from '@cobweb/shared/render-queue'

@@ -2,7 +2,7 @@ import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
 import { describe, expect, it } from 'vitest'
 import { isMissingObject, isObjectTooLarge } from '../ports.ts'
 import { COLLECTION_ID, JOB_ID } from '../testing/fixtures.ts'
-import { bytes, stubAws } from '../testing/stub-aws.ts'
+import { bytes, stubS3 } from '../testing/stub-s3.ts'
 import { COLLAGE_KEY, MAX_OBJECT_BYTES, s3Store } from './s3-store.ts'
 
 const body = (text: string) => ({ Body: { transformToByteArray: async () => bytes(text) } })
@@ -16,7 +16,7 @@ const quick = () => {
 
 describe('s3Store: the upload limit', () => {
   const stores = (answer: () => unknown) => {
-    const art = stubAws(answer)
+    const art = stubS3(answer)
     const { waits, options } = quick()
     return {
       art,
@@ -94,8 +94,8 @@ describe('s3Store: the upload limit', () => {
 
 describe('s3Store', () => {
   it('loads an object from the art bucket by its key', async () => {
-    const art = stubAws(() => body('png'))
-    const render = stubAws()
+    const art = stubS3(() => body('png'))
+    const render = stubS3()
     const store = s3Store({ client: art.client, bucket: 'art' }, { client: render.client, bucket: 'render' })
     expect(await store.load(ref)).toEqual(bytes('png'))
     expect(art.sent).toEqual([
@@ -112,7 +112,7 @@ describe('s3Store', () => {
         $metadata: { httpStatusCode: 404 },
       }),
     ]) {
-      const missing = stubAws(() => {
+      const missing = stubS3(() => {
         throw fault
       })
       const { waits, options } = quick()
@@ -130,7 +130,7 @@ describe('s3Store', () => {
 
   it('retries a throttle and returns the bytes once the third try answers', async () => {
     let tries = 0
-    const art = stubAws(() => {
+    const art = stubS3(() => {
       tries += 1
       if (tries < 3)
         throw Object.assign(new Error('Slow Down'), { name: 'SlowDown', $metadata: { httpStatusCode: 503 } })
@@ -148,7 +148,7 @@ describe('s3Store', () => {
   })
 
   it('throws the last error as it is after three failures, and it is not a MissingObject', async () => {
-    const art = stubAws(() => {
+    const art = stubS3(() => {
       throw Object.assign(new Error('socket hang up'), { name: 'TimeoutError' })
     })
     const { waits, options } = quick()
@@ -166,7 +166,7 @@ describe('s3Store', () => {
 
   it('treats a 404 that is not NoSuchKey (a missing bucket, a bare NotFound) as transient', async () => {
     for (const name of ['NoSuchBucket', 'NotFound', 'UnknownError']) {
-      const art = stubAws(() => {
+      const art = stubS3(() => {
         throw Object.assign(new Error('Not Found'), { name, $metadata: { httpStatusCode: 404 } })
       })
       const { waits, options } = quick()
@@ -184,7 +184,7 @@ describe('s3Store', () => {
   })
 
   it('treats an access error as transient too, never as a missing object', async () => {
-    const art = stubAws(() => {
+    const art = stubS3(() => {
       throw Object.assign(new Error('Access Denied'), {
         name: 'AccessDenied',
         $metadata: { httpStatusCode: 403 },
@@ -202,7 +202,7 @@ describe('s3Store', () => {
   })
 
   it('throws for an empty answer, after the same tries', async () => {
-    const empty = stubAws(() => ({}))
+    const empty = stubS3(() => ({}))
     const { options } = quick()
     const store = s3Store(
       { client: empty.client, bucket: 'art' },
@@ -216,8 +216,8 @@ describe('s3Store', () => {
   })
 
   it('writes a collage to the render bucket as a PNG, never to the art bucket', async () => {
-    const art = stubAws()
-    const render = stubAws()
+    const art = stubS3()
+    const render = stubS3()
     const store = s3Store({ client: art.client, bucket: 'art' }, { client: render.client, bucket: 'render' })
     const key = `${COLLECTION_ID}/collage/${JOB_ID}.png`
     await store.putCollage(key, bytes('png'))
@@ -231,7 +231,7 @@ describe('s3Store', () => {
   })
 
   it('refuses a key shaped like an upload or anything else', async () => {
-    const render = stubAws()
+    const render = stubS3()
     const store = s3Store(
       { client: render.client, bucket: 'art' },
       { client: render.client, bucket: 'render' },
