@@ -94,3 +94,23 @@ export function parseRenderMessage(body: string): RenderMessage | null {
 export function enqueueRender(queue: RenderQueue, job: { id: string; retries: number }): Promise<void> {
   return queue.send([{ jobId: job.id, step: 'start', retries: job.retries }])
 }
+
+/** The Vercel Queues topic the render messages go to. */
+export const RENDER_TOPIC = 'render'
+
+/**
+ * How long a sent message is kept: 7 days, the most Vercel allows, so a message waiting behind a long
+ * queue never expires. The deduplication window is 24 hours whatever this is.
+ */
+export const RENDER_RETENTION_SECONDS = 604_800
+
+/**
+ * A message's idempotency key: `<jobId>:start:<retries>`, `<jobId>:batch:<index>:<retries>` or
+ * `<jobId>:metadata:<retries>`. The queue drops a second message with the same key for 24 hours, so a
+ * step that is rerun after a partial send, or a sweep that sends a start already sent, does no work
+ * twice. A creator's retry raises `retries` and so gets new keys. Under 64 characters.
+ */
+export function messageKey(message: RenderMessage): string {
+  if (message.step === 'batch') return `${message.jobId}:batch:${message.index}:${message.retries}`
+  return `${message.jobId}:${message.step}:${message.retries}`
+}

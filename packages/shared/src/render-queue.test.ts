@@ -4,7 +4,10 @@ import {
   ART_PROBLEM_CODES,
   collageKey,
   enqueueRender,
+  messageKey,
   parseRenderMessage,
+  RENDER_RETENTION_SECONDS,
+  RENDER_TOPIC,
   WORKER_FAILURE_CODES,
   type RenderMessage,
 } from './render-queue.ts'
@@ -83,6 +86,36 @@ describe('enqueueRender', () => {
   it('passes a queue failure on to the caller', async () => {
     const queue = { send: () => Promise.reject(new Error('queue down')) }
     await expect(enqueueRender(queue, { id: JOB, retries: 0 })).rejects.toThrow('queue down')
+  })
+})
+
+describe('messageKey', () => {
+  it('is <jobId>:<step>:<retries>, with the index for a batch', () => {
+    expect(messageKey({ jobId: JOB, step: 'start', retries: 0 })).toBe(`${JOB}:start:0`)
+    expect(messageKey({ jobId: JOB, step: 'batch', index: 7, retries: 2 })).toBe(`${JOB}:batch:7:2`)
+    expect(messageKey({ jobId: JOB, step: 'metadata', retries: 5 })).toBe(`${JOB}:metadata:5`)
+  })
+
+  it('differs for every message a job can send, and across retries', () => {
+    const keys = new Set<string>()
+    for (const retries of [0, 1]) {
+      keys.add(messageKey({ jobId: JOB, step: 'start', retries }))
+      for (const index of [0, 1, 2]) keys.add(messageKey({ jobId: JOB, step: 'batch', index, retries }))
+      keys.add(messageKey({ jobId: JOB, step: 'metadata', retries }))
+    }
+    expect(keys.size).toBe(10)
+  })
+
+  it('stays under 64 characters for a large job, well within the 256 Vercel allows', () => {
+    expect(messageKey({ jobId: JOB, step: 'batch', index: 99_999, retries: 5 }).length).toBeLessThan(64)
+    expect(messageKey({ jobId: JOB, step: 'metadata', retries: 5 }).length).toBeLessThan(64)
+  })
+})
+
+describe('the queue settings', () => {
+  it('sends to the render topic and keeps a message for 7 days, the most Vercel allows', () => {
+    expect(RENDER_TOPIC).toBe('render')
+    expect(RENDER_RETENTION_SECONDS).toBe(604_800)
   })
 })
 
