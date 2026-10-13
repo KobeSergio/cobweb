@@ -20,6 +20,7 @@ coverage/
 .DS_Store
 .remember/
 .vercel/
+.vitest/
 
 # Browser test output
 .playwright-mcp/

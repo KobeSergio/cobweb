@@ -10,3 +10,4 @@ contracts/lib/
 dist/
 packages/ui/src/components/
 .superpowers/
+.vitest/

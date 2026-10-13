@@ -1,0 +1,20 @@
+# What the Vercel CLI never uploads from this repo (the web app deploys from the repo root with Root
+# Directory apps/web, so the workspace packages go up with it). Top-level entries are anchored with a
+# leading slash so they do not match same-named folders inside the apps, such as apps/web/src/lib/supabase.
+/legacy/
+node_modules/
+**/node_modules/
+.next/
+**/.next/
+.turbo/
+**/.turbo/
+/.vercel/
+/contracts/
+/docs/
+/supabase/
+/.remember/
+/.superpowers/
+/.playwright-mcp/
+**/.env
+**/.env.*
+**/*.tsbuildinfo

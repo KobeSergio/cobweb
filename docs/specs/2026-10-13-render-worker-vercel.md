@@ -230,14 +230,14 @@ on the layer bucket allowing `PUT` from the app's origin (browser uploads are pr
 
 ## 13. Acceptance criteria
 
-- [ ] No file under `apps`, `packages`, `services` or `supabase` imports `@aws-sdk/client-sqs`,
+- [x] No file under `apps`, `packages`, `services` or `supabase` imports `@aws-sdk/client-sqs`,
       `@aws-sdk/client-secrets-manager`, `aws-lambda` or `aws-cdk-lib`; `infra` is gone from the
       workspace and the repo.
-- [ ] `pnpm typecheck`, `lint`, `test` and `build` pass; `verify:render` passes three times;
+- [x] `pnpm typecheck`, `lint`, `test` and `build` pass; `verify:render` passes three times;
       `verify:local`, `verify:storage`, `verify:sweep` and `verify:chain` pass.
-- [ ] A recorded payment sends one start message with the job's key; the sweep sends start messages
+- [x] A recorded payment sends one start message with the job's key; the sweep sends start messages
       with the same keys, so a stuck job is never rendered twice within a day.
-- [ ] A message that throws three times fails its job with `dead-letter` and is acknowledged.
-- [ ] The preview deployment builds, and `vercel inspect` (or the deployment's function list) shows
+- [x] A message that throws three times fails its job with `dead-letter` and is acknowledged.
+- [x] The preview deployment builds, and `vercel inspect` (or the deployment's function list) shows
       the consumer route with its trigger and the cron.
-- [ ] The docs in section 12 are updated, and `docs/PLAN.md` is unchanged.
+- [x] The docs in section 12 are updated, and `docs/PLAN.md` is unchanged.
