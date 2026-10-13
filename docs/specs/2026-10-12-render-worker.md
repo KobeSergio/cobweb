@@ -9,6 +9,8 @@ functions and their sentences). Payment: [2026-10-09-lock-and-pay.md](2026-10-09
 section 4 (`jobPayment`, the factory, confirmations). Legacy reference:
 [../legacy/artgen-lambda.md](../legacy/artgen-lambda.md) sections 4, 7 and 9.
 
+> **13 October 2026:** section 9 (AWS) and the AWS lines of sections 4, 8, 10 and 11 are superseded by [2026-10-13-render-worker-vercel.md](2026-10-13-render-worker-vercel.md): the worker runs on Vercel, with no AWS. The text below is kept as it was written.
+
 ## 1. Goal
 
 Build the process that turns a paid render job into pinned images and metadata. It checks the payment
@@ -85,6 +87,8 @@ Out:
 - Source deletion after 90 days (Phase 7).
 
 ## 4. The queue contract (`packages/shared/src/render-queue.ts`)
+
+> Superseded on 13 October 2026: `backlog` and the SQS adapter. `RenderQueue` is `send` only, `messageKey` gives each message its idempotency key, and the queue adapter is `vercelRenderQueue` from `@cobweb/worker/queue` ([2026-10-13-render-worker-vercel.md](2026-10-13-render-worker-vercel.md), sections 4 and 5).
 
 No imports beyond types, so the web app can use it without the worker's dependencies.
 
@@ -353,6 +357,8 @@ never pass is sent again every threshold, with no cap on the age.
 
 ## 8. Local runner and scripts
 
+> Superseded on 13 October 2026: the benchmark is no longer the input to Lambda settings; the functions run on Vercel ([2026-10-13-render-worker-vercel.md](2026-10-13-render-worker-vercel.md), section 2).
+
 - `services/worker/src/local.ts`: `runLocal(deps, { maxReceives: 3 })` drains a `memoryQueue`,
   calling `handle`, redelivering on a throw and calling `handleDead` after three receives.
 - `apps/web/scripts/verify-render.ts`, run as `pnpm --filter @cobweb/web verify:render` (the
@@ -406,6 +412,8 @@ never pass is sent again every threshold, with no cap on the age.
   memory and CAR size. It is the input to the Lambda settings in section 9; it is not a test.
 
 ## 9. AWS (`infra/`)
+
+> Superseded on 13 October 2026, in full: the `infra` package, the Lambda entry points, the SQS adapter and the Secrets Manager loader are deleted. The queue consumer, the dead-lettering and the sweep cron are in [2026-10-13-render-worker-vercel.md](2026-10-13-render-worker-vercel.md), sections 6 and 7.
 
 One stack, `CobwebRender`, in `us-east-1`, defined in `infra/lib/render-stack.ts`:
 
@@ -474,6 +482,8 @@ marks it as the first thing to confirm with a real key.
 
 ## 10. Configuration
 
+> Superseded on 13 October 2026: `RENDER_QUEUE_URL`, `RENDER_SECRET_ARN`, `JOBS_SECRET_ARN` and `RENDER_DEAD_LETTER_QUEUE_URL` are gone. The names and the Vercel and R2 settings are in [2026-10-13-render-worker-vercel.md](2026-10-13-render-worker-vercel.md), section 10.
+
 Worker env names (in `services/worker/.env.example`; none starts with `NEXT_PUBLIC_`, none is read by
 the browser, none is printed):
 
@@ -488,6 +498,8 @@ functions need only `SUPABASE_URL`, `RENDER_QUEUE_URL` and the Supabase key from
 `supabase/config.toml` gains a local `render` bucket (private, PNG only) for `verify:render`.
 
 ## 11. Testing
+
+> Superseded on 13 October 2026: the Lambda handler tests and the CDK template assertions went with the code they tested; the consumer and adapter tests that replace them are in [2026-10-13-render-worker-vercel.md](2026-10-13-render-worker-vercel.md), section 11.
 
 - Unit (Vitest, Node): the message parser; the spec mapper for each project type and each mapping
   failure; every step against fakes of the ports, covering duplicate delivery, a batch already done,

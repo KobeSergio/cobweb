@@ -95,6 +95,10 @@ The model is the TheSuits contract: [reference/TheSuits.sol](reference/TheSuits.
 - Groups overlap: a whitelist group stays open after public starts unless the creator closes it.
 - Liveness on the mint page comes only from the contract's `mintGroupActive` view.
 
+### Hosting
+
+- **Render pipeline on Vercel, Cloudflare R2 and Vercel Queues; no AWS** (decided 13 October 2026; [specs/2026-10-13-render-worker-vercel.md](specs/2026-10-13-render-worker-vercel.md)). The render worker runs inside the web app as Vercel Functions on fluid compute, which scale to zero: the consumer of the `render` topic and a sweep cron every 15 minutes. Pro allows 800 seconds an invocation and a 4 GB Performance instance; a proof run rendered 100 tokens at 2048 by 2048 with 7 layers in 187 seconds at a 779 MB peak and produced the laptop's CID. Layers and collages live in Cloudflare R2 (no egress charge) through its S3 endpoint; locally both buckets stay on Supabase Storage. Duplicates are stopped by idempotency keys; dead-lettering is in the consumer, on the third delivery; the start message is sent when the payment is recorded, or at lock for a waived job; 1/1 and single asset batches target 500 MB at lock and the worker's ceiling is 600 MB; 25 batches run at once to start, in `iad1`. The `infra` CDK package, the Lambda entry points, the SQS adapter and the Secrets Manager loader are deleted. Railway stays for the freshness server.
+
 ## Open decisions
 
 | Decision                                           | Needed by                                                    |
@@ -129,6 +133,7 @@ flowchart LR
 - `CLAUDE.md` with the repo rules, and the skills from [SKILLS.md](SKILLS.md).
 - CI: typecheck, lint, test, `forge test`.
 - Accounts: Supabase project, Railway project, AWS account with a scoped deploy role, Cloudflare zone, Filebase bucket.
+- Accounts, as of 13 October 2026: Supabase project, Railway project, Vercel project, Cloudflare zone and R2, Filebase bucket. The AWS account with a scoped deploy role was dropped; see the Hosting decision.
 
 **Done when:** a fresh clone installs, builds and passes CI with empty packages.
 
@@ -254,6 +259,7 @@ Source: [legacy/market-mint-and-data.md](legacy/market-mint-and-data.md), sectio
 - Mainnet factory deploys and verification on the launch chains; fee values set.
 - Lifecycle rule deleting layer sources after 90 days.
 - Alerts on the dead-letter queue, freshness server health and RPC errors.
+- Alerts, as of 13 October 2026: render queue retries (Vercel Observability, from the dashboard; the dead-letter queue went with AWS), freshness server health and RPC errors.
 - Rotate every legacy secret listed in [legacy/README.md](legacy/README.md).
 - Hosted Supabase settings:
   - Email provider off. Wallet sign-ups stay on.

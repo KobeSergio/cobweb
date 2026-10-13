@@ -1,6 +1,6 @@
 # Cobweb Launchpad
 
-A no-code, permissionless NFT launchpad. A creator arrives, launches one collection, and manages it. Cobweb is a rebuild of Kingdomly as the lightest version we can run: about $70 a month at rest, with AWS cut down to Lambda, SQS and S3 for art rendering.
+A no-code, permissionless NFT launchpad. A creator arrives, launches one collection, and manages it. Cobweb is a rebuild of Kingdomly as the lightest version we can run: about $70 a month at rest, with no AWS: art renders on Vercel Functions fed by Vercel Queues, and layers sit in Cloudflare R2 behind its S3 protocol.
 
 **Status:** the contracts and the web app are built and tested locally. The web app has sign-in, the database schema, the five-stage creator flow and the public mint page; every screen past Details runs on sample data until its backend exists. Nothing is deployed yet. Next is the art generator (Phase 3). See [Build status](#build-status).
 
@@ -59,12 +59,14 @@ flowchart TB
     auth[Auth<br/>Sign in with Ethereum]
   end
 
-  subgraph aws[AWS]
-    s3[(S3<br/>source layers)]
-    cf[CloudFront<br/>thumbnails]
-    sqs[SQS<br/>one message per 100 tokens]
-    render[Render Lambdas<br/>sharp compositing]
-    meta[Metadata Lambda]
+  subgraph r2[Cloudflare R2]
+    s3[(S3 protocol<br/>source layers, collages)]
+  end
+
+  subgraph vercelrender[Vercel, inside apps/web]
+    queue[Vercel Queues<br/>render topic]
+    render[Render functions<br/>sharp compositing]
+    meta[Metadata step]
   end
 
   filebase[(Filebase<br/>IPFS)]
@@ -86,10 +88,10 @@ flowchart TB
   web --> auth
   web --> db
   web -- presigned upload --> s3
-  s3 --> cf --> web
+  s3 -- signed GET --> web
   web -- lock and pay --> factory
   factory -. paid event .-> db
-  db -- paid job --> sqs --> render
+  web -- paid job --> queue --> render
   s3 --> render
   render -- image CARs --> filebase
   render -- last batch --> meta -- metadata CAR --> filebase
@@ -99,36 +101,36 @@ flowchart TB
   web -- poll mint state --> edge --> fresh --> rpc --> collection
 ```
 
-| Piece             | Code              | Runs on                    | Job                                                               |
-| ----------------- | ----------------- | -------------------------- | ----------------------------------------------------------------- |
-| Web app           | `apps/web`        | Vercel                     | Creator dashboard and the public mint page                        |
-| Database and auth | `supabase/`       | Supabase                   | Postgres with row-level security, Sign in with Ethereum, job rows |
-| Contracts         | `contracts/`      | Each launch chain          | Factory and collection                                            |
-| Freshness server  | `apps/freshness`  | Railway, behind Cloudflare | The only reader of chain state for mint pages                     |
-| Render pipeline   | `services/render` | AWS SQS and Lambda         | Composites tokens, packs CARs, uploads to Filebase                |
-| Layer storage     |                   | S3, CloudFront             | Source layers and their thumbnails                                |
-| Trait engine      | `packages/dna`    | Browser and server         | Picks traits for each token; validates the final list at lock     |
-| Component library | `packages/ui`     |                            | shadcn components themed with our tokens                          |
+| Piece             | Code                                 | Runs on                                               | Job                                                               |
+| ----------------- | ------------------------------------ | ----------------------------------------------------- | ----------------------------------------------------------------- |
+| Web app           | `apps/web`                           | Vercel                                                | Creator dashboard and the public mint page                        |
+| Database and auth | `supabase/`                          | Supabase                                              | Postgres with row-level security, Sign in with Ethereum, job rows |
+| Contracts         | `contracts/`                         | Each launch chain                                     | Factory and collection                                            |
+| Freshness server  | `apps/freshness`                     | Railway, behind Cloudflare                            | The only reader of chain state for mint pages                     |
+| Render pipeline   | `services/render`, `services/worker` | Vercel Functions and Vercel Queues, inside `apps/web` | Composites tokens, packs CARs, uploads to Filebase                |
+| Layer storage     |                                      | Cloudflare R2, over the S3 protocol                   | Source layers, their thumbnails and preview collages              |
+| Trait engine      | `packages/dna`                       | Browser and server                                    | Picks traits for each token; validates the final list at lock     |
+| Component library | `packages/ui`                        |                                                       | shadcn components themed with our tokens                          |
 
 ### Art pipeline
 
-Only source layers touch S3. Rendered images go from a Lambda's temporary disk straight to Filebase, one batch at a time.
+Only source layers and preview collages touch storage (R2, over the S3 protocol). Rendered images go from a render function's memory straight to Filebase, one batch at a time.
 
 ```mermaid
 flowchart LR
   U[Upload layers<br/>square, up to 2048 px, 10 MB each] --> P[Generate and curate<br/>in the browser, free]
   P --> L[Lock<br/>server validates and hashes the token list]
   L --> Pay[Pay on-chain]
-  Pay --> Q[SQS<br/>100 tokens per message]
-  Q --> R[Render Lambdas in parallel]
+  Pay --> Q[Vercel Queues<br/>one message per batch]
+  Q --> R[Render functions in parallel]
   R --> I[Image CAR per batch<br/>to Filebase]
-  R -->|last batch| M[Metadata Lambda<br/>one metadata CAR]
+  R -->|last batch| M[Metadata step<br/>one metadata CAR]
 ```
 
 - The browser generates and edits the collection for free. Nothing is rendered until the creator pays.
 - At lock the browser submits the final token list. The server checks it against the project's rules, stores it and hashes it. That stored list is what gets rendered.
 - A job runs only when its row is `paid` (from the factory's payment event) or `waived` (admin only, logged).
-- Failed batches retry through SQS, with a dead-letter queue. The last batch to finish flips the job to `finalizing` exactly once.
+- Failed batches retry through Vercel Queues; the third failed delivery fails the job with dead-letter. The last batch to finish flips the job to `finalizing` exactly once.
 - A re-run of the same job must produce the same CIDs, so metadata carries no timestamps.
 
 ### Mint day traffic
@@ -152,7 +154,8 @@ The freshness server polls each chain on a tiered schedule (slow when idle, fast
 ```
 apps/web           Next.js app: creator dashboard and mint page
 apps/freshness     Railway service: chain polling, quota batching, HTTP with ETag
-services/render    Render and metadata Lambdas, SQS wiring
+services/render    Render library: layers to images, CARs and CIDs
+services/worker    Render worker: steps, adapters, queue consumer. Runs inside apps/web on Vercel
 contracts/         Foundry: factory and collection
 packages/dna       Trait assignment engine, shared by browser and server
 packages/ui        Component library: shadcn components themed with the shared tokens
@@ -216,25 +219,25 @@ pnpm --filter @cobweb/web dev       # http://localhost:3000
 
 Fixed cost at rest is about $68 to $78 a month. Figures come from [docs/PLAN.md](docs/PLAN.md), which has the reasoning and the busy-month scenarios.
 
-| Service  | What we use it for                       | Plan        | Monthly                                            |
-| -------- | ---------------------------------------- | ----------- | -------------------------------------------------- |
-| Vercel   | Hosts `apps/web`                         | Pro         | $20                                                |
-| Supabase | Postgres, auth, storage                  | Pro         | $25                                                |
-| Railway  | Hosts `apps/freshness`                   | Usage-based | $15 to $25 once always-on                          |
-| Filebase | IPFS pinning for images and metadata     | Paid plan   | $7                                                 |
-| AWS      | S3 for layers, SQS, Lambda for rendering | Pay per use | About $1 at rest, about $2 per 10,000-token render |
-| Domain   |                                          |             | $1 to $2                                           |
+| Service         | What we use it for                                    | Plan        | Monthly                                        |
+| --------------- | ----------------------------------------------------- | ----------- | ---------------------------------------------- |
+| Vercel          | Hosts `apps/web`                                      | Pro         | $20                                            |
+| Supabase        | Postgres, auth, storage                               | Pro         | $25                                            |
+| Railway         | Hosts `apps/freshness`                                | Usage-based | $15 to $25 once always-on                      |
+| Filebase        | IPFS pinning for images and metadata                  | Paid plan   | $7                                             |
+| Vercel (render) | Render functions and Vercel Queues, inside `apps/web` | Pro, usage  | About $1.50 of compute per 10,000-token render |
+| Domain          |                                                       |             | $1 to $2                                       |
 
 Free tiers we depend on:
 
-| Service                 | What we use it for                          | When it starts to cost                                 |
-| ----------------------- | ------------------------------------------- | ------------------------------------------------------ |
-| Cloudflare              | Edge cache in front of the freshness server | Not expected                                           |
-| RPC provider            | Chain reads from the freshness server       | About $50 a month once several chains are busy at once |
-| CloudFront              | Serves layer thumbnails                     | Not expected at our volume                             |
-| GitHub                  | Code and CI                                 | Not expected                                           |
-| WalletConnect project   | Wallet connections through RainbowKit       | Not expected                                           |
-| Block explorer API keys | Contract verification, once per chain       | Free                                                   |
+| Service                 | What we use it for                                | When it starts to cost                                 |
+| ----------------------- | ------------------------------------------------- | ------------------------------------------------------ |
+| Cloudflare              | Edge cache in front of the freshness server       | Not expected                                           |
+| RPC provider            | Chain reads from the freshness server             | About $50 a month once several chains are busy at once |
+| Cloudflare R2           | Layers and preview collages, over the S3 protocol | Past the free storage allowance; no egress charge      |
+| GitHub                  | Code and CI                                       | Not expected                                           |
+| WalletConnect project   | Wallet connections through RainbowKit             | Not expected                                           |
+| Block explorer API keys | Contract verification, once per chain             | Free                                                   |
 
 One-time costs: gas to deploy and verify the factory on each chain.
 
@@ -244,26 +247,27 @@ What grows with success, in the order we would feel it: Filebase storage as coll
 
 **Installed** means it is in the lockfile today. **Planned** means the phase that needs it will add it.
 
-| Area      | Library                                        | Status                  | Used for                                       |
-| --------- | ---------------------------------------------- | ----------------------- | ---------------------------------------------- |
-| Tooling   | pnpm workspaces, Turborepo                     | Installed               | Monorepo and task running                      |
-| Tooling   | TypeScript 6                                   | Installed               | Pinned to 6 until typescript-eslint supports 7 |
-| Tooling   | ESLint, typescript-eslint, Prettier            | Installed               | Lint and format                                |
-| Tooling   | Vitest                                         | Installed               | Unit tests                                     |
-| Contracts | Foundry, Solidity 0.8.30                       | Installed               | Build, test, deploy                            |
-| Contracts | Limit Break creator-token-standards (ERC721AC) | Installed               | Collection base, transfer validator, locking   |
-| Contracts | OpenZeppelin Contracts                         | Installed               | Ownable, ERC2981 royalties, ReentrancyGuard    |
-| Contracts | delegate.xyz registry                          | Installed (interface)   | Delegated minting                              |
-| Web       | Next.js, React                                 | Installed               | `apps/web`                                     |
-| Web       | Tailwind CSS, shadcn/ui                        | Installed               | Styling and `packages/ui`                      |
-| Web       | Motion, dnd-kit                                | Installed               | Animation, layer reordering                    |
-| Web       | RainbowKit, wagmi, viem                        | Installed               | Wallet connection and contract calls           |
-| Web       | Supabase JS and SSR client                     | Installed               | Database access and sessions                   |
-| Render    | sharp                                          | Planned, Phase 4        | Image compositing                              |
-| Render    | AWS SDK (S3, SQS)                              | Planned, Phases 3 and 4 | Presigned uploads, job fan-out                 |
-| Render    | A CAR packing library                          | Planned, Phase 4        | IPFS archives for Filebase. Not chosen yet     |
-| Freshness | viem                                           | Planned, Phase 6        | Multicall and log subscriptions                |
-| Load test | k6                                             | Planned, Phase 7        | Mint-day load test                             |
+| Area      | Library                                        | Status                | Used for                                                                                  |
+| --------- | ---------------------------------------------- | --------------------- | ----------------------------------------------------------------------------------------- |
+| Tooling   | pnpm workspaces, Turborepo                     | Installed             | Monorepo and task running                                                                 |
+| Tooling   | TypeScript 6                                   | Installed             | Pinned to 6 until typescript-eslint supports 7                                            |
+| Tooling   | ESLint, typescript-eslint, Prettier            | Installed             | Lint and format                                                                           |
+| Tooling   | Vitest                                         | Installed             | Unit tests                                                                                |
+| Contracts | Foundry, Solidity 0.8.30                       | Installed             | Build, test, deploy                                                                       |
+| Contracts | Limit Break creator-token-standards (ERC721AC) | Installed             | Collection base, transfer validator, locking                                              |
+| Contracts | OpenZeppelin Contracts                         | Installed             | Ownable, ERC2981 royalties, ReentrancyGuard                                               |
+| Contracts | delegate.xyz registry                          | Installed (interface) | Delegated minting                                                                         |
+| Web       | Next.js, React                                 | Installed             | `apps/web`                                                                                |
+| Web       | Tailwind CSS, shadcn/ui                        | Installed             | Styling and `packages/ui`                                                                 |
+| Web       | Motion, dnd-kit                                | Installed             | Animation, layer reordering                                                               |
+| Web       | RainbowKit, wagmi, viem                        | Installed             | Wallet connection and contract calls                                                      |
+| Web       | Supabase JS and SSR client                     | Installed             | Database access and sessions                                                              |
+| Render    | sharp                                          | Planned, Phase 4      | Image compositing                                                                         |
+| Render    | AWS SDK (S3 client)                            | Installed             | Presigned uploads and storage reads over the S3 protocol (Supabase Storage, R2, Filebase) |
+| Render    | Vercel Queues (`@vercel/queue`)                | Installed             | Render job fan-out                                                                        |
+| Render    | A CAR packing library                          | Planned, Phase 4      | IPFS archives for Filebase. Not chosen yet                                                |
+| Freshness | viem                                           | Planned, Phase 6      | Multicall and log subscriptions                                                           |
+| Load test | k6                                             | Planned, Phase 7      | Mint-day load test                                                                        |
 
 ## Contracts in brief
 
@@ -333,7 +337,7 @@ Before porting anything, open the matching context doc: it says which files impl
 | 1     | Contracts: factory, collection                                    | `CobwebFactory` and `CobwebCollection`, tests, deploy script                                                                                             | Testnet deploy and verification                                         |
 | 2     | Web app: design, sign-in, schema, flow, mint page                 | `packages/ui`, wallet sign-in, schema with row-level security, the five-stage flow, the mint page, the address reservation, sample data for every screen | Hosted Supabase; checks at tablet widths                                |
 | 3     | Art generator: trait engine, layer upload, curation, lock and pay | Art screens on sample data                                                                                                                               | Trait engine, art tables, layer upload, lock and pay                    |
-| 4     | Render pipeline: SQS, Lambdas, Filebase                           | Render progress screens on sample data                                                                                                                   | Queue, Lambdas, IPFS upload                                             |
+| 4     | Render pipeline: Vercel Queues, Vercel Functions, Filebase        | Render progress screens on sample data                                                                                                                   | Queue, render functions, IPFS upload                                    |
 | 5     | Deploy and manage: phases, whitelist, reveal, airdrop             | Deploy and Manage drop screens on sample data                                                                                                            | Real transactions, whitelist writes, holder snapshot, validator setting |
 | 6     | Freshness server and mint page                                    | Mint page on sample data                                                                                                                                 | Freshness server, live data, Team, Roadmap, FAQ, music, carousel        |
 | 7     | Hardening and launch: load test, mainnet deploys                  |                                                                                                                                                          | Load test, contract review, mainnet deploys                             |
