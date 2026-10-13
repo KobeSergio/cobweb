@@ -52,7 +52,7 @@ export type LockContext = {
   wallet: string
   collection: LockCollection
   /**
-   * Where the pay flow sends a newly paid job's start message: Vercel Queues on Vercel, a queue that
+   * Where the pay flow and the lock send a job's start message: Vercel Queues on Vercel, a queue that
    * only logs anywhere else (lib/render/queue.ts). The verify scripts pass their own.
    */
   queue: RenderQueue

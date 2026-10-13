@@ -13,12 +13,13 @@ local runner) and [docs/specs/2026-10-13-render-worker-vercel.md](../../docs/spe
 - On Vercel the worker runs inside `apps/web`, in the same project as the pay flow, because a topic's
   messages are delivered to the deployment that published them:
   - `POST /api/queues/render` (`src/app/api/queues/render/route.ts`): the consumer of the `render`
-    topic. Only Vercel's queue infrastructure invokes it. `maxDuration` 800 seconds.
+    topic. Vercel's queue infrastructure invokes it; the SDK itself checks no signature or token (see the owner list below). `maxDuration` 800 seconds.
   - `GET /api/cron/render-sweep` (`src/app/api/cron/render-sweep/route.ts`): every 15 minutes, with
     `Authorization: Bearer <CRON_SECRET>`; any other caller gets a 404.
   - The pay flow (`src/lib/art/lock-core.ts`, `confirmCore`) sends a job's start message as soon as the
-    payment is recorded, and the lock (`lockCore`) sends it for a job locked as `waived` (a single
-    asset, which pays nothing). A failed send is logged and the sweep starts the job.
+    payment is recorded, and the lock (`lockCore` and `lockPlaceholderCore`) sends it for a job the lock
+    returned as `paid` or `waived`: a single asset, a placeholder, or a collection whose fee is zero owes
+    nothing and is recorded as `paid` at once. A failed send is logged and the sweep starts the job.
 - Locally nothing reaches Vercel: the web app's queue only logs `render not queued (no queue here)`,
   and `pnpm --filter @cobweb/web verify:render` drives the local runner (`@cobweb/worker/local`) over a
   queue in memory and a folder standing in for Filebase.
@@ -33,7 +34,7 @@ local runner) and [docs/specs/2026-10-13-render-worker-vercel.md](../../docs/spe
   acknowledged. If that report cannot be written (a database outage) the message comes back and the
   report is made then. The trigger's `maxDeliveries` of 10 bounds a runaway; it is never the normal
   path.
-- The sweep sends a start message again for each job nothing has touched for 15 minutes.
+- The sweep sends a start message again for each job nothing has touched for 15 minutes. That message carries the 15-minute slot it was sent in (`sweep` in the body, `:sweep:<slot>` in the key), so a failed send or a dead-lettered start message is retried with a fresh key every 15 minutes, and a job is picked up within about 15 minutes once the fault clears.
 
 ## Environment
 
@@ -67,7 +68,9 @@ A local or CI build of the web app prints "[QueueClient] Region not detected" tw
 3. Region `iad1` (also set in `apps/web/vercel.json`). Create the Supabase project in us-east-1 so the
    database sits beside the functions.
 4. Production environment values for every name in the table above, and `CRON_SECRET`.
-5. Crons run on production deployments only; the queue trigger is registered on every deployment.
+5. Settings, Environment Variables: keep "Automatically expose System Environment Variables" on, so `VERCEL` and `VERCEL_REGION` reach the functions. Without it every start send falls to the logging branch and the sweep adds about 15 minutes to every job.
+6. Before entering any production value, probe the consumer: send `POST /api/queues/render` to the preview with forged v2beta headers (`ce-type`, `ce-vqsqueuename`, `ce-vqsconsumergroup`, `ce-vqsmessageid`, a made-up `ce-vqsreceipthandle`, and `ce-vqsdeliverycount: 4`) and a valid-looking start body for a random uuid, and confirm the platform refuses it before the handler runs (no `message ignored`, `message failed` or `message dead` line in the function logs). If it does not refuse it, add a guard in the route before `queueConsumer` runs, and only then enter production values.
+7. Crons run on production deployments only; the queue trigger is registered on every deployment.
 
 ## Cloudflare R2 (the owner)
 

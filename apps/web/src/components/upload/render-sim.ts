@@ -1,6 +1,6 @@
 /**
  * Seam: rendering stays simulated until Phase 4 (MASTER_PLAN, Phase 4: render pipeline).
- * `followRender` stands in for following the paid job's batches as the render Lambdas update
+ * `followRender` stands in for following the paid job's batches as the render worker updates
  * `render_jobs` and `render_batches`, and `retryBatch` for the action that re-queues a failed batch.
  * Review, lock, quote, payment and unlock are real (upload-actions.ts, pay-machine.ts).
  */
