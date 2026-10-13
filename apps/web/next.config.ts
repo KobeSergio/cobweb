@@ -1,8 +1,11 @@
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
-  // The UI and DNA packages ship TypeScript source, so Next compiles it with the app.
-  transpilePackages: ['@cobweb/ui', '@cobweb/dna', '@cobweb/shared'],
+  // The workspace packages ship TypeScript source, so Next compiles them with the app. The worker and
+  // the render library run in the render queue consumer and the sweep cron.
+  transpilePackages: ['@cobweb/ui', '@cobweb/dna', '@cobweb/shared', '@cobweb/worker', '@cobweb/render'],
+  // sharp is a native module: loaded from node_modules at run time, never bundled.
+  serverExternalPackages: ['sharp'],
   poweredByHeader: false,
   experimental: {
     // A token action carries one chunk of at most CHUNK_BUDGET_BYTES (3.5 MB of JSON, and at most

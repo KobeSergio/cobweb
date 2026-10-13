@@ -1,0 +1,18 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["iad1"],
+  "functions": {
+    "src/app/api/queues/render/route.ts": {
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "render",
+          "retryAfterSeconds": 120,
+          "maxDeliveries": 10,
+          "maxConcurrency": 25
+        }
+      ]
+    }
+  },
+  "crons": [{ "path": "/api/cron/render-sweep", "schedule": "*/15 * * * *" }]
+}
