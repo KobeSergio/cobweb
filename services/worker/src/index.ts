@@ -7,6 +7,7 @@ export {
   DEAD_LETTER,
   handle,
   handleDead,
+  MAX_BATCH_BYTES,
   PAYMENT_MISMATCH,
   PRODUCTION_RETRY,
   RESULT_DIFFERS,

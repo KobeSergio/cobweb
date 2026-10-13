@@ -131,10 +131,10 @@ const EXPECTED_REFUSALS: readonly RefusalCode[] = [
 /**
  * The most bytes one pass-through batch (1/1 or single asset) may load, counted from what is really
  * read, not from the sizes the database holds: the lock sizes batches from `uploads.bytes`, a planning
- * number. A batch is held about 2.8 times over while it is packed, which the 4 GB function takes at
- * about 1.4 GB.
+ * number, to about 500 MB. A batch is held about 2.8 times over while it is packed, which the 4 GB
+ * Performance instance takes at about 1.7 GB.
  */
-export const MAX_BATCH_BYTES = 1_200_000_000
+export const MAX_BATCH_BYTES = 600_000_000
 
 /**
  * A loader that adds up the bytes it has really returned, each distinct key once (editions of one

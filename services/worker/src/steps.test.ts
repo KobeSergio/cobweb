@@ -530,8 +530,8 @@ describe('batch', () => {
 describe('the batch ceiling', () => {
   const ref = (key: string) => ({ key, ext: 'png' as const })
 
-  it('is 1.2 GB, with a plain sentence', () => {
-    expect(MAX_BATCH_BYTES).toBe(1_200_000_000)
+  it('is 600 MB, with a plain sentence', () => {
+    expect(MAX_BATCH_BYTES).toBe(600_000_000)
     expect(BATCH_TOO_LARGE).toBe(
       'This batch of files is larger than the worker can hold. Tell support about it.',
     )
