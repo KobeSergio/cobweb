@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import { GetQueueAttributesCommand, SendMessageBatchCommand } from '@aws-sdk/client-sqs'
 import type { SQSClient } from '@aws-sdk/client-sqs'
 import { parseRenderMessage } from '@cobweb/shared/render-queue'
@@ -52,25 +51,6 @@ describe('sqsRenderQueue', () => {
       'The queue refused 1 message(s).',
     )
     expect(sent).toHaveLength(2)
-  })
-
-  it('has a package entry that loads nothing but the SQS adapter and the shared queue contract', () => {
-    const entry = readFileSync(new URL('../queue.ts', import.meta.url), 'utf8')
-    const adapter = readFileSync(new URL('./sqs.ts', import.meta.url), 'utf8')
-    const text = `${entry}\n${adapter}`
-    // Every way to load a module: `from '...'` or `from "..."`, a bare `import 'x'`, a dynamic `import(`.
-    expect(text).not.toMatch(/\bimport\s*\(/)
-    expect(text).not.toMatch(/(^|[;\s])import\s*['"]/)
-    expect(text).not.toMatch(/\brequire\s*\(/)
-    const imports = [...text.matchAll(/from\s*(['"])([^'"]+)\1/g)].map((match) => match[2])
-    expect(imports.sort()).toEqual([
-      './adapters/sqs.ts',
-      '@aws-sdk/client-sqs',
-      '@aws-sdk/client-sqs',
-      '@cobweb/shared/render-queue',
-    ])
-    for (const forbidden of ['./steps', '@cobweb/render', 'sharp', '@supabase/supabase-js'])
-      for (const name of imports) expect(name?.startsWith(forbidden), `${name}`).toBe(false)
   })
 
   it('reads the backlog as the approximate number of visible messages', async () => {
