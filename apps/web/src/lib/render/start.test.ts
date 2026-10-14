@@ -1,4 +1,4 @@
-import type { RenderMessage, RenderQueue } from '@cobweb/shared/render-queue'
+import { messageKey, type RenderMessage, type RenderQueue } from '@cobweb/shared/render-queue'
 import { describe, expect, it } from 'vitest'
 import { startIfReady, startRender } from './start'
 
@@ -12,10 +12,19 @@ function recording() {
 }
 
 describe('startRender', () => {
-  it('sends one start message with retries 0', async () => {
-    const sent: RenderMessage[][] = []
-    await startRender({ send: async (messages) => void sent.push(messages) }, JOB, () => {})
+  it('sends one start message with retries 0 for a fresh job', async () => {
+    const { sent, queue } = recording()
+    await startRender(queue, { id: JOB, retries: 0 }, () => {})
     expect(sent).toEqual([[{ jobId: JOB, step: 'start', retries: 0 }]])
+  })
+
+  it("sends one start message carrying the job's retries, so a retry is never a duplicate of the first start", async () => {
+    const { sent, queue } = recording()
+    await startRender(queue, { id: JOB, retries: 3 }, () => {})
+    expect(sent).toEqual([[{ jobId: JOB, step: 'start', retries: 3 }]])
+    const [first] = sent[0] ?? []
+    expect(first && messageKey(first)).toBe(`${JOB}:start:3`)
+    expect(messageKey({ jobId: JOB, step: 'start', retries: 0 })).not.toBe(`${JOB}:start:3`)
   })
 
   it('swallows a failed send and logs the job id with the error name only', async () => {
@@ -23,7 +32,9 @@ describe('startRender', () => {
     const queue: RenderQueue = {
       send: () => Promise.reject(new TypeError('fetch failed https://queue.example/?token=abc')),
     }
-    await expect(startRender(queue, JOB, (line) => lines.push(line))).resolves.toBeUndefined()
+    await expect(
+      startRender(queue, { id: JOB, retries: 1 }, (line) => lines.push(line)),
+    ).resolves.toBeUndefined()
     expect(lines).toHaveLength(1)
     expect(lines[0]).toContain(JOB)
     expect(lines[0]).toContain('TypeError')
@@ -33,13 +44,13 @@ describe('startRender', () => {
 })
 
 describe('startIfReady', () => {
-  it('starts a job the lock returned paid or waived, and nothing else', async () => {
+  it('starts a job the lock returned paid or waived with retries 0, and nothing else', async () => {
     for (const state of ['paid', 'waived']) {
       const ready = recording()
       await startIfReady(ready.queue, { id: JOB, state }, () => {})
       expect(ready.sent).toEqual([[{ jobId: JOB, step: 'start', retries: 0 }]])
     }
-    for (const state of ['payment_due', 'locked', 'rendering']) {
+    for (const state of ['payment_due', 'locked', 'rendering', 'failed']) {
       const other = recording()
       await startIfReady(other.queue, { id: JOB, state }, () => {})
       expect(other.sent).toEqual([])

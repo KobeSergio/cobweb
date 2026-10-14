@@ -92,6 +92,7 @@ export function sampleActions(initial: RenderJob): UploadActions {
     }),
     confirm: async (_jobId, txHash) => ({ ok: true, data: paid(txHash) }),
     reload: async () => ({ ok: true, data: initial }),
+    retry: async () => ({ ok: true, data: initial }),
     lockPlaceholder: async () => {
       await sleep(1200)
       return { ok: true, data: { ...paid(null), lockedAt: nowSeconds() } }

@@ -4,6 +4,7 @@ import {
   lockArt,
   lockPlaceholder,
   quoteArt,
+  retryRender,
   unlockArt,
 } from '@/app/actions/lock'
 import { deleteUpload } from '@/app/actions/uploads'
@@ -25,6 +26,7 @@ export function realActions(collectionId: string): UploadActions {
     requote: () => quoteArt(collectionId),
     confirm: (jobId, txHash) => confirmArtPayment(collectionId, jobId, txHash),
     reload: () => getRenderJob(collectionId),
+    retry: () => retryRender(collectionId),
     lockPlaceholder: async (uploadId) =>
       uploadId ? lockPlaceholder(collectionId, uploadId) : fail(NO_PLACEHOLDER),
     uploadPlaceholder: async (file) => {

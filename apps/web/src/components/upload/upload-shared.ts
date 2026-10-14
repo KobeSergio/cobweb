@@ -14,6 +14,8 @@ export type UploadActions = {
   requote(): Promise<ActionResult<RenderJob>>
   confirm(jobId: string, txHash: Hex): Promise<ActionResult<RenderJob>>
   reload(): Promise<ActionResult<RenderJob | null>>
+  /** Retries a failed render; the job comes back `rendering` (or `finalizing`), or the refusal's sentence. */
+  retry(): Promise<ActionResult<RenderJob>>
   lockPlaceholder(uploadId: string | null): Promise<ActionResult<RenderJob>>
   /** Stores a placeholder file (`uploads` kind placeholder). Null in sample mode, which keeps it in the browser. */
   uploadPlaceholder: ((file: File) => Promise<PlaceholderUpload>) | null

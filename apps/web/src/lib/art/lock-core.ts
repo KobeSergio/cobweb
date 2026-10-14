@@ -286,7 +286,7 @@ export async function lockCore(
   })
   if (error) return { error }
   const job = await loadJob(supabase, (data as { id: string }).id)
-  // A lock that owes nothing (a single asset, or a zero fee) comes back `paid`: start its render now.
+  // A lock that owes nothing (a single asset, or a zero fee) comes back `paid`, and one covered by a credit comes back `waived`: start its render now.
   await startIfReady(ctx.queue, job)
   return { data: job }
 }
@@ -413,7 +413,7 @@ export async function confirmCore(
   if (recorded.error) return { error: recorded.error }
   if (short) return { refused: `${SHORT_PAYMENT} Tell support about job ${row.onchain_job_id}.` }
   // The job is paid: start its render now. A failed send is logged and left to the sweep.
-  await startRender(ctx.queue, row.id)
+  await startRender(ctx.queue, { id: row.id, retries: row.retries })
   return { data: await loadJob(supabase, row.id) }
 }
 
@@ -424,4 +424,19 @@ export async function renderJobCore(ctx: LockContext): Promise<LockOutcome<Rende
     (await openJobRow(ctx.supabase, ctx.collection.id, kind)) ??
     (await latestJobRow(ctx.supabase, ctx.collection.id, kind))
   return { data: row ? await jobFromRow(ctx.supabase, row) : null }
+}
+
+/**
+ * The creator's retry of a failed render (docs/specs/2026-10-14-render-screen-wiring.md, section 6):
+ * `art_render_retry` under the creator's client (the function refuses the service role; it re-queues
+ * the failed batches and raises `retries`), then the start message with the row's new retry count. A
+ * failed send is logged and swallowed: the job is `rendering` with its batches queued, and the sweep
+ * re-sends its start within 15 minutes.
+ */
+export async function retryCore(ctx: LockContext): Promise<LockOutcome<RenderJob>> {
+  const { data, error } = await ctx.supabase.rpc('art_render_retry', { p_collection_id: ctx.collection.id })
+  if (error) return { error }
+  const row = data as unknown as Pick<JobRow, 'id' | 'retries'>
+  await startRender(ctx.queue, { id: row.id, retries: row.retries })
+  return { data: await loadJob(ctx.supabase, row.id) }
 }

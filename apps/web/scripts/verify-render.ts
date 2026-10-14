@@ -2,7 +2,7 @@
 // (docs/specs/2026-10-12-render-worker.md, section 8): a signed-in creator's generative project with
 // drawn layers is locked and paid on Anvil, then the local runner takes the job through the same
 // steps the queue consumer runs, on the production adapters for the database, storage and the chain, with a
-// folder standing in for the pinning service and a queue in memory. Sixteen checks: the full run,
+// folder standing in for the pinning service and a queue in memory. Seventeen checks: the full run,
 // duplicate delivery (serial, then two copies of one batch at once), a pin that fails once, a pin that
 // always fails and the retry after it, identical CIDs for identical input, a 1/1 project's attributes
 // reaching the pinned metadata, a short payment, a payment no node has seen, a wrong CID (for a batch, then for the metadata set), a
@@ -11,9 +11,9 @@
 // Numbering: the spec (section 8) lists ten checks. Its checks 1 to 5 are checks 1 to 5 here. Check 6
 // here is an addition (a 1/1 project's attributes), so the spec's checks 6 to 10 (a short payment, a
 // wrong-CID pinner, a wrong-size layer, the sweep, a placeholder job) are numbered 7 to 11 in the output.
-// Five more cases carry a letter: 2b (concurrent copies of one batch), 7b (a payment no node has seen), 8b (a wrong CID for the metadata
+// Six more cases carry a letter: 2b (concurrent copies of one batch), 4b (the retry action's core), 7b (a payment no node has seen), 8b (a wrong CID for the metadata
 // set only), 9b (the credit the unlock of the wrong-size failure leaves) and 10b (the sweep starting a paid job).
-// With the two setup checks and the two cleanup checks the script prints 20 PASS lines.
+// With the two setup checks and the two cleanup checks the script prints 21 PASS lines.
 //
 // Not covered here: the worker's rule that a payment which shows at the latest block but not yet at the
 // confirmation depth is unconfirmed (viemChain throws PaymentUnconfirmed, and the step is retried).
@@ -135,7 +135,7 @@ for (const endpoint of [url, rpc, storage.ART_S3_ENDPOINT])
 const factory = getAddress(factoryEnv)
 
 // Imported after the environment is set, so the shared clients read the local chain settings.
-const { confirmCore, loadJob, lockCore, lockPlaceholderCore, reviewLock, unlockCore } =
+const { confirmCore, loadJob, lockCore, lockPlaceholderCore, retryCore, reviewLock, unlockCore } =
   await import('../src/lib/art/lock-core.ts')
 const { readLockCollection } = await import('../src/lib/art/lock-collection.ts')
 const web = await import('../src/lib/art/result.ts')
@@ -854,6 +854,35 @@ async function main(): Promise<void> {
         if (after?.attempts !== 1 || after.images_cid !== before?.images_cid)
           return `batch ${index} changed: ${JSON.stringify(before)} then ${JSON.stringify(after)}`
       }
+      return (await jobRow(jobId)).retries === 1 ? null : 'retries is not 1'
+    },
+  )
+
+  // 4b. The retry action's core: art_render_retry, then the start message with the new retry count.
+  await check(
+    '4b. retryCore on a failed job answers it rendering, queues one start with retries 1, and the runner finishes it',
+    async () => {
+      const cid = await seededProject(creator.client, 'four b')
+      const jobId = await lockedAndPaid(creator, cid)
+      const failing = local.failingPinner(local.folderPinner(pins), { nth: 1, times: Infinity })
+      const run = await render(jobId, depsFor(local.memoryQueue(), failing))
+      if (run.dead !== 1) return `run ${JSON.stringify(run)}`
+      if ((await jobRow(jobId)).state !== 'failed') return 'the job did not fail'
+      const queue = local.memoryQueue()
+      const ctx = {
+        ...(await contextFor(creator.client, creator.userId, creator.account.address, cid)),
+        queue,
+      }
+      const retried = await retryCore(ctx)
+      if (!('data' in retried)) return `retry: ${refusal(retried)}`
+      if (retried.data.state !== 'rendering') return `the retry answered ${retried.data.state}`
+      const want = [{ jobId, step: 'start', retries: 1 }]
+      if (JSON.stringify(queue.sent) !== JSON.stringify(want)) return `queued ${JSON.stringify(queue.sent)}`
+      // The queue already holds the start message: the runner drains it with a pinner that works.
+      const again = await local.runLocal(depsFor(queue, local.folderPinner(pins)))
+      if (again.thrown || again.dead) return `the retry had failures: ${JSON.stringify(again)}`
+      const problem = await doneProblem(jobId)
+      if (problem) return problem
       return (await jobRow(jobId)).retries === 1 ? null : 'retries is not 1'
     },
   )

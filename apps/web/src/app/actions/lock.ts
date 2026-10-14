@@ -6,6 +6,7 @@ import {
   lockPlaceholderCore,
   quoteCore,
   renderJobCore,
+  retryCore,
   reviewLock,
   unlockCore,
 } from '@/lib/art/lock-core'
@@ -28,7 +29,7 @@ export async function lockArt(collectionId: string, options: LockArtInput): Prom
   return lockWrite(collectionId, (ctx) => lockCore(ctx, input.data))
 }
 
-/** Unlocks the art while the fee is unpaid: the job and the quote go, the Art step opens again. */
+/** Unlocks the art: an unpaid lock is cancelled; a paid render that failed is released and leaves a credit for the next lock. The Art step opens again. */
 export async function unlockArt(collectionId: string): Promise<ActionResult<null>> {
   return lockWrite(collectionId, (ctx) => unlockCore(ctx))
 }
@@ -64,4 +65,9 @@ export async function confirmArtPayment(
 /** The job Lock and upload shows, or null before anything is locked. */
 export async function getRenderJob(collectionId: string): Promise<ActionResult<RenderJob | null>> {
   return lockWrite(collectionId, (ctx) => renderJobCore(ctx))
+}
+
+/** Retries a failed render: re-queues the failed batches and sends the start message with the new retry count. */
+export async function retryRender(collectionId: string): Promise<ActionResult<RenderJob>> {
+  return lockWrite(collectionId, (ctx) => retryCore(ctx))
 }
