@@ -52,7 +52,10 @@ export type Prepared = {
 
 export type DeployRecordGroup = { onchainId: number; name: string; priceWei: string; maxSupply: number }
 
-/** A deployed collection as `deployments` and `mint_groups` record it, read under the creator's client. */
+/**
+ * A deployed collection as `deployments` and `mint_groups` record it, read under the creator's client. The
+ * public limit and the launch phases are the constructor's (`deployments.args`), named from `mint_groups`.
+ */
 export type DeployRecord = {
   chainId: number
   contractAddress: Address

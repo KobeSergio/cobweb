@@ -35,13 +35,22 @@ import type { FeeSnapshot, RenderJobState } from '@/lib/demo/types'
 import {
   collectionArgsOf,
   deployArgs,
+  launchPhasesOf,
   placeholderPending,
   resolveDeployChain,
   revealsToOf,
   startJobOf,
   validateDeployForm,
 } from './deploy-args'
-import type { DeployChain, DeployForm, DeployRecord, DeployView, DoneJob, Prepared } from './deploy-types'
+import type {
+  DeployChain,
+  DeployForm,
+  DeployRecord,
+  DeployView,
+  DoneJob,
+  Prepared,
+  PreparedArgs,
+} from './deploy-types'
 
 /**
  * The deploy steps (docs/specs/2026-10-14-deploy.md, section 6) on a Supabase client acting as the
@@ -212,9 +221,13 @@ export async function prepareCore(ctx: DeployContext, form: DeployForm): Promise
   }
 }
 
-/** The numeric columns as text, so no wei is lost (PostgREST answers numeric as a JSON number). */
+/**
+ * The numeric columns as text, so no wei is lost (PostgREST answers numeric as a JSON number). The public
+ * limit and the launch phases come from `args`, the constructor as prepared: `public_max_per_wallet` and
+ * the `mint_groups` prices are the copies Phases refreshes (docs/specs/2026-10-15-phases.md, section 7.5).
+ */
 const DEPLOYMENT_COLUMNS =
-  'collection_id, chain_id, contract_address, tx_hash, deployer, deployed_at, base_uri, payout_address, royalty_bps, royalty_receiver, public_max_per_wallet, mint_fee_flat_wei::text, mint_fee_bps, airdrop_fee_per_token_wei::text'
+  'collection_id, chain_id, contract_address, tx_hash, deployer, deployed_at, base_uri, payout_address, royalty_bps, royalty_receiver, args, mint_fee_flat_wei::text, mint_fee_bps, airdrop_fee_per_token_wei::text'
 
 type DeploymentRow = {
   collection_id: string
@@ -227,13 +240,13 @@ type DeploymentRow = {
   payout_address: string
   royalty_bps: number
   royalty_receiver: string
-  public_max_per_wallet: number
+  args: PreparedArgs
   mint_fee_flat_wei: string
   mint_fee_bps: number
   airdrop_fee_per_token_wei: string
 }
 
-type GroupRow = { onchain_id: number; name: string; price_wei: string; max_supply: number }
+type GroupRow = { onchain_id: number; name: string }
 
 /** The collection's deployment and its launch phases under the creator's client, or null before deploy (section 6.3). */
 export async function readDeployment(
@@ -250,9 +263,8 @@ export async function readDeployment(
   const row = data as unknown as DeploymentRow
   const groups = await supabase
     .from('mint_groups')
-    .select('onchain_id, name, price_wei::text, max_supply')
+    .select('onchain_id, name')
     .eq('collection_id', collectionId)
-    .order('onchain_id')
   if (groups.error) throw new Error(`The launch phases could not be read: ${groups.error.message}`)
   return {
     chainId: row.chain_id,
@@ -264,18 +276,13 @@ export async function readDeployment(
     payout: getAddress(row.payout_address),
     royaltyBps: row.royalty_bps,
     royaltyReceiver: getAddress(row.royalty_receiver),
-    publicMaxPerWallet: row.public_max_per_wallet,
+    publicMaxPerWallet: Number(row.args.publicMaxPerWallet),
     fees: {
       mintFeeFlatWei: row.mint_fee_flat_wei,
       mintFeeBps: row.mint_fee_bps,
       airdropFeePerTokenWei: row.airdrop_fee_per_token_wei,
     },
-    groups: ((groups.data ?? []) as unknown as GroupRow[]).map((group) => ({
-      onchainId: group.onchain_id,
-      name: group.name,
-      priceWei: group.price_wei,
-      maxSupply: group.max_supply,
-    })),
+    groups: launchPhasesOf(row.args, (groups.data ?? []) as GroupRow[]),
   }
 }
 

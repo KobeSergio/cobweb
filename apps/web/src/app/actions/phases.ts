@@ -1,0 +1,111 @@
+'use server'
+
+import { cache } from 'react'
+import { txHash as txHashSchema } from '@/lib/art/lock-schemas'
+import type { ActionResult } from '@/lib/art/result'
+import { parse } from '@/lib/art/schemas'
+import { callOf, expectedEvent, type SentCall } from '@/lib/manage/phase-calls'
+import {
+  directionShape,
+  onchainIdShape,
+  parseSentCall,
+  phaseAddShape,
+  phaseDetailsShape,
+  visibleShape,
+} from '@/lib/manage/phase-schemas'
+import {
+  confirmPhaseTxCore,
+  movePhaseCore,
+  phasesViewCore,
+  readCollectionState,
+  renamePhaseCore,
+  setPhaseVisibilityCore,
+} from '@/lib/manage/phases-core'
+import type { PhaseAdd, PhasesView } from '@/lib/manage/phases-types'
+import { phasesWrite } from '@/lib/manage/phases-write'
+
+/**
+ * Phases' server actions (docs/specs/2026-10-15-phases.md, section 6.4). Each checks its input first, then
+ * runs through `phasesWrite`, which checks the session and the ownership (CLAUDE.md rule 4). The browser
+ * never writes an on-chain value: a confirm answers the view the server read from the chain.
+ */
+
+/** One chain read per request, however many times a page asks (React's cache). */
+const readOnce = cache(readCollectionState)
+
+/** The contract's groups joined with their rows, read on the server. */
+export async function getPhases(collectionId: string): Promise<ActionResult<PhasesView>> {
+  return phasesWrite(collectionId, (ctx) => phasesViewCore(ctx, readOnce))
+}
+
+/** Confirms an on-chain change from its receipt, then answers the fresh view. */
+export async function confirmPhaseTx(
+  collectionId: string,
+  txHash: string,
+  sent: SentCall,
+): Promise<ActionResult<PhasesView>> {
+  const hash = parse(txHashSchema, txHash)
+  if (!hash.ok) return hash
+  const call = parseSentCall(sent)
+  if (!call.ok) return call
+  return phasesWrite(collectionId, (ctx) =>
+    confirmPhaseTxCore(ctx, hash.data, { event: expectedEvent(callOf(call.data)) }),
+  )
+}
+
+/** Confirms Add phase from its receipt's MintGroupRegistered log, records the phase's row, then answers the view. */
+export async function recordPhase(
+  collectionId: string,
+  txHash: string,
+  add: PhaseAdd,
+): Promise<ActionResult<PhasesView>> {
+  const hash = parse(txHashSchema, txHash)
+  if (!hash.ok) return hash
+  const input = parse(phaseAddShape, add)
+  if (!input.ok) return input
+  return phasesWrite(collectionId, (ctx) =>
+    confirmPhaseTxCore(ctx, hash.data, {
+      event: { eventName: 'MintGroupRegistered', args: { mintGroup: BigInt(input.data.onchainId) } },
+      add: input.data,
+    }),
+  )
+}
+
+/** Edit details: the name and the description, or the first name of a group registered outside Cobweb. */
+export async function renamePhase(
+  collectionId: string,
+  onchainId: number,
+  details: { name: string; description: string },
+): Promise<ActionResult> {
+  const id = parse(onchainIdShape, onchainId)
+  if (!id.ok) return id
+  const input = parse(phaseDetailsShape, details)
+  if (!input.ok) return input
+  return phasesWrite(collectionId, (ctx) => renamePhaseCore(ctx, id.data, input.data, readOnce))
+}
+
+/** Hide from or show on the mint page. */
+export async function setPhaseVisibility(
+  collectionId: string,
+  onchainId: number,
+  visible: boolean,
+): Promise<ActionResult> {
+  const id = parse(onchainIdShape, onchainId)
+  if (!id.ok) return id
+  const shown = parse(visibleShape, visible)
+  if (!shown.ok) return shown
+  return phasesWrite(collectionId, (ctx) => setPhaseVisibilityCore(ctx, id.data, shown.data))
+}
+
+/** Move up or Move down in the creator's order, which the mint page follows. */
+export async function movePhase(
+  collectionId: string,
+  onchainId: number,
+  direction: 'up' | 'down',
+): Promise<ActionResult> {
+  const id = parse(onchainIdShape, onchainId)
+  if (!id.ok) return id
+  const towards = parse(directionShape, direction)
+  if (!towards.ok) return towards
+  return phasesWrite(collectionId, (ctx) => movePhaseCore(ctx, id.data, towards.data))
+}
