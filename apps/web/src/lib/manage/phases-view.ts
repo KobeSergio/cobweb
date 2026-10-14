@@ -11,7 +11,11 @@ import type { ChainGroup, ChainState, PhaseRowCopy, PhasesView } from './phases-
 /** The largest value the copy's integer columns hold (`onchain_id`, `max_supply`, `public_max_per_wallet`). */
 export const INT_MAX = 2_147_483_647
 
-/** The last second of 9999-12-31 UTC: a start above it does not fit the copy's timestamptz column. */
+/**
+ * The last second of 9999-12-31 UTC. A start past it comes back from the copy with a five-digit year that
+ * `copyView`'s `Date.parse` cannot read, and far larger starts make Postgres `to_timestamp` raise, so a read
+ * with such a start is not copied at all.
+ */
 export const TIMESTAMP_MAX = 253_402_300_799
 
 const kindOf = (id: number): MintGroup['kind'] => (id === 0 ? 'public' : 'whitelist')
@@ -132,8 +136,9 @@ export type RefreshPayload = {
 
 /**
  * The copies a read refreshes, or null when an id, an allocation or the public limit set outside Cobweb
- * does not fit the integer columns, or a start does not fit the timestamp column: then that read is not
- * copied at all (section 12).
+ * does not fit the integer columns, or a start is past `TIMESTAMP_MAX`: then that read is not copied at all
+ * (section 12). A start past 9999-12-31 would come back from the copy with a five-digit year that
+ * `copyView`'s `Date.parse` cannot read, and far larger starts make Postgres `to_timestamp` raise.
  */
 export function refreshPayload(state: ChainState): RefreshPayload | null {
   const fits = (value: number) => Number.isSafeInteger(value) && value >= 0 && value <= INT_MAX

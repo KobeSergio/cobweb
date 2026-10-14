@@ -108,6 +108,7 @@ describe('runManage', () => {
       'success',
     ])
     expect(calls.simulated).toEqual([phaseCalls.open(1)])
+    expect(calls.send).toBe(1)
     expect(calls.switchChain).toEqual([])
     expect(calls.sleeps).toEqual([3_000, 3_000])
     expect(result).toBe(VIEW)

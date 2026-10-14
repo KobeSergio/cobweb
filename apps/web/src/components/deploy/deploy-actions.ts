@@ -2,14 +2,7 @@ import { factoryAbi } from '@cobweb/shared'
 import { COLLECTION_CREATION_CODE } from '@cobweb/shared/collection'
 import type { Address, Hex } from 'viem'
 import type { Config } from 'wagmi'
-import {
-  getPublicClient,
-  readContract,
-  simulateContract,
-  switchChain,
-  waitForTransactionReceipt,
-  writeContract,
-} from 'wagmi/actions'
+import { getPublicClient, readContract, simulateContract, switchChain, writeContract } from 'wagmi/actions'
 import { confirmDeploy, prepareDeploy } from '@/app/actions/deploy'
 import type { ActionResult } from '@/lib/art/result'
 import type { FeeSnapshot } from '@/lib/demo/types'
@@ -98,7 +91,13 @@ export function realDeployActions(
       // CLAUDE.md rule 2: the wallet gets exactly the request the simulation passed.
       return () => writeContract(config, simulated.request)
     },
-    wait: async (hash, chainId) => (await waitForTransactionReceipt(config, { hash, chainId })).status,
+    // viem answers a reverted receipt with its status, where wagmi's wait throws. After three minutes a
+    // dropped transaction ends in a throw, which the machine shows as unconfirmed with "Check again".
+    wait: async (hash, chainId) => {
+      const client = getPublicClient(config, { chainId })
+      if (!client) throw new Error('No RPC for this chain')
+      return (await client.waitForTransactionReceipt({ hash, timeout: 180_000 })).status
+    },
     confirm: (hash, form) => confirmDeploy(collectionId, hash, form),
   }
 }

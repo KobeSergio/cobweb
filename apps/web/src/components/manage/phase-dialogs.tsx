@@ -144,13 +144,15 @@ export function ClearScheduleDialog({
   onView,
   ...ctx
 }: PhaseContext & { group: MintGroup; onView: (view: PhasesView) => void }) {
+  // The start as the creator confirmed it: once the clear lands, the live view reads no start.
+  const [start] = useState(group.scheduledStart)
   return (
     <TransactionDialog
       open={ctx.open}
       onOpenChange={ctx.onOpenChange}
       chain={ctx.chain}
       title="Clear the scheduled start"
-      description={`${group.name} will no longer open by itself at ${shortUtc(group.scheduledStart)}. It stays closed until you open it or schedule it again.`}
+      description={`${group.name} will no longer open by itself at ${shortUtc(start)}. It stays closed until you open it or schedule it again.`}
       actionLabel="Clear schedule"
       successMessage={`${group.name} is no longer scheduled`}
       request={phaseRequest(phaseCalls.clearSchedule(group.id), ctx)}

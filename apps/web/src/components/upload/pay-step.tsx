@@ -4,7 +4,7 @@ import { InfoIcon, LockOpenIcon, RefreshCwIcon, WalletIcon } from 'lucide-react'
 import { useEffect, useReducer, useRef, useState } from 'react'
 import type { Address, Hex } from 'viem'
 import { useAccount, useConfig } from 'wagmi'
-import { readContract, simulateContract, waitForTransactionReceipt, writeContract } from 'wagmi/actions'
+import { getPublicClient, readContract, simulateContract, writeContract } from 'wagmi/actions'
 import { factoryAbi } from '@cobweb/shared'
 import { Alert, AlertDescription, AlertTitle } from '@cobweb/ui/components/alert'
 import {
@@ -184,8 +184,13 @@ export function PayStep({
           // CLAUDE.md rule 2: the wallet gets exactly the request the simulation passed.
           return () => writeContract(config, simulated.request)
         },
-        wait: async (hash) =>
-          (await waitForTransactionReceipt(config, { hash, chainId: quote.chainId })).status,
+        // viem answers a reverted receipt with its status, where wagmi's wait throws. After three minutes a
+        // dropped transaction ends in a throw, which the machine shows as unconfirmed with "Check again".
+        wait: async (hash) => {
+          const client = getPublicClient(config, { chainId: quote.chainId })
+          if (!client) throw new Error('No RPC for this chain')
+          return (await client.waitForTransactionReceipt({ hash, timeout: 180_000 })).status
+        },
         confirm: (hash) => actions.confirm(job.id, hash),
         reload: () => actions.reload(),
         remember: (hash) => rememberPayment(store, job.id, hash),

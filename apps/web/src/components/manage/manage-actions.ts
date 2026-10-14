@@ -1,13 +1,7 @@
 import { collectionAbi } from '@cobweb/shared/collection-abi'
 import type { Address, Hex } from 'viem'
 import type { Config } from 'wagmi'
-import {
-  readContract,
-  simulateContract,
-  switchChain,
-  waitForTransactionReceipt,
-  writeContract,
-} from 'wagmi/actions'
+import { getPublicClient, readContract, simulateContract, switchChain, writeContract } from 'wagmi/actions'
 import type { ActionResult } from '@/lib/art/result'
 import type { ManageCall } from '@/lib/manage/phase-calls'
 
@@ -81,7 +75,13 @@ export function realManageActions(
       // CLAUDE.md rule 2: the wallet gets exactly the request the simulation passed.
       return () => writeContract(config, simulated.request)
     },
-    wait: async (hash) => (await waitForTransactionReceipt(config, { hash, chainId: target.chainId })).status,
+    // viem answers a reverted receipt with its status, where wagmi's wait throws. After three minutes a
+    // dropped transaction ends in a throw, which the machine shows as unconfirmed with "Check again".
+    wait: async (hash) => {
+      const client = getPublicClient(config, { chainId: target.chainId })
+      if (!client) throw new Error('No RPC for this chain')
+      return (await client.waitForTransactionReceipt({ hash, timeout: 180_000 })).status
+    },
     nextGroupId: async () => {
       const ids = await readContract(config, {
         address: target.contract,

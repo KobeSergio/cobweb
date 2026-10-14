@@ -48,13 +48,17 @@ describe('the shipped collection artifact', () => {
   })
 
   if (existsSync(artifact)) {
-    it('ships the bytecode of the Foundry build in contracts/out', () => {
-      const built = JSON.parse(readFileSync(artifact, 'utf8')) as { bytecode: { object: string } }
+    it('ships the bytecode and the ABI of the Foundry build in contracts/out', () => {
+      const built = JSON.parse(readFileSync(artifact, 'utf8')) as {
+        abi: unknown[]
+        bytecode: { object: string }
+      }
       expect(COLLECTION_CREATION_CODE).toBe(built.bytecode.object)
       expect(COLLECTION_CODE_HASH).toBe(keccak256(built.bytecode.object as `0x${string}`))
+      expect(abiOnly).toEqual(built.abi)
     })
   } else {
-    it.skip('ships the bytecode of the Foundry build in contracts/out (run forge build in contracts/ to check it)', () => {})
+    it.skip('ships the bytecode and the ABI of the Foundry build in contracts/out (run forge build in contracts/ to check it)', () => {})
   }
 })
 
