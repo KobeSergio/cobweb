@@ -123,3 +123,35 @@ describe('the ABI-only entry and what Phases relies on (docs/specs/2026-10-15-ph
     }
   })
 })
+
+describe('what Whitelist relies on (docs/specs/2026-10-15-whitelist.md, section 5)', () => {
+  it('carries setMintQuota with its argument names, and the quota and ERC-721 views the server reads', () => {
+    const quotas = getAbiItem({ abi: abiOnly, name: 'setMintQuota' })
+    expect(toFunctionSelector(quotas)).toBe(toFunctionSelector('setMintQuota(address[],uint256,uint256[])'))
+    expect(namesOf(quotas)).toEqual(['addressesToAdd', 'mintGroup', 'mintQuotas_'])
+    for (const [name, signature] of [
+      ['mintQuotas', 'mintQuotas(uint256,address)'],
+      ['quotaClaimed', 'quotaClaimed(uint256,address)'],
+      ['walletState', 'walletState(address)'],
+      ['ownerOf', 'ownerOf(uint256)'],
+      ['totalSupply', 'totalSupply()'],
+      ['supportsInterface', 'supportsInterface(bytes4)'],
+    ] as const) {
+      expect(toFunctionSelector(getAbiItem({ abi: abiOnly, name }))).toBe(toFunctionSelector(signature))
+    }
+  })
+
+  it('carries the event a chunk leaves and the errors the quota sentences decode', () => {
+    expect(toEventSelector(getAbiItem({ abi: abiOnly, name: 'MintQuotasAdded' }))).toBe(
+      toEventSelector('MintQuotasAdded(uint256,uint256)'),
+    )
+    for (const [name, signature] of [
+      ['ArrayLengthMismatch', 'ArrayLengthMismatch()'],
+      ['PublicGroupHasNoQuota', 'PublicGroupHasNoQuota()'],
+      ['NotInWhitelist', 'NotInWhitelist(address,uint256)'],
+      ['ExceedsMintQuota', 'ExceedsMintQuota(uint256,uint256)'],
+    ] as const) {
+      expect(signatureOf(getAbiItem({ abi: abiOnly, name }))).toBe(signature)
+    }
+  })
+})
