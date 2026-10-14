@@ -5,10 +5,13 @@
 -- so the web app never mirrors it. art_unlock is redefined to take the collection's latest real job
 -- whatever its state, so a failed paid job can be unlocked (it keeps the worker's sentence and takes
 -- the code unlocked, which every existing check for an unlocked job reads); a job failed with
--- payment-mismatch stays with support and leaves no credit. art_lock is redefined to insert a lock
--- covered by a credit as waived, with the quote columns filled as for a paid lock and credit_job_id
--- naming the job whose payment it rests on. Both keep their signatures and grants, and the rest of
--- their bodies is as in 20261009020000_lock_and_pay.sql and 20261012010000_render_job_state.sql.
+-- payment-mismatch stays with support and leaves no credit. On a collection that finishes its art
+-- later, art_unlock also releases a failed placeholder job with the code unlocked and nothing else (a
+-- placeholder lock is free, sets no art_locked_at and leaves no credit), so the placeholder can be
+-- locked again. art_lock is redefined to insert a lock covered by a credit as waived, with the quote
+-- columns filled as for a paid lock and credit_job_id naming the job whose payment it rests on. Both
+-- keep their signatures and grants, and the rest of their bodies is as in
+-- 20261009020000_lock_and_pay.sql and 20261012010000_render_job_state.sql.
 
 -- ---------------------------------------------------------------------------------------------
 -- render_jobs.credit_job_id: the job whose payment a waived lock rests on
@@ -82,7 +85,8 @@ grant execute on function public.art_render_credit(uuid, integer) to authenticat
 
 -- ---------------------------------------------------------------------------------------------
 -- art_unlock, redefined: the latest real job whatever its state, so a failed paid job can be
--- unlocked and leave its credit. Otherwise as in 20261012010000_render_job_state.sql.
+-- unlocked and leave its credit; on a collection that finishes its art later, a failed placeholder
+-- job is released the same way. Otherwise as in 20261012010000_render_job_state.sql.
 -- ---------------------------------------------------------------------------------------------
 create or replace function public.art_unlock(p_collection_id uuid)
 returns void
@@ -93,6 +97,7 @@ as $$
 declare
   v_collection public.collections;
   v_job public.render_jobs;
+  v_placeholder public.render_jobs;
 begin
   v_collection := private.lock_owned_collection(p_collection_id, (select auth.uid()));
   -- The collection's latest real job, in any state. A job cancelled by an unlock counts here, so it
@@ -103,6 +108,32 @@ begin
   order by j.created_at desc, j.id desc
   limit 1
   for update;
+  -- A collection that finishes its art later, with no real job or with its latest real job cancelled
+  -- by an unlock, may hold a failed placeholder job (art_render_retry picks it the same way). It is
+  -- released with the code unlocked and nothing else: a placeholder lock is free, sets no
+  -- art_locked_at and leaves no credit, and art_lock_placeholder accepts a new lock after a failure.
+  -- A deferred collection with no such job falls through to the checks below on the real job.
+  if v_collection.art_deferred
+    and (v_job.id is null
+      or (v_job.state = 'failed' and (v_job.error_code = 'unlocked' or v_job.error = 'unlocked')))
+  then
+    select j.* into v_placeholder
+    from public.render_jobs j
+    where j.collection_id = p_collection_id and j.kind = 'placeholder'
+    order by j.created_at desc, j.id desc
+    limit 1
+    for update;
+    if v_placeholder.id is not null
+      and v_placeholder.state = 'failed'
+      and v_placeholder.error_code is distinct from 'unlocked'
+      and v_placeholder.error is distinct from 'unlocked'
+    then
+      update public.render_jobs j
+      set error_code = 'unlocked'
+      where j.id = v_placeholder.id and j.collection_id = p_collection_id;
+      return;
+    end if;
+  end if;
   -- (1) Nothing to unlock: no job, no lock on the collection, a finished job, or a job already unlocked.
   if v_job.id is null
     or v_collection.art_locked_at is null

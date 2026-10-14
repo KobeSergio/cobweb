@@ -11,15 +11,29 @@ import { formatDuration } from './upload-shared'
 
 const CONNECTION_LOST = 'Cobweb cannot reach the server; still trying.'
 
-/** What the failure alert says under the worker's sentence, by face, and the one button that fits. */
-function faceCopy(face: FailureFace, retriesLeft: number): { advice: string; button: string } | null {
+type PhaseState = 'waiting' | 'running' | 'done' | 'failed'
+
+/**
+ * What the failure alert says under the worker's sentence, by face, and the one button that fits. A
+ * placeholder lock is free and leaves no credit, so with deferred art the art and credit faces say so.
+ */
+function faceCopy(
+  face: FailureFace,
+  retriesLeft: number,
+  placeholderOnly: boolean,
+): { advice: string; button: string } | null {
   switch (face) {
     case 'art':
-      return {
-        advice:
-          'Unlock the art, fix it on the Art screens and lock again. The credit from this render makes the next lock free.',
-        button: 'Unlock and fix the art',
-      }
+      return placeholderOnly
+        ? {
+            advice: 'Unlock the placeholder, replace the file and lock it again. A placeholder lock is free.',
+            button: 'Unlock and replace the placeholder',
+          }
+        : {
+            advice:
+              'Unlock the art, fix it on the Art screens and lock again. The credit from this render makes the next lock free.',
+            button: 'Unlock and fix the art',
+          }
     case 'retry':
       return {
         advice: `The finished batches are kept; a retry renders only the rest. ${retriesLeft} ${
@@ -28,11 +42,16 @@ function faceCopy(face: FailureFace, retriesLeft: number): { advice: string; but
         button: 'Try again',
       }
     case 'credit':
-      return {
-        advice:
-          'No retries are left. Unlock and lock again: the credit from this render makes the next lock free.',
-        button: 'Unlock and lock again',
-      }
+      return placeholderOnly
+        ? {
+            advice: 'No retries are left. Unlock and lock the placeholder again; a placeholder lock is free.',
+            button: 'Unlock and lock again',
+          }
+        : {
+            advice:
+              'No retries are left. Unlock and lock again: the credit from this render makes the next lock free.',
+            button: 'Unlock and lock again',
+          }
     case 'support':
       return null
   }
@@ -79,20 +98,25 @@ export function RenderStep({
 }) {
   const { failure } = view
   const imagesDone = view.phase === 'metadata' || view.phase === 'done'
-  const copy = failure ? faceCopy(failure.face, failure.retriesLeft) : null
+  const copy = failure ? faceCopy(failure.face, failure.retriesLeft, placeholderOnly) : null
   const onAction = failure?.face === 'retry' ? onRetry : onUnlock
-  // The placeholder is one file, pinned before the first batch of the real set finishes.
-  const placeholderState = view.phase === 'done' || view.done > 0 ? 'done' : 'running'
+  // The placeholder is one file, pinned before the first batch of the real set finishes; a failure
+  // stops it with the rest of the job. With deferred art it is the whole job, done when the job is.
+  const placeholderState: PhaseState = failure
+    ? 'failed'
+    : view.phase === 'done' || (!placeholderOnly && view.done > 0)
+      ? 'done'
+      : 'running'
   const placeholderRow = (
     <PhaseRow
       label="Placeholder"
-      state={
-        placeholderOnly ? (view.phase === 'done' ? 'done' : failure ? 'failed' : 'running') : placeholderState
-      }
+      state={placeholderState}
       detail={
-        (placeholderOnly ? view.phase === 'done' : placeholderState === 'done')
+        placeholderState === 'done'
           ? 'Done. Pinned to its own CID'
-          : 'Pinning the one placeholder file'
+          : placeholderState === 'failed'
+            ? 'Stopped'
+            : 'Pinning the one placeholder file'
       }
     />
   )
@@ -234,15 +258,7 @@ export function RenderStep({
   )
 }
 
-function PhaseRow({
-  label,
-  state,
-  detail,
-}: {
-  label: string
-  state: 'waiting' | 'running' | 'done' | 'failed'
-  detail: React.ReactNode
-}) {
+function PhaseRow({ label, state, detail }: { label: string; state: PhaseState; detail: React.ReactNode }) {
   return (
     <li className="bg-surface-2/50 flex items-start gap-3 rounded-lg border px-4 py-3">
       <span

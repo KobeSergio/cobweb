@@ -132,6 +132,8 @@ generative project's `max_supply` cleared), and the job:
 - `failed`: `error_code = 'unlocked'` only. `error`, `finished_at`, `retries`, the payment and the
   batch rows stay as the worker left them.
 
+> **14 October 2026 (whole-branch review):** on a collection that finishes its art later (`art_deferred`), when the latest real job is absent or unlocked, `art_unlock` also takes the collection's latest placeholder job (`order by created_at desc, id desc`, `for update`); if that job is `failed` and not already unlocked it gets `error_code = 'unlocked'` only and the function returns, writing nothing on the collection (a placeholder lock is free and sets no `art_locked_at`), so `art_lock_placeholder` accepts a new lock. In every other case the checks above run on the real job as before, so a deferred collection with no failed placeholder job still reads 'The art is not locked.'
+
 ### 4.4 `art_lock`, redefined
 
 Same signature and grants (service role). After its checks and the collection update, before the

@@ -9,7 +9,8 @@
  * so every failure state can be reviewed and the way out then works: `check-failed` gives the sample
  * set two identical tokens for the duplicates check; `batch-failed` stops the run two batches after its
  * start on a worker failure the creator retries; `art-problem` stops it on a layer problem the creator
- * unlocks to fix.
+ * unlocks to fix. An unlock of a failed job leaves a credit, as the server's does: the next lock is
+ * answered waived and the render starts at once, so the pay step is skipped.
  */
 import type { TxFailure, TxPhase } from '@/components/deploy/tx-progress'
 import { jobBase } from '@/lib/art/render-job'
@@ -87,6 +88,8 @@ export function sampleActions(
   let outcome = options.outcome
   // How many batches were done when the run started, for the stop two batches later.
   let startDone: number | null = null
+  // The credit: set by an unlock of a failed job, spent by the next lock (one lock, as the database's).
+  let creditNext = false
 
   const paid = (txHash: Hex | null): RenderJob => ({
     ...base,
@@ -156,17 +159,21 @@ export function sampleActions(
   return {
     lock: async () => {
       await sleep(1200)
-      current = {
-        ...base,
-        lockedAt: nowSeconds(),
-        quote: { ...base.quote, expiresAt: nowSeconds() + DAY },
-        state: 'payment_due',
-        payment: null,
+      const lockedAt = nowSeconds()
+      const quote = { ...base.quote, expiresAt: lockedAt + DAY }
+      if (creditNext) {
+        // The credit pays the fee: the lock is recorded waived and the render starts at once.
+        creditNext = false
+        current = { ...base, lockedAt, quote, state: 'waived', payment: null, batches, credited: true }
+        return { ok: true, data: current }
       }
+      current = { ...base, lockedAt, quote, state: 'payment_due', payment: null }
       return { ok: true, data: current }
     },
     unlock: async () => {
       await sleep(600)
+      // A failed job that is unlocked leaves its credit, whatever stopped it.
+      if (current.state === 'failed') creditNext = true
       outcome = undefined
       startDone = null
       current = { ...base, state: 'locked' }

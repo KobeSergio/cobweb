@@ -105,7 +105,7 @@ describe('sampleActions', () => {
     ])
   })
 
-  it('stops on the layer problem with the art-problem outcome, and an unlock clears it for the next lock', async () => {
+  it('stops on the layer problem with the art-problem outcome, and the unlock leaves a credit that one lock spends', async () => {
     const actions = sampleActions(paid, { outcome: 'art-problem', done })
     const seen = await run(actions)
     expect(seen.map(summary)).toEqual(['rendering:0', 'failed:1'])
@@ -113,10 +113,21 @@ describe('sampleActions', () => {
     const unlocking = actions.unlock()
     await vi.runAllTimersAsync()
     expect((await unlocking).ok).toBe(true)
+    // The failed render left a credit: the next lock is waived and follows the paid job's path.
     const locking = actions.lock({ allowDuplicates: false, chainId: 8453 })
     await vi.runAllTimersAsync()
     const locked = await locking
-    expect(locked.ok && locked.data.state).toBe('payment_due')
+    expect(locked.ok && locked.data).toMatchObject({ state: 'waived', credited: true, payment: null })
+    const started = await actions.reload()
+    expect(started.ok && started.data && summary(started.data)).toBe('rendering:0')
+    // The credit is spent: a plain unlock and a new lock ask for payment again.
+    const again = actions.unlock()
+    await vi.runAllTimersAsync()
+    expect((await again).ok).toBe(true)
+    const relocking = actions.lock({ allowDuplicates: false, chainId: 8453 })
+    await vi.runAllTimersAsync()
+    const relocked = await relocking
+    expect(relocked.ok && relocked.data.state).toBe('payment_due')
     const confirmed = await actions.confirm('job-1', `0x${'5'.repeat(64)}`)
     expect(confirmed.ok && confirmed.data.state).toBe('paid')
     const rest = await run(actions)

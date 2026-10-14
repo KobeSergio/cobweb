@@ -4863,6 +4863,64 @@ async function artRenderCredit(A: Creator, B: Creator): Promise<void> {
         : `${JSON.stringify(job)} ${JSON.stringify(state)} credit ${JSON.stringify(credit.data)}`
     },
   )
+
+  // Deferred art: a placeholder job the worker failed. A placeholder lock is free, sets no
+  // art_locked_at and leaves no credit, so the unlock only releases the job for a new placeholder lock.
+  const deferredId = (await insertCollection(A.client)).row!.id
+  const deferredSet = await A.client.from('collections').update({ art_deferred: true }).eq('id', deferredId)
+  if (deferredSet.error) throw new Error(`setup: ${describe(deferredSet.error as DbError)}`)
+  const placeholderUpload = await recordUpload(A.client, deferredId, { kind: 'placeholder' })
+  if (!placeholderUpload.id) throw new Error(`setup: ${describe(placeholderUpload.error)}`)
+  const placeholderLock = await callArt(A.client, 'art_lock_placeholder', {
+    p_collection_id: deferredId,
+    p_placeholder_upload_id: placeholderUpload.id,
+  })
+  if (placeholderLock.error) throw new Error(`setup: ${describe(placeholderLock.error)}`)
+  const placeholderJob = idOf(placeholderLock.data)
+  const PLACEHOLDER_UNREADABLE = 'The placeholder file could not be decoded.'
+
+  await check(
+    "art_unlock: a deferred collection's failed placeholder job is released with the code unlocked, and nothing else changes",
+    async () => {
+      const failed = await failRender(placeholderJob, 'decode', PLACEHOLDER_UNREADABLE)
+      if (failed) return `setup: ${failed}`
+      const before = await creditRow(placeholderJob)
+      const stateBefore = await lockState(deferredId)
+      if (before.state !== 'failed' || stateBefore.art_locked_at !== null)
+        return `setup: ${JSON.stringify(before)} ${JSON.stringify(stateBefore)}`
+      const { error } = await callArt(A.client, 'art_unlock', { p_collection_id: deferredId })
+      if (error) return describe(error)
+      const job = await creditRow(placeholderJob)
+      const state = await lockState(deferredId)
+      const batch = (await batchesOf(placeholderJob))[0]
+      const credit = await creditOf(A.client, deferredId, 1)
+      return job.state === 'failed' &&
+        job.error_code === 'unlocked' &&
+        job.error === PLACEHOLDER_UNREADABLE &&
+        job.finished_at === before.finished_at &&
+        job.retries === before.retries &&
+        batch?.state === 'failed' &&
+        state.art_locked_at === null &&
+        state.status === stateBefore.status &&
+        credit.data === null
+        ? null
+        : `${JSON.stringify(job)} ${JSON.stringify(batch)} ${JSON.stringify(state)} credit ${JSON.stringify(credit.data)}`
+    },
+  )
+
+  await check('art_lock_placeholder: a new placeholder lock is accepted after the release', async () => {
+    const { data, error } = await callArt(A.client, 'art_lock_placeholder', {
+      p_collection_id: deferredId,
+      p_placeholder_upload_id: placeholderUpload.id,
+    })
+    if (error) return describe(error)
+    const next = idOf(data)
+    const job = await creditRow(next)
+    const state = await lockState(deferredId)
+    return next !== '' && next !== placeholderJob && job.state === 'paid' && state.art_locked_at === null
+      ? null
+      : `${next} ${JSON.stringify(job)} ${JSON.stringify(state)}`
+  })
 }
 
 // ---------------------------------------------------------------------------------------------
