@@ -1,3 +1,5 @@
+import { PHASE_NAME_TAKEN } from '@/lib/art/result'
+
 /**
  * The checks a phase's settings go through before a transaction is built, shared by Deploy (the
  * initial phases in the constructor) and Manage drop (phases after deploy). They mirror the
@@ -13,13 +15,16 @@ export const PRICE_MAX = 1_000_000
 /** The native token's decimals on every launch chain. */
 export const NATIVE_DECIMALS = 18
 
+/** The name sentences, shared with the server's checks (lib/manage/phase-schemas.ts). */
+export const PHASE_NAME_EMPTY = 'Name the phase, for example "Holders".'
+export const PHASE_NAME_LONG = `Use at most ${PHASE_NAME_MAX} characters.`
+
 /** Why a phase name cannot be used, or null. Names are compared without case or outer spaces. */
 export function phaseNameError(name: string, others: string[]): string | null {
   const trimmed = name.trim()
-  if (!trimmed) return 'Name the phase, for example "Holders".'
-  if (trimmed.length > PHASE_NAME_MAX) return `Use at most ${PHASE_NAME_MAX} characters.`
-  if (others.some((other) => other.trim().toLowerCase() === trimmed.toLowerCase()))
-    return 'Another phase already has this name.'
+  if (!trimmed) return PHASE_NAME_EMPTY
+  if (trimmed.length > PHASE_NAME_MAX) return PHASE_NAME_LONG
+  if (others.some((other) => other.trim().toLowerCase() === trimmed.toLowerCase())) return PHASE_NAME_TAKEN
   return null
 }
 

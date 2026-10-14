@@ -10,6 +10,7 @@ import {
   GROUP_PRICE,
   GROUP_SUPPLY,
   GROUPS_OVER_SUPPLY,
+  launchPhasesOf,
   PAYOUT_INVALID,
   PAYOUT_ZERO,
   placeholderPending,
@@ -212,5 +213,23 @@ describe('deployArgs and collectionArgsOf', () => {
       owner: WALLET,
       royaltyReceiver: RECEIVER,
     })
+  })
+})
+
+describe('launchPhasesOf', () => {
+  it("answers the constructor's prices and allocations with each phase's name, Group N without a row", () => {
+    expect(
+      launchPhasesOf({ groupPrices: ['0', '1000000000000000'], groupSupplies: ['2', '1'] }, [
+        { onchain_id: 1, name: 'Holders club' },
+        { onchain_id: 0, name: 'Public' },
+        { onchain_id: 2, name: 'Added later' },
+      ]),
+    ).toEqual([
+      { onchainId: 0, name: 'Public', priceWei: '0', maxSupply: 2 },
+      { onchainId: 1, name: 'Holders club', priceWei: '1000000000000000', maxSupply: 1 },
+    ])
+    expect(launchPhasesOf({ groupPrices: ['0'], groupSupplies: ['5'] }, [])).toEqual([
+      { onchainId: 0, name: 'Group 0', priceWei: '0', maxSupply: 5 },
+    ])
   })
 })

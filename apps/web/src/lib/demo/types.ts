@@ -270,6 +270,11 @@ export type MintGroup = {
   description?: string
   /** False hides the phase from the mint page; it still mints if open. Off chain: `mint_groups.visible`. */
   visible?: boolean
+  /**
+   * False when the chain lists the group and Cobweb has no row for it (registered outside Cobweb): it
+   * reads "Group N" until the creator names it. Undefined counts as named.
+   */
+  named?: boolean
 }
 
 /** One wallet on a group's whitelist. Replaced by: `whitelist_entries` joined with `walletState` usage. */

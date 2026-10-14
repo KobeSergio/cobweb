@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { artWriteError, lockWriteError } from './db-error'
+import { artWriteError, lockWriteError, phasesWriteError } from './db-error'
 import {
   ALREADY_LOCKED,
   ART_CHANGED,
@@ -45,6 +45,9 @@ import {
   SAVE_CAP,
   SHORT_PAYMENT,
   SUPPLY_MISMATCH,
+  NOT_DEPLOYED,
+  PHASE_NAME_TAKEN,
+  PUBLIC_SHOWN,
   UNSAVED,
 } from './result'
 
@@ -173,5 +176,47 @@ describe('lockWriteError', () => {
       UNSAVED,
     )
     expect(lockWriteError(null)).toBe(UNSAVED)
+  })
+})
+
+describe('phasesWriteError', () => {
+  it('reads every refusal of the owner check as not found', () => {
+    expect(phasesWriteError({ code: '42501', message: 'collection not found' })).toBe(NOT_FOUND)
+    expect(phasesWriteError({ code: '42501', message: 'phase not found' })).toBe(NOT_FOUND)
+    expect(phasesWriteError({ code: '42501', message: 'permission denied for table mint_groups' })).toBe(
+      NOT_FOUND,
+    )
+  })
+
+  it('maps the name index and the public sale check, and passes the not-deployed sentence through', () => {
+    expect(
+      phasesWriteError({
+        code: '23505',
+        message: 'duplicate key value violates unique constraint "mint_groups_name_key"',
+      }),
+    ).toBe(PHASE_NAME_TAKEN)
+    expect(
+      phasesWriteError({
+        code: '23514',
+        message: 'new row for relation "mint_groups" violates check constraint "mint_groups_public_shown"',
+      }),
+    ).toBe(PUBLIC_SHOWN)
+    expect(phasesWriteError({ code: '23514', message: NOT_DEPLOYED })).toBe(NOT_DEPLOYED)
+  })
+
+  it('says "reload" for anything else', () => {
+    expect(
+      phasesWriteError({
+        code: '23505',
+        message: 'duplicate key value violates unique constraint "mint_groups_position_key"',
+      }),
+    ).toBe(UNSAVED)
+    expect(
+      phasesWriteError({
+        code: '23514',
+        message: 'new row for relation "mint_groups" violates check constraint "mint_groups_name_check"',
+      }),
+    ).toBe(UNSAVED)
+    expect(phasesWriteError(null)).toBe(UNSAVED)
   })
 })

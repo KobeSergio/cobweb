@@ -3,7 +3,7 @@ import { getAddress, isAddress, type Address } from 'viem'
 import { z } from 'zod'
 import { parse } from '@/lib/art/schemas'
 import type { RenderJobState } from '@/lib/demo/types'
-import type { DeployForm, PreparedArgs } from './deploy-types'
+import type { DeployForm, DeployRecordGroup, PreparedArgs } from './deploy-types'
 
 /**
  * The deploy form's rules and the constructor built from it (docs/specs/2026-10-14-deploy.md,
@@ -174,4 +174,21 @@ export function collectionArgsOf(args: PreparedArgs): CollectionArgs {
     owner: args.owner,
     royaltyReceiver: args.royaltyReceiver,
   }
+}
+
+/**
+ * The launch phases as the constructor took them (docs/specs/2026-10-15-phases.md, section 7.5): prices and
+ * allocations from `deployments.args`, each name from its `mint_groups` row by `onchain_id`, "Group N"
+ * without one. Phases changes the live values and the copies; the deployed view keeps showing what landed.
+ */
+export function launchPhasesOf(
+  args: Pick<PreparedArgs, 'groupPrices' | 'groupSupplies'>,
+  rows: { onchain_id: number; name: string }[],
+): DeployRecordGroup[] {
+  return args.groupPrices.map((priceWei, index) => ({
+    onchainId: index,
+    name: rows.find((row) => row.onchain_id === index)?.name ?? `Group ${index}`,
+    priceWei,
+    maxSupply: Number(args.groupSupplies[index] ?? '0'),
+  }))
 }

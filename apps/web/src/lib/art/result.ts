@@ -95,3 +95,21 @@ export const OTHER_CODE = 'The transaction deployed different contract code.'
 export const OTHER_CONTRACT = 'The contract on chain was not built from the prepared settings.'
 export const DEPLOY_TIMED_OUT =
   'The deployment is not confirmed yet. Try again in a minute; the contract is recorded once it is.'
+
+// Phases (docs/specs/2026-10-15-phases.md, section 6.5). The database raises NOT_DEPLOYED as it is.
+export const NOT_DEPLOYED = 'The contract is not deployed yet.'
+// Said by the server or the screen (the database does not raise these).
+export const PHASE_NAME_TAKEN = 'Another phase already has this name.'
+export const PUBLIC_SHOWN = 'The public sale is always shown on the mint page.'
+export const PHASE_NOT_CONFIRMED = 'The change has not been confirmed on chain yet.'
+export const PHASE_REVERTED = 'The change reverted on chain.'
+export const NOT_THIS_CONTRACT = "The transaction was not sent to this collection's contract."
+export const NOT_FROM_WALLET = 'The transaction was not sent from your sign-in wallet.'
+export const NOT_THIS_CHANGE = 'The transaction did not make this change.'
+export const PHASE_NOT_ON_CHAIN = 'This phase is not on the contract.'
+export const NAME_FIRST = 'Name the phase first.'
+export const DESCRIPTION_TOO_LONG = 'Use at most 500 characters.'
+export const PHASE_TIMED_OUT =
+  'The change is not confirmed yet. Read the contract again in a minute to see it.'
+// Naming a group that has no row reads the chain first; this is said when it does not answer.
+export const CONTRACT_UNREADABLE = 'The contract could not be read. Try again in a minute.'

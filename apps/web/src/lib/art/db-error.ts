@@ -29,6 +29,7 @@ import {
   NO_PLACEHOLDER,
   NO_SUCH_BATCH,
   NOT_DEFERRED,
+  NOT_DEPLOYED,
   NOT_FOUND,
   NOT_LOCKED,
   NOT_RENDERED,
@@ -37,11 +38,13 @@ import {
   OTHER_WALLET,
   PAID_STAYS_LOCKED,
   PAYER_NOT_YOU,
+  PHASE_NAME_TAKEN,
   PAYMENT_AMOUNT_INVALID,
   PAYMENT_RECORDED,
   PAYMENT_USED,
   PAYMENT_USED_FOR_JOB,
   PLACEHOLDER_LOCKED,
+  PUBLIC_SHOWN,
   QUOTE_EXPIRED,
   QUOTE_FROZEN,
   QUOTE_NOT_EXPIRED,
@@ -160,5 +163,24 @@ export function deployWriteError(error: DbError): string {
   if (error.code === '23505')
     return error.message.includes('deployments_tx_hash_key') ? DEPLOY_USED : ALREADY_DEPLOYED
   if (error.code === '23514' && DEPLOY_SENTENCES.has(error.message)) return error.message
+  return UNSAVED
+}
+
+/** Sentences the phases functions raise (supabase/migrations/20261015000000_phases.sql). */
+const PHASES_SENTENCES = new Set([NOT_DEPLOYED])
+
+/**
+ * A failed phases write, by SQLSTATE, in the creator's words (docs/specs/2026-10-15-phases.md, section
+ * 6.4): the owner lock's 'collection not found', mint_group_move's 'phase not found' and a refused grant
+ * all read as not found; the name index as a taken name; the public sale's check as always shown.
+ */
+export function phasesWriteError(error: DbError): string {
+  if (!error) return UNSAVED
+  if (error.code === '42501') return NOT_FOUND
+  if (error.code === '23505' && error.message.includes('mint_groups_name_key')) return PHASE_NAME_TAKEN
+  if (error.code === '23514') {
+    if (error.message.includes('mint_groups_public_shown')) return PUBLIC_SHOWN
+    if (PHASES_SENTENCES.has(error.message)) return error.message
+  }
   return UNSAVED
 }
