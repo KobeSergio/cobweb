@@ -209,6 +209,8 @@ The fourth sub-project's `retryRender` action calls this, then the third sub-pro
 `enqueueRender(jobId)`, in that order, so a failed enqueue leaves a job that the worker's periodic
 sweep (third sub-project) can pick up.
 
+> **14 October 2026:** the retry action exists: `retryRender` calls this function and sends the start message with the returned row's `retries` ([2026-10-14-render-screen-wiring.md](2026-10-14-render-screen-wiring.md), section 6). A failed paid job can also be unlocked now; it keeps its sentence under the code `unlocked` and leaves a credit for the next lock (section 4 there).
+
 ## 8. Sentences
 
 Fourteen sentences, added to `LOCK_SENTENCES` in `apps/web/src/lib/art/db-error.ts` and exported from `result.ts`:
@@ -284,6 +286,8 @@ policy) with one bounded select, only for rendering, finalizing, failed and done
 `render-sim.ts` is untouched here; the fourth sub-project replaces it.
 
 The sample data path (`NEXT_PUBLIC_DEMO_DATA`) gets a `finalizing` sample so the stage can be seen.
+
+> **14 October 2026:** the known gap on art problems is closed by the screen: for every code in `ART_PROBLEM_CODES` the failed job shows the `art` face (unlock and fix the art), whatever `retryable` says ([2026-10-14-render-screen-wiring.md](2026-10-14-render-screen-wiring.md), section 8). `RenderJobBase` gained `credited`, and `render-sim.ts` is gone.
 
 ## 10. Testing
 

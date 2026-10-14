@@ -86,6 +86,8 @@ Out:
 - Opacity and extra metadata columns (the mapper passes opacity 1 and no extra fields).
 - Source deletion after 90 days (Phase 7).
 
+> **14 October 2026:** the fourth sub-project consumed `enqueueRender` (through `startRender` with the row's retry count), `ART_PROBLEM_CODES`, the collage key (served by `GET /api/collections/[id]/collage` through a presigned GET on the render bucket), `art_render_retry` in `retryRender`, and the local runner in `pnpm --filter @cobweb/web render:local`; see [2026-10-14-render-screen-wiring.md](2026-10-14-render-screen-wiring.md).
+
 ## 4. The queue contract (`packages/shared/src/render-queue.ts`)
 
 > Superseded on 13 October 2026: `backlog` and the SQS adapter. `RenderQueue` is `send` only, `messageKey` gives each message its idempotency key, and the queue adapter is `vercelRenderQueue` from `@cobweb/worker/queue` ([2026-10-13-render-worker-vercel.md](2026-10-13-render-worker-vercel.md), sections 4 and 5).
