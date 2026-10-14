@@ -1,5 +1,6 @@
 import {
   ALREADY_LOCKED,
+  ALREADY_DEPLOYED,
   ART_CHANGED,
   BATCH_ALREADY_DONE,
   BATCH_COUNT_MISMATCH,
@@ -9,6 +10,7 @@ import {
   CHANGED_ELSEWHERE,
   CLEAR_FIRST,
   DNA_MISMATCH,
+  DEPLOY_USED,
   EMPTY_SET,
   FEE_NOT_WHOLE,
   HASH_INVALID,
@@ -20,6 +22,7 @@ import {
   JOB_RESULT_DIFFERS,
   JOB_UNLOCKED,
   LOCKED,
+  LINK_REQUIRED,
   NO_CHAIN,
   NO_PAYMENT_DUE,
   NO_PAYMENT_FOR_JOB,
@@ -28,6 +31,7 @@ import {
   NOT_DEFERRED,
   NOT_FOUND,
   NOT_LOCKED,
+  NOT_RENDERED,
   NOT_THIS_JOB,
   NOTHING_TO_LOCK,
   OTHER_WALLET,
@@ -47,6 +51,7 @@ import {
   SAVE_CAP,
   SHORT_PAYMENT,
   SUPPLY_MISMATCH,
+  SUPPLY_REQUIRED,
   TRAIT_CAP,
   UNSAVED,
   UPLOAD_CAP,
@@ -135,5 +140,25 @@ export function lockWriteError(error: DbError): string {
   if (error.code === '23505')
     return error.message.includes('render_jobs_one_open_per_kind') ? ALREADY_LOCKED : PAYMENT_USED
   if (error.code === '23514' && LOCK_SENTENCES.has(error.message)) return error.message
+  return UNSAVED
+}
+
+/** Sentences collection_record_deploy raises (supabase/migrations/20261014100000_deploy.sql). */
+const DEPLOY_SENTENCES = new Set([
+  ALREADY_DEPLOYED,
+  LINK_REQUIRED,
+  SUPPLY_REQUIRED,
+  NOT_RENDERED,
+  DEPLOY_USED,
+])
+
+/** A failed deploy write, by SQLSTATE, in the creator's words (docs/specs/2026-10-14-deploy.md, section 6). */
+export function deployWriteError(error: DbError): string {
+  if (!error) return UNSAVED
+  if (error.code === '42501') return error.message === 'collection not found' ? NOT_FOUND : UNSAVED
+  // Two unique indexes: one deployment per transaction, one per collection (the primary key).
+  if (error.code === '23505')
+    return error.message.includes('deployments_tx_hash_key') ? DEPLOY_USED : ALREADY_DEPLOYED
+  if (error.code === '23514' && DEPLOY_SENTENCES.has(error.message)) return error.message
   return UNSAVED
 }

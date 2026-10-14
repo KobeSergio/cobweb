@@ -8,14 +8,17 @@ import type { Database, Tables } from '@/lib/database.types'
 export type LockClient = SupabaseClient<Database>
 
 export const LOCK_COLLECTION_COLUMNS =
-  'id, owner_id, name, project_type, status, art_deferred, art_locked_at, chain_id, max_supply, token_name, token_description, show_blank_traits, generation_seed, canvas_width, canvas_height'
+  'id, owner_id, name, symbol, slug, slug_reserved_at, project_type, status, art_deferred, art_locked_at, chain_id, max_supply, token_name, token_description, show_blank_traits, generation_seed, canvas_width, canvas_height'
 
-/** The collection columns the lock and pay code reads. */
+/** The collection columns the lock, pay and deploy code reads. */
 export type LockCollection = Pick<
   Tables<'collections'>,
   | 'id'
   | 'owner_id'
   | 'name'
+  | 'symbol'
+  | 'slug'
+  | 'slug_reserved_at'
   | 'project_type'
   | 'status'
   | 'art_deferred'

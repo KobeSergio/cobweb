@@ -78,3 +78,20 @@ export const RETRY_LIMIT = 'This job has been retried too many times. Tell suppo
 export const PAYMENT_UNVERIFIED = 'The payment for this job could not be verified. Tell support about it.'
 // Ruling: a collection may lock its placeholder ten times, in any state of the earlier jobs.
 export const PLACEHOLDER_LIMIT = 'The placeholder has been locked too many times. Tell support about it.'
+
+// Deploy (docs/specs/2026-10-14-deploy.md, sections 4.2 and 6). The database raises the first five as they are.
+export const ALREADY_DEPLOYED = 'The contract is already deployed.'
+export const LINK_REQUIRED = 'Reserve your mint page link first.'
+export const SUPPLY_REQUIRED = 'Set the supply in Art first.'
+export const NOT_RENDERED = 'Render the art before deploying.'
+export const DEPLOY_USED = 'This transaction was recorded for another collection.'
+// Said by the server or the screen (the database does not raise these).
+export const WRONG_CHAIN = 'The contract goes on the chain the fee was paid on.'
+export const FACTORY_UNREADABLE = 'The factory could not be read.'
+export const DEPLOY_NOT_CONFIRMED = 'The deployment has not been confirmed on chain yet.'
+export const DEPLOY_REVERTED = 'The deployment reverted on chain.'
+export const NOT_THIS_DEPLOY = 'The transaction did not deploy this collection.'
+export const OTHER_CODE = 'The transaction deployed different contract code.'
+export const OTHER_CONTRACT = 'The contract on chain was not built from the prepared settings.'
+export const DEPLOY_TIMED_OUT =
+  'The deployment is not confirmed yet. Try again in a minute; the contract is recorded once it is.'
