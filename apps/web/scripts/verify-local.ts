@@ -164,6 +164,7 @@ type Collection = {
   chain_id: number | null
   contract_address: string | null
   max_supply: number | null
+  art_locked_at: string | null
   updated_at: string
 }
 
@@ -1043,6 +1044,7 @@ async function main(): Promise<void> {
   await artLockAndPay(A, B)
   await artRenderState(A, B)
   await artRenderCredit(A, B)
+  await artDeploy(A, B)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -4921,6 +4923,553 @@ async function artRenderCredit(A: Creator, B: Creator): Promise<void> {
       ? null
       : `${next} ${JSON.stringify(job)} ${JSON.stringify(state)}`
   })
+}
+
+// ---------------------------------------------------------------------------------------------
+// 9j. Deploy: the deployments table, collection_record_deploy, the guard's lock branch and
+// collection_placeholder_ready (docs/specs/2026-10-14-deploy.md, section 4)
+// ---------------------------------------------------------------------------------------------
+type DeploymentRow = {
+  collection_id: string
+  chain_id: number
+  factory: string
+  deployer: string
+  salt: string
+  code_hash: string
+  contract_address: string
+  tx_hash: string
+  base_uri: string
+  payout_address: string
+  royalty_bps: number
+  royalty_receiver: string
+  public_max_per_wallet: number
+  mint_fee_flat_wei: string
+  mint_fee_bps: number
+  airdrop_fee_per_token_wei: string
+  deployed_at: string
+}
+
+const DEPLOYMENT_COLUMNS =
+  'collection_id, chain_id, factory, deployer, salt, code_hash, contract_address, tx_hash, base_uri, payout_address, royalty_bps, royalty_receiver, public_max_per_wallet, mint_fee_flat_wei::text, mint_fee_bps, airdrop_fee_per_token_wei::text, deployed_at'
+
+async function deploymentOf(client: SupabaseClient, cid: string) {
+  const { data, error } = await client
+    .from('deployments')
+    .select(DEPLOYMENT_COLUMNS)
+    .eq('collection_id', cid)
+    .maybeSingle()
+  return { row: data as unknown as DeploymentRow | null, error: error as DbError }
+}
+
+type DeployedState = {
+  status: string
+  chain_id: number | null
+  contract_address: string | null
+  slug: string | null
+  slug_reserved_at: string | null
+  art_locked_at: string | null
+}
+
+async function deployedState(cid: string): Promise<DeployedState> {
+  const { data, error } = await admin
+    .from('collections')
+    .select('status, chain_id, contract_address, slug, slug_reserved_at, art_locked_at')
+    .eq('id', cid)
+    .single()
+  if (error) throw new Error(`deployed state: ${describe(error as DbError)}`)
+  return data as DeployedState
+}
+
+type GroupRow = {
+  onchain_id: number
+  name: string
+  price_wei: string
+  max_supply: number
+  start_at: string | null
+}
+
+async function groupsOf(cid: string): Promise<GroupRow[]> {
+  const { data, error } = await admin
+    .from('mint_groups')
+    .select('onchain_id, name, price_wei::text, max_supply, start_at')
+    .eq('collection_id', cid)
+    .order('onchain_id')
+  if (error) throw new Error(`groups: ${describe(error as DbError)}`)
+  return data as unknown as GroupRow[]
+}
+
+/** Takes a paid (or placeholder) job through its one batch to done, as the worker would. */
+async function finishRender(
+  jobId: string,
+  imagesCid: string,
+  metadataCid: string,
+  baseUri: string,
+  placeholderImageCid: string | null = null,
+): Promise<string | null> {
+  const { failed } = await runSteps(
+    [
+      ['art_claim_render', { p_job_id: jobId }],
+      ['art_batch_start', { p_job_id: jobId, p_index: 0 }],
+      ['art_batch_done', { p_job_id: jobId, p_index: 0, p_images_cid: imagesCid, p_images_size: 1000 }],
+      [
+        'art_render_finish',
+        {
+          p_job_id: jobId,
+          p_metadata_cid: metadataCid,
+          p_base_uri: baseUri,
+          p_placeholder_image_cid: placeholderImageCid,
+        },
+      ],
+    ],
+    async () => '',
+  )
+  return failed
+}
+
+/** A generative collection of three tokens, locked, paid and rendered to done; with a live link unless `link` is false. */
+async function renderedFixture(A: Creator, payer: string, tag: number, options: { link?: boolean } = {}) {
+  const { cid, jobId, list } = await renderFixture(A, payer, tag)
+  const failed = await finishRender(jobId, CID('d'), CID('e'), `ipfs://${CID('e')}/`)
+  if (failed) throw new Error(`setup: render: ${failed}`)
+  if (options.link !== false) {
+    const error = await reserve(A.client, cid, slug())
+    if (error) throw new Error(`setup: link: ${describe(error)}`)
+  }
+  return { cid, jobId, list }
+}
+
+/** A collection that finishes its art later, its placeholder locked and rendered to done, with a live link; a supply unless `withSupply` is false. */
+async function deferredFixture(A: Creator, withSupply = true) {
+  const col = await insertCollection(A.client)
+  if (!col.row) throw new Error(`setup: ${describe(col.error)}`)
+  const cid = col.row.id
+  const set = await A.client
+    .from('collections')
+    .update({ art_deferred: true, ...(withSupply ? { max_supply: 5 } : {}) })
+    .eq('id', cid)
+  if (set.error) throw new Error(`setup: deferred: ${describe(set.error as DbError)}`)
+  const upload = await recordUpload(A.client, cid, { kind: 'placeholder', file_name: 'placeholder.png' })
+  if (upload.error || !upload.id) throw new Error(`setup: placeholder upload: ${describe(upload.error)}`)
+  const lock = await callArt(A.client, 'art_lock_placeholder', {
+    p_collection_id: cid,
+    p_placeholder_upload_id: upload.id,
+  })
+  if (lock.error) throw new Error(`setup: placeholder lock: ${describe(lock.error)}`)
+  const jobId = idOf(lock.data)
+  const failed = await finishRender(jobId, CID('p'), CID('q'), `ipfs://${CID('q')}/metadata.json`, CID('p'))
+  if (failed) throw new Error(`setup: placeholder render: ${failed}`)
+  const link = await reserve(A.client, cid, slug())
+  if (link) throw new Error(`setup: link: ${describe(link)}`)
+  return { cid, jobId }
+}
+
+const ADDRESS40 = (n: number) => `0x${n.toString(16).padStart(40, '0')}`
+
+/** The record function's arguments for a collection, every address lowercase, every wei a string. */
+const recordArgs = (
+  owner: string,
+  cid: string,
+  payer: string,
+  n: number,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> => ({
+  p_collection_id: cid,
+  p_owner: owner,
+  p_chain_id: 31337,
+  p_factory: FACTORY_ADDRESS,
+  p_deployer: payer,
+  p_salt: `0x${HEX64(n)}`,
+  p_code_hash: `0x${HEX64(1000 + n)}`,
+  p_args: {
+    name: 'Verify',
+    symbol: 'VFY',
+    maxSupply: '3',
+    groupSupplies: ['2', '1'],
+    groupPrices: ['0', '1000000000000000'],
+  },
+  p_contract_address: ADDRESS40(n),
+  p_tx_hash: `0x${HEX64(2000 + n)}`,
+  p_base_uri: `ipfs://${CID('e')}/`,
+  p_payout_address: payer,
+  p_royalty_bps: 500,
+  p_royalty_receiver: payer,
+  p_public_max_per_wallet: 3,
+  p_mint_fee_flat_wei: '0',
+  p_mint_fee_bps: 0,
+  p_airdrop_fee_per_token_wei: '0',
+  p_groups: [
+    { name: 'Public', price_wei: '0', max_supply: 2 },
+    { name: 'Holders', price_wei: '1000000000000000', max_supply: 1 },
+  ],
+  ...overrides,
+})
+
+const BIG_FEE = '8000000000000000000123'
+const LOCK_SENTENCE = 'The name, symbol and description cannot change while the art is locked.'
+
+async function artDeploy(A: Creator, B: Creator): Promise<void> {
+  const payer = A.account.address.toLowerCase()
+  // Rendered, linked: the deployment that lands.
+  const rendered = await renderedFixture(A, payer, 141)
+  // Rendered, no link, then a lapsed link: refusal (2).
+  const unlinked = await renderedFixture(A, payer, 142, { link: false })
+  // Deferred with its placeholder done: refusal (5) with the first deployment's hash, then its own deployment.
+  const deferred = await deferredFixture(A)
+  // Deferred without a supply: refusal (3).
+  const bare = await deferredFixture(A, false)
+  // A draft with a supply and a link but nothing rendered: refusal (4).
+  const draft = await insertCollection(A.client)
+  if (!draft.row) throw new Error(`setup: ${describe(draft.error)}`)
+  const draftId = draft.row.id
+  // Locked, waiting for payment: the guard's lock branch.
+  const locked = await renderFixture(A, payer, 146, false)
+
+  await check(
+    'deployments: the owner reads nothing before deploy, and a client insert is refused',
+    async () => {
+      const read = await A.client.from('deployments').select('collection_id')
+      if (read.error) return describe(read.error as DbError)
+      if (read.data.length > 0) return `${read.data.length} row(s) before any deploy`
+      const { data, error } = await A.client
+        .from('deployments')
+        .insert({
+          collection_id: rendered.cid,
+          chain_id: 31337,
+          factory: FACTORY_ADDRESS,
+          deployer: payer,
+          salt: `0x${HEX64(1)}`,
+          code_hash: `0x${HEX64(1001)}`,
+          args: {},
+          contract_address: ADDRESS40(1),
+          tx_hash: `0x${HEX64(2001)}`,
+          base_uri: `ipfs://${CID('e')}/`,
+          payout_address: payer,
+          royalty_bps: 500,
+          royalty_receiver: payer,
+          public_max_per_wallet: 3,
+          mint_fee_flat_wei: 0,
+          mint_fee_bps: 0,
+          airdrop_fee_per_token_wei: 0,
+        })
+        .select()
+      return expectError(error as DbError, PERMISSION, data)
+    },
+  )
+
+  await check(
+    "collection_record_deploy: the owner's session and a signed-out caller cannot execute it",
+    async () => {
+      const problems: string[] = []
+      for (const [who, client] of [
+        ['owner session', A.client],
+        ['signed out', anon],
+      ] as const) {
+        const { error } = await callArt(
+          client,
+          'collection_record_deploy',
+          recordArgs(A.userId, rendered.cid, payer, 1),
+        )
+        const problem = expectSentence(error, PERMISSION, 'permission denied')
+        if (problem) problems.push(`${who}: ${problem}`)
+      }
+      return problems.length ? problems.join('; ') : null
+    },
+  )
+
+  await check(
+    "collection_record_deploy: B's id as p_owner on A's collection is refused as not found",
+    async () => {
+      const { error } = await callArt(
+        admin,
+        'collection_record_deploy',
+        recordArgs(B.userId, rendered.cid, payer, 1),
+      )
+      const problem = expectSentence(error, PERMISSION, 'collection not found')
+      if (problem) return problem
+      return (await deployedState(rendered.cid)).status === 'rendered' ? null : 'the collection changed'
+    },
+  )
+
+  await check(
+    'collection_record_deploy: a collection without a live link is refused, lapsed or missing',
+    async () => {
+      const missing = await callArt(
+        admin,
+        'collection_record_deploy',
+        recordArgs(A.userId, unlinked.cid, payer, 2),
+      )
+      const first = expectSentence(missing.error, CHECK, 'Reserve your mint page link first.')
+      if (first) return `no link: ${first}`
+      const reserved = await reserve(A.client, unlinked.cid, slug())
+      if (reserved) return `setup reserve: ${describe(reserved)}`
+      const aged = await admin
+        .from('collections')
+        .update({ slug_reserved_at: new Date(Date.now() - 4 * 24 * 3600 * 1000).toISOString() })
+        .eq('id', unlinked.cid)
+      if (aged.error) return `setup age: ${describe(aged.error as DbError)}`
+      const lapsed = await callArt(
+        admin,
+        'collection_record_deploy',
+        recordArgs(A.userId, unlinked.cid, payer, 2),
+      )
+      const second = expectSentence(lapsed.error, CHECK, 'Reserve your mint page link first.')
+      if (second) return `lapsed link: ${second}`
+      return (await deployedState(unlinked.cid)).status === 'rendered' ? null : 'the collection changed'
+    },
+  )
+
+  await check('collection_record_deploy: a deferred collection without a supply is refused', async () => {
+    const { error } = await callArt(
+      admin,
+      'collection_record_deploy',
+      recordArgs(A.userId, bare.cid, payer, 3),
+    )
+    return expectSentence(error, CHECK, 'Set the supply in Art first.')
+  })
+
+  await check('collection_record_deploy: a collection with nothing rendered is refused', async () => {
+    const supply = await A.client.from('collections').update({ max_supply: 3 }).eq('id', draftId)
+    if (supply.error) return `setup supply: ${describe(supply.error as DbError)}`
+    const link = await reserve(A.client, draftId, slug())
+    if (link) return `setup link: ${describe(link)}`
+    const { error } = await callArt(
+      admin,
+      'collection_record_deploy',
+      recordArgs(A.userId, draftId, payer, 4),
+    )
+    return expectSentence(error, CHECK, 'Render the art before deploying.')
+  })
+
+  let deployedSlug: string | null = null
+  await check(
+    'collection_record_deploy: records the deployment, marks the collection deployed on its chain, makes the link permanent and writes the launch phases',
+    async () => {
+      const stale = await A.client
+        .from('mint_groups')
+        .insert({ collection_id: rendered.cid, onchain_id: 7, name: 'Old draft' })
+      if (stale.error) return `setup group: ${describe(stale.error as DbError)}`
+      const before = await deployedState(rendered.cid)
+      deployedSlug = before.slug
+      const { data, error } = await callArt(
+        admin,
+        'collection_record_deploy',
+        recordArgs(A.userId, rendered.cid, payer, 1, { p_mint_fee_flat_wei: BIG_FEE }),
+      )
+      if (error) return describe(error)
+      const returned = data as { collection_id?: string; tx_hash?: string } | null
+      if (returned?.collection_id !== rendered.cid || returned.tx_hash !== `0x${HEX64(2001)}`)
+        return `returned ${JSON.stringify(returned)}`
+      const state = await deployedState(rendered.cid)
+      const problems = [
+        state.status === 'deployed' ? null : `status ${state.status}`,
+        state.chain_id === 31337 ? null : `chain ${state.chain_id}`,
+        state.contract_address === ADDRESS40(1) ? null : `contract ${state.contract_address}`,
+        state.slug === before.slug ? null : `slug ${state.slug}`,
+        state.slug_reserved_at === null ? null : `slug_reserved_at ${state.slug_reserved_at}`,
+      ].filter(Boolean)
+      if (problems.length) return problems.join('; ')
+      const groups = await groupsOf(rendered.cid)
+      const want = [
+        { onchain_id: 0, name: 'Public', price_wei: '0', max_supply: 2, start_at: null },
+        { onchain_id: 1, name: 'Holders', price_wei: '1000000000000000', max_supply: 1, start_at: null },
+      ]
+      if (JSON.stringify(groups) !== JSON.stringify(want)) return `groups ${JSON.stringify(groups)}`
+      const { row, error: readError } = await deploymentOf(A.client, rendered.cid)
+      if (readError) return `read: ${describe(readError)}`
+      if (!row) return 'no deployments row under the owner'
+      const age = Date.now() - Date.parse(row.deployed_at)
+      return row.chain_id === 31337 &&
+        row.factory === FACTORY_ADDRESS &&
+        row.deployer === payer &&
+        row.salt === `0x${HEX64(1)}` &&
+        row.code_hash === `0x${HEX64(1001)}` &&
+        row.contract_address === ADDRESS40(1) &&
+        row.base_uri === `ipfs://${CID('e')}/` &&
+        row.royalty_bps === 500 &&
+        row.public_max_per_wallet === 3 &&
+        Math.abs(age) < 60_000
+        ? null
+        : JSON.stringify(row)
+    },
+  )
+
+  await check('collection_record_deploy: the fee snapshot keeps every wei above 2^53', async () => {
+    const { row, error } = await deploymentOf(A.client, rendered.cid)
+    if (error) return describe(error)
+    return row?.mint_fee_flat_wei === BIG_FEE ? null : `mint_fee_flat_wei ${row?.mint_fee_flat_wei}`
+  })
+
+  await check('collection_record_deploy: a second call for a deployed collection is refused', async () => {
+    const { error } = await callArt(
+      admin,
+      'collection_record_deploy',
+      recordArgs(A.userId, rendered.cid, payer, 5),
+    )
+    const problem = expectSentence(error, CHECK, 'The contract is already deployed.')
+    if (problem) return problem
+    const { row } = await deploymentOf(A.client, rendered.cid)
+    return row?.tx_hash === `0x${HEX64(2001)}` ? null : `the row changed: ${row?.tx_hash}`
+  })
+
+  await check(
+    'collection_record_deploy: a transaction hash recorded for another collection is refused',
+    async () => {
+      const { error } = await callArt(
+        admin,
+        'collection_record_deploy',
+        recordArgs(A.userId, deferred.cid, payer, 6, { p_tx_hash: `0x${HEX64(2001)}` }),
+      )
+      const problem = expectSentence(error, CHECK, 'This transaction was recorded for another collection.')
+      if (problem) return problem
+      return (await deployedState(deferred.cid)).status === 'draft' ? null : 'the collection changed'
+    },
+  )
+
+  await check(
+    'collection_record_deploy: a deferred collection deploys on its placeholder base URI',
+    async () => {
+      const { error } = await callArt(
+        admin,
+        'collection_record_deploy',
+        recordArgs(A.userId, deferred.cid, payer, 6, { p_base_uri: `ipfs://${CID('q')}/metadata.json` }),
+      )
+      if (error) return describe(error)
+      const state = await deployedState(deferred.cid)
+      const { row } = await deploymentOf(A.client, deferred.cid)
+      return state.status === 'deployed' &&
+        state.chain_id === 31337 &&
+        state.art_locked_at === null &&
+        row?.base_uri === `ipfs://${CID('q')}/metadata.json`
+        ? null
+        : `${JSON.stringify(state)} ${JSON.stringify(row)}`
+    },
+  )
+
+  await check(
+    "reserve_slug: a deployed collection's link is permanent, so another collection cannot take it",
+    async () => {
+      if (!deployedSlug) return 'no slug recorded'
+      const other = await insertCollection(B.client)
+      if (!other.row) return `setup: ${describe(other.error)}`
+      const problem = expectError(await reserve(B.client, other.row.id, deployedSlug), UNIQUE)
+      if (problem) return problem
+      return (await deployedState(rendered.cid)).slug === deployedSlug ? null : 'the deployed link was lost'
+    },
+  )
+
+  await check(
+    "deployments: B cannot read A's deployment; A reads it and cannot update or delete it",
+    async () => {
+      const strangers = await B.client
+        .from('deployments')
+        .select('collection_id')
+        .eq('collection_id', rendered.cid)
+      const hidden = expectNothing(strangers.error as DbError, strangers.data)
+      if (hidden) return `B: ${hidden}`
+      const own = await deploymentOf(A.client, rendered.cid)
+      if (own.error || !own.row) return `A: ${describe(own.error)}`
+      const update = await A.client
+        .from('deployments')
+        .update({ royalty_bps: 1 })
+        .eq('collection_id', rendered.cid)
+        .select()
+      const refused = expectError(update.error as DbError, PERMISSION, update.data)
+      if (refused) return `update: ${refused}`
+      const del = await A.client.from('deployments').delete().eq('collection_id', rendered.cid).select()
+      const kept = expectNothing(del.error as DbError, del.data)
+      if (kept) return `delete: ${kept}`
+      return (await deploymentOf(A.client, rendered.cid)).row?.royalty_bps === 500 ? null : 'the row changed'
+    },
+  )
+
+  await check('collection_placeholder_ready: true with a done placeholder job, false without', async () => {
+    const ready = await A.client.rpc('collection_placeholder_ready', { p_collection_id: deferred.cid })
+    if (ready.error) return describe(ready.error as DbError)
+    const not = await A.client.rpc('collection_placeholder_ready', { p_collection_id: rendered.cid })
+    if (not.error) return describe(not.error as DbError)
+    return ready.data === true && not.data === false
+      ? null
+      : JSON.stringify({ ready: ready.data, not: not.data })
+  })
+
+  await check(
+    "collection_placeholder_ready: B's session on A's collection is refused as not found; anon and the service role cannot execute it",
+    async () => {
+      const stranger = await B.client.rpc('collection_placeholder_ready', { p_collection_id: deferred.cid })
+      const notFound = expectSentence(stranger.error as DbError, PERMISSION, 'collection not found')
+      if (notFound) return `B: ${notFound}`
+      const problems: string[] = []
+      for (const [who, client] of [
+        ['signed out', anon],
+        ['service role', admin],
+      ] as const) {
+        const { error } = await client.rpc('collection_placeholder_ready', { p_collection_id: deferred.cid })
+        const problem = expectSentence(error as DbError, PERMISSION, 'permission denied')
+        if (problem) problems.push(`${who}: ${problem}`)
+      }
+      return problems.length ? problems.join('; ') : null
+    },
+  )
+
+  await check(
+    'collections_guard_frozen_fields: the name, symbol and description cannot change while the art is locked',
+    async () => {
+      const before = await stored(locked.cid)
+      if (!before?.art_locked_at) return 'setup: the collection is not locked'
+      const problems: string[] = []
+      for (const patch of [{ name: 'Renamed' }, { symbol: 'NEW' }, { description: 'Changed' }]) {
+        const { data, error } = await A.client.from('collections').update(patch).eq('id', locked.cid).select()
+        const problem =
+          expectError(error as DbError, CHECK, data) ?? expectSentence(error as DbError, CHECK, LOCK_SENTENCE)
+        if (problem) problems.push(`${Object.keys(patch)[0]}: ${problem}`)
+      }
+      if (problems.length) return problems.join('; ')
+      return sameStoredRow(before, await stored(locked.cid)) ? null : 'stored row changed'
+    },
+  )
+
+  await check(
+    'collections_guard_frozen_fields: the three still change on a draft, and again after an unlock',
+    async () => {
+      const changed = await A.client
+        .from('collections')
+        .update({ name: 'Draft renamed', symbol: 'DRF', description: 'A draft can change.' })
+        .eq('id', draftId)
+        .select()
+      if (changed.error) return `draft: ${describe(changed.error as DbError)}`
+      const unlock = await callArt(A.client, 'art_unlock', { p_collection_id: locked.cid })
+      if (unlock.error) return `unlock: ${describe(unlock.error)}`
+      const after = await A.client
+        .from('collections')
+        .update({ name: 'Unlocked renamed', description: 'Open again.' })
+        .eq('id', locked.cid)
+        .select()
+      if (after.error) return `after unlock: ${describe(after.error as DbError)}`
+      return (await stored(locked.cid))?.name === 'Unlocked renamed' ? null : 'the rename was not stored'
+    },
+  )
+
+  await check(
+    'collections_guard_frozen_fields: a deployed collection whose placeholder alone was locked keeps the deployment branch',
+    async () => {
+      const name = await A.client
+        .from('collections')
+        .update({ name: 'Too late' })
+        .eq('id', deferred.cid)
+        .select()
+      const refused =
+        expectError(name.error as DbError, CHECK, name.data) ??
+        expectSentence(name.error as DbError, CHECK, 'The name and symbol cannot change after deployment.')
+      if (refused) return `name: ${refused}`
+      const description = await A.client
+        .from('collections')
+        .update({ description: 'The description still changes.' })
+        .eq('id', deferred.cid)
+        .select()
+      if (description.error) return `description: ${describe(description.error as DbError)}`
+      return description.data.length === 1 ? null : 'the description did not change'
+    },
+  )
 }
 
 // ---------------------------------------------------------------------------------------------

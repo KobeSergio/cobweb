@@ -180,6 +180,80 @@ export type Database = {
         }
         Relationships: []
       }
+      deployments: {
+        Row: {
+          airdrop_fee_per_token_wei: number
+          args: Json
+          base_uri: string
+          chain_id: number
+          code_hash: string
+          collection_id: string
+          contract_address: string
+          created_at: string
+          deployed_at: string
+          deployer: string
+          factory: string
+          mint_fee_bps: number
+          mint_fee_flat_wei: number
+          payout_address: string
+          public_max_per_wallet: number
+          royalty_bps: number
+          royalty_receiver: string
+          salt: string
+          tx_hash: string
+        }
+        Insert: {
+          airdrop_fee_per_token_wei: number
+          args: Json
+          base_uri: string
+          chain_id: number
+          code_hash: string
+          collection_id: string
+          contract_address: string
+          created_at?: string
+          deployed_at?: string
+          deployer: string
+          factory: string
+          mint_fee_bps: number
+          mint_fee_flat_wei: number
+          payout_address: string
+          public_max_per_wallet: number
+          royalty_bps: number
+          royalty_receiver: string
+          salt: string
+          tx_hash: string
+        }
+        Update: {
+          airdrop_fee_per_token_wei?: number
+          args?: Json
+          base_uri?: string
+          chain_id?: number
+          code_hash?: string
+          collection_id?: string
+          contract_address?: string
+          created_at?: string
+          deployed_at?: string
+          deployer?: string
+          factory?: string
+          mint_fee_bps?: number
+          mint_fee_flat_wei?: number
+          payout_address?: string
+          public_max_per_wallet?: number
+          royalty_bps?: number
+          royalty_receiver?: string
+          salt?: string
+          tx_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'deployments_collection_id_fkey'
+            columns: ['collection_id']
+            isOneToOne: true
+            referencedRelation: 'collections'
+            referencedColumns: ['id']
+          },
+        ]
+      }
       layers: {
         Row: {
           art_collection_id: string
@@ -1257,6 +1331,60 @@ export type Database = {
       art_update_tokens: {
         Args: { p_collection_id: string; p_rows: Json }
         Returns: undefined
+      }
+      collection_placeholder_ready: {
+        Args: { p_collection_id: string }
+        Returns: boolean
+      }
+      collection_record_deploy: {
+        Args: {
+          p_airdrop_fee_per_token_wei: number
+          p_args: Json
+          p_base_uri: string
+          p_chain_id: number
+          p_code_hash: string
+          p_collection_id: string
+          p_contract_address: string
+          p_deployer: string
+          p_factory: string
+          p_groups: Json
+          p_mint_fee_bps: number
+          p_mint_fee_flat_wei: number
+          p_owner: string
+          p_payout_address: string
+          p_public_max_per_wallet: number
+          p_royalty_bps: number
+          p_royalty_receiver: string
+          p_salt: string
+          p_tx_hash: string
+        }
+        Returns: {
+          airdrop_fee_per_token_wei: number
+          args: Json
+          base_uri: string
+          chain_id: number
+          code_hash: string
+          collection_id: string
+          contract_address: string
+          created_at: string
+          deployed_at: string
+          deployer: string
+          factory: string
+          mint_fee_bps: number
+          mint_fee_flat_wei: number
+          payout_address: string
+          public_max_per_wallet: number
+          royalty_bps: number
+          royalty_receiver: string
+          salt: string
+          tx_hash: string
+        }
+        SetofOptions: {
+          from: '*'
+          to: 'deployments'
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       record_upload: {
         Args: {
