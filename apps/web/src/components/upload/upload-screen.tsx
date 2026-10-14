@@ -15,6 +15,7 @@ import {
 } from '@/lib/demo'
 import { hasArtSubStep, type FlowLink } from '@/lib/steps'
 import { UploadFlow } from './upload-flow'
+import { resultOf } from './upload-shared'
 import { UPLOAD_OUTCOMES, type UploadOutcome } from './upload-sim'
 
 export type UploadScreenProps = {
@@ -58,7 +59,6 @@ export function UploadScreen({
   sampleOutcome,
 }: UploadScreenProps) {
   const outcome = UPLOAD_OUTCOMES.find((entry) => entry === sampleOutcome) as UploadOutcome | undefined
-  const { imagesCid, metadataCid, placeholder } = DEMO_RENDER_JOBS.done
 
   return (
     <UploadFlow
@@ -68,7 +68,7 @@ export function UploadScreen({
       pending={pending}
       review={sample ? sampleReview(outcome) : (review ?? EMPTY_REVIEW)}
       sample={sample}
-      sampleResult={{ imagesCid, metadataCid, placeholder }}
+      sampleResult={resultOf(DEMO_RENDER_JOBS.done, { collageUrl: '/demo/collage.svg' })}
       placeholderDescription={sample ? DEMO_PLACEHOLDER_DESCRIPTION : ''}
       deferred={artDeferred}
       assetsFlow={!hasArtSubStep(collection.project_type, 'generate')}

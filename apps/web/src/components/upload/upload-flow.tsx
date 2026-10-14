@@ -133,10 +133,12 @@ export function UploadFlow({
   const renderStart = renderStartOf(job)
   const result: RenderResult =
     job.state === 'done'
-      ? resultOf(job)
+      ? resultOf(job, { collageUrl: null })
       : {
-          imagesCid: deferred ? null : sampleResult.imagesCid,
+          batchCids: deferred ? [] : sampleResult.batchCids,
           metadataCid: deferred ? null : sampleResult.metadataCid,
+          baseUri: deferred ? null : sampleResult.baseUri,
+          collageUrl: deferred ? null : sampleResult.collageUrl,
           placeholder:
             placeholderOn && reveal.file
               ? {

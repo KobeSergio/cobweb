@@ -26,13 +26,16 @@ import { lockRefusal, reviewChecks, type ReviewData } from '@/lib/art/lock-revie
 import type { RenderJob } from '@/lib/demo/types'
 import type { FlowLink } from '@/lib/steps'
 import { RevealChoice, type RevealLaterState } from './reveal-later'
-import { tokenPreview, type UploadActions } from './upload-shared'
+import type { UploadActions } from './upload-shared'
 import type { LockOptions } from './upload-sim'
 
 const STRIP = 8
 const CONNECT_TO_LOCK = 'Connect your wallet to choose the network the fee is paid on.'
 
 const fmt = (value: number) => value.toLocaleString('en-US')
+
+/** The sample strip's preview for a token id. Only 24 sample images exist, so ids past 24 reuse them. */
+const tokenPreview = (id: number) => `/demo/tokens/${((id - 1) % 24) + 1}.svg`
 
 /**
  * Review and lock. Opens with the reveal choice (Reveal at mint or Reveal later, with the
