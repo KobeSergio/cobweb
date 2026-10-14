@@ -13,40 +13,64 @@ import {
 import { Progress } from '@cobweb/ui/components/progress'
 import { StatusBadge } from '@cobweb/ui/components/status-badge'
 import { cn } from '@cobweb/ui/lib/utils'
+import { NAME_FIRST } from '@/lib/art/result'
 import { formatNative, type MintGroup, type SupportedChain } from '@/lib/demo'
 import { count, percent, relativeTo, shortUtc } from './format'
 
 export type PhaseAction =
-  'open' | 'close' | 'schedule' | 'clear' | 'price' | 'supply' | 'cap' | 'details' | 'up' | 'down'
+  | 'open'
+  | 'close'
+  | 'schedule'
+  | 'clear'
+  | 'price'
+  | 'supply'
+  | 'cap'
+  | 'details'
+  | 'up'
+  | 'down'
+  | 'hide'
+  | 'show'
 
 /** Column template shared by the header and every row, once the list is 56rem wide. */
 export const PHASE_COLUMNS =
   '@4xl:grid-cols-[minmax(8rem,1.2fr)_7rem_minmax(10rem,1fr)_5rem_minmax(9rem,0.9fr)_9rem]'
 
+/** Why the on-chain controls are off while the contract cannot be read. */
+export const UNREADABLE_REASON = 'The contract could not be read, so changes on chain wait until it can be.'
+
 /**
- * One phase. Its state is the chain's `active` field and nothing else: a scheduled start is
- * shown as a time, and the badge says Scheduled until the chain reports the phase live.
+ * One phase (docs/specs/2026-10-15-phases.md, section 7.4). Its state is the chain's `active` field and
+ * nothing else: a scheduled start is shown as a time, and the badge says Scheduled until the chain reports
+ * the phase live. A group the chain lists without a row reads "Group N", "Not named", until it is named.
+ * While the contract cannot be read, status and minted counts are not shown and the on-chain controls are
+ * off; naming, hiding and moving still work.
  */
 export function PhaseRow({
   group,
   chain,
-  blockTimestamp,
+  now,
   publicCap,
+  reachable,
   first,
   last,
   onAction,
 }: {
   group: MintGroup
   chain: SupportedChain
-  blockTimestamp: number
+  /** The chain's estimated time, for "Opens in" labels only. */
+  now: number
   publicCap: number
-  /** Its place in the mint page order, for Move up and Move down. */
+  /** False while the view is the copy. */
+  reachable: boolean
+  /** Its place among the named phases, for Move up and Move down. */
   first: boolean
   last: boolean
   onAction: (action: PhaseAction) => void
 }) {
-  const full = group.minted >= group.maxSupply
+  const named = group.named !== false
+  const full = reachable && group.minted >= group.maxSupply
   const status = group.active ? 'live' : group.scheduledStart > 0 ? 'scheduled' : 'closed'
+  const offChain = reachable ? undefined : UNREADABLE_REASON
   return (
     <li
       className={cn(
@@ -61,6 +85,11 @@ export function PhaseRow({
         <div className="min-w-0">
           <p className="text-heading flex items-center gap-2">
             <span className="truncate">{group.name}</span>
+            {!named && (
+              <Badge variant="outline" className="h-5 shrink-0">
+                Not named
+              </Badge>
+            )}
             {group.visible === false && (
               <Badge variant="secondary" className="h-5 shrink-0">
                 <EyeOffIcon aria-hidden="true" />
@@ -80,7 +109,7 @@ export function PhaseRow({
           )}
         </div>
         <div className="ml-auto flex items-center gap-2 @4xl:hidden">
-          <StatusBadge status={status} />
+          {reachable ? <StatusBadge status={status} /> : <StatusBadge status="draft">Not read</StatusBadge>}
         </div>
       </div>
 
@@ -92,7 +121,11 @@ export function PhaseRow({
         <div className="grid gap-1.5">
           <div className="flex items-center gap-2">
             <p className="numeric text-sm">
-              <span className={cn(group.active && 'text-primary')}>{count(group.minted)}</span>
+              {reachable ? (
+                <span className={cn(group.active && 'text-primary')}>{count(group.minted)}</span>
+              ) : (
+                <span className="text-muted-foreground font-sans">Not read</span>
+              )}
               <span className="text-muted-foreground"> / {count(group.maxSupply)}</span>
             </p>
             {full && (
@@ -105,17 +138,21 @@ export function PhaseRow({
               size="xs"
               className="text-muted-foreground -my-1 ml-auto"
               onClick={() => onAction('supply')}
+              disabled={!reachable}
+              title={offChain}
               aria-label={`Edit supply for ${group.name}`}
             >
               <PencilIcon aria-hidden="true" />
               Edit
             </Button>
           </div>
-          <Progress
-            size="sm"
-            value={percent(group.minted, group.maxSupply)}
-            aria-label={`${group.name}: ${count(group.minted)} of ${count(group.maxSupply)} minted`}
-          />
+          {reachable && (
+            <Progress
+              size="sm"
+              value={percent(group.minted, group.maxSupply)}
+              aria-label={`${group.name}: ${count(group.minted)} of ${count(group.maxSupply)} minted`}
+            />
+          )}
         </div>
       </Cell>
 
@@ -129,17 +166,22 @@ export function PhaseRow({
 
       <Cell label="Status" className="col-span-2 @xl:col-span-1">
         <div className="grid gap-1">
-          <StatusBadge status={status} className="hidden @4xl:inline-flex" />
+          {reachable ? (
+            <StatusBadge status={status} className="hidden @4xl:inline-flex" />
+          ) : (
+            <StatusBadge status="draft" className="hidden @4xl:inline-flex">
+              Not read
+            </StatusBadge>
+          )}
           {group.scheduledStart > 0 ? (
             <p className="text-muted-foreground text-[0.8125rem]">
               <span className="numeric text-foreground">{shortUtc(group.scheduledStart)}</span>
               <br />
-              {group.scheduledStart > blockTimestamp ? 'Opens' : 'Start was'}{' '}
-              {relativeTo(group.scheduledStart, blockTimestamp)}
+              {group.scheduledStart > now ? 'Opens' : 'Start was'} {relativeTo(group.scheduledStart, now)}
             </p>
           ) : (
             <p className="text-muted-foreground text-[0.8125rem]">
-              {group.active ? 'Opened by hand' : 'No start set'}
+              {reachable && group.active ? 'Opened by hand' : 'No start set'}
             </p>
           )}
         </div>
@@ -147,11 +189,23 @@ export function PhaseRow({
 
       <div className="col-span-2 flex items-center justify-end gap-2 @xl:col-span-4 @4xl:col-span-1">
         {group.active ? (
-          <Button variant="outline" size="sm" onClick={() => onAction('close')}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onAction('close')}
+            disabled={!reachable}
+            title={offChain}
+          >
             Close
           </Button>
         ) : (
-          <Button variant="secondary" size="sm" onClick={() => onAction('open')}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => onAction('open')}
+            disabled={!reachable}
+            title={offChain}
+          >
             Open now
           </Button>
         )}
@@ -162,27 +216,47 @@ export function PhaseRow({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuItem onSelect={() => onAction('details')}>Edit details</DropdownMenuItem>
-            <DropdownMenuItem disabled={first} onSelect={() => onAction('up')}>
+            <DropdownMenuItem onSelect={() => onAction('details')}>
+              {named ? 'Edit details' : 'Name this phase'}
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!named || first} onSelect={() => onAction('up')}>
               Move up
             </DropdownMenuItem>
-            <DropdownMenuItem disabled={last} onSelect={() => onAction('down')}>
+            <DropdownMenuItem disabled={!named || last} onSelect={() => onAction('down')}>
               Move down
             </DropdownMenuItem>
+            {group.kind !== 'public' && (
+              <DropdownMenuItem
+                disabled={!named}
+                onSelect={() => onAction(group.visible === false ? 'show' : 'hide')}
+              >
+                {group.visible === false ? 'Show on the mint page' : 'Hide from the mint page'}
+              </DropdownMenuItem>
+            )}
+            {!named && <p className="text-muted-foreground px-2 py-1.5 text-xs">{NAME_FIRST}</p>}
             <DropdownMenuSeparator />
-            <DropdownMenuItem disabled={group.active} onSelect={() => onAction('schedule')}>
+            <DropdownMenuItem disabled={!reachable || group.active} onSelect={() => onAction('schedule')}>
               {group.scheduledStart > 0 ? 'Change scheduled start' : 'Schedule start'}
             </DropdownMenuItem>
             {group.scheduledStart > 0 && !group.active && (
-              <DropdownMenuItem onSelect={() => onAction('clear')}>Clear schedule</DropdownMenuItem>
+              <DropdownMenuItem disabled={!reachable} onSelect={() => onAction('clear')}>
+                Clear schedule
+              </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => onAction('price')}>Edit price</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => onAction('supply')}>Edit max supply</DropdownMenuItem>
+            <DropdownMenuItem disabled={!reachable} onSelect={() => onAction('price')}>
+              Edit price
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!reachable} onSelect={() => onAction('supply')}>
+              Edit max supply
+            </DropdownMenuItem>
             {group.kind === 'public' && (
-              <DropdownMenuItem onSelect={() => onAction('cap')}>Edit per-wallet limit</DropdownMenuItem>
+              <DropdownMenuItem disabled={!reachable} onSelect={() => onAction('cap')}>
+                Edit per-wallet limit
+              </DropdownMenuItem>
             )}
-            {group.active && (
+            {!reachable && <p className="text-muted-foreground px-2 py-1.5 text-xs">{UNREADABLE_REASON}</p>}
+            {reachable && group.active && (
               <p className="text-muted-foreground px-2 py-1.5 text-xs">Close the phase to schedule it.</p>
             )}
           </DropdownMenuContent>

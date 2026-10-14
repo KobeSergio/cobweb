@@ -16,22 +16,29 @@ import { Input } from '@cobweb/ui/components/input'
 import { Spinner } from '@cobweb/ui/components/spinner'
 import { Switch } from '@cobweb/ui/components/switch'
 import { Textarea } from '@cobweb/ui/components/textarea'
+import { THROWN, type ActionResult } from '@/lib/art/result'
 import type { MintGroup } from '@/lib/demo'
 import { PHASE_DESCRIPTION_MAX, PHASE_NAME_MAX, phaseNameError } from './phase-rules'
-import { saveOffChain } from './manage-sim'
+import type { PhasesServer } from './phases-server'
 
 /** What Cobweb stores about a phase, apart from the chain: shown on the mint page only. */
 export type PhaseDetails = { name: string; description: string; visible: boolean }
 
-/** Name, description and the mint page switch, as legacy's mint group form had them. */
+/**
+ * Name, description and, for Add phase, the mint page switch, as legacy's mint group form had them. Edit
+ * details leaves the switch out: a phase is hidden or shown from its menu (docs/specs/2026-10-15-phases.md,
+ * section 7.4).
+ */
 export function PhaseDetailsFields({
   value,
   onChange,
   nameError,
+  showVisibility = true,
 }: {
   value: PhaseDetails
   onChange: (value: PhaseDetails) => void
   nameError: string | null
+  showVisibility?: boolean
 }) {
   const id = useId()
   const tooLong = value.description.length > PHASE_DESCRIPTION_MAX
@@ -68,31 +75,37 @@ export function PhaseDetailsFields({
           {PHASE_DESCRIPTION_MAX} characters. Optional.
         </FieldDescription>
       </Field>
-      <Field orientation="horizontal">
-        <Switch
-          id={`${id}-visible`}
-          checked={value.visible}
-          onCheckedChange={(visible) => onChange({ ...value, visible })}
-        />
-        <div className="grid gap-0.5">
-          <FieldLabel htmlFor={`${id}-visible`}>Show on the mint page</FieldLabel>
-          <FieldDescription>
-            {value.visible
-              ? 'Visitors see this phase, its price and whether they are on its list.'
-              : 'Hidden from visitors. It still mints while open, for wallets that know to use it.'}
-          </FieldDescription>
-        </div>
-      </Field>
+      {showVisibility && (
+        <Field orientation="horizontal">
+          <Switch
+            id={`${id}-visible`}
+            checked={value.visible}
+            onCheckedChange={(visible) => onChange({ ...value, visible })}
+          />
+          <div className="grid gap-0.5">
+            <FieldLabel htmlFor={`${id}-visible`}>Show on the mint page</FieldLabel>
+            <FieldDescription>
+              {value.visible
+                ? 'Visitors see this phase, its price and whether they are on its list.'
+                : 'Hidden from visitors. It still mints while open, for wallets that know to use it.'}
+            </FieldDescription>
+          </div>
+        </Field>
+      )}
     </div>
   )
 }
 
-/** Edit a phase's name, description and visibility. No transaction: Cobweb stores these. */
+/**
+ * Edit a phase's name and description, or name a group registered outside Cobweb. No transaction: Cobweb
+ * stores these, through `renamePhase`, which checks the session and ownership.
+ */
 export function PhaseDetailsDialog({
   open,
   onOpenChange,
   group,
   others,
+  server,
   onSaved,
 }: {
   open: boolean
@@ -100,10 +113,13 @@ export function PhaseDetailsDialog({
   group: MintGroup
   /** The other phases' names, which this one may not repeat. */
   others: string[]
-  onSaved: (details: PhaseDetails) => void
+  server: PhasesServer
+  onSaved: (details: { name: string; description: string }) => void
 }) {
+  const named = group.named !== false
+  // A group without a row reads "Group N" until named: the field starts empty.
   const [value, setValue] = useState<PhaseDetails>({
-    name: group.name,
+    name: named ? group.name : '',
     description: group.description ?? '',
     visible: group.visible !== false,
   })
@@ -111,25 +127,27 @@ export function PhaseDetailsDialog({
   const nameError = phaseNameError(value.name, others)
   const invalid = !!nameError || value.description.length > PHASE_DESCRIPTION_MAX
   const unchanged =
-    value.name.trim() === group.name &&
-    value.description.trim() === (group.description ?? '') &&
-    value.visible === (group.visible !== false)
+    named && value.name.trim() === group.name && value.description.trim() === (group.description ?? '')
 
   async function save(event: React.FormEvent) {
     event.preventDefault()
     if (invalid || unchanged) return
     setSaving(true)
+    const details = { name: value.name.trim(), description: value.description.trim() }
+    let result: ActionResult
     try {
-      // Seam: a server action that checks the session and ownership, then updates `mint_groups`.
-      await saveOffChain()
-      onSaved({ name: value.name.trim(), description: value.description.trim(), visible: value.visible })
-      toast.success(`${value.name.trim()} saved`)
-      onOpenChange(false)
+      result = await server.rename(group.id, details)
     } catch {
-      toast.error('The phase could not be saved. Check your connection and try again.')
-    } finally {
-      setSaving(false)
+      result = { ok: false, error: THROWN }
     }
+    setSaving(false)
+    if (!result.ok) {
+      toast.error(result.error)
+      return
+    }
+    onSaved(details)
+    toast.success(`${details.name} saved`)
+    onOpenChange(false)
   }
 
   return (
@@ -137,13 +155,19 @@ export function PhaseDetailsDialog({
       <DialogContent className="sm:max-w-lg">
         <form onSubmit={save} className="grid gap-5">
           <DialogHeader>
-            <DialogTitle>Edit {group.name}</DialogTitle>
+            <DialogTitle>{named ? `Edit ${group.name}` : `Name group ${group.id}`}</DialogTitle>
             <DialogDescription>
-              How the phase appears on the mint page. Price, supply and start are changed on chain from the
-              phase&apos;s menu.
+              {named
+                ? "How the phase appears on the mint page. Price, supply and start are changed on chain from the phase's menu."
+                : 'This group was registered on the contract outside Cobweb. Name it to show it on the mint page and to add its whitelist.'}
             </DialogDescription>
           </DialogHeader>
-          <PhaseDetailsFields value={value} onChange={setValue} nameError={nameError} />
+          <PhaseDetailsFields
+            value={value}
+            onChange={setValue}
+            nameError={nameError}
+            showVisibility={false}
+          />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
               Cancel

@@ -1,41 +1,64 @@
+import { getAddress } from 'viem'
+import { getPhases } from '@/app/actions/phases'
+import { ManageUnavailable } from '@/components/manage/manage-unavailable'
+import { samplePhasesView } from '@/components/manage/manage-sim'
 import { PhasesScreen } from '@/components/manage/phases-screen'
 import { StagePage } from '@/components/shell/stage-page'
-import { requireOwnedCollection } from '@/lib/auth'
+import { requireOwnedCollection, requireUser } from '@/lib/auth'
+import type { PhasesView } from '@/lib/manage/phases-types'
 import {
-  DEMO_COLLECTION,
-  DEMO_DEPLOYMENT,
-  DEMO_NOW,
-  DEMO_PUBLIC_MAX_PER_WALLET,
-  getChain,
-  sampleSupply,
-  scaleSampleToSupply,
-} from '@/lib/demo'
-import { LockedStagePage, stageContext, type CollectionParams } from '../../_lib/stage'
+  LockedStagePage,
+  searchParam,
+  stageContext,
+  type CollectionParams,
+  type SearchParams,
+} from '../../_lib/stage'
 
-/** Manage drop, phases. Sample data until the contract reads and writes are wired. */
-export default async function Page({ params }: { params: CollectionParams }) {
+const TITLE = 'Phases'
+const DESCRIPTION =
+  'The public sale and whitelist phases: price, supply and when each opens. A phase stays open until you close it.'
+
+/**
+ * Manage drop, Phases (docs/specs/2026-10-15-phases.md, section 7.4): the contract's groups, read on the
+ * server and joined with Cobweb's rows. Sample mode only (`NEXT_PUBLIC_DEMO_DATA=1`): the sample phases on
+ * any collection, `?chain=unreachable` shows the copy with its alert, `?pending=add` an add waiting to be
+ * recorded.
+ */
+export default async function Page({
+  params,
+  searchParams,
+}: {
+  params: CollectionParams
+  searchParams: SearchParams
+}) {
   const { id } = await params
   const collection = await requireOwnedCollection(id)
+  const user = await requireUser()
   const ctx = stageContext(collection, 'manage', 'manage')
   if (ctx.access === 'locked') return <LockedStagePage collection={collection} stage="manage" />
-  const chain = getChain(DEMO_DEPLOYMENT.chainId)!
-  // Seam: the groups and the minted total come from the freshness server once Phase 6 lands.
-  const sample = scaleSampleToSupply(sampleSupply(collection.max_supply, DEMO_COLLECTION.maxSupply))
+
+  let view: PhasesView
+  if (ctx.demo) {
+    view = samplePhasesView(collection, (await searchParam(searchParams, 'chain')) !== 'unreachable')
+  } else {
+    const result = await getPhases(collection.id)
+    if (!result.ok)
+      return (
+        <StagePage title={TITLE} description={DESCRIPTION} width="wide">
+          <ManageUnavailable title="The phases could not be read" message={result.error} />
+        </StagePage>
+      )
+    view = result.data
+  }
 
   return (
-    <StagePage
-      title="Phases"
-      description="The public sale and whitelist phases: price, supply and when each opens. A phase stays open until you close it."
-      width="wide"
-    >
+    <StagePage title={TITLE} description={DESCRIPTION} width="wide">
       <PhasesScreen
         collection={collection}
-        deployment={DEMO_DEPLOYMENT}
-        chain={chain}
-        groups={sample.groups}
-        totalMinted={sample.totalMinted}
-        publicMaxMintPerWallet={DEMO_PUBLIC_MAX_PER_WALLET}
-        blockTimestamp={DEMO_NOW}
+        view={view}
+        wallet={getAddress(user.walletAddress)}
+        sample={ctx.demo}
+        samplePending={ctx.demo && (await searchParam(searchParams, 'pending')) === 'add'}
       />
     </StagePage>
   )

@@ -22,7 +22,8 @@ import { saveOffChain, SAMPLE } from './manage-sim'
 
 /**
  * The top of the overview, one compact row: the artwork, minted of supply, the contract, what the
- * contract points at right now (with Reveal), and holders.
+ * contract points at right now (with Reveal), and holders. Minted reads "Not read" while the contract
+ * cannot be read (`totalMinted` null); "deployed" is relative to the read's time (`readAt`).
  */
 export function OverviewHeader({
   collectionId,
@@ -31,6 +32,7 @@ export function OverviewHeader({
   chain,
   totalMinted,
   maxSupply,
+  readAt,
   holders,
   singleAsset,
   realArtRendered,
@@ -39,13 +41,13 @@ export function OverviewHeader({
   name: string
   deployment: Deployment
   chain: SupportedChain
-  totalMinted: number
+  totalMinted: number | null
   maxSupply: number
+  readAt: number
   holders: number
   singleAsset: boolean
   realArtRendered: boolean
 }) {
-  const share = percent(totalMinted, maxSupply)
   return (
     <section
       aria-label="The drop at a glance"
@@ -58,29 +60,35 @@ export function OverviewHeader({
         className="size-14 shrink-0 rounded-lg border"
       />
       <Fact label="Minted" className="w-44 border-l-0 pl-0">
-        <p className="numeric flex items-center gap-2 text-lg leading-tight">
-          <span>
-            {count(totalMinted)}
-            <span className="text-muted-foreground text-sm"> / {count(maxSupply)}</span>
-          </span>
-          {maxSupply > 0 && totalMinted >= maxSupply && (
-            <Badge variant="success" className="h-5 font-sans">
-              Sold out
-            </Badge>
-          )}
-        </p>
-        <Progress
-          size="sm"
-          value={share}
-          className="mt-1.5"
-          aria-label={`${count(totalMinted)} of ${count(maxSupply)} minted`}
-        />
+        {totalMinted === null ? (
+          <p className="text-muted-foreground text-lg leading-tight">Not read</p>
+        ) : (
+          <>
+            <p className="numeric flex items-center gap-2 text-lg leading-tight">
+              <span>
+                {count(totalMinted)}
+                <span className="text-muted-foreground text-sm"> / {count(maxSupply)}</span>
+              </span>
+              {maxSupply > 0 && totalMinted >= maxSupply && (
+                <Badge variant="success" className="h-5 font-sans">
+                  Sold out
+                </Badge>
+              )}
+            </p>
+            <Progress
+              size="sm"
+              value={percent(totalMinted, maxSupply)}
+              className="mt-1.5"
+              aria-label={`${count(totalMinted)} of ${count(maxSupply)} minted`}
+            />
+          </>
+        )}
       </Fact>
       <Fact
         label={
           <>
             <ChainIcon chainId={chain.id} className="size-3.5" />
-            {chain.name}, deployed {relativeTo(deployment.deployedAt, SAMPLE.readAt)}
+            {chain.name}, deployed {relativeTo(deployment.deployedAt, readAt)}
           </>
         }
       >

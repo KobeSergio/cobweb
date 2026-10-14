@@ -4,9 +4,12 @@ import { useId, useState } from 'react'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@cobweb/ui/components/field'
 import { Input } from '@cobweb/ui/components/input'
 import { formatNative, toWei, type MintGroup, type SupportedChain } from '@/lib/demo'
+import { phaseCalls, reviewOf, type ManageCall } from '@/lib/manage/phase-calls'
+import type { PhasesView } from '@/lib/manage/phases-types'
 import { count, shortUtc } from './format'
-import { sampleRequest } from './manage-sim'
+import type { ManageRequest } from './manage-actions'
 import { allocationCheck, priceError, publicCapError } from './phase-rules'
+import type { PhasesServer } from './phases-server'
 import { PriceInput } from './price-input'
 import { TransactionDialog } from './transaction-dialog'
 
@@ -18,18 +21,37 @@ export type PhaseContext = {
   maxSupply: number
   /** Tokens airdropped (and burned): collection supply no phase can sell. */
   airdropped: number
+  /** The chain's time at the read; the dialogs' clocks start from it. Never liveness. */
   blockTimestamp: number
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Phases' server: every confirm answers the fresh view. */
+  server: PhasesServer
+}
+
+/**
+ * A change as a Phases dialog sends it (docs/specs/2026-10-15-phases.md, section 7.4): the call built with
+ * `phaseCalls`, the review from `reviewOf`, and the server's confirm, which answers the fresh view.
+ */
+export function phaseRequest(
+  call: ManageCall | null,
+  ctx: Pick<PhaseContext, 'chain' | 'server'>,
+): ManageRequest<PhasesView> | null {
+  if (!call) return null
+  return {
+    call,
+    review: { contract: 'Collection', functionName: call.functionName, args: reviewOf(call, ctx.chain) },
+    confirm: (hash) => ctx.server.confirm(hash, call),
+  }
 }
 
 /** Open now or Close. Closing also clears the schedule, as the contract does. */
 export function StatusDialog({
   group,
   nextStatus,
-  onApply,
+  onView,
   ...ctx
-}: PhaseContext & { group: MintGroup; nextStatus: boolean; onApply: (patch: Partial<MintGroup>) => void }) {
+}: PhaseContext & { group: MintGroup; nextStatus: boolean; onView: (view: PhasesView) => void }) {
   const others = ctx.groups.filter((other) => other.id !== group.id && other.active)
   return (
     <TransactionDialog
@@ -45,15 +67,8 @@ export function StatusDialog({
       actionLabel={nextStatus ? 'Open phase' : 'Close phase'}
       destructive={!nextStatus}
       successMessage={nextStatus ? `${group.name} is open` : `${group.name} is closed`}
-      request={sampleRequest({
-        contract: 'Collection',
-        functionName: 'setMintGroupStatus',
-        args: [
-          { name: 'mintGroup', value: String(group.id) },
-          { name: 'status', value: String(nextStatus) },
-        ],
-      })}
-      onConfirmed={() => onApply(nextStatus ? { flag: true } : { flag: false, scheduledStart: 0 })}
+      request={phaseRequest(nextStatus ? phaseCalls.open(group.id) : phaseCalls.close(group.id), ctx)}
+      onConfirmed={onView}
     >
       <ul className="text-muted-foreground grid list-disc gap-1.5 pl-5 text-sm">
         {!nextStatus && group.scheduledStart > 0 && (
@@ -88,7 +103,7 @@ export function StatusDialog({
 }
 
 /** The emergency stop: closes every phase in one transaction, clearing every schedule. */
-export function CloseAllDialog({ onApply, ...ctx }: PhaseContext & { onApply: () => void }) {
+export function CloseAllDialog({ onView, ...ctx }: PhaseContext & { onView: (view: PhasesView) => void }) {
   const scheduled = ctx.groups.filter((group) => group.scheduledStart > 0)
   return (
     <TransactionDialog
@@ -100,12 +115,8 @@ export function CloseAllDialog({ onApply, ...ctx }: PhaseContext & { onApply: ()
       description="Minting stops in every phase as soon as the transaction confirms. Use it to pause the whole drop."
       actionLabel="Close all phases"
       successMessage="Every phase is closed"
-      request={sampleRequest({
-        contract: 'Collection',
-        functionName: 'stopOrStartAllMintGroups',
-        args: [{ name: 'status', value: 'false' }],
-      })}
-      onConfirmed={onApply}
+      request={phaseRequest(phaseCalls.closeAll(), ctx)}
+      onConfirmed={onView}
     >
       {scheduled.length > 0 && (
         <p className="text-muted-foreground text-sm">
@@ -121,9 +132,9 @@ export function CloseAllDialog({ onApply, ...ctx }: PhaseContext & { onApply: ()
 /** Removes a scheduled start without opening or closing the phase. */
 export function ClearScheduleDialog({
   group,
-  onApply,
+  onView,
   ...ctx
-}: PhaseContext & { group: MintGroup; onApply: (patch: Partial<MintGroup>) => void }) {
+}: PhaseContext & { group: MintGroup; onView: (view: PhasesView) => void }) {
   return (
     <TransactionDialog
       open={ctx.open}
@@ -133,15 +144,8 @@ export function ClearScheduleDialog({
       description={`${group.name} will no longer open by itself at ${shortUtc(group.scheduledStart)}. It stays closed until you open it or schedule it again.`}
       actionLabel="Clear schedule"
       successMessage={`${group.name} is no longer scheduled`}
-      request={sampleRequest({
-        contract: 'Collection',
-        functionName: 'scheduleMintGroupStart',
-        args: [
-          { name: 'mintGroup', value: String(group.id) },
-          { name: 'startTimestamp', value: '0' },
-        ],
-      })}
-      onConfirmed={() => onApply({ scheduledStart: 0 })}
+      request={phaseRequest(phaseCalls.clearSchedule(group.id), ctx)}
+      onConfirmed={onView}
     />
   )
 }
@@ -149,9 +153,9 @@ export function ClearScheduleDialog({
 /** Change the price per token, entered in the native token. */
 export function PriceDialog({
   group,
-  onApply,
+  onView,
   ...ctx
-}: PhaseContext & { group: MintGroup; onApply: (patch: Partial<MintGroup>) => void }) {
+}: PhaseContext & { group: MintGroup; onView: (view: PhasesView) => void }) {
   const id = useId()
   const [value, setValue] = useState(formatNative(group.priceWei, '', 18).trim().replace(/,/g, ''))
   const error = priceError(value, ctx.chain.nativeSymbol)
@@ -166,19 +170,8 @@ export function PriceDialog({
       description="Applies to every mint after the transaction confirms. Platform fees are added on top for the minter."
       actionLabel="Change price"
       successMessage={`${group.name} price changed`}
-      request={
-        wei && !unchanged
-          ? sampleRequest({
-              contract: 'Collection',
-              functionName: 'changeSalePrice',
-              args: [
-                { name: 'price', value: `${wei} wei` },
-                { name: 'mintGroup', value: String(group.id) },
-              ],
-            })
-          : null
-      }
-      onConfirmed={() => wei && onApply({ priceWei: wei })}
+      request={phaseRequest(wei && !unchanged ? phaseCalls.price(group.id, wei) : null, ctx)}
+      onConfirmed={onView}
     >
       <PriceInput
         id={`${id}-price`}
@@ -192,12 +185,15 @@ export function PriceDialog({
   )
 }
 
-/** Change the allocation: never below what the phase has minted, never past the collection's supply. */
+/**
+ * Change the allocation: never below what the phase has minted, never past the collection's supply.
+ * Both are checked here before the simulation, which checks them again on the contract.
+ */
 export function SupplyDialog({
   group,
-  onApply,
+  onView,
   ...ctx
-}: PhaseContext & { group: MintGroup; onApply: (patch: Partial<MintGroup>) => void }) {
+}: PhaseContext & { group: MintGroup; onView: (view: PhasesView) => void }) {
   const id = useId()
   const [value, setValue] = useState(String(group.maxSupply))
   const { error, warning, room, next } = allocationCheck({
@@ -216,21 +212,11 @@ export function SupplyDialog({
       description="How many tokens this phase may mint in total. Unsold tokens do not move to another phase by themselves; lower one phase and raise another."
       actionLabel="Change max supply"
       successMessage={`${group.name} max supply changed`}
-      request={
-        error || next === group.maxSupply
-          ? null
-          : sampleRequest({
-              contract: 'Collection',
-              functionName: 'setMintGroupMaxSupply',
-              args: [
-                { name: 'mintGroup', value: String(group.id) },
-                { name: 'maxSupply', value: String(next) },
-              ],
-              check: () =>
-                next < group.minted ? 'BelowMinted' : next > room ? 'AllocationsExceedMaxSupply' : null,
-            })
-      }
-      onConfirmed={() => onApply({ maxSupply: next })}
+      request={phaseRequest(
+        error || next === group.maxSupply ? null : phaseCalls.allocation(group.id, next),
+        ctx,
+      )}
+      onConfirmed={onView}
     >
       <Field data-invalid={!!error}>
         <FieldLabel htmlFor={`${id}-supply`}>Max supply</FieldLabel>
@@ -262,9 +248,9 @@ export function SupplyDialog({
 /** The public phase's lifetime cap per wallet. */
 export function PublicCapDialog({
   cap,
-  onApply,
+  onView,
   ...ctx
-}: PhaseContext & { cap: number; onApply: (cap: number) => void }) {
+}: PhaseContext & { cap: number; onView: (view: PhasesView) => void }) {
   const id = useId()
   const [value, setValue] = useState(String(cap))
   const next = Number(value)
@@ -281,16 +267,8 @@ export function PublicCapDialog({
       description="The most one wallet can mint in the public phase, over the whole sale. Whitelist phases use each address's quota instead."
       actionLabel="Change limit"
       successMessage="Public limit changed"
-      request={
-        error || next === cap
-          ? null
-          : sampleRequest({
-              contract: 'Collection',
-              functionName: 'setPublicMaxMintPerWallet',
-              args: [{ name: 'cap', value: String(next) }],
-            })
-      }
-      onConfirmed={() => onApply(next)}
+      request={phaseRequest(error || next === cap ? null : phaseCalls.publicCap(next), ctx)}
+      onConfirmed={onView}
     >
       <Field data-invalid={!!error}>
         <FieldLabel htmlFor={`${id}-cap`}>Per wallet</FieldLabel>

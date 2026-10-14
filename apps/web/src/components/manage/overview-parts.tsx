@@ -18,17 +18,20 @@ import { count, localDateTime, percent, relativeTo, shortUtc, useTimeZone } from
 /**
  * The phases the chain reports as live, and the next one scheduled. Live comes from each
  * group's `active` field only; the schedule is shown as a time, never used to decide liveness.
+ * While the contract cannot be read (`reachable` false), no phase is shown as live.
  */
 export function LiveNow({
   groups,
   chain,
   readAt,
   phasesHref,
+  reachable = true,
 }: {
   groups: MintGroup[]
   chain: SupportedChain
   readAt: number
   phasesHref: string
+  reachable?: boolean
 }) {
   const timeZone = useTimeZone()
   const live = groups.filter((group) => group.active)
@@ -38,7 +41,14 @@ export function LiveNow({
 
   return (
     <div className="grid gap-5">
-      {live.length === 0 ? (
+      {!reachable ? (
+        <div className="grid gap-2">
+          <StatusBadge status="draft">Not read</StatusBadge>
+          <p className="text-muted-foreground text-sm">
+            The contract could not be read, so live phases are not shown.
+          </p>
+        </div>
+      ) : live.length === 0 ? (
         <div className="grid gap-2">
           <StatusBadge status="closed">Nothing live</StatusBadge>
           <p className="text-muted-foreground text-sm">No phase is open, so nobody can mint right now.</p>

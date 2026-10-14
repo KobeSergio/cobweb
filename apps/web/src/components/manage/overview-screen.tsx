@@ -11,8 +11,6 @@ import {
   type DropActivity,
   type MintGroup,
   type SupportedChain,
-  sampleSupply,
-  DEMO_COLLECTION,
 } from '@/lib/demo'
 import { manageTabHref } from '@/lib/steps'
 import { Row } from './bits'
@@ -27,7 +25,13 @@ export type OverviewScreenProps = {
   /** Phases as the chain reports them; `active` comes from `mintGroupActive`. */
   groups: MintGroup[]
   activity: DropActivity
-  totalMinted: number
+  /** Everything minted, from the chain read; null while the contract cannot be read. */
+  totalMinted: number | null
+  maxSupply: number
+  /** The read's time (the chain's, or the copy's): relative labels only, never liveness. */
+  readAt: number
+  /** False while the view is the copy: minted and live phases are not shown. */
+  chainReachable: boolean
   /** The collection's mint page link (`/night-owls` without the slash), or null while it has none. */
   slug: string | null
   /**
@@ -49,10 +53,12 @@ export function OverviewScreen({
   groups,
   activity,
   totalMinted,
+  maxSupply,
+  readAt,
+  chainReachable,
   slug,
   realArtRendered = true,
 }: OverviewScreenProps) {
-  const readAt = SAMPLE.readAt
   const href = (tab: Parameters<typeof manageTabHref>[1]) => manageTabHref(collection.id, tab)
   const { proceeds } = activity
   const symbol = chain.nativeSymbol
@@ -65,7 +71,8 @@ export function OverviewScreen({
         deployment={deployment}
         chain={chain}
         totalMinted={totalMinted}
-        maxSupply={sampleSupply(collection.max_supply, DEMO_COLLECTION.maxSupply)}
+        maxSupply={maxSupply}
+        readAt={readAt}
         holders={activity.holders}
         singleAsset={collection.project_type === 'single_asset'}
         realArtRendered={realArtRendered}
@@ -80,7 +87,13 @@ export function OverviewScreen({
             className={cn(groups.some((group) => group.active) && 'border-primary-line')}
             bodyClassName="p-5"
           >
-            <LiveNow groups={groups} chain={chain} readAt={readAt} phasesHref={href('phases')} />
+            <LiveNow
+              groups={groups}
+              chain={chain}
+              readAt={readAt}
+              phasesHref={href('phases')}
+              reachable={chainReachable}
+            />
           </Panel>
 
           <Panel title="Proceeds" bodyClassName="grid gap-4 p-5">
