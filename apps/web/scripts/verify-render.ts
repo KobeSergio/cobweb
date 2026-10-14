@@ -2,18 +2,18 @@
 // (docs/specs/2026-10-12-render-worker.md, section 8): a signed-in creator's generative project with
 // drawn layers is locked and paid on Anvil, then the local runner takes the job through the same
 // steps the queue consumer runs, on the production adapters for the database, storage and the chain, with a
-// folder standing in for the pinning service and a queue in memory. Fifteen checks: the full run,
+// folder standing in for the pinning service and a queue in memory. Sixteen checks: the full run,
 // duplicate delivery (serial, then two copies of one batch at once), a pin that fails once, a pin that
 // always fails and the retry after it, identical CIDs for identical input, a 1/1 project's attributes
 // reaching the pinned metadata, a short payment, a payment no node has seen, a wrong CID (for a batch, then for the metadata set), a
-// layer of the wrong size, the sweep (two cases) and a placeholder job.
+// layer of the wrong size, the credit that failure's unlock leaves, the sweep (two cases) and a placeholder job.
 //
 // Numbering: the spec (section 8) lists ten checks. Its checks 1 to 5 are checks 1 to 5 here. Check 6
 // here is an addition (a 1/1 project's attributes), so the spec's checks 6 to 10 (a short payment, a
 // wrong-CID pinner, a wrong-size layer, the sweep, a placeholder job) are numbered 7 to 11 in the output.
-// Four more cases carry a letter: 2b (concurrent copies of one batch), 7b (a payment no node has seen), 8b (a wrong CID for the metadata
-// set only) and 10b (the sweep starting a paid job). With the two setup checks and the two cleanup checks
-// the script prints 19 PASS lines.
+// Five more cases carry a letter: 2b (concurrent copies of one batch), 7b (a payment no node has seen), 8b (a wrong CID for the metadata
+// set only), 9b (the credit the unlock of the wrong-size failure leaves) and 10b (the sweep starting a paid job).
+// With the two setup checks and the two cleanup checks the script prints 20 PASS lines.
 //
 // Not covered here: the worker's rule that a payment which shows at the latest block but not yet at the
 // confirmation depth is unconfirmed (viemChain throws PaymentUnconfirmed, and the step is retried).
@@ -135,7 +135,8 @@ for (const endpoint of [url, rpc, storage.ART_S3_ENDPOINT])
 const factory = getAddress(factoryEnv)
 
 // Imported after the environment is set, so the shared clients read the local chain settings.
-const { confirmCore, loadJob, lockCore, lockPlaceholderCore } = await import('../src/lib/art/lock-core.ts')
+const { confirmCore, loadJob, lockCore, lockPlaceholderCore, reviewLock, unlockCore } =
+  await import('../src/lib/art/lock-core.ts')
 const { readLockCollection } = await import('../src/lib/art/lock-collection.ts')
 const web = await import('../src/lib/art/result.ts')
 const schemas = await import('../src/lib/art/schemas.ts')
@@ -1008,10 +1009,12 @@ async function main(): Promise<void> {
     },
   )
 
-  // 9. A layer of the wrong size (the spec's check 8).
+  // 9. A layer of the wrong size (the spec's check 8). The project is shared with 9b.
+  const wrongSize = await seededProject(creator.client, 'nine', true)
+  const wrongSizeJob = await lockedAndPaid(creator, wrongSize)
   await check('9. a layer of the wrong size fails the job with layer-size and its sentence', async () => {
-    const cid = await seededProject(creator.client, 'nine', true)
-    const jobId = await lockedAndPaid(creator, cid)
+    const cid = wrongSize
+    const jobId = wrongSizeJob
     const run = await render(jobId, depsFor(local.memoryQueue(), local.folderPinner(pins)))
     if (run.thrown || run.dead) return `a bad layer was retried: ${JSON.stringify(run)}`
     const job = await jobRow(jobId)
@@ -1034,6 +1037,38 @@ async function main(): Promise<void> {
       ? null
       : `model ${JSON.stringify({ errorCode: model.errorCode, retryable: model.retryable })}`
   })
+
+  // 9b. The credit on the web side (docs/specs/2026-10-14-render-screen-wiring.md, sections 4 and 5):
+  // the art failure is unlocked through the core, the review offers the credit, and the next lock is
+  // recorded waived on it and queued at once.
+  await check(
+    '9b. after an art failure the unlock leaves a credit: the review says so, and the next lock is waived and queued',
+    async () => {
+      const queue = local.memoryQueue()
+      const ctx = {
+        ...(await contextFor(creator.client, creator.userId, creator.account.address, wrongSize)),
+        queue,
+      }
+      const unlocked = await unlockCore(ctx)
+      if (!('data' in unlocked)) return `unlock: ${refusal(unlocked)}`
+      const before = await jobRow(wrongSizeJob)
+      if (before.state !== 'failed' || before.error_code !== 'unlocked')
+        return `after the unlock: ${JSON.stringify(before)}`
+      if ((await statusOf(wrongSize)) !== 'draft') return `collection ${await statusOf(wrongSize)}`
+      const review = await reviewLock(ctx)
+      if (!review.credit) return `the review offers no credit: ${JSON.stringify(review)}`
+      const locked = await lockCore(ctx, { allowDuplicates: false, chainId: 31337 })
+      if (!('data' in locked)) return `lock: ${refusal(locked)}`
+      const job = locked.data
+      if (job.state !== 'waived' || !job.credited)
+        return `the lock came back ${job.state}, credited ${String(job.credited)}`
+      const want = [{ jobId: job.id, step: 'start', retries: 0 }]
+      if (JSON.stringify(queue.sent) !== JSON.stringify(want)) return `queued ${JSON.stringify(queue.sent)}`
+      // The credit is used: a review of the same count now offers none.
+      const again = await reviewLock(ctx)
+      return again.credit ? 'the used credit is still offered' : null
+    },
+  )
 
   // 10. The sweep, a job left finalizing (the spec's check 9).
   await check('10. the sweep re-enqueues a job left finalizing and it finishes', async () => {

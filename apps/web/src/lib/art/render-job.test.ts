@@ -45,6 +45,7 @@ const row = (overrides: Partial<JobRow> = {}): JobRow => ({
   base_uri: null,
   placeholder_image_cid: null,
   collage_key: null,
+  credit_job_id: null,
   placeholder_upload_id: null,
   onchain_job_id: ONCHAIN,
   error: null,
@@ -112,10 +113,28 @@ describe('toRenderJob', () => {
   })
 
   it('reads the new job columns and the batch columns, and no longer reads images_cid', () => {
-    for (const column of ['base_uri', 'placeholder_image_cid', 'collage_key', 'error_code', 'retries'])
+    for (const column of [
+      'base_uri',
+      'placeholder_image_cid',
+      'collage_key',
+      'error_code',
+      'retries',
+      'credit_job_id',
+    ])
       expect(JOB_COLUMNS).toContain(column)
     expect(JOB_COLUMNS).not.toContain('images_cid')
     expect(BATCH_COLUMNS).toBe('index, state, attempts, images_cid, images_size, error, error_code')
+  })
+
+  it('marks a job locked on a credit as credited, and every other job as not', () => {
+    const credit = '7a1c0f3e-2f5e-4e3a-9d1c-1b2c3d4e5f62'
+    expect(toRenderJob(row({ state: 'waived', credit_job_id: credit }), [], extra)).toMatchObject({
+      state: 'waived',
+      credited: true,
+      payment: null,
+    })
+    expect(toRenderJob(row(), [], extra).credited).toBe(false)
+    expect(toRenderJob(row({ state: 'waived' }), [], extra).credited).toBe(false)
   })
 
   it('maps paid with its payment, and waived or zero-quote paid without one', () => {
@@ -296,6 +315,7 @@ describe('pendingJob', () => {
       tokenCount: 0,
       quote: { chainId: 8453, totalWei: '0', payer: ZERO_ADDRESS, factory: null },
       placeholder: null,
+      credited: false,
     })
     expect(pendingJob(null, null).quote.chainId).toBe(0)
   })

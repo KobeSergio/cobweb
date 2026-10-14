@@ -116,6 +116,8 @@ export type RenderJobBase = {
    * to the real metadata from Settings. Null when the contract starts on the real art.
    */
   placeholder: RenderPlaceholder | null
+  /** True when the lock was recorded waived on the credit of a paid render that failed (`render_jobs.credit_job_id`). */
+  credited: boolean
 }
 
 /** The payment recorded from the factory's `ArtPaid` event. */

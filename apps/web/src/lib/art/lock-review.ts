@@ -18,6 +18,8 @@ export type ReviewData = {
   counts: { collections: number; layers: number; traits: number; rules: number }
   /** Traits with a maximum count, and that maximum. */
   constants: { name: string; count: number }[]
+  /** A paid render that failed and was unlocked left a credit that covers this lock: the lock is free. */
+  credit: boolean
 }
 
 export const EMPTY_REVIEW: ReviewData = {
@@ -27,6 +29,7 @@ export const EMPTY_REVIEW: ReviewData = {
   allowDuplicatesNeeded: false,
   counts: { collections: 0, layers: 0, traits: 0, rules: 0 },
   constants: [],
+  credit: false,
 }
 
 /**
@@ -43,6 +46,7 @@ export function reviewData(list: LockList, projectType: ProjectType): ReviewData
       allowDuplicatesNeeded: false,
       counts: { collections: 1, layers: 0, traits: 0, rules: 0 },
       constants: [],
+      credit: false,
     }
   const { project, tokens } = list
   const result = validateTokenList(project, tokens, { allowDuplicates: false })
@@ -65,6 +69,7 @@ export function reviewData(list: LockList, projectType: ProjectType): ReviewData
     constants: traits.flatMap((trait) =>
       trait.constant ? [{ name: trait.name, count: trait.constant }] : [],
     ),
+    credit: false,
   }
 }
 

@@ -1,6 +1,6 @@
 import type { Project, TokenCore } from '@cobweb/dna'
 import { describe, expect, it } from 'vitest'
-import { lockRefusal, reviewChecks, reviewData, type LockList } from './lock-review'
+import { EMPTY_REVIEW, lockRefusal, reviewChecks, reviewData, type LockList } from './lock-review'
 
 const project: Project = {
   collections: [{ id: 'c1', name: 'Owls', size: 2 }],
@@ -39,6 +39,7 @@ describe('reviewData for a generative project', () => {
       allowDuplicatesNeeded: false,
       counts: { collections: 1, layers: 1, traits: 2, rules: 0 },
       constants: [{ name: 'Wide', count: 1 }],
+      credit: false,
     })
     expect(lockRefusal(review, false)).toBeNull()
   })
@@ -74,6 +75,12 @@ describe('reviewData for a generative project', () => {
     const review = reviewData(generative([]), 'generative')
     expect(review.problems[0]).toEqual({ code: 'size', message: 'Generate the set before locking.' })
     expect(lockRefusal(review, true)).toBe('Generate the set before locking.')
+  })
+
+  it('never claims a credit on its own: the database decides that', () => {
+    const review = reviewData(generative([{ id: 1, collectionId: 'c1', dna: ['wide'] }]), 'generative')
+    expect(review.credit).toBe(false)
+    expect(EMPTY_REVIEW.credit).toBe(false)
   })
 })
 

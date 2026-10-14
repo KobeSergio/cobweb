@@ -37,6 +37,8 @@ export type JobRow = {
   error_code: string | null
   /** How many times the creator retried the job; five is the cap. */
   retries: number
+  /** The job whose payment this waived lock rests on, or null. */
+  credit_job_id: string | null
   created_at: string
   started_at: string | null
   finished_at: string | null
@@ -47,7 +49,7 @@ export type JobRow = {
  * 2^53 wei; the casts keep every wei (Review Focus 3).
  */
 export const JOB_COLUMNS =
-  'id, collection_id, kind, state, token_count, token_list_hash, allow_duplicates, fee_per_token_wei::text, quote_total_wei::text, quote_chain_id, quote_payer, quote_factory, quote_expires_at, payment_tx_hash, paid_at, paid_amount_wei::text, batch_size, batches_total, batches_done, metadata_cid, base_uri, placeholder_image_cid, collage_key, placeholder_upload_id, onchain_job_id, error, error_code, retries, created_at, started_at, finished_at'
+  'id, collection_id, kind, state, token_count, token_list_hash, allow_duplicates, fee_per_token_wei::text, quote_total_wei::text, quote_chain_id, quote_payer, quote_factory, quote_expires_at, payment_tx_hash, paid_at, paid_amount_wei::text, batch_size, batches_total, batches_done, metadata_cid, base_uri, placeholder_image_cid, collage_key, placeholder_upload_id, onchain_job_id, error, error_code, retries, credit_job_id, created_at, started_at, finished_at'
 
 /** A render_batches row as the lock core reads it (`BATCH_COLUMNS`). */
 export type BatchRow = {
@@ -152,6 +154,7 @@ export function toRenderJob(
     },
     lockOptions: { allowDuplicates: row.allow_duplicates },
     placeholder: placeholderOf(extra.placeholder, row.placeholder_image_cid),
+    credited: row.credit_job_id !== null,
   }
   const payment = row.payment_tx_hash
     ? {
@@ -239,12 +242,13 @@ export function pendingJob(chainId: number | null, placeholder: JobPlaceholder):
     },
     lockOptions: { allowDuplicates: false },
     placeholder: placeholderOf(placeholder, null),
+    credited: false,
     state: 'locked',
   }
 }
 
 /** The fields every state shares, to build a job in another state from it (sample mode). */
 export function jobBase(job: RenderJob): RenderJobBase {
-  const { id, jobId, tokenCount, lockedAt, tokenListHash, quote, lockOptions, placeholder } = job
-  return { id, jobId, tokenCount, lockedAt, tokenListHash, quote, lockOptions, placeholder }
+  const { id, jobId, tokenCount, lockedAt, tokenListHash, quote, lockOptions, placeholder, credited } = job
+  return { id, jobId, tokenCount, lockedAt, tokenListHash, quote, lockOptions, placeholder, credited }
 }

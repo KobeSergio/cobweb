@@ -121,6 +121,7 @@ function sampleReview(outcome: UploadOutcome | undefined): ReviewData {
     constants: traits.flatMap((trait) =>
       trait.constant ? [{ name: trait.name, count: trait.constant }] : [],
     ),
+    credit: false,
   }
 }
 

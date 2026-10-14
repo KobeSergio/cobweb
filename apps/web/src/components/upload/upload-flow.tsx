@@ -229,7 +229,9 @@ export function UploadFlow({
           state={stateOf('pay')}
           status={<StatusBadge status="draft">Payment due</StatusBadge>}
           receipt={
-            free ? (
+            job.credited ? (
+              'No fee: covered by the credit from the render that failed'
+            ) : free ? (
               deferred ? (
                 'No fee for the placeholder'
               ) : (

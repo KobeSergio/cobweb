@@ -39,7 +39,7 @@ import { toProject } from './rows'
  * `server-only` marker, so the script can import it; the browser never does.
  */
 export type LockContext = {
-  /** The creator's client under row-level security: every read, `art_unlock`, `art_lock_placeholder`. */
+  /** The creator's client under row-level security: every read, `art_unlock`, `art_lock_placeholder`, `art_render_credit`, `art_render_retry`. */
   supabase: LockClient
   /**
    * The service-role client, only for `art_lock`, `art_requote` and `art_record_payment`. Built on
@@ -107,7 +107,24 @@ export async function readLockList(supabase: LockClient, collection: LockCollect
 }
 
 export async function reviewLock(ctx: LockContext): Promise<ReviewData> {
-  return reviewData(await readLockList(ctx.supabase, ctx.collection), ctx.collection.project_type)
+  const review = reviewData(await readLockList(ctx.supabase, ctx.collection), ctx.collection.project_type)
+  return { ...review, credit: await creditCovers(ctx, review.tokenCount) }
+}
+
+/**
+ * Whether a credit from a paid render that failed and was unlocked covers a lock of this many tokens
+ * (docs/specs/2026-10-14-render-screen-wiring.md, section 5). The rule is the database's
+ * (`private.render_credit`); the web app only asks, under the creator's client.
+ */
+async function creditCovers(ctx: LockContext, tokenCount: number): Promise<boolean> {
+  if (tokenCount === 0) return false
+  const { data, error } = await ctx.supabase.rpc('art_render_credit', {
+    p_collection_id: ctx.collection.id,
+    p_token_count: tokenCount,
+  })
+  if (error) throw new Error(`The render credit could not be read: ${error.message}`)
+  // The credit job's id, or null when there is none; the generated type says string.
+  return Boolean(data)
 }
 
 /** The factory's published rate on a chain, or null when the chain, its RPC or its factory is not there. */

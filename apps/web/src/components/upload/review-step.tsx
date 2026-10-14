@@ -298,7 +298,9 @@ export function ReviewStep({
               ? 'Add a placeholder to lock with Reveal later, or choose Reveal at mint.'
               : deferred
                 ? 'Locking the placeholder is final for this run. The art stays open until you lock the real set.'
-                : 'Locking is final once the fee is paid. Until then you can unlock and edit again.')}
+                : review.credit
+                  ? 'Locking is final: the credit pays the fee at once.'
+                  : 'Locking is final once the fee is paid. Until then you can unlock and edit again.')}
         </p>
         {!readOnly && (
           <Button onClick={() => setConfirmOpen(true)} disabled={locking || needsPlaceholder || !!blocked}>
@@ -315,7 +317,9 @@ export function ReviewStep({
             <AlertDialogDescription>
               {deferred
                 ? 'Cobweb stores the placeholder, and the contract starts on it. There is no fee for the placeholder. The art stays open; you lock the real set later from Art.'
-                : `Cobweb checks and stores these ${fmt(review.tokenCount)} tokens exactly as they are now, and quotes the fee from this supply. You cannot edit the layers, traits, rules or tokens afterwards, unless you unlock before paying.`}
+                : review.credit
+                  ? `Cobweb checks and stores these ${fmt(review.tokenCount)} tokens exactly as they are now. The render that failed left a credit, so this lock is free and the render starts at once. You cannot edit the layers, traits, rules or tokens afterwards.`
+                  : `Cobweb checks and stores these ${fmt(review.tokenCount)} tokens exactly as they are now, and quotes the fee from this supply. You cannot edit the layers, traits, rules or tokens afterwards, unless you unlock before paying.`}
               {!deferred && lockOptions.allowDuplicates && ' Identical tokens are allowed.'}
               {!deferred && reveal.on && ' The contract will start on the placeholder.'}
             </AlertDialogDescription>

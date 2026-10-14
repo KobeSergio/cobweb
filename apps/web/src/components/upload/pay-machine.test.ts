@@ -54,6 +54,7 @@ const paidWith = (txHash: Hex): RenderJob => ({
   },
   lockOptions: { allowDuplicates: false },
   placeholder: null,
+  credited: false,
   state: 'paid',
   payment: { txHash, paidAt: 0, amountWei: '2' },
   batches: { total: 1, done: 0, size: 100 },
