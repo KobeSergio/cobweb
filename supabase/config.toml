@@ -432,10 +432,12 @@ enabled = true
 
 # Overrides that `supabase config push` applies when the linked project is the hosted Cobweb project
 # (SuitVentures organisation, us-east-1). Everything else comes from the sections above. The sign-in
-# message carries the page's origin, which Supabase checks against these URLs.
+# message carries the page's origin, which Supabase checks against these URLs, so only the production
+# domain is listed: a glob over preview hosts would also match a stranger's team whose slug ends in
+# the same suffix. Previews sign in through production.
 [remotes.cobweb]
 project_id = "umwkpwtkwmdizgndxnjc"
 
 [remotes.cobweb.auth]
 site_url = "https://cobweb-cobweb3.vercel.app"
-additional_redirect_urls = ["https://cobweb-cobweb3.vercel.app/**", "https://cobweb-*-cobweb3.vercel.app/**"]
+additional_redirect_urls = ["https://cobweb-cobweb3.vercel.app/**"]
