@@ -2,7 +2,6 @@
 
 import {
   ArrowRightIcon,
-  ArrowUpRightIcon,
   CheckIcon,
   ImageIcon,
   LayersIcon,
@@ -21,47 +20,44 @@ import { EASE_OUT, transition } from '@cobweb/ui/lib/motion'
 import { ChainIcon, ChainName } from '@/components/chains/chain-icon'
 import { slugState } from '@/lib/collections'
 import type { Tables } from '@/lib/database.types'
-import { explorerAddressUrl, explorerTxUrl, formatBps, formatUtc, shortAddress } from '@/lib/demo/helpers'
-import type { Deployment, SupportedChain } from '@/lib/demo/types'
+import {
+  explorerAddressUrl,
+  explorerTxUrl,
+  formatBps,
+  formatNative,
+  formatUtc,
+  shortAddress,
+} from '@/lib/demo/helpers'
+import type { SupportedChain } from '@/lib/demo/types'
+import type { DeployRecord } from '@/lib/deploy/deploy-types'
 import { useArtDeferred } from './art-deferred'
 import { CopyValue, SummaryRow } from './copy-value'
 import { mintFeeText } from './deploy-summary'
 
-/**
- * The deployed view's primary action, for the footer: open the public page, or set its link when
- * the collection has none (the reservation lapsed before the deploy).
- */
-export function OpenMintPageButton({ collection }: { collection: Tables<'collections'> }) {
-  const state = slugState(collection)
-  const slug = state.kind === 'permanent' || state.kind === 'reserved' ? state.slug : null
-  if (!slug)
-    return (
-      <Button asChild>
-        <Link href={`/collections/${collection.id}/manage/mint-page`}>Set your mint page link</Link>
-      </Button>
-    )
+/** The deployed view's primary action, for the footer: Manage drop, where the phases are opened. */
+export function SetUpDropButton({ collectionId }: { collectionId: string }) {
   return (
     <Button asChild>
-      <a href={`/${slug}`} target="_blank" rel="noreferrer">
-        Open mint page
-        <ArrowUpRightIcon aria-hidden="true" />
-      </a>
+      <Link href={`/collections/${collectionId}/manage`}>
+        Set up your drop
+        <ArrowRightIcon aria-hidden="true" />
+      </Link>
     </Button>
   )
 }
 
-/** The deployed contract: where it is, the receipt, and what to do next in Manage drop. */
+/** The deployed contract as the server recorded it: where it is, the receipt, and what to do next in Manage drop. */
 export function DeployedView({
   collection,
-  deployment,
+  record,
   chain,
   artSrc,
   focusOnMount = false,
 }: {
   collection: Tables<'collections'>
-  deployment: Deployment
+  record: DeployRecord
   chain: SupportedChain
-  artSrc: string
+  artSrc: string | null
   /** Move focus to the heading, after a deploy that just finished on this screen. */
   focusOnMount?: boolean
 }) {
@@ -76,13 +72,14 @@ export function DeployedView({
   // A deploy makes a live reservation permanent; one that lapsed first was released.
   const state = slugState(collection)
   const slug = state.kind === 'permanent' || state.kind === 'reserved' ? state.slug : null
-  const explorerName = new URL(chain.explorerUrl).hostname.replace(/^www\./, '')
+  // A chain with no explorer (Anvil) has no links to show.
+  const explorerName = chain.explorerUrl ? new URL(chain.explorerUrl).hostname.replace(/^www\./, '') : null
   const nextSteps = [
     // Deferred art (MASTER_PLAN, Flow: pre-reveal): the contract is on the placeholder until the real set is revealed.
     ...(artDeferred
       ? [
           {
-            href: `/collections/${collection.id}/art/generate?art=deferred&state=deployed`,
+            href: `/collections/${collection.id}/art/generate`,
             icon: <ImageIcon />,
             title: 'Finish the art, then reveal',
             text: 'Art stays open. Lock and upload the real set, then reveal it from Settings.',
@@ -92,8 +89,8 @@ export function DeployedView({
     {
       href: `${manage}/phases`,
       icon: <LayersIcon />,
-      title: 'Set up phases',
-      text: 'Prices, supply and start times for the whitelist and public sale.',
+      title: 'Open the phases',
+      text: 'Every phase starts closed. Open the public sale, or schedule it, in Phases.',
     },
     {
       href: `${manage}/whitelist`,
@@ -104,10 +101,10 @@ export function DeployedView({
     {
       href: `${manage}/mint-page`,
       icon: <Share2Icon />,
-      title: 'Share the mint page',
+      title: 'Prepare the mint page',
       text: slug
-        ? 'Add a banner and links, publish it, and send collectors the link.'
-        : 'Choose its link, add a banner and links, and publish it.',
+        ? 'Add a banner and links. The public page opens with Phase 6.'
+        : 'Choose its link, add a banner and links. The public page opens with Phase 6.',
     },
   ]
 
@@ -163,71 +160,110 @@ export function DeployedView({
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-        <Panel title="Contract" bodyClassName="px-6 py-2">
-          <dl className="divide-y">
-            <SummaryRow label="Chain">
-              <ChainName chain={chain} className="text-[0.8125rem]" />
-            </SummaryRow>
-            <SummaryRow label="Address">
-              <CopyValue
-                value={deployment.contractAddress}
-                label="Contract address"
-                display={shortAddress(deployment.contractAddress, 8)}
-                href={explorerAddressUrl(chain, deployment.contractAddress)}
-                linkLabel={`View on ${explorerName}`}
-              />
-            </SummaryRow>
-            <SummaryRow label="Transaction">
-              <CopyValue
-                value={deployment.txHash}
-                label="Transaction hash"
-                display={shortAddress(deployment.txHash, 8)}
-                href={explorerTxUrl(chain, deployment.txHash)}
-                linkLabel={`View on ${explorerName}`}
-              />
-            </SummaryRow>
-            <SummaryRow label="Deployed">
-              <span className="numeric text-[0.8125rem]">{formatUtc(deployment.deployedAt)}</span>
-            </SummaryRow>
-            <SummaryRow label="Mint page link">
-              {slug ? (
-                <span className="numeric text-[0.8125rem]">cobweb.app/{slug}</span>
-              ) : (
-                <span className="text-muted-foreground text-[0.8125rem]">
-                  None yet. Set it in Manage drop.
+        <div className="space-y-5">
+          <Panel title="Contract" bodyClassName="px-6 py-2">
+            <dl className="divide-y">
+              <SummaryRow label="Chain">
+                <ChainName chain={chain} className="text-[0.8125rem]" />
+              </SummaryRow>
+              <SummaryRow label="Address">
+                <CopyValue
+                  value={record.contractAddress}
+                  label="Contract address"
+                  display={shortAddress(record.contractAddress, 8)}
+                  href={explorerName ? explorerAddressUrl(chain, record.contractAddress) : undefined}
+                  linkLabel={explorerName ? `View on ${explorerName}` : undefined}
+                />
+              </SummaryRow>
+              <SummaryRow label="Transaction">
+                <CopyValue
+                  value={record.txHash}
+                  label="Transaction hash"
+                  display={shortAddress(record.txHash, 8)}
+                  href={explorerName ? explorerTxUrl(chain, record.txHash) : undefined}
+                  linkLabel={explorerName ? `View on ${explorerName}` : undefined}
+                />
+              </SummaryRow>
+              <SummaryRow label="Deployed">
+                <span className="numeric text-[0.8125rem]">{formatUtc(record.deployedAt)}</span>
+              </SummaryRow>
+              <SummaryRow label="Deployed by">
+                <span className="numeric text-[0.8125rem]" title={record.deployer}>
+                  {shortAddress(record.deployer)}
                 </span>
-              )}
-            </SummaryRow>
-            <SummaryRow label="Payout">
-              <span className="numeric text-[0.8125rem]" title={deployment.payoutAddress}>
-                {shortAddress(deployment.payoutAddress)}
-              </span>
-            </SummaryRow>
-            <SummaryRow label="Royalty">
-              <span className="numeric text-[0.8125rem]">
-                {formatBps(deployment.royaltyBps)} to {shortAddress(deployment.royaltyReceiver)}
-              </span>
-            </SummaryRow>
-            <SummaryRow label="Mint fee">
-              <span className="numeric text-[0.8125rem]">
-                {mintFeeText(deployment.fees, chain.nativeSymbol)}
-              </span>
-            </SummaryRow>
-          </dl>
-          <div className="bg-surface-2/40 -mx-6 mt-2 -mb-2 flex gap-3 rounded-b-xl border-t px-6 py-4">
-            <ShieldCheckIcon aria-hidden="true" className="text-muted-foreground mt-0.5 size-4 shrink-0" />
-            <div className="space-y-1 text-[0.8125rem] leading-snug">
-              <p className="font-medium">
-                Royalties <span className="numeric">{formatBps(deployment.royaltyBps)}</span>, enforced on
-                secondary sales through the transfer validator
-              </p>
-              <p className="text-muted-foreground">
-                Collectors can resell only where the royalty is paid; marketplaces that skip it cannot move
-                the tokens.
-              </p>
+              </SummaryRow>
+              <SummaryRow label="Starts on">
+                <span className="numeric truncate text-[0.8125rem]" title={record.baseUri}>
+                  {record.baseUri.replace(/^(ipfs:\/\/.{10}).*(.{6})$/, '$1…$2')}
+                </span>
+              </SummaryRow>
+              <SummaryRow label="Mint page link">
+                {slug ? (
+                  <span className="flex min-w-0 flex-col items-end">
+                    <span className="numeric text-[0.8125rem]">cobweb.app/{slug}</span>
+                    <span className="text-muted-foreground text-xs">
+                      Opens with the public mint page in Phase 6.
+                    </span>
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground text-[0.8125rem]">
+                    None yet. Set it in Manage drop.
+                  </span>
+                )}
+              </SummaryRow>
+              <SummaryRow label="Payout">
+                <span className="numeric text-[0.8125rem]" title={record.payout}>
+                  {shortAddress(record.payout)}
+                </span>
+              </SummaryRow>
+              <SummaryRow label="Royalty">
+                <span className="numeric text-[0.8125rem]">
+                  {formatBps(record.royaltyBps)} to {shortAddress(record.royaltyReceiver)}
+                </span>
+              </SummaryRow>
+              <SummaryRow label="Public limit">
+                <span>
+                  <span className="numeric">{record.publicMaxPerWallet}</span> per wallet
+                </span>
+              </SummaryRow>
+              <SummaryRow label="Mint fee">
+                <span className="numeric text-[0.8125rem]">
+                  {mintFeeText(record.fees, chain.nativeSymbol)}
+                </span>
+              </SummaryRow>
+            </dl>
+            <div className="bg-surface-2/40 -mx-6 mt-2 -mb-2 flex gap-3 rounded-b-xl border-t px-6 py-4">
+              <ShieldCheckIcon aria-hidden="true" className="text-muted-foreground mt-0.5 size-4 shrink-0" />
+              <div className="space-y-1 text-[0.8125rem] leading-snug">
+                <p className="font-medium">
+                  Royalties <span className="numeric">{formatBps(record.royaltyBps)}</span>, enforced on
+                  secondary sales through the transfer validator
+                </p>
+                <p className="text-muted-foreground">
+                  Collectors can resell only where the royalty is paid; marketplaces that skip it cannot move
+                  the tokens.
+                </p>
+              </div>
             </div>
-          </div>
-        </Panel>
+          </Panel>
+
+          <Panel
+            title="Launch phases"
+            description="As the constructor took them, all closed."
+            bodyClassName="px-6 py-2"
+          >
+            <dl className="divide-y">
+              {record.groups.map((group) => (
+                <SummaryRow key={group.onchainId} label={`${group.onchainId}. ${group.name}`}>
+                  <span className="numeric text-[0.8125rem]">
+                    {formatNative(group.priceWei, chain.nativeSymbol, 18)} ·{' '}
+                    {group.maxSupply.toLocaleString('en-US')} tokens · closed
+                  </span>
+                </SummaryRow>
+              ))}
+            </dl>
+          </Panel>
+        </div>
 
         <Panel
           title="What happens next"

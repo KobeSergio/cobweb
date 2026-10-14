@@ -1,23 +1,16 @@
 /**
- * SIMULATION SEAM for Deploy. Nothing here talks to a chain; each function stands in for one real
- * action and reports the same states the real one will. Replace them when Phase 5 lands:
- *
- *  - `useFactoryRead`     → `readContract(factory.collectionFees())` and a gas estimate for the
- *                           chosen chain (the props carry today's sample values).
- *  - `predictAddress`     → `factory.predictCollectionAddress(deployer, creationCode, args, salt)`.
- *                           The factory has the same address on every chain (MASTER_PLAN, Contracts: addresses), so the
- *                           result does not depend on the chain, only on the deployer and the args.
- *  - `deployCollection`   → wagmi: `switchChain` if needed, `simulateContract(deployCollection(...))`,
- *                           `writeContract(request)`, `waitForTransactionReceipt`, then a server
- *                           action that records the address from the `CollectionDeployed` event.
- *
- * Failures are driven by `?outcome=` in sample mode, on the first attempt only.
+ * Sample mode only (`NEXT_PUBLIC_DEMO_DATA=1`): the deploy actions simulated in client state, so
+ * every state can be reviewed without a wallet, a chain or a database (docs/specs/2026-10-14-deploy.md,
+ * section 8). Real mode uses `realDeployActions` (deploy-actions.ts). Failures are driven by
+ * `?outcome=` and fire once, on the first run of the step they belong to, so a retry then goes through.
  */
-import { useEffect, useState } from 'react'
+import { collectionSalt } from '@cobweb/shared'
+import type { Address, Hex } from 'viem'
 import { useAccount } from 'wagmi'
+import { DEMO_DEPLOY_COST_ESTIMATE, DEMO_DEPLOYMENT, DEMO_FACTORY_FEES } from '@/lib/demo'
 import { sampleAddress, sampleTxHash } from '@/lib/demo/helpers'
-import type { Address, Hex } from '@/lib/demo/types'
-import type { TxFailure, TxPhase, TxStep } from './tx-progress'
+import type { DeployForm, DeployRecord, Prepared } from '@/lib/deploy/deploy-types'
+import type { DeployActions } from './deploy-actions'
 
 export type DeployOutcome = 'rejected' | 'reverted' | 'balance' | 'switch-rejected' | 'fees-error'
 
@@ -29,70 +22,32 @@ export const DEPLOY_OUTCOMES: DeployOutcome[] = [
   'fees-error',
 ]
 
-/** The chain a wallet reports when none is connected, so a switch shows when another is picked. */
+/** The chain a wallet reports in sample mode when none is connected, so a switch shows when another is picked. */
 const SAMPLE_WALLET_CHAIN = 1
+const SAMPLE_FACTORY: Address = '0x5FbDB2315678afecb367f032d93F642f64180aa3'
+const SAMPLE_CODE_HASH: Hex = `0x${'7'.repeat(64)}`
 
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) return reject(signal.reason)
-    const timer = setTimeout(resolve, ms)
-    const abort = () => {
-      clearTimeout(timer)
-      reject(signal.reason)
-    }
-    signal.addEventListener('abort', abort, { once: true })
-  })
-}
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
-/** The connected wallet and its chain, or the sample creator when no wallet is connected. */
-export function useCreatorWallet(sample: Address): { address: Address; chainId: number } {
+/**
+ * The connected wallet and its chain, or the fallback address (the session's wallet in real mode, the
+ * sample creator in sample mode) and, in sample mode only, Ethereum as the chain.
+ */
+export function useCreatorWallet(
+  fallback: Address,
+  sample: boolean,
+): { address: Address; connected: boolean; chainId: number | undefined } {
   const account = useAccount()
-  return { address: account.address ?? sample, chainId: account.chainId ?? SAMPLE_WALLET_CHAIN }
-}
-
-export type FactoryRead = { status: 'loading' | 'ready' | 'error'; retry: () => void }
-
-/** Reading the factory's fees and a gas estimate for a chain: loading, then ready (or an error). */
-export function useFactoryRead(chainId: number | null, outcome?: DeployOutcome): FactoryRead {
-  const [state, setState] = useState<{ key: string; status: FactoryRead['status'] } | null>(null)
-  const [attempt, setAttempt] = useState(0)
-  const key = `${chainId}:${attempt}`
-
-  useEffect(() => {
-    if (chainId === null) return
-    const timer = setTimeout(
-      () => setState({ key, status: outcome === 'fees-error' && attempt === 0 ? 'error' : 'ready' }),
-      550,
-    )
-    return () => clearTimeout(timer)
-  }, [chainId, attempt, key, outcome])
-
   return {
-    status: state?.key === key ? state.status : 'loading',
-    retry: () => setAttempt((count) => count + 1),
+    address: account.address ?? fallback,
+    connected: account.address !== undefined,
+    chainId: account.chainId ?? (sample ? SAMPLE_WALLET_CHAIN : undefined),
   }
 }
 
-export type DeployArgs = {
-  name: string
-  symbol: string
-  maxSupply: number
-  payout: Address
-  initialBaseUri: string
-  publicMaxMintPerWallet: number
-  royaltyBps: number
-  owner: Address
-  royaltyReceiver: Address
-  /**
-   * The initial phases in group order, index 0 the public sale: `mintGroupMaxSupplies_` and
-   * `mintPrice_` (wei). Names stay with Cobweb. Seam: written to `mint_groups` once the deploy lands.
-   */
-  mintGroups: { name: string; priceWei: string; maxSupply: number }[]
-}
-
-/** The address `deployCollection` would produce for these args. Sample: a stable hash of them. */
-export function predictAddress(collectionId: string, args: DeployArgs): Address {
-  const text = `${collectionId}|${JSON.stringify(args)}`
+/** The address the sample "predicts" for these settings: a stable hash of them. */
+export function sampleAddressFor(collectionId: string, form: DeployForm): Address {
+  const text = `${collectionId}|${JSON.stringify(form)}`
   let hash = 2166136261
   for (let index = 0; index < text.length; index++) {
     hash ^= text.charCodeAt(index)
@@ -101,64 +56,114 @@ export function predictAddress(collectionId: string, args: DeployArgs): Address 
   return sampleAddress(hash >>> 0)
 }
 
-const FAILURES: Partial<Record<DeployOutcome, { at: TxStep; failure: TxFailure }>> = {
-  'switch-rejected': {
-    at: 'switching',
-    failure: {
-      kind: 'switch',
-      title: 'Network switch cancelled',
-      message:
-        'Your wallet stayed on its current network, so nothing was deployed. Try again and approve the switch.',
-    },
-  },
-  balance: {
-    at: 'simulating',
-    failure: {
-      kind: 'balance',
-      title: 'Not enough funds for gas',
-      message: 'This wallet cannot cover the deploy cost on this network. Add funds, then try again.',
-    },
-  },
-  reverted: {
-    at: 'simulating',
-    failure: {
-      kind: 'reverted',
-      title: 'The deploy would fail',
-      message:
-        'The factory reverted with CollectionExists: a collection with these exact settings is already deployed from this wallet. Change a setting, or open the existing contract from Manage drop.',
-    },
-  },
-  rejected: {
-    at: 'wallet',
-    failure: {
-      kind: 'rejected',
-      title: 'Deploy cancelled in your wallet',
-      message: 'Nothing was sent and no gas was spent. Try again when you are ready.',
-    },
-  },
+export type SampleDeployInput = {
+  collectionId: string
+  collection: { name: string; symbol: string; maxSupply: number }
+  /** The wallet the sample deploys from. */
+  wallet: Address
+  baseUri: string
+  revealsTo: string | null
+  outcome?: DeployOutcome
 }
 
-/** Deploys through the factory: switch chain, simulate, sign, wait for the receipt. */
-export async function deployCollection(
-  onPhase: (phase: TxPhase) => void,
-  options: { needsSwitch: boolean; outcome?: DeployOutcome; signal: AbortSignal },
-): Promise<Hex | null> {
-  const { signal } = options
-  const failure = options.outcome ? FAILURES[options.outcome] : undefined
-  const steps: TxStep[] = [...(options.needsSwitch ? (['switching'] as const) : []), 'simulating', 'wallet']
-  const durations: Record<string, number> = { switching: 1200, simulating: 1000, wallet: 1700 }
-
-  for (const step of steps) {
-    onPhase({ step })
-    await sleep(durations[step]!, signal)
-    if (failure?.at === step) {
-      onPhase({ step: 'failed', ...failure })
-      return null
-    }
+function samplePrepared(input: SampleDeployInput, form: DeployForm): Prepared {
+  return {
+    chainId: form.chainId,
+    factory: SAMPLE_FACTORY,
+    deployer: input.wallet,
+    salt: collectionSalt(input.collectionId),
+    codeHash: SAMPLE_CODE_HASH,
+    args: {
+      name: input.collection.name,
+      symbol: input.collection.symbol,
+      payout: form.payout,
+      baseUri: input.baseUri,
+      maxSupply: String(input.collection.maxSupply),
+      groupSupplies: form.groups.map((group) => String(group.maxSupply)),
+      groupPrices: form.groups.map((group) => group.priceWei),
+      publicMaxPerWallet: String(form.publicMaxPerWallet),
+      royaltyBps: form.royaltyBps,
+      owner: input.wallet,
+      royaltyReceiver: form.royaltyReceiver,
+    },
+    groups: form.groups,
+    encodedArgs: '0x',
+    predicted: sampleAddressFor(input.collectionId, form),
+    baseUri: input.baseUri,
+    revealsTo: input.revealsTo,
+    fees: DEMO_FACTORY_FEES[form.chainId] ?? DEMO_DEPLOYMENT.fees,
   }
-  const txHash = sampleTxHash(Math.floor(Date.now() / 1000) % 100_000)
-  onPhase({ step: 'confirming', txHash })
-  await sleep(2200, signal)
-  onPhase({ step: 'success', txHash })
-  return txHash
+}
+
+/** The record of a sample deploy that just landed: the creator's own settings at the sample's prediction. */
+function recordOf(prepared: Prepared, hash: Hex): DeployRecord {
+  return {
+    chainId: prepared.chainId,
+    contractAddress: prepared.predicted,
+    txHash: hash,
+    deployer: prepared.deployer,
+    deployedAt: Math.floor(Date.now() / 1000),
+    baseUri: prepared.baseUri,
+    payout: prepared.args.payout,
+    royaltyBps: prepared.args.royaltyBps,
+    royaltyReceiver: prepared.args.royaltyReceiver,
+    publicMaxPerWallet: Number(prepared.args.publicMaxPerWallet),
+    fees: prepared.fees,
+    groups: prepared.groups.map((group, index) => ({
+      onchainId: index,
+      name: group.name,
+      priceWei: group.priceWei,
+      maxSupply: group.maxSupply,
+    })),
+  }
+}
+
+const rejection = () => Object.assign(new Error('User rejected the request.'), { code: 4001 })
+
+/** The screen's actions in sample mode: they wait like the real ones and write nothing. */
+export function sampleDeployActions(input: SampleDeployInput): DeployActions {
+  // The outcome fires once, on the first run of its step: a retry then goes through.
+  let fired = false
+  const failsNow = (kind: DeployOutcome) => {
+    if (input.outcome !== kind || fired) return false
+    fired = true
+    return true
+  }
+  return {
+    prepare: async (form) => {
+      await sleep(300)
+      return { ok: true, data: samplePrepared(input, form) }
+    },
+    fees: async (chainId) => {
+      await sleep(550)
+      if (failsNow('fees-error')) throw new Error('The factory did not answer.')
+      const fees = DEMO_FACTORY_FEES[chainId]
+      if (!fees) throw new Error(`No sample fees for chain ${chainId}.`)
+      return fees
+    },
+    estimateCost: async (prepared) => DEMO_DEPLOY_COST_ESTIMATE[prepared.chainId] ?? null,
+    switchChain: async () => {
+      await sleep(1200)
+      if (failsNow('switch-rejected')) throw rejection()
+    },
+    simulate: async () => {
+      await sleep(1000)
+      if (failsNow('balance')) throw new Error('insufficient funds for gas * price + value')
+      if (failsNow('reverted'))
+        throw Object.assign(new Error('reverted'), { shortMessage: 'Execution reverted: DeploymentFailed.' })
+      return async () => {
+        await sleep(1700)
+        if (failsNow('rejected')) throw rejection()
+        return sampleTxHash(Math.floor(Date.now() / 1000) % 100_000)
+      }
+    },
+    wait: async () => {
+      await sleep(2200)
+      return 'success'
+    },
+    confirm: async (hash, form) => {
+      await sleep(800)
+      return { ok: true, data: recordOf(samplePrepared(input, form), hash) }
+    },
+  }
 }

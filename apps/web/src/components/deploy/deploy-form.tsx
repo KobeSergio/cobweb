@@ -20,8 +20,8 @@ import { Switch } from '@cobweb/ui/components/switch'
 import { ChainIcon, ChainName } from '@/components/chains/chain-icon'
 import { MintPageAddressField } from '@/components/collections/mint-page-address-field'
 import type { Tables } from '@/lib/database.types'
-import { formatNative } from '@/lib/demo/helpers'
-import type { Address, SupportedChain } from '@/lib/demo/types'
+import type { Address } from '@/lib/demo/types'
+import type { DeployChain } from '@/lib/deploy/deploy-types'
 
 export type DeployFormValues = {
   chainId: number | null
@@ -74,7 +74,7 @@ export function validateDeploy(values: DeployFormValues, maxSupply: number): Dep
 export function DeployForm({
   collection,
   chains,
-  deployCost,
+  fixedChainId,
   walletAddress,
   walletChainId,
   values,
@@ -84,10 +84,11 @@ export function DeployForm({
   onAddressSaved,
 }: {
   collection: Tables<'collections'>
-  chains: SupportedChain[]
-  deployCost: Record<number, string>
+  chains: DeployChain[]
+  /** The chain the fee was paid on: one card, no picker (docs/specs/2026-10-14-deploy.md, section 7.2). */
+  fixedChainId: number | null
   walletAddress: Address
-  walletChainId: number
+  walletChainId: number | undefined
   values: DeployFormValues
   /** Only the errors to show now (after the field was touched or a deploy was attempted). */
   errors: DeployFormErrors
@@ -96,67 +97,85 @@ export function DeployForm({
   onAddressSaved: (value: { slug: string; slug_reserved_at: string | null }) => void
 }) {
   const walletChain = chains.find((chain) => chain.id === walletChainId)
+  const fixedChain =
+    fixedChainId === null ? null : (chains.find((chain) => chain.id === fixedChainId) ?? null)
 
   return (
     <div className="space-y-8">
-      <Panel
-        title="Chain"
-        description={
-          walletChain ? (
-            <>
-              Your wallet is on{' '}
-              <ChainName chain={walletChain} className="text-foreground" iconClassName="size-3.5" />. If you
-              pick another chain, it asks to switch when you deploy.
-            </>
-          ) : (
-            'Your wallet asks to switch to the chain you pick when you deploy.'
-          )
-        }
-      >
-        <ChoiceCards
-          aria-label="Chain"
-          aria-invalid={!!errors.chainId}
-          aria-describedby={errors.chainId ? 'deploy-chain-error' : undefined}
-          value={values.chainId === null ? '' : String(values.chainId)}
-          onValueChange={(value) => onChange({ chainId: Number(value) })}
-          disabled={readOnly}
-          className="sm:grid-cols-2 xl:grid-cols-3"
+      {fixedChain ? (
+        <Panel
+          title="Chain"
+          description="The art fee was paid on this chain, so the contract goes here. Your wallet switches to it when you deploy."
         >
-          {chains.map((chain) => (
-            <ChoiceCard
-              key={chain.id}
-              value={String(chain.id)}
-              icon={<ChainIcon chainId={chain.id} className="size-5" />}
-              title={
-                <span className="flex flex-wrap items-center gap-2">
-                  {chain.name}
-                  {chain.id === walletChainId && (
-                    <Badge variant="secondary" className="font-medium">
-                      Connected
-                    </Badge>
-                  )}
-                </span>
-              }
-              description={
-                <>
-                  Pays in <span className="numeric">{chain.nativeSymbol}</span>
-                  {deployCost[chain.id] && (
-                    <>
-                      . Deploy about{' '}
-                      <span className="numeric">
-                        {formatNative(deployCost[chain.id]!, chain.nativeSymbol, 5)}
-                      </span>
-                    </>
-                  )}
-                </>
-              }
-            />
-          ))}
-        </ChoiceCards>
-        <FieldError id="deploy-chain-error" className="mt-3">
-          {errors.chainId}
-        </FieldError>
-      </Panel>
+          <div className="bg-surface-2/40 flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4">
+            <span className="flex items-center gap-3">
+              <ChainIcon chainId={fixedChain.id} className="size-6" />
+              <span className="font-medium">{fixedChain.name}</span>
+              <span className="text-muted-foreground text-[0.8125rem]">
+                Pays in <span className="numeric">{fixedChain.nativeSymbol}</span>
+              </span>
+            </span>
+            {walletChainId === fixedChain.id ? (
+              <Badge variant="secondary" className="font-medium">
+                Connected
+              </Badge>
+            ) : (
+              <span className="text-muted-foreground text-[0.8125rem]">Switch to {fixedChain.name}</span>
+            )}
+          </div>
+        </Panel>
+      ) : (
+        <Panel
+          title="Chain"
+          description={
+            walletChain ? (
+              <>
+                Your wallet is on{' '}
+                <ChainName chain={walletChain} className="text-foreground" iconClassName="size-3.5" />. If you
+                pick another chain, it asks to switch when you deploy.
+              </>
+            ) : (
+              'Your wallet asks to switch to the chain you pick when you deploy.'
+            )
+          }
+        >
+          <ChoiceCards
+            aria-label="Chain"
+            aria-invalid={!!errors.chainId}
+            aria-describedby={errors.chainId ? 'deploy-chain-error' : undefined}
+            value={values.chainId === null ? '' : String(values.chainId)}
+            onValueChange={(value) => onChange({ chainId: Number(value) })}
+            disabled={readOnly}
+            className="sm:grid-cols-2 xl:grid-cols-3"
+          >
+            {chains.map((chain) => (
+              <ChoiceCard
+                key={chain.id}
+                value={String(chain.id)}
+                icon={<ChainIcon chainId={chain.id} className="size-5" />}
+                title={
+                  <span className="flex flex-wrap items-center gap-2">
+                    {chain.name}
+                    {chain.id === walletChainId && (
+                      <Badge variant="secondary" className="font-medium">
+                        Connected
+                      </Badge>
+                    )}
+                  </span>
+                }
+                description={
+                  <>
+                    Pays in <span className="numeric">{chain.nativeSymbol}</span>
+                  </>
+                }
+              />
+            ))}
+          </ChoiceCards>
+          <FieldError id="deploy-chain-error" className="mt-3">
+            {errors.chainId}
+          </FieldError>
+        </Panel>
+      )}
 
       <Panel title="Contract settings" description="Written into the contract when it is created.">
         <FieldGroup className="gap-7">
@@ -172,8 +191,8 @@ export function DeployForm({
           </div>
           <FieldDescription className="-mt-4 flex items-center gap-1.5">
             <LockIcon aria-hidden="true" className="size-3.5 shrink-0" />
-            Name, symbol and supply are fixed once deployed. Change name and symbol in Details before you
-            deploy.
+            Name and symbol were fixed when the art was locked, and the supply comes from the art. The
+            contract takes them as they are.
           </FieldDescription>
 
           <AddressField

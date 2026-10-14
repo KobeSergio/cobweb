@@ -1,15 +1,13 @@
+import { getAddress } from 'viem'
+import { getDeployView } from '@/app/actions/deploy'
 import { DeployScreen } from '@/components/deploy/deploy-screen'
 import { StagePage } from '@/components/shell/stage-page'
-import { requireOwnedCollection } from '@/lib/auth'
-import {
-  DEMO_DEPLOY_COST_ESTIMATE,
-  DEMO_DEPLOY_DRAFT,
-  DEMO_DEPLOYMENT,
-  DEMO_FACTORY_FEES,
-  SUPPORTED_CHAINS,
-} from '@/lib/demo'
+import { requireOwnedCollection, requireUser } from '@/lib/auth'
+import { deployChains } from '@/lib/deploy/deploy-core'
+import type { DeployView } from '@/lib/deploy/deploy-types'
 import {
   LockedStagePage,
+  placeholderReady,
   searchParam,
   stageContext,
   type CollectionParams,
@@ -17,8 +15,10 @@ import {
 } from '../_lib/stage'
 
 /**
- * Stage 4, Deploy. Sample data until deployment is wired. In sample-data mode `?state=deployed`
- * shows the deployed result instead of the form, and
+ * Stage 4, Deploy (docs/specs/2026-10-14-deploy.md). The server prepares the constructor from the
+ * collection and the finished render, the wallet deploys through the factory, and the server records
+ * the contract from the factory's event. Sample mode only (`NEXT_PUBLIC_DEMO_DATA=1`):
+ * `?state=deployed` shows the deployed result instead of the form,
  * `?outcome=rejected|reverted|balance|switch-rejected|fees-error` makes the first attempt fail, and
  * `?art=deferred` deploys on the placeholder of the deferred-art scenario (MASTER_PLAN, Flow: pre-reveal).
  */
@@ -31,12 +31,26 @@ export default async function DeployPage({
 }) {
   const { id } = await params
   const collection = await requireOwnedCollection(id)
-  const ctx = stageContext(collection, 'deploy', 'deploy', { art: await searchParam(searchParams, 'art') })
+  const user = await requireUser()
+  // A deferred collection's Deploy opens once its placeholder job is done, with the collection still a draft.
+  const ready = await placeholderReady(collection)
+  const ctx = stageContext(
+    collection,
+    'deploy',
+    'deploy',
+    { art: await searchParam(searchParams, 'art') },
+    { placeholderReady: ready },
+  )
   if (ctx.access === 'locked') return <LockedStagePage collection={collection} stage="deploy" />
 
-  const deployed = ctx.demo
-    ? (await searchParam(searchParams, 'state')) === 'deployed'
-    : collection.status === 'deployed'
+  const sampleDeployed = ctx.demo && (await searchParam(searchParams, 'state')) === 'deployed'
+  let view: DeployView | null = null
+  if (!ctx.demo) {
+    const result = await getDeployView(collection.id)
+    if (!result.ok) throw new Error(result.error)
+    view = result.data
+  }
+  const deployed = ctx.demo ? sampleDeployed : view !== null && view.record !== null
 
   return (
     <StagePage
@@ -46,21 +60,21 @@ export default async function DeployPage({
       description={
         deployed
           ? 'The contract is live. Its receipt, and where to go next.'
-          : 'Choose a chain, set royalties and the payout address, and deploy the contract from your wallet.'
+          : 'Set royalties, the payout address and the launch phases, and deploy the contract from your wallet.'
       }
       width="wide"
       bodyHasFooter
     >
-      {/* The screen renders the footer: Deploy is its action, and Continue unlocks once deployed. */}
+      {/* The screen renders the footer: Deploy is its action, and Manage drop opens once deployed. */}
       <DeployScreen
         collection={collection}
-        chains={SUPPORTED_CHAINS}
-        factoryFees={DEMO_FACTORY_FEES}
-        deployCost={DEMO_DEPLOY_COST_ESTIMATE}
-        draft={DEMO_DEPLOY_DRAFT}
-        deployment={deployed ? DEMO_DEPLOYMENT : null}
+        chains={deployChains()}
+        view={view}
+        sample={ctx.demo}
+        sampleDeployed={sampleDeployed}
         readOnly={ctx.readOnly}
         artDeferred={ctx.artDeferred}
+        sessionWallet={getAddress(user.walletAddress)}
         previous={ctx.previous}
         next={ctx.next}
         sampleOutcome={ctx.demo ? await searchParam(searchParams, 'outcome') : undefined}

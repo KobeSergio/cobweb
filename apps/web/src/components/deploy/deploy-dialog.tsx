@@ -136,6 +136,12 @@ export function DeployDialog({
             phase={phase}
             txUrl={(hash) => explorerTxUrl(chain, hash)}
             steps={[
+              {
+                step: 'preparing',
+                label: 'Preparing the deploy',
+                detail:
+                  'Cobweb builds the contract settings from the collection and the render, and predicts the address.',
+              },
               ...(needsSwitch
                 ? [
                     {
@@ -160,6 +166,12 @@ export function DeployDialog({
                 step: 'confirming',
                 label: `Confirming on ${chain.name}`,
                 detail: 'Sent. Waiting for the transaction to be included in a block.',
+              },
+              {
+                step: 'verifying',
+                label: 'Recording the contract',
+                detail:
+                  'Cobweb reads the factory event from the receipt and records the address once it equals the prediction.',
               },
             ]}
           />

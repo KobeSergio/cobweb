@@ -71,11 +71,11 @@ function causes(error: unknown): unknown[] {
   return list
 }
 
+/** The error's `shortMessage` (viem) or `message`, read so a null or undefined rejection never throws inside a catch. */
 function shortMessageOf(error: unknown): string {
-  return (
-    (error as { shortMessage?: string }).shortMessage ??
-    (error instanceof Error ? error.message : 'Unknown error.')
-  )
+  const shaped = error as { shortMessage?: unknown; message?: unknown } | null | undefined
+  const message = shaped?.shortMessage ?? shaped?.message
+  return typeof message === 'string' && message ? message : 'Unknown error.'
 }
 
 /** A wallet or chain error as the creator reads it, for the step it happened at. */
