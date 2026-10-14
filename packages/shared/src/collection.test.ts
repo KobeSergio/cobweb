@@ -1,8 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { getAbiItem, keccak256, toFunctionSelector } from 'viem'
+import { getAbiItem, keccak256, toEventSelector, toFunctionSelector } from 'viem'
 import { describe, expect, it } from 'vitest'
+import { collectionAbi as abiOnly } from './collection-abi.ts'
 import { COLLECTION_CODE_HASH, COLLECTION_CREATION_CODE, collectionAbi } from './collection.ts'
 
 const artifact = resolve(
@@ -55,4 +56,66 @@ describe('the shipped collection artifact', () => {
   } else {
     it.skip('ships the bytecode of the Foundry build in contracts/out (run forge build in contracts/ to check it)', () => {})
   }
+})
+
+/** `name(type,type)`, from an ABI item. */
+const signatureOf = (item: { name: string; inputs: readonly { type: string }[] }) =>
+  `${item.name}(${item.inputs.map((input) => input.type).join(',')})`
+/** The argument names of an ABI item, in order. */
+const namesOf = (item: { inputs: readonly { name?: string }[] }) => item.inputs.map((input) => input.name)
+
+describe('the ABI-only entry and what Phases relies on (docs/specs/2026-10-15-phases.md, section 5)', () => {
+  it('exports the same ABI from both entries', () => {
+    expect(abiOnly).toBe(collectionAbi)
+    expect(abiOnly.length).toBeGreaterThan(100)
+  })
+
+  it('carries the calls Manage drop sends, with their selectors and argument names (the price first in changeSalePrice)', () => {
+    for (const [name, signature, inputs] of [
+      [
+        'registerMintGroup',
+        'registerMintGroup(uint256,uint256,uint256,uint256)',
+        ['mintGroup', 'price', 'maxSupply_', 'startTimestamp'],
+      ],
+      ['setMintGroupStatus', 'setMintGroupStatus(uint256,bool)', ['mintGroup', 'status']],
+      ['scheduleMintGroupStart', 'scheduleMintGroupStart(uint256,uint256)', ['mintGroup', 'startTimestamp']],
+      ['changeSalePrice', 'changeSalePrice(uint256,uint256)', ['newMintPrice', 'mintGroup']],
+      ['setMintGroupMaxSupply', 'setMintGroupMaxSupply(uint256,uint256)', ['mintGroup', 'newMaxSupply']],
+      ['setPublicMaxMintPerWallet', 'setPublicMaxMintPerWallet(uint256)', ['newPublicMaxMintPerWallet']],
+      ['stopOrStartAllMintGroups', 'stopOrStartAllMintGroups(bool)', ['status']],
+      ['mintGroups', 'mintGroups()', []],
+    ] as const) {
+      const item = getAbiItem({ abi: abiOnly, name })
+      expect(toFunctionSelector(item)).toBe(toFunctionSelector(signature))
+      expect(namesOf(item)).toEqual(inputs)
+    }
+  })
+
+  it('carries the events the confirm matches', () => {
+    for (const [name, signature] of [
+      ['MintGroupRegistered', 'MintGroupRegistered(uint256)'],
+      ['MintGroupStatusChanged', 'MintGroupStatusChanged(uint256,bool)'],
+      ['AllMintGroupsStatusChanged', 'AllMintGroupsStatusChanged(bool,uint256)'],
+      ['MintGroupStartTimestampChanged', 'MintGroupStartTimestampChanged(uint256,uint256)'],
+      ['SalePriceChanged', 'SalePriceChanged(uint256,uint256)'],
+      ['MintGroupMaxSupplyUpdated', 'MintGroupMaxSupplyUpdated(uint256,uint256)'],
+      ['PublicMaxMintPerWalletChanged', 'PublicMaxMintPerWalletChanged(uint256)'],
+    ] as const) {
+      expect(toEventSelector(getAbiItem({ abi: abiOnly, name }))).toBe(toEventSelector(signature))
+    }
+  })
+
+  it('carries the errors the manage sentences decode', () => {
+    for (const [name, signature] of [
+      ['BelowMinted', 'BelowMinted(uint256)'],
+      ['AllocationsExceedMaxSupply', 'AllocationsExceedMaxSupply()'],
+      ['MintGroupAlreadyExists', 'MintGroupAlreadyExists(uint256)'],
+      ['MintGroupDoesNotExist', 'MintGroupDoesNotExist(uint256)'],
+      ['AddressZero', 'AddressZero()'],
+      ['Unauthorized', 'Unauthorized(address)'],
+      ['OwnableUnauthorizedAccount', 'OwnableUnauthorizedAccount(address)'],
+    ] as const) {
+      expect(signatureOf(getAbiItem({ abi: abiOnly, name }))).toBe(signature)
+    }
+  })
 })

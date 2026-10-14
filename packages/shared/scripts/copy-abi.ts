@@ -1,13 +1,15 @@
-// Copies the factory ABI entries the app uses from the Foundry build into src/factory-abi.ts, and the
-// whole collection artifact (its creation code, the code's keccak256 hash and its ABI) into
-// src/collection.ts, so the app's ABIs and the bytes it deploys always come from contracts/out
-// (never from legacy/). Run `forge build` in contracts/ first.
+// Copies the factory ABI entries the app uses from the Foundry build into src/factory-abi.ts, the
+// collection's ABI alone into src/collection-abi.ts, and the collection's creation code and its keccak256
+// hash into src/collection.ts (which re-exports the ABI), so the app's ABIs and the bytes it deploys always
+// come from contracts/out (never from legacy/). Run `forge build` in contracts/ first.
 //
 //   pnpm --filter @cobweb/shared abi
 //
 // The hash printed at the end is the one the factory admin approves with approveCreationCode; the
 // local factory (chain:local) approves keccak256(type(CobwebCollection).creationCode) of the same
-// build, which is the same bytes (docs/specs/2026-10-14-deploy.md, section 5).
+// build, which is the same bytes (docs/specs/2026-10-14-deploy.md, section 5). Manage drop imports
+// the ABI-only entry, so the dashboard never loads the 20 KB creation code
+// (docs/specs/2026-10-15-phases.md, section 5).
 
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -20,6 +22,7 @@ const repoRoot = resolve(here, '../../..')
 const factoryArtifact = resolve(repoRoot, 'contracts/out/CobwebFactory.sol/CobwebFactory.json')
 const collectionArtifact = resolve(repoRoot, 'contracts/out/CobwebCollection.sol/CobwebCollection.json')
 const factoryOut = resolve(here, '../src/factory-abi.ts')
+const collectionAbiOut = resolve(here, '../src/collection-abi.ts')
 const collectionOut = resolve(here, '../src/collection.ts')
 // The five entries the pay flow uses, then the five the deploy flow uses.
 const WANTED = [
@@ -70,6 +73,19 @@ const code = collection.bytecode.object
 if (!/^0x[0-9a-f]+$/.test(code)) throw new Error('The collection bytecode in the artifact is not hex.')
 const hash = keccak256(code as Hex)
 writeFileSync(
+  collectionAbiOut,
+  [
+    ...HEADER('CobwebCollection.sol/CobwebCollection.json'),
+    '',
+    '/**',
+    " * The collection's ABI alone, without the creation code: the entry Manage drop's browser code imports",
+    ' * (`@cobweb/shared/collection-abi`), so the dashboard never loads the 20 KB of bytecode.',
+    ' */',
+    `export const collectionAbi = ${JSON.stringify(collection.abi, null, 2)} as const`,
+    '',
+  ].join('\n'),
+)
+writeFileSync(
   collectionOut,
   [
     ...HEADER('CobwebCollection.sol/CobwebCollection.json'),
@@ -85,16 +101,18 @@ writeFileSync(
     '/** keccak256 of the creation code: what the factory checks against its approved hashes. */',
     `export const COLLECTION_CODE_HASH: Hex = '${hash}'`,
     '',
-    `export const collectionAbi = ${JSON.stringify(collection.abi, null, 2)} as const`,
+    "/** The ABI, from the ABI-only entry, so the deploy's imports stay as they were. */",
+    "export { collectionAbi } from './collection-abi.ts'",
     '',
   ].join('\n'),
 )
-execFileSync('pnpm', ['exec', 'prettier', '--write', factoryOut, collectionOut], {
+execFileSync('pnpm', ['exec', 'prettier', '--write', factoryOut, collectionAbiOut, collectionOut], {
   cwd: repoRoot,
   stdio: 'ignore',
 })
 console.log(`Wrote ${entries.length} entries to packages/shared/src/factory-abi.ts`)
+console.log(`Wrote packages/shared/src/collection-abi.ts: ${collection.abi.length} ABI entries`)
 console.log(
-  `Wrote packages/shared/src/collection.ts: ${(code.length - 2) / 2} bytes of creation code, ${collection.abi.length} ABI entries`,
+  `Wrote packages/shared/src/collection.ts: ${(code.length - 2) / 2} bytes of creation code and the ABI re-exported`,
 )
 console.log(`Collection creation code hash: ${hash}`)

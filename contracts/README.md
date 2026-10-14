@@ -368,6 +368,8 @@ The script deploys the factory through the deterministic deployment proxy with a
 
 **The artifact the web app ships.** `pnpm --filter @cobweb/shared abi` (after `forge build`) copies the factory ABI entries the app uses into `packages/shared/src/factory-abi.ts` and the whole collection artifact into `packages/shared/src/collection.ts`: the creation code, its keccak256 hash and the ABI. The deploy screen sends that creation code to `deployCollection`, so the hash the admin approves with `approveCreationCode` must be the hash of the shipped bytes. `foundry.toml` pins `evm_version` for that reason, `packages/shared/src/collection.test.ts` asserts the shipped hash against `contracts/out` whenever the build is present, and CI runs that test after `forge build`, so a compiler drift fails the build. After any change to the contracts: `forge build`, run the copy script, commit both generated files, and have the admin approve the new hash (the script prints it).
 
+**The ABI-only entry** (added 15 October 2026, docs/specs/2026-10-15-phases.md, section 5). The same script also writes `packages/shared/src/collection-abi.ts`, the collection's ABI alone, which `@cobweb/shared/collection-abi` exports and `collection.ts` re-exports. Manage drop's browser code imports that entry, so the dashboard never loads the 20 KB of creation code; only the deploy screen and the confirming core import `@cobweb/shared/collection`. Commit the three generated files together after a contract change.
+
 ## Design notes
 
 **Compared with the reference contract** ([TheSuits](../docs/reference/TheSuits.sol), [analysis](../docs/reference/the-suits-mint-analysis.md)), mint-group handling is kept and these things changed:
