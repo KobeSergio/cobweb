@@ -11,3 +11,4 @@ dist/
 packages/ui/src/components/
 .superpowers/
 .vitest/
+supabase/.temp/
