@@ -5,17 +5,16 @@ import {
   DEMO_COLLECTIONS,
   DEMO_LAYERS,
   DEMO_PLACEHOLDER_DESCRIPTION,
-  DEMO_RENDER_JOBS,
   DEMO_RULE_CONFLICTS,
   DEMO_RULES,
   DEMO_TOKEN_COUNT,
   DEMO_TOKENS,
+  getRenderJob as sampleRenderJob,
   type GeneratedToken,
   type RenderJob,
 } from '@/lib/demo'
 import { hasArtSubStep, type FlowLink } from '@/lib/steps'
 import { UploadFlow } from './upload-flow'
-import { resultOf } from './upload-shared'
 import { UPLOAD_OUTCOMES, type UploadOutcome } from './upload-sim'
 
 export type UploadScreenProps = {
@@ -42,9 +41,9 @@ export type UploadScreenProps = {
 
 /**
  * Lock and upload: review and lock the art, pay the generation fee through the factory's
- * `payForArt(jobId)` (simulate first, then send), then follow the render in batches. Server part:
- * in sample mode it works out the sample's review here, so the client bundle does not carry the
- * sample art.
+ * `payForArt(jobId)` (simulate first, then send), then follow the render in batches as the worker
+ * finishes them. Server part: in sample mode it works out the sample's review and picks the done sample
+ * here, so the client bundle does not carry the sample art.
  */
 export function UploadScreen({
   collection,
@@ -59,6 +58,8 @@ export function UploadScreen({
   sampleOutcome,
 }: UploadScreenProps) {
   const outcome = UPLOAD_OUTCOMES.find((entry) => entry === sampleOutcome) as UploadOutcome | undefined
+  const sampleDone = sample ? sampleRenderJob('done', { artDeferred }) : null
+  if (sampleDone && sampleDone.state !== 'done') throw new Error('The sample done job is not done.')
 
   return (
     <UploadFlow
@@ -68,7 +69,7 @@ export function UploadScreen({
       pending={pending}
       review={sample ? sampleReview(outcome) : (review ?? EMPTY_REVIEW)}
       sample={sample}
-      sampleResult={resultOf(DEMO_RENDER_JOBS.done, { collageUrl: '/demo/collage.svg' })}
+      sampleDone={sampleDone}
       placeholderDescription={sample ? DEMO_PLACEHOLDER_DESCRIPTION : ''}
       deferred={artDeferred}
       assetsFlow={!hasArtSubStep(collection.project_type, 'generate')}
