@@ -18,7 +18,7 @@ import type { Deployment, SupportedChain } from '@/lib/demo'
 import { AddressLine } from './bits'
 import { count, percent, relativeTo } from './format'
 import { RevealDialog } from './settings-dialogs'
-import { saveOffChain, SAMPLE } from './simulate'
+import { saveOffChain, SAMPLE } from './manage-sim'
 
 /**
  * The top of the overview, one compact row: the artwork, minted of supply, the contract, what the

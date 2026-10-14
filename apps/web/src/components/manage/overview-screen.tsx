@@ -18,7 +18,7 @@ import { manageTabHref } from '@/lib/steps'
 import { Row } from './bits'
 import { MintPageLinkBar, OverviewHeader } from './overview-cards'
 import { LiveNow, RecentMints } from './overview-parts'
-import { SAMPLE } from './simulate'
+import { SAMPLE } from './manage-sim'
 
 export type OverviewScreenProps = {
   collection: Tables<'collections'>

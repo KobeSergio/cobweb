@@ -14,6 +14,7 @@ import { Field, FieldDescription, FieldError, FieldLabel } from '@cobweb/ui/comp
 import { Input } from '@cobweb/ui/components/input'
 import type { MintGroup, SupportedChain } from '@/lib/demo'
 import { count } from './format'
+import { sampleRequest } from './manage-sim'
 import { parseRecipients, type ParseOptions, type Recipient } from './recipients'
 import { ParsePreview, RecipientsInput } from './recipients-input'
 import type { SnapshotSource } from './snapshot-tab'
@@ -203,7 +204,7 @@ export function WriteChunkDialog({
       description={`Sets the quota of ${count(chunk.entries.length)} addresses in ${group.name}. Sending a chunk twice is safe: quota already used is never granted again.`}
       actionLabel={chunk.status === 'failed' ? 'Retry chunk' : 'Write chunk'}
       successMessage={`Chunk ${chunk.number} is on chain`}
-      request={{
+      request={sampleRequest({
         contract: 'Collection',
         functionName: 'setMintQuota',
         args: [
@@ -211,7 +212,7 @@ export function WriteChunkDialog({
           { name: 'mintGroup', value: String(group.id) },
           { name: 'quotas', value: `${count(chunk.entries.length)} values, ${count(quotaTotal)} in total` },
         ],
-      }}
+      })}
       onConfirmed={onWritten}
       onFailed={onFailed}
     >

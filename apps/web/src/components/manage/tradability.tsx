@@ -15,7 +15,7 @@ import { ChainName } from '@/components/chains/chain-icon'
 import type { Address, Deployment, SupportedChain } from '@/lib/demo'
 import { AddressLine } from './bits'
 import { Setting } from './settings-parts'
-import { SAMPLE } from './simulate'
+import { SAMPLE, sampleRequest } from './manage-sim'
 import { TransactionDialog } from './transaction-dialog'
 
 const DEFAULT_VALIDATOR = SAMPLE.transferValidator
@@ -173,7 +173,7 @@ function LevelDialog({
       request={
         next === current
           ? null
-          : {
+          : sampleRequest({
               // Seam: legacy called `setRulesetOfCollection(collection, 0 | 1 | 2, 0x0, 0, 0)` on validator
               // V5 and `setTransferSecurityLevelOfCollection(collection, 0 | 1 | 9, false, false, false)` on
               // V4. The exact call per chain is confirmed in Phase 5 (MASTER_PLAN, Contracts: lock).
@@ -183,7 +183,7 @@ function LevelDialog({
                 { name: 'collection', value: collection },
                 { name: 'level', value: choice.arg },
               ],
-            }
+            })
       }
       onConfirmed={() => onApply(next)}
     >
@@ -244,11 +244,11 @@ function ValidatorDialog({
       successMessage="Transfer validator changed"
       request={
         address && !error && understood
-          ? {
+          ? sampleRequest({
               contract: 'Collection',
               functionName: 'setTransferValidator',
               args: [{ name: 'validator', value: address }],
-            }
+            })
           : null
       }
       onConfirmed={() => address && onApply(address)}

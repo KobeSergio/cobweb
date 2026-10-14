@@ -1,0 +1,183 @@
+import type { Hex } from 'viem'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { classifyError } from '@/components/deploy/tx-errors'
+import { DEMO_COLLECTION, DEMO_MINT_GROUPS, DEMO_NOW, DEMO_TOTAL_MINTED } from '@/lib/demo'
+import { phaseCalls, type ManageCall } from '@/lib/manage/phase-calls'
+import type { PhasesView } from '@/lib/manage/phases-types'
+import {
+  sampleApply,
+  sampleManageActions,
+  samplePhasesServer,
+  samplePhasesView,
+  sampleRequest,
+  sampleRevert,
+} from './manage-sim'
+
+const view: PhasesView = samplePhasesView({ max_supply: DEMO_COLLECTION.maxSupply })
+
+describe('samplePhasesView', () => {
+  it("builds today's sample at the sample supply, and the copy for ?chain=unreachable", () => {
+    expect(view).toMatchObject({
+      groups: DEMO_MINT_GROUPS,
+      totalMinted: DEMO_TOTAL_MINTED,
+      maxSupply: DEMO_COLLECTION.maxSupply,
+      blockTimestamp: DEMO_NOW,
+      readAt: DEMO_NOW,
+      chainReachable: true,
+    })
+    const copy = samplePhasesView({ max_supply: DEMO_COLLECTION.maxSupply }, false)
+    expect(copy.chainReachable).toBe(false)
+    expect(copy.totalMinted).toBe(0)
+    expect(copy.groups.every((group) => !group.active && !group.flag && group.minted === 0)).toBe(true)
+  })
+})
+
+describe('sampleRevert', () => {
+  const sentence = (call: ManageCall) => {
+    const refused = sampleRevert(call, view)
+    return refused ? classifyError(refused, 'simulating', 'manage').message : null
+  }
+
+  it('refuses as the contract would, decoded into the same sentences', () => {
+    // Owl List (1) has minted 186 of 250; Public (0) holds 477 and Team (2) 50 of the 777.
+    expect(sentence(phaseCalls.allocation(1, 100))).toBe(
+      'It cannot go below 186, the tokens this phase has already minted. Nothing was sent.',
+    )
+    expect(sentence(phaseCalls.allocation(1, 251))).toBe(
+      "The phases' allocations together would be more than the collection's supply. Lower another phase first. Nothing was sent.",
+    )
+    expect(sentence(phaseCalls.register(1, '0', 0, 0))).toBe(
+      'Phase 1 is already on the contract. Read the contract again, then add the phase. Nothing was sent.',
+    )
+    expect(sentence(phaseCalls.open(9))).toBe(
+      'Phase 9 is not on the contract. Read the contract again. Nothing was sent.',
+    )
+    expect(sentence(phaseCalls.price(9, '1'))).toBe(
+      'Phase 9 is not on the contract. Read the contract again. Nothing was sent.',
+    )
+  })
+
+  it('lets through what the contract would accept', () => {
+    expect(sampleRevert(phaseCalls.allocation(1, 250), view)).toBeNull()
+    expect(sampleRevert(phaseCalls.register(3, '0', 0, 0), view)).toBeNull()
+    expect(sampleRevert(phaseCalls.closeAll(), view)).toBeNull()
+    expect(sampleRevert(phaseCalls.publicCap(9), view)).toBeNull()
+  })
+})
+
+describe('sampleApply', () => {
+  it("applies each change and takes live from the sample chain's clock", () => {
+    const scheduled = sampleApply(phaseCalls.schedule(2, DEMO_NOW - 60), view)
+    expect(scheduled.groups.find((group) => group.id === 2)).toMatchObject({
+      scheduledStart: DEMO_NOW - 60,
+      flag: false,
+      active: true,
+    })
+    const closed = sampleApply(phaseCalls.close(1), view)
+    expect(closed.groups.find((group) => group.id === 1)).toMatchObject({ flag: false, active: false })
+    const all = sampleApply(phaseCalls.closeAll(), view)
+    expect(all.groups.every((group) => !group.flag && group.scheduledStart === 0 && !group.active)).toBe(true)
+    expect(sampleApply(phaseCalls.price(1, '5'), view).groups.find((group) => group.id === 1)?.priceWei).toBe(
+      '5',
+    )
+    expect(sampleApply(phaseCalls.publicCap(9), view).publicMaxPerWallet).toBe(9)
+    const added = sampleApply(phaseCalls.register(3, '0', 10, 0), view, {
+      onchainId: 3,
+      name: 'Holders',
+      description: 'Holders of the first collection.',
+      visible: false,
+    })
+    expect(added.groups.at(-1)).toMatchObject({
+      id: 3,
+      name: 'Holders',
+      visible: false,
+      named: true,
+      maxSupply: 10,
+    })
+  })
+})
+
+describe('the sample actions and server', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('checks for 650 ms, sends on Approve, refuses on Reject, and reverts after Approve, then revert', async () => {
+    const sent = new Map<Hex, ManageCall>()
+    const actions = sampleManageActions(() => view, sent)
+
+    const simulating = actions.simulate(phaseCalls.open(2))
+    await vi.advanceTimersByTimeAsync(650)
+    const send = await simulating
+    const sending = send()
+    actions.answer?.('approve')
+    const hash = await sending
+    expect(hash).toMatch(/^0x[0-9a-f]{64}$/)
+    expect(sent.get(hash)).toEqual(phaseCalls.open(2))
+    const waiting = actions.wait(hash)
+    await vi.advanceTimersByTimeAsync(1600)
+    expect(await waiting).toBe('success')
+
+    const again = actions.simulate(phaseCalls.open(2))
+    await vi.advanceTimersByTimeAsync(650)
+    const rejected = (await again)()
+    actions.answer?.('reject')
+    await expect(rejected).rejects.toMatchObject({ name: 'UserRejectedRequestError', code: 4001 })
+
+    const third = actions.simulate(phaseCalls.open(2))
+    await vi.advanceTimersByTimeAsync(650)
+    const reverting = (await third)()
+    actions.answer?.('approve-revert')
+    const revertHash = await reverting
+    const revertWait = actions.wait(revertHash)
+    await vi.advanceTimersByTimeAsync(1600)
+    expect(await revertWait).toBe('reverted')
+  })
+
+  it('refuses at the check what the contract would refuse, and checks a sample tab by its review', async () => {
+    const actions = sampleManageActions(() => view)
+    const refused = actions.simulate(phaseCalls.allocation(1, 100))
+    const expectation = expect(refused).rejects.toMatchObject({ name: 'ContractFunctionRevertedError' })
+    await vi.advanceTimersByTimeAsync(650)
+    await expectation
+    const review = actions.review?.({
+      contract: 'Collection',
+      functionName: 'airdropNFTs',
+      args: [],
+      check: () => 'ExceedsMaxSupply',
+    })
+    const reviewExpectation = expect(review).rejects.toMatchObject({
+      shortMessage: 'The contract would reject this with ExceedsMaxSupply.',
+    })
+    await vi.advanceTimersByTimeAsync(650)
+    await reviewExpectation
+  })
+
+  it('answers the next free id, and records an add with the call the wallet sent', async () => {
+    const sent = new Map<Hex, ManageCall>()
+    const actions = sampleManageActions(() => view, sent)
+    const server = samplePhasesServer(() => view, sent)
+    expect(await actions.nextGroupId()).toBe(3)
+    const hash: Hex = `0x${'cd'.repeat(32)}`
+    sent.set(hash, phaseCalls.register(3, '1000', 20, 0))
+    const recording = server.record(hash, { onchainId: 3, name: 'Holders', description: '', visible: true })
+    await vi.advanceTimersByTimeAsync(900)
+    const result = await recording
+    expect(result.ok && result.data.groups.at(-1)).toMatchObject({
+      id: 3,
+      name: 'Holders',
+      priceWei: '1000',
+      maxSupply: 20,
+    })
+  })
+
+  it('answers the hash for a tab still on sample data', async () => {
+    const hash: Hex = `0x${'ef'.repeat(32)}`
+    const request = sampleRequest({ contract: 'Collection', functionName: 'withdrawMintFunds', args: [] })
+    expect(request.call).toBeNull()
+    expect(await request.confirm(hash)).toEqual({ ok: true, data: hash })
+  })
+})

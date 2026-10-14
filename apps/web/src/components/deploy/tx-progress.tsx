@@ -8,8 +8,8 @@ import type { Hex } from '@/lib/demo/types'
 
 /**
  * The steps a wallet transaction goes through, in order (rule 2: simulate, then send the
- * simulated request). Not every flow uses every step: only deploy prepares on the server and
- * switches chain; both wait for the server to verify the event.
+ * simulated request). Not every flow uses every step: only deploy prepares on the server; deploy and
+ * the changes in Manage drop switch chain; every flow waits for the server to verify the receipt.
  */
 export type TxStep = 'preparing' | 'switching' | 'simulating' | 'wallet' | 'confirming' | 'verifying'
 
@@ -36,7 +36,7 @@ export function isTxRunning(phase: TxPhase): boolean {
   return phase.step !== 'idle' && phase.step !== 'success' && phase.step !== 'failed'
 }
 
-type StepView = { step: TxStep; label: string; detail?: React.ReactNode }
+export type StepView = { step: TxStep; label: string; detail?: React.ReactNode }
 
 function stepIndex(steps: StepView[], phase: TxPhase): number {
   if (phase.step === 'idle') return -1

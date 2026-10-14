@@ -5,6 +5,7 @@ import { Field, FieldDescription, FieldError, FieldLabel } from '@cobweb/ui/comp
 import { Input } from '@cobweb/ui/components/input'
 import { formatNative, toWei, type MintGroup, type SupportedChain } from '@/lib/demo'
 import { count, shortUtc } from './format'
+import { sampleRequest } from './manage-sim'
 import { allocationCheck, priceError, publicCapError } from './phase-rules'
 import { PriceInput } from './price-input'
 import { TransactionDialog } from './transaction-dialog'
@@ -44,14 +45,14 @@ export function StatusDialog({
       actionLabel={nextStatus ? 'Open phase' : 'Close phase'}
       destructive={!nextStatus}
       successMessage={nextStatus ? `${group.name} is open` : `${group.name} is closed`}
-      request={{
+      request={sampleRequest({
         contract: 'Collection',
         functionName: 'setMintGroupStatus',
         args: [
           { name: 'mintGroup', value: String(group.id) },
           { name: 'status', value: String(nextStatus) },
         ],
-      }}
+      })}
       onConfirmed={() => onApply(nextStatus ? { flag: true } : { flag: false, scheduledStart: 0 })}
     >
       <ul className="text-muted-foreground grid list-disc gap-1.5 pl-5 text-sm">
@@ -99,11 +100,11 @@ export function CloseAllDialog({ onApply, ...ctx }: PhaseContext & { onApply: ()
       description="Minting stops in every phase as soon as the transaction confirms. Use it to pause the whole drop."
       actionLabel="Close all phases"
       successMessage="Every phase is closed"
-      request={{
+      request={sampleRequest({
         contract: 'Collection',
         functionName: 'stopOrStartAllMintGroups',
         args: [{ name: 'status', value: 'false' }],
-      }}
+      })}
       onConfirmed={onApply}
     >
       {scheduled.length > 0 && (
@@ -132,14 +133,14 @@ export function ClearScheduleDialog({
       description={`${group.name} will no longer open by itself at ${shortUtc(group.scheduledStart)}. It stays closed until you open it or schedule it again.`}
       actionLabel="Clear schedule"
       successMessage={`${group.name} is no longer scheduled`}
-      request={{
+      request={sampleRequest({
         contract: 'Collection',
         functionName: 'scheduleMintGroupStart',
         args: [
           { name: 'mintGroup', value: String(group.id) },
           { name: 'startTimestamp', value: '0' },
         ],
-      }}
+      })}
       onConfirmed={() => onApply({ scheduledStart: 0 })}
     />
   )
@@ -167,14 +168,14 @@ export function PriceDialog({
       successMessage={`${group.name} price changed`}
       request={
         wei && !unchanged
-          ? {
+          ? sampleRequest({
               contract: 'Collection',
               functionName: 'changeSalePrice',
               args: [
                 { name: 'price', value: `${wei} wei` },
                 { name: 'mintGroup', value: String(group.id) },
               ],
-            }
+            })
           : null
       }
       onConfirmed={() => wei && onApply({ priceWei: wei })}
@@ -218,7 +219,7 @@ export function SupplyDialog({
       request={
         error || next === group.maxSupply
           ? null
-          : {
+          : sampleRequest({
               contract: 'Collection',
               functionName: 'setMintGroupMaxSupply',
               args: [
@@ -227,7 +228,7 @@ export function SupplyDialog({
               ],
               check: () =>
                 next < group.minted ? 'BelowMinted' : next > room ? 'AllocationsExceedMaxSupply' : null,
-            }
+            })
       }
       onConfirmed={() => onApply({ maxSupply: next })}
     >
@@ -283,11 +284,11 @@ export function PublicCapDialog({
       request={
         error || next === cap
           ? null
-          : {
+          : sampleRequest({
               contract: 'Collection',
               functionName: 'setPublicMaxMintPerWallet',
               args: [{ name: 'cap', value: String(next) }],
-            }
+            })
       }
       onConfirmed={() => onApply(next)}
     >

@@ -17,7 +17,7 @@ import { CopyButton } from './bits'
 import { FeaturedPicker, ImageSlot } from './mint-page-fields'
 import { MintPagePreview } from './mint-page-preview'
 import { MintPageSections } from './mint-page-sections'
-import { saveOffChain } from './simulate'
+import { saveOffChain } from './manage-sim'
 
 export type MintPageScreenProps = {
   collection: Tables<'collections'>

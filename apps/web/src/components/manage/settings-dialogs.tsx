@@ -16,6 +16,7 @@ import { RadioGroup, RadioGroupItem } from '@cobweb/ui/components/radio-group'
 // Royalty limits are Deploy's: 0 to 10%, in whole basis points, as in legacy.
 import { MAX_ROYALTY_PERCENT, royaltyBps as royaltyPercentToBps } from '@/components/deploy/deploy-form'
 import { formatBps, type Address, type SupportedChain } from '@/lib/demo'
+import { sampleRequest } from './manage-sim'
 import { TransactionDialog } from './transaction-dialog'
 
 type Base = { open: boolean; onOpenChange: (open: boolean) => void; chain: SupportedChain }
@@ -56,11 +57,11 @@ export function PayoutDialog({
       successMessage="Payout address changed"
       request={
         address && !same
-          ? {
+          ? sampleRequest({
               contract: 'Collection',
               functionName: 'setOwnerPayoutAddress',
               args: [{ name: 'address', value: address }],
-            }
+            })
           : null
       }
       onConfirmed={() => address && onApply(address)}
@@ -113,14 +114,14 @@ export function RoyaltyDialog({
       successMessage="Royalties updated"
       request={
         nextBps !== null && address && !unchanged
-          ? {
+          ? sampleRequest({
               contract: 'Collection',
               functionName: 'setDefaultRoyalty',
               args: [
                 { name: 'receiver', value: address },
                 { name: 'feeNumerator', value: `${nextBps} (${formatBps(nextBps)})` },
               ],
-            }
+            })
           : null
       }
       onConfirmed={() => address && nextBps !== null && onApply(address, nextBps)}
@@ -203,7 +204,11 @@ export function RevealDialog({
       successMessage="Metadata updated. The collection is revealed."
       request={
         uri && uri !== currentUri
-          ? { contract: 'Collection', functionName: 'setBaseURI', args: [{ name: 'uri', value: uri }] }
+          ? sampleRequest({
+              contract: 'Collection',
+              functionName: 'setBaseURI',
+              args: [{ name: 'uri', value: uri }],
+            })
           : null
       }
       onConfirmed={() => uri && onApply(uri)}

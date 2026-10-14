@@ -29,7 +29,7 @@ import {
 import { PhaseDetailsDialog } from './phase-details'
 import { PHASE_COLUMNS, PhaseRow, type PhaseAction } from './phase-row'
 import { AddPhaseDialog, ScheduleDialog } from './phase-schedule'
-import { chainReadGroup, saveOffChain } from './simulate'
+import { chainReadGroup, saveOffChain } from './manage-sim'
 import { SupplyMap } from './supply-map'
 
 export type PhasesScreenProps = {

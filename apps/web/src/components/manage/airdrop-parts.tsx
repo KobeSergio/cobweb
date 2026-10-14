@@ -18,6 +18,7 @@ import {
 } from '@/lib/demo'
 import { Row } from './bits'
 import { count, relativeTo, shortUtc } from './format'
+import { sampleRequest } from './manage-sim'
 import { toCsv } from './recipients'
 import { TransactionDialog } from './transaction-dialog'
 
@@ -224,7 +225,7 @@ export function BurnDialog({
       successMessage={`${count(amount)} ${noun} burned`}
       request={
         confirmed
-          ? {
+          ? sampleRequest({
               contract: 'Collection',
               functionName: 'airdropNFTs',
               args: [
@@ -233,7 +234,7 @@ export function BurnDialog({
               ],
               valueWei: fee,
               check: () => (amount > remaining ? 'ExceedsMaxSupply' : null),
-            }
+            })
           : null
       }
       onConfirmed={onBurned}

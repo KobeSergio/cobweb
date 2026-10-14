@@ -18,7 +18,7 @@ import { Switch } from '@cobweb/ui/components/switch'
 import { Textarea } from '@cobweb/ui/components/textarea'
 import type { MintGroup } from '@/lib/demo'
 import { PHASE_DESCRIPTION_MAX, PHASE_NAME_MAX, phaseNameError } from './phase-rules'
-import { saveOffChain } from './simulate'
+import { saveOffChain } from './manage-sim'
 
 /** What Cobweb stores about a phase, apart from the chain: shown on the mint page only. */
 export type PhaseDetails = { name: string; description: string; visible: boolean }

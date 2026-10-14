@@ -10,6 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@cobweb/ui/components/p
 import { Switch } from '@cobweb/ui/components/switch'
 import { formatUtc, toWei, type MintGroup } from '@/lib/demo'
 import { count, relativeTo, useTimeZone } from './format'
+import { sampleRequest } from './manage-sim'
 import type { PhaseContext } from './phase-dialogs'
 import { PhaseDetailsFields, type PhaseDetails } from './phase-details'
 import { allocationCheck, phaseNameError, priceError } from './phase-rules'
@@ -148,14 +149,14 @@ export function ScheduleDialog({
       request={
         unix === null
           ? null
-          : {
+          : sampleRequest({
               contract: 'Collection',
               functionName: 'scheduleMintGroupStart',
               args: [
                 { name: 'mintGroup', value: String(group.id) },
                 { name: 'startTimestamp', value: String(unix) },
               ],
-            }
+            })
       }
       onConfirmed={() => unix !== null && onApply({ scheduledStart: unix })}
     >
@@ -217,7 +218,7 @@ export function AddPhaseDialog({
       className="sm:max-w-xl"
       request={
         ready
-          ? {
+          ? sampleRequest({
               contract: 'Collection',
               functionName: 'registerMintGroup',
               args: [
@@ -227,7 +228,7 @@ export function AddPhaseDialog({
                 { name: 'startTimestamp', value: String(unix) },
               ],
               check: () => (allocation.next > allocation.room ? 'AllocationsExceedMaxSupply' : null),
-            }
+            })
           : null
       }
       onConfirmed={() =>

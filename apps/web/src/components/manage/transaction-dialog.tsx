@@ -1,8 +1,10 @@
 'use client'
 
-import { CheckIcon, ExternalLinkIcon, WalletIcon, XIcon } from 'lucide-react'
-import { useRef } from 'react'
+import { CheckIcon, WalletIcon } from 'lucide-react'
+import { useEffect, useReducer, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import type { Hex } from 'viem'
+import { useAccount } from 'wagmi'
 import { Button } from '@cobweb/ui/components/button'
 import {
   Dialog,
@@ -12,22 +14,31 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@cobweb/ui/components/dialog'
-import { Spinner } from '@cobweb/ui/components/spinner'
 import { cn } from '@cobweb/ui/lib/utils'
 import { ChainName } from '@/components/chains/chain-icon'
-import { explorerTxUrl, formatNative, shortAddress, type Hex, type SupportedChain } from '@/lib/demo'
-import type { TxRequest } from './simulate'
-import { TX_STEPS, useTransaction, type TxState, type TxStep } from './use-transaction'
+import { deployReducer, retryHash, type DeployEvent } from '@/components/deploy/deploy-machine'
+import { classifyError } from '@/components/deploy/tx-errors'
+import {
+  isTxRunning,
+  TX_IDLE,
+  TxProgress,
+  type StepView,
+  type TxFailure,
+} from '@/components/deploy/tx-progress'
+import { explorerTxUrl, formatNative, type SupportedChain } from '@/lib/demo'
+import type { ManageRequest, TxRequest } from './manage-actions'
+import { useManageActions } from './manage-context'
+import { runManage } from './manage-machine'
 
-export type TransactionDialogProps = {
+export type TransactionDialogProps<T> = {
   open: boolean
   onOpenChange: (open: boolean) => void
   title: string
   description?: React.ReactNode
   /** Fields or a summary, shown until the transaction starts. */
   children?: React.ReactNode
-  /** The call to send; null while the form above is incomplete or invalid. */
-  request: TxRequest | null
+  /** The change to send; null while the form above is incomplete or invalid. */
+  request: ManageRequest<T> | null
   /** The button that starts the sequence, e.g. "Open phase". */
   actionLabel: string
   /** Red action button, for irreversible or risky calls. */
@@ -35,17 +46,21 @@ export type TransactionDialogProps = {
   chain: SupportedChain
   /** Shown in the toast and the done state, e.g. "Owl List is open". */
   successMessage: string
-  onConfirmed?: (hash: Hex) => void
-  onFailed?: (message: string, step: TxStep) => void
+  /** The server's answer once the change is confirmed: the fresh view on Phases, the hash on a tab still on sample data. */
+  onConfirmed?: (result: T) => void
+  /** The failure's sentence, when the sequence ends without a confirmed change. */
+  onFailed?: (message: string) => void
   className?: string
 }
 
 /**
- * The one dialog for every on-chain action in Manage drop. It shows what will be sent, then
- * walks the honest sequence: checking, confirm in wallet, confirming, done, with a clear failure
- * at whichever step failed and a way to try again.
+ * The one dialog for every on-chain change in Manage drop (docs/specs/2026-10-15-phases.md, section 7.3).
+ * It shows what will be sent, then runs the manage machine with the context's actions, the sign-in wallet
+ * and the wallet's account and chain: switch when needed, check, confirm in the wallet, confirming, and
+ * reading the contract, with the failure at whichever step failed and a way forward. The simulated wallet
+ * shows only on sample actions.
  */
-export function TransactionDialog({
+export function TransactionDialog<T>({
   open,
   onOpenChange,
   title,
@@ -59,28 +74,135 @@ export function TransactionDialog({
   onConfirmed,
   onFailed,
   className,
-}: TransactionDialogProps) {
-  const tx = useTransaction({
-    onConfirmed: (hash) => {
-      onConfirmed?.(hash)
-      toast.success(successMessage)
-    },
-    onFailed,
-  })
+}: TransactionDialogProps<T>) {
+  const { actions, chainId, wallet } = useManageActions()
+  const account = useAccount()
+  const sample = actions.answer !== undefined
+  const [phase, dispatch] = useReducer(deployReducer, TX_IDLE)
+  const [switching, setSwitching] = useState(false)
+  const run = useRef(0)
   const resetTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const { state } = tx
+  const running = isTxRunning(phase)
+  // A change sent but not confirmed in time is checked again, never sent again.
+  const sentHash = retryHash(phase)
+
+  useEffect(
+    () => () => {
+      // Unmounted: drop any step still in flight.
+      run.current++
+    },
+    [],
+  )
+
+  function reset() {
+    run.current++
+    dispatch({ type: 'set', phase: TX_IDLE })
+  }
 
   function handleOpenChange(next: boolean) {
     clearTimeout(resetTimer.current)
     // A transaction in flight keeps going if the dialog closes; the toast reports the result.
-    if (!next && !tx.busy) resetTimer.current = setTimeout(tx.reset, 200)
+    if (!next && !running) resetTimer.current = setTimeout(reset, 200)
     onOpenChange(next)
+  }
+
+  async function start(checkHash?: Hex) {
+    if (!request) return
+    const current = request
+    const id = ++run.current
+    // Each run starts from idle: a refusal before any step is its first event, and must not keep the last
+    // run's step or transaction.
+    dispatch({ type: 'set', phase: TX_IDLE })
+    const last: { failure: TxFailure | null } = { failure: null }
+    const report = (event: DeployEvent) => {
+      if (id !== run.current) return
+      if (event.type === 'failed') last.failure = event.failure
+      dispatch(event)
+    }
+    setSwitching(!sample && !checkHash && account.chainId !== chainId)
+    const call = current.call
+    let result: T | null = null
+    try {
+      result = await runManage<T>(
+        {
+          call,
+          // Sample actions stand in for the wallet: the sign-in wallet on the collection's chain.
+          account: sample ? wallet : account.address,
+          wallet,
+          chainId,
+          connectedChainId: sample ? chainId : account.chainId,
+          sentHash: checkHash,
+          addId: call?.functionName === 'registerMintGroup' ? Number(call.args[0]) : undefined,
+        },
+        {
+          switchChain: (target) => actions.switchChain(target),
+          simulate: (next) => {
+            if (next) return actions.simulate(next)
+            if (actions.review) return actions.review(current.review)
+            return Promise.reject(new Error('This change runs on sample data only.'))
+          },
+          wait: (hash) => actions.wait(hash),
+          confirm: (hash) => current.confirm(hash),
+          remember: current.pending ? (hash) => current.pending?.remember(hash) : undefined,
+          forget: current.pending ? () => current.pending?.forget() : undefined,
+          sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+          now: () => Date.now(),
+        },
+        report,
+      )
+    } catch (error) {
+      // The machine words every failure it expects; one it did not must not leave the dialog on a spinner.
+      report({ type: 'failed', failure: classifyError(error, 'confirming', 'manage') })
+    }
+    if (id !== run.current) return
+    if (result !== null) {
+      onConfirmed?.(result)
+      toast.success(successMessage)
+      return
+    }
+    if (last.failure) onFailed?.(last.failure.message)
   }
 
   function submit(event: React.FormEvent) {
     event.preventDefault()
-    if (request && state.phase === 'idle') tx.start(request)
+    if (request && phase.step === 'idle') void start()
   }
+
+  const steps: StepView[] = [
+    ...(switching
+      ? [
+          {
+            step: 'switching' as const,
+            label: `Switch to ${chain.name}`,
+            detail: 'Approve the network switch in your wallet.',
+          },
+        ]
+      : []),
+    {
+      step: 'simulating',
+      label: 'Checking the change',
+      detail: 'A dry run against the contract, so the wallet only opens for a change that will go through.',
+    },
+    {
+      step: 'wallet',
+      label: 'Confirm in your wallet',
+      detail: sample
+        ? 'Answer for your wallet below.'
+        : 'Your wallet shows a call to the collection contract and the gas for it.',
+    },
+    {
+      step: 'confirming',
+      label: `Confirming on ${chain.name}`,
+      detail: 'Sent. Waiting for the transaction to be included in a block.',
+    },
+    {
+      step: 'verifying',
+      label: 'Reading the contract',
+      detail:
+        'Cobweb checks the receipt and reads the contract again, so the screen shows what the chain holds.',
+    },
+  ]
+  const failedAt = phase.step === 'failed' ? phase.at : null
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -91,17 +213,32 @@ export function TransactionDialog({
             {description && <DialogDescription>{description}</DialogDescription>}
           </DialogHeader>
 
-          {state.phase === 'idle' ? (
+          {phase.step === 'idle' ? (
             <>
               {children}
-              {request && <CallReview request={request} chain={chain} />}
+              {request && <CallReview request={request.review} chain={chain} />}
             </>
           ) : (
-            <TxProgress state={state} chain={chain} onRespond={tx.respond} successMessage={successMessage} />
+            <div className="grid gap-3">
+              <TxProgress
+                phase={phase}
+                steps={steps}
+                txUrl={chain.explorerUrl ? (hash) => explorerTxUrl(chain, hash) : undefined}
+              />
+              {sample && phase.step === 'wallet' && (
+                <SimulatedWallet onRespond={(choice) => actions.answer?.(choice)} />
+              )}
+              {phase.step === 'success' && (
+                <p className="bg-success-soft flex items-center gap-2 rounded-lg px-4 py-3 text-sm">
+                  <CheckIcon aria-hidden="true" className="text-success-foreground size-4 shrink-0" />
+                  {successMessage}
+                </p>
+              )}
+            </div>
           )}
 
           <DialogFooter>
-            {state.phase === 'idle' && (
+            {phase.step === 'idle' && (
               <>
                 <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
                   Cancel
@@ -111,27 +248,29 @@ export function TransactionDialog({
                 </Button>
               </>
             )}
-            {tx.busy && (
+            {running && (
               <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
-                {state.phase === 'confirming' ? 'Close and keep waiting' : 'Close'}
+                {phase.step === 'confirming' || phase.step === 'verifying'
+                  ? 'Close and keep waiting'
+                  : 'Close'}
               </Button>
             )}
-            {state.phase === 'failed' && (
+            {phase.step === 'failed' && (
               <>
-                <Button type="button" variant="outline" onClick={tx.reset}>
-                  {state.step === 'checking' ? 'Back to edit' : 'Back'}
+                <Button type="button" variant="outline" onClick={reset}>
+                  {failedAt === 'simulating' ? 'Back to edit' : 'Back'}
                 </Button>
                 <Button
                   type="button"
                   variant={destructive ? 'destructive' : 'default'}
                   disabled={!request}
-                  onClick={() => request && tx.start(request)}
+                  onClick={() => void start(sentHash)}
                 >
-                  Try again
+                  {sentHash ? 'Check again' : 'Try again'}
                 </Button>
               </>
             )}
-            {state.phase === 'done' && (
+            {phase.step === 'success' && (
               <Button type="button" variant="secondary" onClick={() => handleOpenChange(false)}>
                 Close
               </Button>
@@ -170,118 +309,7 @@ export function CallReview({ request, chain }: { request: TxRequest; chain: Supp
   )
 }
 
-const ORDER: TxStep[] = ['checking', 'wallet', 'confirming']
-
-function stepStatus(state: TxState, step: TxStep): 'todo' | 'active' | 'done' | 'failed' {
-  if (state.phase === 'done') return 'done'
-  if (state.phase === 'idle') return 'todo'
-  const current = state.phase === 'failed' ? state.step : state.phase
-  const diff = ORDER.indexOf(step) - ORDER.indexOf(current)
-  if (diff < 0) return 'done'
-  if (diff > 0) return 'todo'
-  return state.phase === 'failed' ? 'failed' : 'active'
-}
-
-/** The three steps with their state, the simulated wallet, and the result. */
-export function TxProgress({
-  state,
-  chain,
-  onRespond,
-  successMessage,
-}: {
-  state: TxState
-  chain: SupportedChain
-  onRespond: (answer: 'approve' | 'reject' | 'approve-revert') => void
-  successMessage: string
-}) {
-  const hash = 'hash' in state ? state.hash : undefined
-  return (
-    <div className="grid gap-4">
-      <ol className="grid gap-0" aria-label="Transaction progress">
-        {TX_STEPS.map(({ step, label, detail }, index) => {
-          const status = stepStatus(state, step)
-          return (
-            <li key={step} className="relative flex gap-3 pb-4 last:pb-0">
-              {index < TX_STEPS.length - 1 && (
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    'absolute top-7 bottom-1 left-3 w-px',
-                    status === 'done' ? 'bg-primary-line' : 'bg-border',
-                  )}
-                />
-              )}
-              <StepIcon status={status} />
-              <div className="min-w-0 pt-0.5">
-                <p
-                  className={cn('text-sm font-medium', status === 'todo' && 'text-muted-foreground')}
-                  aria-current={status === 'active' ? 'step' : undefined}
-                >
-                  {label}
-                  <span className="sr-only">
-                    {status === 'done' ? ', done' : status === 'failed' ? ', failed' : ''}
-                  </span>
-                </p>
-                {status === 'active' && <p className="text-muted-foreground text-[0.8125rem]">{detail}</p>}
-              </div>
-            </li>
-          )
-        })}
-      </ol>
-
-      <div aria-live="polite" className="grid gap-3">
-        {state.phase === 'wallet' && <SimulatedWallet onRespond={onRespond} />}
-        {state.phase === 'failed' && (
-          <p role="alert" className="bg-destructive-soft rounded-lg px-4 py-3 text-sm">
-            {state.message}
-          </p>
-        )}
-        {state.phase === 'done' && (
-          <p className="bg-success-soft flex items-center gap-2 rounded-lg px-4 py-3 text-sm">
-            <CheckIcon aria-hidden="true" className="text-success-foreground size-4 shrink-0" />
-            {successMessage}
-          </p>
-        )}
-        {hash && (
-          <a
-            href={explorerTxUrl(chain, hash)}
-            target="_blank"
-            rel="noreferrer"
-            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex w-fit items-center gap-1.5 rounded-sm text-[0.8125rem] underline-offset-4 outline-none hover:underline focus-visible:ring-2"
-          >
-            Transaction <span className="numeric">{shortAddress(hash, 6)}</span>
-            <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
-            <span className="sr-only">(opens the block explorer)</span>
-          </a>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function StepIcon({ status }: { status: 'todo' | 'active' | 'done' | 'failed' }) {
-  return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        'relative z-10 flex size-6 shrink-0 items-center justify-center rounded-full border',
-        status === 'todo' && 'border-border-strong bg-card',
-        status === 'active' && 'border-primary-line bg-primary-soft text-primary',
-        status === 'done' && 'border-transparent bg-primary text-primary-foreground',
-        status === 'failed' && 'bg-destructive-soft text-destructive-foreground border-transparent',
-      )}
-    >
-      {status === 'active' && <Spinner className="size-3.5" />}
-      {status === 'done' && <CheckIcon className="size-3.5" strokeWidth={3} />}
-      {status === 'failed' && <XIcon className="size-3.5" strokeWidth={3} />}
-    </span>
-  )
-}
-
-/**
- * Stands in for the wallet's own confirmation window while transactions are simulated.
- * SEAM: removed when `writeContract` is wired; the real wallet prompt replaces it.
- */
+/** Stands in for the wallet's own confirmation window on sample actions. */
 function SimulatedWallet({
   onRespond,
 }: {

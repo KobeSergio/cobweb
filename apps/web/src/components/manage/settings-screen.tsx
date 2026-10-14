@@ -16,7 +16,7 @@ import {
 import { AddressLine, Row } from './bits'
 import { PayoutDialog, RevealDialog, RoyaltyDialog } from './settings-dialogs'
 import { Setting, SettingsGroup as Group } from './settings-parts'
-import { SAMPLE } from './simulate'
+import { SAMPLE, sampleRequest } from './manage-sim'
 import { TradabilitySettings } from './tradability'
 import { TransactionDialog } from './transaction-dialog'
 
@@ -189,7 +189,7 @@ export function SettingsScreen({
           description="The whole balance goes to the payout address in one transaction."
           actionLabel="Withdraw"
           successMessage="Proceeds withdrawn"
-          request={{ contract: 'Collection', functionName: 'withdrawMintFunds', args: [] }}
+          request={sampleRequest({ contract: 'Collection', functionName: 'withdrawMintFunds', args: [] })}
           onConfirmed={() =>
             setState((current) => ({
               ...current,
@@ -247,11 +247,11 @@ export function SettingsScreen({
           }
           actionLabel={dialog.at.onBehalf ? 'Turn off' : 'Turn on'}
           successMessage={dialog.at.onBehalf ? 'Mint on behalf is off' : 'Mint on behalf is on'}
-          request={{
+          request={sampleRequest({
             contract: 'Collection',
             functionName: 'setMintOnBehalfStatus',
             args: [{ name: 'status', value: String(!dialog.at.onBehalf) }],
-          }}
+          })}
           onConfirmed={() => patch({ onBehalf: !dialog.at.onBehalf })}
         />
       )}

@@ -33,7 +33,7 @@ import { Row } from './bits'
 import { count, downloadText } from './format'
 import { parseRecipients, type ParseOptions, type Recipient } from './recipients'
 import { ParsePreview, RecipientsInput } from './recipients-input'
-import { SAMPLE } from './simulate'
+import { SAMPLE, sampleRequest } from './manage-sim'
 import { TransactionDialog } from './transaction-dialog'
 
 export type AirdropScreenProps = {
@@ -364,7 +364,7 @@ export function AirdropScreen({
           description={`${count(batchTokens)} tokens to ${count(dialog.batch.length)} wallets. They arrive as soon as the transaction confirms.`}
           actionLabel="Send airdrop"
           successMessage={`${count(batchTokens)} tokens airdropped`}
-          request={{
+          request={sampleRequest({
             contract: 'Collection',
             functionName: 'airdropNFTs',
             args: [
@@ -376,7 +376,7 @@ export function AirdropScreen({
             ],
             valueWei: mulWei(feePerToken, batchTokens),
             check: () => (batchTokens > remaining ? 'ExceedsMaxSupply' : null),
-          }}
+          })}
           onConfirmed={(hash: Hex) => {
             record({ txHash: hash, recipients: dialog.batch.length, tokens: batchTokens, burn: false })
             const sent = dialog.index + 1
