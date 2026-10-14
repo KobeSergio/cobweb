@@ -148,6 +148,7 @@ const web = await import('../src/lib/art/result.ts')
 const schemas = await import('../src/lib/art/schemas.ts')
 const { presignGet } = await import('../src/lib/storage/objects.ts')
 const { renderBucket } = await import('../src/lib/storage/config.ts')
+const { faceOf } = await import('../src/components/upload/render-follow.ts')
 const worker = await import('@cobweb/worker')
 const local = await import('@cobweb/worker/local')
 type LockContext = import('../src/lib/art/lock-core.ts').LockContext
@@ -1086,13 +1087,13 @@ async function main(): Promise<void> {
       return `batch error ${JSON.stringify(failedBatches[0])}`
     if ((await statusOf(cid)) !== 'art_locked') return `collection ${await statusOf(cid)}`
     // The web app's model of the job. The creator can fix this art only by unlocking it, so a retry
-    // fails the same way; the model still calls the job retryable. A known gap, recorded for the
-    // screen sub-project, which should offer the unlock first.
+    // fails the same way: the model still calls the job retryable (the database would accept a retry),
+    // but the screen's face is `art`, which offers the unlock and never "Try again".
     const model = await loadJob(creator.client, jobId)
     if (model.state !== 'failed') return `the web model says ${model.state}`
-    return model.errorCode === 'layer-size' && model.retryable
-      ? null
-      : `model ${JSON.stringify({ errorCode: model.errorCode, retryable: model.retryable })}`
+    if (model.errorCode !== 'layer-size' || !model.retryable)
+      return `model ${JSON.stringify({ errorCode: model.errorCode, retryable: model.retryable })}`
+    return faceOf(model) === 'art' ? null : `face ${faceOf(model)}`
   })
 
   // 9b. The credit on the web side (docs/specs/2026-10-14-render-screen-wiring.md, sections 4 and 5):
