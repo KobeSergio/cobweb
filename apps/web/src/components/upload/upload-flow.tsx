@@ -53,6 +53,11 @@ export type UploadFlowProps = {
   sample: boolean
   /** Sample mode: the done job the scripted render ends on. Null in real mode. */
   sampleDone: Extract<RenderJob, { state: 'done' }> | null
+  /**
+   * Unix seconds: the clock the time estimate is drawn with, from the server so hydration matches;
+   * `DEMO_NOW` in sample mode.
+   */
+  now: number
   /** The description saved with the job's placeholder, when it has one. */
   placeholderDescription: string
   /** "Finish the art later" (MASTER_PLAN, Flow: pre-reveal): this run locks and renders the placeholder alone. */
@@ -101,6 +106,7 @@ export function UploadFlow({
   review,
   sample,
   sampleDone,
+  now: initialNow,
   placeholderDescription,
   deferred,
   assetsFlow,
@@ -133,10 +139,13 @@ export function UploadFlow({
   const [actionError, setActionError] = useState<string | null>(null)
   // Sample mode: an unlock after a failed render shows the review's credit line, as the server would.
   const [creditAfterUnlock, setCreditAfterUnlock] = useState(false)
+  // The clock the view is drawn with: the server's at first, so hydration matches, then the clock at
+  // each poll and retry in real mode. Sample mode keeps the demo clock.
+  const [now, setNow] = useState(initialNow)
   const chain = chainView(job.quote.chainId)
   const paymentTx = 'payment' in job ? (job.payment?.txHash ?? null) : null
   const free = job.quote.totalWei === '0'
-  const view = renderView(job, Math.floor(Date.now() / 1000))
+  const view = renderView(job, now)
   const collageUrl =
     job.state === 'done' && job.collageKey
       ? sample
@@ -154,14 +163,16 @@ export function UploadFlow({
   const doneState: ProgressionState = stage === 'done' ? 'current' : 'pending'
 
   /**
-   * A job from the server: show the step its state belongs to. The server page (the stepper, the Art
-   * screens) is refreshed when the stage changes or the job ends, never on an ordinary poll.
+   * A job from the server: show the step its state belongs to, with the time estimate drawn on the
+   * clock now (sample mode keeps the demo clock). The server page (the stepper, the Art screens) is
+   * refreshed when the stage changes or the job ends, never on an ordinary poll.
    */
   function settle(nextJob: RenderJob) {
     const nextStage = STAGE_FOR_JOB[nextJob.state]
     const changed = nextStage !== stageRef.current
     if (changed && nextStage === 'render') since.current = Date.now()
     stageRef.current = nextStage
+    if (!sample) setNow(Math.floor(Date.now() / 1000))
     setJob(nextJob)
     setStage(nextStage)
     if (!sample && (changed || nextJob.state === 'done' || nextJob.state === 'failed')) router.refresh()
@@ -196,6 +207,7 @@ export function UploadFlow({
   }, [polled])
 
   async function retry() {
+    if (!sample) setNow(Math.floor(Date.now() / 1000))
     setBusy(true)
     setActionError(null)
     try {

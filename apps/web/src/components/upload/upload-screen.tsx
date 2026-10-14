@@ -4,6 +4,7 @@ import type { Tables } from '@/lib/database.types'
 import {
   DEMO_COLLECTIONS,
   DEMO_LAYERS,
+  DEMO_NOW,
   DEMO_PLACEHOLDER_DESCRIPTION,
   DEMO_RULE_CONFLICTS,
   DEMO_RULES,
@@ -70,6 +71,7 @@ export function UploadScreen({
       review={sample ? sampleReview(outcome) : (review ?? EMPTY_REVIEW)}
       sample={sample}
       sampleDone={sampleDone}
+      now={sample ? DEMO_NOW : Math.floor(Date.now() / 1000)}
       placeholderDescription={sample ? DEMO_PLACEHOLDER_DESCRIPTION : ''}
       deferred={artDeferred}
       assetsFlow={!hasArtSubStep(collection.project_type, 'generate')}
