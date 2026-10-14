@@ -100,13 +100,20 @@ export function RenderStep({
   const imagesDone = view.phase === 'metadata' || view.phase === 'done'
   const copy = failure ? faceCopy(failure.face, failure.retriesLeft, placeholderOnly) : null
   const onAction = failure?.face === 'retry' ? onRetry : onUnlock
-  // The placeholder is one file, pinned before the first batch of the real set finishes; a failure
-  // stops it with the rest of the job. With deferred art it is the whole job, done when the job is.
-  const placeholderState: PhaseState = failure
-    ? 'failed'
-    : view.phase === 'done' || (!placeholderOnly && view.done > 0)
+  // The placeholder is one file, pinned before the first batch of the real set finishes: a job that
+  // failed later still has it, so with "Reveal later" the row fails only when no batch finished.
+  // With deferred art the placeholder is the whole job: done when the job is, failed when it is.
+  const placeholderState: PhaseState = placeholderOnly
+    ? view.phase === 'done'
       ? 'done'
-      : 'running'
+      : failure
+        ? 'failed'
+        : 'running'
+    : failure && view.done === 0
+      ? 'failed'
+      : view.phase === 'done' || view.done > 0
+        ? 'done'
+        : 'running'
   const placeholderRow = (
     <PhaseRow
       label="Placeholder"
