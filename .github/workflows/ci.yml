@@ -31,7 +31,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      # The shipped collection bytecode in packages/shared/src/collection.ts must come from this build.
       - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly-6f49a622bd1c2219f918752b372d401aeeb8e851
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:

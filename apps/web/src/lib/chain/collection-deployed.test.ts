@@ -34,6 +34,20 @@ function deployed(
   }
 }
 
+/** The factory's real `ArtPaid` log, with the same job id and wallet as the deploy's salt and deployer. */
+function artPaid(address: Address): ReceiptLog {
+  const topics = encodeEventTopics({
+    abi: factoryAbi,
+    eventName: 'ArtPaid',
+    args: { jobId: SALT, payer: DEPLOYER },
+  })
+  return {
+    address,
+    topics: topics as ReceiptLog['topics'],
+    data: encodeAbiParameters([{ type: 'uint256' }], [125_000_000_000_000n]),
+  }
+}
+
 const receipt = (...logs: ReceiptLog[]): ReceiptLike => ({ status: 'success', logs })
 const expected = {
   factory: FACTORY,
@@ -122,5 +136,16 @@ describe('matchCollectionDeployed', () => {
         expected,
       ),
     ).toEqual({ ok: true, collection: PREDICTED })
+  })
+
+  it("skips the factory's ArtPaid log by its name: viem decodes any event of the ABI", () => {
+    expect(matchCollectionDeployed(receipt(artPaid(FACTORY)), expected)).toEqual({
+      ok: false,
+      error: NOT_THIS_DEPLOY,
+    })
+    expect(matchCollectionDeployed(receipt(artPaid(FACTORY), deployed(FACTORY, good)), expected)).toEqual({
+      ok: true,
+      collection: PREDICTED,
+    })
   })
 })

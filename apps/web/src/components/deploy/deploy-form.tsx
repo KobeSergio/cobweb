@@ -22,6 +22,7 @@ import { MintPageAddressField } from '@/components/collections/mint-page-address
 import type { Tables } from '@/lib/database.types'
 import type { Address } from '@/lib/demo/types'
 import type { DeployChain } from '@/lib/deploy/deploy-types'
+import { useArtDeferred } from './art-deferred'
 
 export type DeployFormValues = {
   chainId: number | null
@@ -96,6 +97,9 @@ export function DeployForm({
   onChange: (patch: Partial<DeployFormValues>) => void
   onAddressSaved: (value: { slug: string; slug_reserved_at: string | null }) => void
 }) {
+  // A placeholder lock sets no art lock, so deferred art keeps its name and symbol open in Details until deploy
+  // (spec section 2.7).
+  const artDeferred = useArtDeferred()
   const walletChain = chains.find((chain) => chain.id === walletChainId)
   const fixedChain =
     fixedChainId === null ? null : (chains.find((chain) => chain.id === fixedChainId) ?? null)
@@ -191,8 +195,9 @@ export function DeployForm({
           </div>
           <FieldDescription className="-mt-4 flex items-center gap-1.5">
             <LockIcon aria-hidden="true" className="size-3.5 shrink-0" />
-            Name and symbol were fixed when the art was locked, and the supply comes from the art. The
-            contract takes them as they are.
+            {artDeferred
+              ? 'Name and symbol are taken as they are; you can still change them in Details until you deploy. The supply comes from the art.'
+              : 'Name and symbol were fixed when the art was locked, and the supply comes from the art. The contract takes them as they are.'}
           </FieldDescription>
 
           <AddressField

@@ -25,6 +25,8 @@ import type { DeployForm } from './deploy-types'
 
 const PAYOUT = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
 const RECEIVER = '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
+/** The session wallet: the deployer and the owner, a different address from the payout. */
+const WALLET = '0x90F79bf6EB2c4f870365E785982E1f101E93b906'
 const ZERO = `0x${'0'.repeat(40)}`
 
 const form: DeployForm = {
@@ -175,13 +177,15 @@ describe('revealsToOf', () => {
 })
 
 describe('deployArgs and collectionArgsOf', () => {
-  it('builds the constructor from the row, the start job, the form and the wallet, every uint a string', () => {
+  it("builds the constructor from the row, the start job, the form and the wallet, every uint a string: the payout is the form's, the owner the wallet", () => {
     const args = deployArgs(
       { name: 'Night Owls', symbol: 'OWLS', max_supply: 777 },
       { base_uri: 'ipfs://start/' },
       form,
-      PAYOUT,
+      WALLET,
     )
+    expect(args.payout).toBe(PAYOUT)
+    expect(args.owner).toBe(WALLET)
     expect(args).toEqual({
       name: 'Night Owls',
       symbol: 'OWLS',
@@ -192,7 +196,7 @@ describe('deployArgs and collectionArgsOf', () => {
       groupPrices: ['0', '3000000000000000'],
       publicMaxPerWallet: '3',
       royaltyBps: 500,
-      owner: PAYOUT,
+      owner: WALLET,
       royaltyReceiver: RECEIVER,
     })
     expect(collectionArgsOf(args)).toEqual({
@@ -205,7 +209,7 @@ describe('deployArgs and collectionArgsOf', () => {
       groupPrices: [0n, 3_000_000_000_000_000n],
       publicMaxPerWallet: 3n,
       royaltyBps: 500,
-      owner: PAYOUT,
+      owner: WALLET,
       royaltyReceiver: RECEIVER,
     })
   })

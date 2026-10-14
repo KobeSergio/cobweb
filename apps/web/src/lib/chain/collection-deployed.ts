@@ -27,13 +27,16 @@ export function matchCollectionDeployed(
         data: log.data,
         topics: log.topics,
       })
+      // viem decodes any event of the ABI by its topic, whatever `eventName` says: the factory's other
+      // events (ArtPaid) are skipped here by name.
+      if (event.eventName !== 'CollectionDeployed') continue
       if (
         event.args.deployer.toLowerCase() === expected.deployer.toLowerCase() &&
         event.args.salt.toLowerCase() === expected.salt.toLowerCase()
       )
         deployed.push({ collection: event.args.collection, codeHash: event.args.codeHash })
     } catch {
-      // Another event of the factory.
+      // A log the factory's ABI does not decode.
     }
   }
   if (deployed.length === 0) return { ok: false, error: NOT_THIS_DEPLOY }

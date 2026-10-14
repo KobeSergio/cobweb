@@ -1,4 +1,4 @@
-import type { Hex } from 'viem'
+import { formatEther, type Hex } from 'viem'
 import {
   ALREADY_DEPLOYED,
   DEPLOY_NOT_CONFIRMED,
@@ -12,6 +12,7 @@ import {
   type ActionResult,
 } from '@/lib/art/result'
 import type { DeployForm, DeployRecord, Prepared } from '@/lib/deploy/deploy-types'
+import type { DraftPhase } from './deploy-phases'
 import { classifyError } from './tx-errors'
 import type { TxFailure, TxPhase } from './tx-progress'
 
@@ -298,5 +299,43 @@ export function forgetDeploy(store: KeyStore | null, collectionId: string): void
     store?.removeItem(keyFor(collectionId))
   } catch {
     // Storage blocked: nothing was kept.
+  }
+}
+
+/** The Deploy form's settings for a remembered deploy, as the screen holds them. */
+export type SentSettings = {
+  chainId: number
+  payout: string
+  /** Percent as the form shows it: '2.5' for 250 basis points. */
+  royalty: string
+  /** Null when royalties go to the payout address (the form's switch on). */
+  royaltyReceiver: string | null
+  publicCap: string
+  phases: DraftPhase[]
+}
+
+/**
+ * The settings a remembered deploy was sent with, for the form after a reload (spec section 2.11): the
+ * prediction is then that deploy's address, not the one the defaults would give. Prices go back to the
+ * native unit the form takes. Null for a remembered form this screen cannot read.
+ */
+export function sentSettings(form: DeployForm): SentSettings | null {
+  try {
+    const same = form.royaltyReceiver.toLowerCase() === form.payout.toLowerCase()
+    return {
+      chainId: form.chainId,
+      payout: form.payout,
+      royalty: String(form.royaltyBps / 100),
+      royaltyReceiver: same ? null : form.royaltyReceiver,
+      publicCap: String(form.publicMaxPerWallet),
+      phases: form.groups.map((group, index) => ({
+        key: index === 0 ? 'public' : `wl-${index}`,
+        name: group.name,
+        price: formatEther(BigInt(group.priceWei)),
+        supply: String(group.maxSupply),
+      })),
+    }
+  } catch {
+    return null
   }
 }

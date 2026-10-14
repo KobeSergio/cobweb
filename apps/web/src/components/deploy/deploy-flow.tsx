@@ -1,7 +1,7 @@
 'use client'
 
 import { DEMO_COLLECTION, DEMO_DEPLOY_DRAFT, sampleSupply, toWei } from '@/lib/demo'
-import { InfoIcon, RocketIcon } from 'lucide-react'
+import { InfoIcon, RefreshCwIcon, RocketIcon } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { isAddress, type Address, type Hex } from 'viem'
@@ -11,6 +11,7 @@ import { Button } from '@cobweb/ui/components/button'
 import { Input } from '@cobweb/ui/components/input'
 import { Label } from '@cobweb/ui/components/label'
 import { Panel } from '@cobweb/ui/components/panel'
+import { Spinner } from '@cobweb/ui/components/spinner'
 import { StageFooter } from '@/components/shell/stage-footer'
 import { LINK_REQUIRED, NOT_A_HASH } from '@/lib/art/result'
 import { chainView } from '@/lib/chain/chain-view'
@@ -35,6 +36,7 @@ import {
   rememberDeploy,
   retryHash,
   runDeploy,
+  sentSettings,
   type PendingDeploy,
 } from './deploy-machine'
 import { defaultPhases, DeployPhases, phaseErrors, type DraftPhase } from './deploy-phases'
@@ -78,6 +80,7 @@ const HASH_RE = /^0x[0-9a-fA-F]{64}$/
 const FORM_FIRST = 'Fill in the settings the contract was deployed with, then check the hash.'
 const PREDICT_FAILED = 'The address could not be predicted. Reload the page and try again.'
 const PREDICTING = 'Predicting the contract address.'
+const SENT_FIRST = 'Check or discard the deploy you sent first.'
 
 /** The machine's form from the screen's values, or null while anything is invalid. */
 function toDeployForm(
@@ -199,12 +202,16 @@ export function DeployFlow(props: DeployFlowProps) {
   )
   const [feesAttempt, setFeesAttempt] = useState(0)
   const [cost, setCost] = useState<CostState>({ kind: 'none' })
-  // A deploy this browser sent and the server has not recorded yet.
+  // A deploy this browser sent and the server has not recorded yet, with the form it was sent with: kept in
+  // localStorage across reloads and in memory, so it holds when storage is blocked.
   const [resumable, setResumable] = useState<PendingDeploy | null>(null)
   const [hashOpen, setHashOpen] = useState(false)
   const [hashText, setHashText] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
   const running = isTxRunning(phase)
+  // While a sent deploy is not recorded (remembered, or carried by a failed check), the screen checks it and never
+  // sends another (spec section 2.11, as the pay step): a second send would collide with the first or orphan it.
+  const sentHash = retryHash(phase) ?? resumable?.hash
 
   const chainId = fixedChainId ?? values.chainId
   const chain = chains.find((entry) => entry.id === chainId) ?? null
@@ -227,8 +234,23 @@ export function DeployFlow(props: DeployFlowProps) {
       : null
   const walletChain = wallet.chainId === undefined ? undefined : chainView(wallet.chainId)
 
+  // A deploy sent before a reload: the form shows the settings it was sent with, so the prediction is its
+  // address and nothing on screen differs from what is on chain.
   useEffect(() => {
-    if (!sample) setResumable(pendingDeploy(browserStore(), collection.id))
+    if (sample) return
+    const pending = pendingDeploy(browserStore(), collection.id)
+    setResumable(pending)
+    const sent = pending && sentSettings(pending.form)
+    if (!sent) return
+    setPayout(sent.payout)
+    setReceiverText(sent.royaltyReceiver)
+    setForm({
+      chainId: sent.chainId,
+      royalty: sent.royalty,
+      sameReceiver: sent.royaltyReceiver === null,
+      publicCap: sent.publicCap,
+    })
+    setPhases(sent.phases)
   }, [sample, collection.id])
 
   // The fees on the deploy chain, read in the browser; the server's snapshot stays shown meanwhile.
@@ -340,6 +362,8 @@ export function DeployFlow(props: DeployFlowProps) {
   }
 
   function openFinalCheck() {
+    // A sent deploy is checked, never sent again: the final check stays closed until it is recorded or discarded.
+    if (sentHash) return
     if (!valid) {
       setShowAll(true)
       // Take the creator to the first field that needs attention.
@@ -360,7 +384,8 @@ export function DeployFlow(props: DeployFlowProps) {
   /** Deploys with the current form, or checks a deploy already sent (`sent`): the machine does the rest. */
   async function deploy(sent?: PendingDeploy) {
     const input = sent?.form ?? deployForm
-    if (!input || (!sent && !ready)) return
+    // Only a check runs while a sent deploy is not recorded, never a second send.
+    if (!input || (!sent && (!ready || sentHash))) return
     setNotice(null)
     const store = browserStore()
     const deployChainId = input.chainId
@@ -379,11 +404,16 @@ export function DeployFlow(props: DeployFlowProps) {
           simulate: (ready) => actions.simulate(ready),
           wait: (hash) => actions.wait(hash, deployChainId),
           confirm: (hash, form) => actions.confirm(hash, form),
+          // In memory as well as in the store, so the check keeps the sent form when storage is blocked.
           remember: (hash, form) => {
-            if (!sample) rememberDeploy(store, collection.id, { hash, form })
+            if (sample) return
+            rememberDeploy(store, collection.id, { hash, form })
+            setResumable({ hash, form })
           },
           forget: () => {
-            if (!sample) forgetDeploy(store, collection.id)
+            if (sample) return
+            forgetDeploy(store, collection.id)
+            setResumable(null)
           },
           sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
           now: () => Date.now(),
@@ -395,7 +425,6 @@ export function DeployFlow(props: DeployFlowProps) {
       // spinner. A remembered hash stays in the store, so the recovery panel offers "Check again".
       dispatch({ type: 'failed', failure: classifyError(error, 'confirming', 'deploy') })
     }
-    if (!sample) setResumable(pendingDeploy(store, collection.id))
     if (!result) return
     setRecord(result)
     setJustDeployed(true)
@@ -404,14 +433,26 @@ export function DeployFlow(props: DeployFlowProps) {
     if (!sample) router.refresh()
   }
 
-  /** "Try again" in the dialog: a deploy sent but not confirmed is checked, not sent again. */
+  /** "Try again" in the dialog: a deploy sent and not recorded is checked again, never sent again. */
   function tryAgain() {
-    const hash = retryHash(phase)
-    if (hash) {
-      const pending = resumable?.hash === hash ? resumable : deployForm ? { hash, form: deployForm } : null
-      if (pending) return deploy(pending)
-    }
-    return deploy()
+    return sentHash ? checkSent() : deploy()
+  }
+
+  /**
+   * Checks the sent deploy with the form it was sent with, as the pay step resumes with its remembered hash.
+   * The screen's form stands in only when nothing is remembered.
+   */
+  function checkSent() {
+    if (!sentHash) return
+    const form = resumable?.form ?? deployForm
+    if (!form) return setNotice(FORM_FIRST)
+    return deploy({ hash: sentHash, form })
+  }
+
+  /** The footer's check: its progress shows in the recovery panel, so the panel is brought into view. */
+  function checkFromFooter() {
+    document.getElementById('deploy-sent')?.scrollIntoView({ block: 'nearest' })
+    void checkSent()
   }
 
   function checkTyped() {
@@ -471,8 +512,11 @@ export function DeployFlow(props: DeployFlowProps) {
         }
       : null
 
-  const hint =
-    maxSupply === 0
+  const hint = sentHash
+    ? running
+      ? null
+      : SENT_FIRST
+    : maxSupply === 0
       ? 'Set the supply in Art first.'
       : !startsOn
         ? 'Render the art before deploying.'
@@ -524,6 +568,7 @@ export function DeployFlow(props: DeployFlowProps) {
           />
           {!readOnly && !sample && (
             <Panel
+              id="deploy-sent"
               title="Sent from elsewhere?"
               description="A deploy sent outside this page, or one this page lost, is recorded from its transaction hash. Cobweb checks it against the settings above."
             >
@@ -541,7 +586,7 @@ export function DeployFlow(props: DeployFlowProps) {
                         <Button
                           variant="secondary"
                           size="sm"
-                          onClick={() => void deploy(resumable)}
+                          onClick={() => void checkSent()}
                           disabled={running}
                         >
                           {phase.step === 'failed' ? 'Check again' : 'Check the deploy'}
@@ -624,23 +669,29 @@ export function DeployFlow(props: DeployFlowProps) {
 
       <StageFooter previous={previous}>
         {hint && <p className="text-muted-foreground text-sm">{hint}</p>}
-        {!readOnly && (
-          <Button
-            onClick={openFinalCheck}
-            disabled={
-              maxSupply === 0 ||
-              !startsOn ||
-              !linkSlug ||
-              !chain ||
-              fees.status !== 'ready' ||
-              (!sample && !wallet.connected) ||
-              (valid && (!prepared || predicting))
-            }
-          >
-            <RocketIcon />
-            Deploy contract
-          </Button>
-        )}
+        {!readOnly &&
+          (sentHash ? (
+            <Button onClick={checkFromFooter} disabled={running}>
+              {running ? <Spinner /> : <RefreshCwIcon />}
+              Check the deploy
+            </Button>
+          ) : (
+            <Button
+              onClick={openFinalCheck}
+              disabled={
+                maxSupply === 0 ||
+                !startsOn ||
+                !linkSlug ||
+                !chain ||
+                fees.status !== 'ready' ||
+                (!sample && !wallet.connected) ||
+                (valid && (!prepared || predicting))
+              }
+            >
+              <RocketIcon />
+              Deploy contract
+            </Button>
+          ))}
       </StageFooter>
 
       <DeployDialog

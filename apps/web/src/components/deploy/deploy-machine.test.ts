@@ -1,4 +1,4 @@
-import type { Hex } from 'viem'
+import type { Address, Hex } from 'viem'
 import { describe, expect, it } from 'vitest'
 import {
   ALREADY_DEPLOYED,
@@ -17,6 +17,7 @@ import {
   UNSAVED,
   type ActionResult,
 } from '@/lib/art/result'
+import { toWei } from '@/lib/demo/helpers'
 import type { DeployForm, DeployRecord, Prepared } from '@/lib/deploy/deploy-types'
 import {
   deployReducer,
@@ -25,6 +26,7 @@ import {
   rememberDeploy,
   retryHash,
   runDeploy,
+  sentSettings,
   type DeployDeps,
   type DeployEvent,
   type DeployInput,
@@ -414,5 +416,52 @@ describe('the pending deploy kept in the browser', () => {
     expect(pendingDeploy(blocked, 'col-1')).toBeNull()
     expect(pendingDeploy(null, 'col-1')).toBeNull()
     expect(() => forgetDeploy(null, 'col-1')).not.toThrow()
+  })
+})
+
+describe('sentSettings: the form after a reload mid-deploy (spec section 2.11)', () => {
+  it('gives the form the settings the remembered deploy was sent with, prices in the native unit', () => {
+    expect(
+      sentSettings({
+        chainId: 8453,
+        payout: DEPLOYER,
+        royaltyBps: 250,
+        royaltyReceiver: STRANGER,
+        publicMaxPerWallet: 3,
+        groups: [
+          { name: 'Public', priceWei: '0', maxSupply: 600 },
+          { name: 'Holders', priceWei: '3000000000000000', maxSupply: 177 },
+        ],
+      }),
+    ).toEqual({
+      chainId: 8453,
+      payout: DEPLOYER,
+      royalty: '2.5',
+      royaltyReceiver: STRANGER,
+      publicCap: '3',
+      phases: [
+        { key: 'public', name: 'Public', price: '0', supply: '600' },
+        { key: 'wl-1', name: 'Holders', price: '0.003', supply: '177' },
+      ],
+    })
+  })
+
+  it('keeps royalties on the payout when the receiver is the payout, whatever the case', () => {
+    expect(
+      sentSettings({ ...form, royaltyReceiver: DEPLOYER.toLowerCase() as Address })?.royaltyReceiver,
+    ).toBeNull()
+  })
+
+  it('reads back the exact wei and basis points the deploy was sent with', () => {
+    for (const priceWei of ['1', '2500000000000000', '1000000000000000000', '1234500000000000000001']) {
+      const phases = sentSettings({ ...form, groups: [{ name: 'Public', priceWei, maxSupply: 1 }] })?.phases
+      expect(toWei(phases?.[0]?.price ?? '')).toBe(priceWei)
+    }
+    const royalty = (royaltyBps: number) => sentSettings({ ...form, royaltyBps })?.royalty
+    expect([0, 1, 250, 333, 999, 1000].map(royalty)).toEqual(['0', '0.01', '2.5', '3.33', '9.99', '10'])
+  })
+
+  it('answers null for a remembered form it cannot read', () => {
+    expect(sentSettings({ ...form, groups: [{ name: 'Public', priceWei: 'free', maxSupply: 1 }] })).toBeNull()
   })
 })

@@ -318,6 +318,8 @@ async function main(): Promise<void> {
 
   const creator = privateKeyToAccount(generatePrivateKey())
   const stranger = privateKeyToAccount(generatePrivateKey())
+  // A third address for the payout, so check 9 tells the payout from the owner (the deployer).
+  const payee = privateKeyToAccount(generatePrivateKey())
   await chain.setBalance({ address: creator.address, value: parseEther('10') })
   await chain.setBalance({ address: stranger.address, value: parseEther('10') })
   const { client, userId } = await signIn(creator)
@@ -344,7 +346,7 @@ async function main(): Promise<void> {
 
   const form: DeployForm = {
     chainId: 31337,
-    payout: creator.address,
+    payout: payee.address,
     royaltyBps: 500,
     royaltyReceiver: stranger.address,
     publicMaxPerWallet: 2,
@@ -463,7 +465,7 @@ async function main(): Promise<void> {
         record.txHash === deployHash.toLowerCase() ? null : `hash ${record.txHash}`,
         record.deployer === creator.address ? null : `deployer ${record.deployer}`,
         record.baseUri === prepared.baseUri ? null : `base URI ${record.baseUri}`,
-        record.payout === creator.address &&
+        record.payout === payee.address &&
         record.royaltyReceiver === stranger.address &&
         record.royaltyBps === 500
           ? null
@@ -494,7 +496,7 @@ async function main(): Promise<void> {
   )
 
   await check(
-    '9. contract: name, symbol, maxSupply, baseURI, owner, payout, publicMaxMintPerWallet, royaltyInfo and collectionState match the arguments',
+    '9. contract: name, symbol, maxSupply, baseURI, owner (the deployer), payout (a third address), publicMaxMintPerWallet, royaltyInfo and collectionState match the arguments',
     async () => {
       if (!prepared) return 'not prepared'
       const address = prepared.predicted
@@ -525,8 +527,8 @@ async function main(): Promise<void> {
         symbol === 'DPL' ? null : `symbol ${symbol}`,
         maxSupply === 3n ? null : `maxSupply ${maxSupply}`,
         baseURI === prepared.baseUri ? null : `baseURI ${baseURI}`,
-        owner === creator.address ? null : `owner ${owner}`,
-        payout === creator.address ? null : `payout ${payout}`,
+        owner === creator.address ? null : `owner ${owner}, not the deployer`,
+        payout === payee.address ? null : `payout ${payout}, not the third address`,
         cap === 2n ? null : `cap ${cap}`,
         receiver === stranger.address && royalty === 500n ? null : `royalty ${receiver} ${royalty}`,
         state.groups.length === 2 &&

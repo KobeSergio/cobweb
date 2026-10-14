@@ -85,13 +85,15 @@ export function realDeployActions(
     simulate: async (prepared) => {
       // The deploy chain is named here, and wagmi carries it on the simulated request, so the send below
       // is checked against that chain by viem too: a wallet still on another chain never deploys there.
+      // The account is the prepared deployer, not the live one: wagmi refuses to send the request from a
+      // wallet that does not hold it, so the deploy can only go out from the address the server predicted for.
       const simulated = await simulateContract(config, {
         address: prepared.factory,
         abi: factoryAbi,
         functionName: 'deployCollection',
         args: callArgs(prepared),
         chainId: prepared.chainId,
-        account: account(),
+        account: prepared.deployer,
       })
       // CLAUDE.md rule 2: the wallet gets exactly the request the simulation passed.
       return () => writeContract(config, simulated.request)
