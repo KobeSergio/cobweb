@@ -32,6 +32,16 @@ jobs:
         with:
           submodules: recursive
       - uses: foundry-rs/foundry-toolchain@v1
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
       - run: forge fmt --check
       - run: forge build --sizes
       - run: forge test -vvv
+      # The collection artifact the web app ships must be this build (docs/specs/2026-10-14-deploy.md, 5.3).
+      - run: pnpm install --frozen-lockfile
+        working-directory: ${{ github.workspace }}
+      - run: pnpm --filter @cobweb/shared test
+        working-directory: ${{ github.workspace }}

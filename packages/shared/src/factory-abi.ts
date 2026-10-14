@@ -89,4 +89,140 @@ export const factoryAbi = [
     ],
     anonymous: false,
   },
+  {
+    type: 'function',
+    name: 'deployCollection',
+    inputs: [
+      {
+        name: 'creationCode',
+        type: 'bytes',
+        internalType: 'bytes',
+      },
+      {
+        name: 'constructorArgs',
+        type: 'bytes',
+        internalType: 'bytes',
+      },
+      {
+        name: 'salt',
+        type: 'bytes32',
+        internalType: 'bytes32',
+      },
+    ],
+    outputs: [
+      {
+        name: 'collection',
+        type: 'address',
+        internalType: 'address',
+      },
+    ],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'predictCollectionAddress',
+    inputs: [
+      {
+        name: 'deployer',
+        type: 'address',
+        internalType: 'address',
+      },
+      {
+        name: 'creationCode',
+        type: 'bytes',
+        internalType: 'bytes',
+      },
+      {
+        name: 'constructorArgs',
+        type: 'bytes',
+        internalType: 'bytes',
+      },
+      {
+        name: 'salt',
+        type: 'bytes32',
+        internalType: 'bytes32',
+      },
+    ],
+    outputs: [
+      {
+        name: '',
+        type: 'address',
+        internalType: 'address',
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'collectionFees',
+    inputs: [],
+    outputs: [
+      {
+        name: 'mintFeeFlat',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+      {
+        name: 'mintFeeBps',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+      {
+        name: 'airdropFeePerToken',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'isCollection',
+    inputs: [
+      {
+        name: 'collection',
+        type: 'address',
+        internalType: 'address',
+      },
+    ],
+    outputs: [
+      {
+        name: '',
+        type: 'bool',
+        internalType: 'bool',
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'event',
+    name: 'CollectionDeployed',
+    inputs: [
+      {
+        name: 'collection',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'codeHash',
+        type: 'bytes32',
+        indexed: true,
+        internalType: 'bytes32',
+      },
+      {
+        name: 'deployer',
+        type: 'address',
+        indexed: true,
+        internalType: 'address',
+      },
+      {
+        name: 'salt',
+        type: 'bytes32',
+        indexed: false,
+        internalType: 'bytes32',
+      },
+    ],
+    anonymous: false,
+  },
 ] as const

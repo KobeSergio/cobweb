@@ -366,6 +366,8 @@ forge script script/Deploy.s.sol --rpc-url $RPC_URL --broadcast --verify
 
 The script deploys the factory through the deterministic deployment proxy with a fixed salt, so the same admin and treasury give the same factory address on every chain. If the deployer is the admin it also approves the collection's creation code. Afterwards the admin sets the fees for that chain.
 
+**The artifact the web app ships.** `pnpm --filter @cobweb/shared abi` (after `forge build`) copies the factory ABI entries the app uses into `packages/shared/src/factory-abi.ts` and the whole collection artifact into `packages/shared/src/collection.ts`: the creation code, its keccak256 hash and the ABI. The deploy screen sends that creation code to `deployCollection`, so the hash the admin approves with `approveCreationCode` must be the hash of the shipped bytes. `foundry.toml` pins `evm_version` for that reason, `packages/shared/src/collection.test.ts` asserts the shipped hash against `contracts/out` whenever the build is present, and CI runs that test after `forge build`, so a compiler drift fails the build. After any change to the contracts: `forge build`, run the copy script, commit both generated files, and have the admin approve the new hash (the script prints it).
+
 ## Design notes
 
 **Compared with the reference contract** ([TheSuits](../docs/reference/TheSuits.sol), [analysis](../docs/reference/the-suits-mint-analysis.md)), mint-group handling is kept and these things changed:
