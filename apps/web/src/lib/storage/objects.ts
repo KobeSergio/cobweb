@@ -25,9 +25,13 @@ export async function presignPut(
   })
 }
 
-/** A GET URL for one object, valid an hour by default. */
-export async function presignGet(key: string, expiresSeconds = 3600): Promise<string> {
-  const { bucket } = storageConfig()
+/** A GET URL for one object, valid an hour by default, on the art bucket unless another is named. */
+export async function presignGet(
+  key: string,
+  expiresSeconds = 3600,
+  options: { bucket?: string } = {},
+): Promise<string> {
+  const bucket = options.bucket ?? storageConfig().bucket
   return getSignedUrl(s3(), new GetObjectCommand({ Bucket: bucket, Key: key }), { expiresIn: expiresSeconds })
 }
 

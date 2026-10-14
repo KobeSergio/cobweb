@@ -2,18 +2,20 @@
 // (docs/specs/2026-10-12-render-worker.md, section 8): a signed-in creator's generative project with
 // drawn layers is locked and paid on Anvil, then the local runner takes the job through the same
 // steps the queue consumer runs, on the production adapters for the database, storage and the chain, with a
-// folder standing in for the pinning service and a queue in memory. Seventeen checks: the full run,
-// duplicate delivery (serial, then two copies of one batch at once), a pin that fails once, a pin that
-// always fails and the retry after it, identical CIDs for identical input, a 1/1 project's attributes
-// reaching the pinned metadata, a short payment, a payment no node has seen, a wrong CID (for a batch, then for the metadata set), a
-// layer of the wrong size, the credit that failure's unlock leaves, the sweep (two cases) and a placeholder job.
+// folder standing in for the pinning service and a queue in memory. Eighteen checks: the full run, the
+// collage presigned by the web app, duplicate delivery (serial, then two copies of one batch at once), a pin
+// that fails once, a pin that always fails and the retry after it, the retry action's core, identical CIDs
+// for identical input, a 1/1 project's attributes reaching the pinned metadata, a short payment, a payment
+// no node has seen, a wrong CID (for a batch, then for the metadata set), a layer of the wrong size, the
+// credit that failure's unlock leaves, the sweep (two cases) and a placeholder job.
 //
 // Numbering: the spec (section 8) lists ten checks. Its checks 1 to 5 are checks 1 to 5 here. Check 6
 // here is an addition (a 1/1 project's attributes), so the spec's checks 6 to 10 (a short payment, a
 // wrong-CID pinner, a wrong-size layer, the sweep, a placeholder job) are numbered 7 to 11 in the output.
-// Six more cases carry a letter: 2b (concurrent copies of one batch), 4b (the retry action's core), 7b (a payment no node has seen), 8b (a wrong CID for the metadata
-// set only), 9b (the credit the unlock of the wrong-size failure leaves) and 10b (the sweep starting a paid job).
-// With the two setup checks and the two cleanup checks the script prints 21 PASS lines.
+// Seven more cases carry a letter: 1b (the collage presigned by the web app), 2b (concurrent copies of one
+// batch), 4b (the retry action's core), 7b (a payment no node has seen), 8b (a wrong CID for the metadata
+// set only), 9b (the credit the unlock of the wrong-size failure leaves) and 10b (the sweep starting a paid
+// job). With the two setup checks and the two cleanup checks the script prints 22 PASS lines.
 //
 // Not covered here: the worker's rule that a payment which shows at the latest block but not yet at the
 // confirmation depth is unconfirmed (viemChain throws PaymentUnconfirmed, and the step is retried).
@@ -112,6 +114,10 @@ const storage = {
 }
 const ART_BUCKET = config('ART_S3_BUCKET', [], 'art')
 const RENDER_BUCKET = config('RENDER_S3_BUCKET', [], 'render')
+// The web app's storage module reads ART_S3_* and RENDER_S3_BUCKET from the environment (check 1b).
+for (const [name, value] of Object.entries(storage)) process.env[name] ??= value
+process.env.ART_S3_BUCKET ??= ART_BUCKET
+process.env.RENDER_S3_BUCKET ??= RENDER_BUCKET
 const rpc = process.env.RPC_URL_31337
 const factoryEnv = process.env.FACTORY_ADDRESS_31337
 if (!rpc || !factoryEnv) {
@@ -140,6 +146,8 @@ const { confirmCore, loadJob, lockCore, lockPlaceholderCore, retryCore, reviewLo
 const { readLockCollection } = await import('../src/lib/art/lock-collection.ts')
 const web = await import('../src/lib/art/result.ts')
 const schemas = await import('../src/lib/art/schemas.ts')
+const { presignGet } = await import('../src/lib/storage/objects.ts')
+const { renderBucket } = await import('../src/lib/storage/config.ts')
 const worker = await import('@cobweb/worker')
 const local = await import('@cobweb/worker/local')
 type LockContext = import('../src/lib/art/lock-core.ts').LockContext
@@ -750,6 +758,26 @@ async function main(): Promise<void> {
     }
     return null
   })
+
+  // 1b. The collage as the screen gets it: the web app's presigned GET on the render bucket.
+  await check(
+    '1b. presignGet on the render bucket answers a URL that fetches the collage with 200 and image/png',
+    async () => {
+      const key = `${firstCid}/collage/${firstJob}.png`
+      const signed = await presignGet(key, 60, { bucket: renderBucket() })
+      if (!isLocalUrl(signed)) return 'the signed URL is not local'
+      const response = await fetch(signed)
+      if (response.status !== 200) return `status ${response.status}`
+      const type = response.headers.get('content-type')
+      if (type !== 'image/png') return `content type ${type}`
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      const got = await local.rgbaAt(bytes, 128, 128).catch((e: unknown) => String(e))
+      if (typeof got === 'string') return `the served collage does not decode: ${got}`
+      return got.width === 1024 && got.height === 256
+        ? null
+        : `the served collage is ${got.width} by ${got.height}`
+    },
+  )
 
   // 2. Duplicate delivery.
   await check('2. with every message delivered twice, the final state is the same', async () => {

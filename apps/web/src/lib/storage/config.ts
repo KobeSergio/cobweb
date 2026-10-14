@@ -18,6 +18,17 @@ export function storageConfig() {
   }
 }
 
+/**
+ * The bucket the render worker writes preview collages to (`RENDER_S3_BUCKET`), behind the same endpoint
+ * and credentials as the art bucket (services/worker/src/env.ts). Never the art bucket itself: the upload
+ * sweep deletes what no upload row records there.
+ */
+export function renderBucket(): string {
+  const bucket = process.env.RENDER_S3_BUCKET
+  if (!bucket) throw new Error('Object storage is not configured: set RENDER_S3_BUCKET.')
+  return bucket
+}
+
 let client: S3Client | null = null
 
 /** One S3 client for the server process. */
