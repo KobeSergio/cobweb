@@ -7,6 +7,7 @@ import { WorkspaceNav } from '@/components/shell/workspace-nav'
 import { requireOwnedCollection, requireUser } from '@/lib/auth'
 import { sampleArtDeferred } from '@/lib/demo'
 import { isDemoMode, isDeployed } from '@/lib/steps'
+import { placeholderReady } from './_lib/stage'
 
 type Props = { children: React.ReactNode; params: Promise<{ id: string }> }
 
@@ -27,6 +28,8 @@ export default async function CollectionLayout({ children, params }: Props) {
   const collection = await requireOwnedCollection(id)
   const demo = isDemoMode()
   const deployed = isDeployed(collection.status)
+  // A deferred collection's Deploy stage opens once its placeholder is rendered; the stepper shows it.
+  const ready = await placeholderReady(collection)
 
   return (
     <>
@@ -52,6 +55,7 @@ export default async function CollectionLayout({ children, params }: Props) {
             projectType={collection.project_type}
             demo={demo}
             artDeferred={demo ? sampleArtDeferred(undefined) : collection.art_deferred}
+            placeholderReady={ready}
           />
         </div>
         <main className="flex flex-1 flex-col">{children}</main>

@@ -3,6 +3,7 @@ import { StageFooter } from '@/components/shell/stage-footer'
 import { StageLocked } from '@/components/shell/stage-locked'
 import { StagePage } from '@/components/shell/stage-page'
 import type { Tables } from '@/lib/database.types'
+import { createClient } from '@/lib/supabase/server'
 import { sampleArtDeferred } from '@/lib/demo'
 import {
   flowNeighbours,
@@ -35,9 +36,11 @@ export function stageContext(
   stage: StageSlug,
   path: string,
   sample: { art?: string } = {},
+  options: { placeholderReady?: boolean } = {},
 ) {
   const demo = isDemoMode()
   const artDeferred = demo ? sampleArtDeferred(sample.art) : collection.art_deferred
+  const placeholderReady = options.placeholderReady ?? false
   const readOnly =
     !demo && stage === 'art'
       ? collection.art_locked_at !== null
@@ -45,12 +48,31 @@ export function stageContext(
   return {
     demo,
     artDeferred,
-    access: stageAccess(collection.status, stage, { demo, artDeferred }),
+    access: stageAccess(collection.status, stage, { demo, artDeferred, placeholderReady }),
     readOnly,
     /** "Stage 2 of 4" for a build stage; none for Manage drop, which is not a stage. */
     eyebrow: stageIndex(stage) === -1 ? undefined : `Stage ${stageIndex(stage) + 1} of ${STAGES.length}`,
     ...flowNeighbours(collection.id, collection.project_type, path),
   }
+}
+
+/**
+ * Whether a deferred collection's placeholder job is done, which opens Deploy while the collection is
+ * still a draft (docs/specs/2026-10-14-deploy.md, section 9): one `collection_placeholder_ready` call
+ * under the creator's session. False for a collection that is not deferred, and in sample mode, where
+ * every stage is open anyway. The deploy page and the collection layout pass the answer to
+ * `stageContext` and the stepper.
+ */
+export async function placeholderReady(
+  collection: Pick<Tables<'collections'>, 'id' | 'art_deferred'>,
+): Promise<boolean> {
+  if (isDemoMode() || !collection.art_deferred) return false
+  const supabase = await createClient()
+  const { data, error } = await supabase.rpc('collection_placeholder_ready', {
+    p_collection_id: collection.id,
+  })
+  if (error) throw new Error(`The placeholder readiness could not be read: ${error.message}`)
+  return data === true
 }
 
 /** The page for a stage that cannot be opened yet. */

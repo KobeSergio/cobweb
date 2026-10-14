@@ -208,7 +208,12 @@ export function isDemoMode(): boolean {
  * Options shared by the access rules. `artDeferred`: the creator chose "Finish the art later"
  * (MASTER_PLAN, Flow: pre-reveal) and has not locked the real set yet.
  */
-export type StageOptions = { demo?: boolean; artDeferred?: boolean }
+export type StageOptions = {
+  demo?: boolean
+  artDeferred?: boolean
+  /** A deferred collection's placeholder job is done (`collection_placeholder_ready`): Deploy opens on the draft. */
+  placeholderReady?: boolean
+}
 
 /**
  * Whether a stage can be opened. A build stage is locked until the one before it is done; done
@@ -225,6 +230,9 @@ export function stageAccess(
   if (stage === MANAGE_STAGE.slug) return isDeployed(status) ? 'open' : 'locked'
   // Lock and upload opens on a draft: its review step is where the art is checked and locked.
   if (stage === 'upload' && (options.artDeferred || status === 'draft')) return 'open'
+  // Deploy opens once the render landed or, with deferred art, once the placeholder job is done
+  // (docs/specs/2026-10-14-deploy.md, section 9): the collection is still a draft then.
+  if (stage === 'deploy' && options.artDeferred && options.placeholderReady) return 'open'
   const index = stageIndex(stage)
   if (index === 0) return 'open'
   return isStageDone(STAGES[index - 1]!.slug, status) ? 'open' : 'locked'
@@ -250,16 +258,27 @@ export function isStageReadOnly(
   return isStageDone(stage, status)
 }
 
+export type DetailField = 'name' | 'symbol' | 'description' | 'maxSupply' | 'projectType'
+
 /**
- * Detail fields the database will refuse to change in this status
- * (the `collections_guard_frozen_fields` trigger). The project type never changes after creation.
+ * Detail fields the database will refuse to change for this row (the `collections_guard_frozen_fields`
+ * trigger). The project type never changes after creation; the supply freezes after draft; the name,
+ * symbol and description freeze while the art is locked (docs/specs/2026-10-14-deploy.md, section
+ * 4.3: the metadata the worker writes and the contract's name must agree); the name and symbol stay
+ * frozen once deployed, including a collection whose placeholder alone was locked (no art lock).
  */
-export function frozenDetailFields(
-  status: CollectionStatus,
-): ReadonlySet<'name' | 'symbol' | 'maxSupply' | 'projectType'> {
-  const frozen = new Set<'name' | 'symbol' | 'maxSupply' | 'projectType'>(['projectType'])
-  if (status !== 'draft') frozen.add('maxSupply')
-  if (status === 'deployed') {
+export function frozenDetailFields(collection: {
+  status: CollectionStatus
+  art_locked_at: string | null
+}): ReadonlySet<DetailField> {
+  const frozen = new Set<DetailField>(['projectType'])
+  if (collection.status !== 'draft') frozen.add('maxSupply')
+  if (collection.art_locked_at !== null) {
+    frozen.add('name')
+    frozen.add('symbol')
+    frozen.add('description')
+  }
+  if (collection.status === 'deployed') {
     frozen.add('name')
     frozen.add('symbol')
   }

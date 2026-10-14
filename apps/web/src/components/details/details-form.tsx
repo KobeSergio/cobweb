@@ -3,6 +3,7 @@
 import { ArrowRightIcon, LockIcon } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useActionState, useEffect, useState } from 'react'
+import { Alert, AlertDescription, AlertTitle } from '@cobweb/ui/components/alert'
 import { Button } from '@cobweb/ui/components/button'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@cobweb/ui/components/field'
 import { Input } from '@cobweb/ui/components/input'
@@ -27,6 +28,7 @@ type Props = {
     | 'max_supply'
     | 'project_type'
     | 'status'
+    | 'art_locked_at'
   >
   /** Where "Save and continue" leads once the details are saved (Art). */
   next?: FlowLink
@@ -63,12 +65,28 @@ export function DetailsForm({ collection, next, readOnly = false }: Props) {
   const [symbol, setSymbol] = useState(collection.symbol)
   const [description, setDescription] = useState(collection.description)
 
-  const frozen = frozenDetailFields(collection.status)
+  const frozen = frozenDetailFields(collection)
   const errors = state.fieldErrors ?? {}
-  const deployedNote = 'Fixed at deployment.'
+  // Why a frozen field is read-only: the art lock freezes the three (docs/specs/2026-10-14-deploy.md,
+  // section 9); a deployment freezes the name and symbol.
+  const lockedByArt = collection.art_locked_at !== null
+  const frozenNote = lockedByArt ? 'Fixed while the art is locked.' : 'Fixed at deployment.'
+  const descriptionFrozen = readOnly || frozen.has('description')
+  // With every field frozen there is nothing to save: the footer offers Continue, as it does once deployed.
+  const nothingToSave = frozen.has('name') && frozen.has('symbol') && frozen.has('description')
 
   return (
     <form action={formAction} className="flex flex-1 flex-col gap-8">
+      {lockedByArt && !readOnly && (
+        <Alert>
+          <LockIcon aria-hidden="true" />
+          <AlertTitle>The art is locked</AlertTitle>
+          <AlertDescription>
+            The name, symbol and description are fixed while the art is locked. Unlock the art in Lock and
+            upload to change them.
+          </AlertDescription>
+        </Alert>
+      )}
       <FieldGroup className="gap-7">
         <div className="grid gap-4 sm:grid-cols-[1fr_10rem]">
           <Field data-invalid={!!errors.name} data-disabled={frozen.has('name')}>
@@ -89,7 +107,7 @@ export function DetailsForm({ collection, next, readOnly = false }: Props) {
             {errors.name ? (
               <FieldError id="details-name-error">{errors.name}</FieldError>
             ) : (
-              frozen.has('name') && <FrozenNote id="details-name-frozen">{deployedNote}</FrozenNote>
+              frozen.has('name') && <FrozenNote id="details-name-frozen">{frozenNote}</FrozenNote>
             )}
           </Field>
           <Field data-invalid={!!errors.symbol} data-disabled={frozen.has('symbol')}>
@@ -104,14 +122,24 @@ export function DetailsForm({ collection, next, readOnly = false }: Props) {
               className="numeric tracking-wide"
               readOnly={frozen.has('symbol')}
               aria-invalid={!!errors.symbol}
-              aria-describedby={errors.symbol ? 'details-symbol-error' : undefined}
+              aria-describedby={
+                errors.symbol
+                  ? 'details-symbol-error'
+                  : frozen.has('symbol')
+                    ? 'details-symbol-frozen'
+                    : undefined
+              }
               required
             />
-            <FieldError id="details-symbol-error">{errors.symbol}</FieldError>
+            {errors.symbol ? (
+              <FieldError id="details-symbol-error">{errors.symbol}</FieldError>
+            ) : (
+              frozen.has('symbol') && <FrozenNote id="details-symbol-frozen">{frozenNote}</FrozenNote>
+            )}
           </Field>
         </div>
 
-        <Field data-invalid={!!errors.description} data-disabled={readOnly}>
+        <Field data-invalid={!!errors.description} data-disabled={descriptionFrozen}>
           <FieldLabel htmlFor="details-description">Description</FieldLabel>
           <Textarea
             id="details-description"
@@ -120,7 +148,7 @@ export function DetailsForm({ collection, next, readOnly = false }: Props) {
             onChange={(event) => setDescription(event.target.value)}
             maxLength={2000}
             rows={5}
-            readOnly={readOnly}
+            readOnly={descriptionFrozen}
             aria-invalid={!!errors.description}
             aria-describedby={errors.description ? 'details-description-error' : 'details-description-help'}
           />
@@ -128,6 +156,8 @@ export function DetailsForm({ collection, next, readOnly = false }: Props) {
             <FieldError id="details-description-error">{errors.description}</FieldError>
           ) : readOnly ? (
             <FrozenNote id="details-description-help">Edit it in Manage drop, Mint page.</FrozenNote>
+          ) : frozen.has('description') ? (
+            <FrozenNote id="details-description-help">{frozenNote}</FrozenNote>
           ) : (
             <FieldDescription id="details-description-help">
               Shown on the mint page. {description.length.toLocaleString('en-US')} of 2,000 characters.
@@ -145,7 +175,7 @@ export function DetailsForm({ collection, next, readOnly = false }: Props) {
         </p>
       )}
 
-      {readOnly ? (
+      {readOnly || nothingToSave ? (
         <StageFooter previous={BACK_TO_COLLECTIONS} next={next} />
       ) : (
         <StageFooter previous={BACK_TO_COLLECTIONS}>

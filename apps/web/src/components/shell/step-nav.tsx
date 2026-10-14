@@ -29,6 +29,8 @@ type Props = {
    * Lock and upload opens without finished art. In sample mode `?art=deferred` also turns it on.
    */
   artDeferred?: boolean
+  /** A deferred collection's placeholder job is done: Deploy is open on the draft (`stageAccess`). */
+  placeholderReady?: boolean
 }
 
 const focusRing = 'outline-none focus-visible:ring-ring/50 focus-visible:ring-[3px]'
@@ -41,7 +43,14 @@ const focusRing = 'outline-none focus-visible:ring-ring/50 focus-visible:ring-[3
  * stepper at all (see `WorkspaceNav`). While the Art stage is shown and the art is not deferred,
  * "Finish the art later" sits at the right end of the row.
  */
-export function StageNav({ collectionId, status, projectType, demo, artDeferred = false }: Props) {
+export function StageNav({
+  collectionId,
+  status,
+  projectType,
+  demo,
+  artDeferred = false,
+  placeholderReady = false,
+}: Props) {
   const segments = useSelectedLayoutSegments()
   const [selectedStage] = segments
   const upNext = nextStage(status).slug
@@ -71,7 +80,8 @@ export function StageNav({ collectionId, status, projectType, demo, artDeferred 
           // Deferred art is not done, whatever the status says, until the real set is locked.
           const done = isStageDone(stage.slug, status) && !artDeferredHere
           const current = stage.slug === selectedStage
-          const locked = stageAccess(status, stage.slug, { demo, artDeferred: deferred }) === 'locked'
+          const locked =
+            stageAccess(status, stage.slug, { demo, artDeferred: deferred, placeholderReady }) === 'locked'
           const state: StepState = current
             ? 'current'
             : done

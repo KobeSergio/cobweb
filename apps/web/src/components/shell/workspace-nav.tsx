@@ -12,6 +12,8 @@ type Props = {
   /** Sample-data mode: every route is open, and `?art=deferred` picks the deferred-art scenario. */
   demo: boolean
   artDeferred?: boolean
+  /** A deferred collection's placeholder job is done: Deploy is open on the draft. */
+  placeholderReady?: boolean
 }
 
 /**
@@ -21,7 +23,14 @@ type Props = {
  * route opened by URL before deploy (sample mode) renders as if deployed: tabs, no stepper; so
  * does any route with `?state=deployed` in sample mode.
  */
-export function WorkspaceNav({ collectionId, status, projectType, demo, artDeferred = false }: Props) {
+export function WorkspaceNav({
+  collectionId,
+  status,
+  projectType,
+  demo,
+  artDeferred = false,
+  placeholderReady = false,
+}: Props) {
   const [segment] = useSelectedLayoutSegments()
   const searchParams = useSearchParams()
   const sampleDeferred = demo && searchParams.get('art') === 'deferred'
@@ -45,6 +54,7 @@ export function WorkspaceNav({ collectionId, status, projectType, demo, artDefer
       projectType={projectType}
       demo={demo}
       artDeferred={artDeferred}
+      placeholderReady={placeholderReady}
     />
   )
 }
