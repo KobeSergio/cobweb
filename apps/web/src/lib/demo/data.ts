@@ -234,7 +234,7 @@ export const DEMO_PLACEHOLDER_DESCRIPTION =
 /** The states the sample shows on Lock and upload (`?job=`). */
 export type SampleJobState = Extract<
   RenderJobState,
-  'locked' | 'payment_due' | 'rendering' | 'finalizing' | 'done'
+  'locked' | 'payment_due' | 'rendering' | 'finalizing' | 'failed' | 'done'
 >
 
 type RenderJobsByState = {
@@ -250,9 +250,7 @@ const SAMPLE_PLACEHOLDER_METADATA_CID = 'bafybeie5gq4jxvzmsym6hjlwxej4rwdoxt7wad
  * The render job in each of its states, for the Lock and upload screen. "Reveal later" was on, so
  * every state after the lock carries the placeholder; the finished job has the real set too.
  */
-export const DEMO_RENDER_JOBS: Omit<RenderJobsByState, 'done'> & {
-  done: RenderJobsByState['done'] & { imagesCid: string; placeholder: RenderPlaceholder }
-} = {
+export const DEMO_RENDER_JOBS: RenderJobsByState = {
   locked: { ...jobBase, state: 'locked', placeholder: null },
   payment_due: { ...jobBase, state: 'payment_due', placeholder: DEMO_PLACEHOLDER, payment: null },
   rendering: {
@@ -272,6 +270,19 @@ export const DEMO_RENDER_JOBS: Omit<RenderJobsByState, 'done'> & {
     batches: { total: batchTotal, done: batchTotal, size: BATCH_SIZE },
     startedAt: payment.paidAt + 60,
   },
+  // The rendering sample stopped by the worker at batch 10: the retry face.
+  failed: {
+    ...jobBase,
+    state: 'failed',
+    placeholder: DEMO_PLACEHOLDER,
+    payment,
+    batches: { total: batchTotal, done: 9, size: BATCH_SIZE },
+    error: 'The pinning service answered with a different CID.',
+    errorCode: 'cid-mismatch',
+    retries: 1,
+    failedBatch: 10,
+    retryable: true,
+  },
   done: {
     ...jobBase,
     state: 'done',
@@ -280,13 +291,12 @@ export const DEMO_RENDER_JOBS: Omit<RenderJobsByState, 'done'> & {
     batches: { total: batchTotal, done: batchTotal, size: BATCH_SIZE },
     startedAt: payment.paidAt + 60,
     finishedAt: payment.paidAt + 60 + 26 * 60,
-    // The upload screen's sample result reads this one images CID.
-    imagesCid: SAMPLE_IMAGES_CID,
     metadataCid: SAMPLE_METADATA_CID,
     baseUri: `ipfs://${SAMPLE_METADATA_CID}/`,
     batchCids: [SAMPLE_IMAGES_CID],
     placeholderImageCid: null,
-    collageKey: null,
+    // The sample done step shows the static collage at /demo/collage.svg; the key only says there is one.
+    collageKey: 'night-owls/collage/job_night_owls_01.png',
   },
 }
 
@@ -329,6 +339,18 @@ export const DEMO_DEFERRED_RENDER_JOBS: RenderJobsByState = {
     payment: deferredPayment,
     batches: { total: 1, done: 1, size: 1 },
     startedAt: payment.paidAt + 60,
+  },
+  failed: {
+    ...deferredBase,
+    state: 'failed',
+    placeholder: DEMO_PLACEHOLDER,
+    payment: deferredPayment,
+    batches: { total: 1, done: 0, size: 1 },
+    error: 'The pinning service answered with a different CID.',
+    errorCode: 'cid-mismatch',
+    retries: 1,
+    failedBatch: 1,
+    retryable: true,
   },
   done: {
     ...deferredBase,

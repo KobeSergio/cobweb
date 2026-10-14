@@ -105,9 +105,26 @@ describe('sample render jobs', () => {
     }
   })
 
-  it('mark the deferred run as the placeholder alone and the real run as the real set', () => {
+  it('mark the deferred run as the placeholder alone and the real run as the real set, with its collage', () => {
     expect(DEMO_DEFERRED_RENDER_JOBS.done.placeholderImageCid).not.toBeNull()
+    expect(DEMO_DEFERRED_RENDER_JOBS.done.collageKey).toBeNull()
     expect(DEMO_RENDER_JOBS.done.placeholderImageCid).toBeNull()
-    expect(DEMO_RENDER_JOBS.done.batchCids).toEqual([DEMO_RENDER_JOBS.done.imagesCid])
+    expect(DEMO_RENDER_JOBS.done.batchCids).toHaveLength(1)
+    expect(DEMO_RENDER_JOBS.done.collageKey).not.toBeNull()
+    expect(DEMO_RENDER_JOBS.done).not.toHaveProperty('imagesCid')
+  })
+
+  it("have a failed job stopped at batch 10 on the worker's sentence, retryable, in both scenarios", () => {
+    expect(DEMO_RENDER_JOBS.failed).toMatchObject({
+      state: 'failed',
+      error: 'The pinning service answered with a different CID.',
+      errorCode: 'cid-mismatch',
+      failedBatch: 10,
+      retries: 1,
+      retryable: true,
+      batches: { done: 9 },
+    })
+    expect(DEMO_DEFERRED_RENDER_JOBS.failed).toMatchObject({ state: 'failed', errorCode: 'cid-mismatch' })
+    expect(getRenderJob('failed').state).toBe('failed')
   })
 })

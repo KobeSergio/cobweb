@@ -35,7 +35,7 @@ export type UploadScreenProps = {
   next?: FlowLink
   /**
    * Sample mode only (`?outcome=`): makes the first attempt of an action fail, so failure states
-   * can be reviewed. rejected | reverted | balance | check-failed | batch-failed.
+   * can be reviewed. rejected | reverted | balance | check-failed | batch-failed | art-problem.
    */
   sampleOutcome?: string
 }
