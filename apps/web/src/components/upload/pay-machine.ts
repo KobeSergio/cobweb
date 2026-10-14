@@ -1,3 +1,4 @@
+import { classifyError } from '@/components/deploy/tx-errors'
 import type { TxFailure, TxPhase } from '@/components/deploy/tx-progress'
 import {
   CHAIN_NOT_READY,
@@ -83,17 +84,6 @@ export type PayDeps = {
   now(): number
 }
 
-const REJECTED: TxFailure = {
-  kind: 'rejected',
-  title: 'Payment cancelled in your wallet',
-  message: 'Nothing was sent and nothing was charged. Try again when you are ready.',
-}
-const BALANCE: TxFailure = {
-  kind: 'balance',
-  title: 'Not enough funds in this wallet',
-  message:
-    'The fee and network gas are more than this wallet holds on the network. Add funds, then try again.',
-}
 const REVERTED_ON_CHAIN: TxFailure = {
   kind: 'reverted',
   title: 'The payment failed on chain',
@@ -125,48 +115,8 @@ export function preflight(input: PayInput): TxFailure | null {
   return null
 }
 
-function causes(error: unknown): unknown[] {
-  const list: unknown[] = []
-  let current: unknown = error
-  for (let depth = 0; current && depth < 10; depth++) {
-    list.push(current)
-    current = (current as { cause?: unknown }).cause
-  }
-  return list
-}
-
-/** A wallet or chain error as the creator reads it. */
-export function classifyError(error: unknown, at: 'simulating' | 'wallet' | 'confirming'): TxFailure {
-  const chain = causes(error)
-  const rejected = chain.some(
-    (entry) =>
-      (entry as { name?: string }).name === 'UserRejectedRequestError' ||
-      (entry as { code?: unknown }).code === 4001,
-  )
-  if (rejected) return REJECTED
-  const text = chain.map((entry) => (entry instanceof Error ? entry.message : String(entry))).join(' ')
-  if (/insufficient funds/i.test(text)) return BALANCE
-  const short =
-    (error as { shortMessage?: string }).shortMessage ??
-    (error instanceof Error ? error.message : 'Unknown error.')
-  if (at === 'simulating')
-    return {
-      kind: 'reverted',
-      title: 'The payment would fail',
-      message: `The check against the factory failed: ${short} Nothing was sent.`,
-    }
-  if (at === 'wallet')
-    return {
-      kind: 'rejected',
-      title: 'The wallet did not send the payment',
-      message: `${short} Nothing was charged.`,
-    }
-  return {
-    kind: 'reverted',
-    title: 'The payment could not be confirmed',
-    message: `${short} Check your wallet's activity before you pay again.`,
-  }
-}
+/** Shared with the deploy machine (components/deploy/tx-errors.ts); the payment wording is unchanged. */
+export { classifyError }
 
 /**
  * Asks the server to confirm a payment every 3 seconds while it answers "not confirmed yet", for up

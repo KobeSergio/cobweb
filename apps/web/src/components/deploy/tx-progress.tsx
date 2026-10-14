@@ -8,10 +8,10 @@ import type { Hex } from '@/lib/demo/types'
 
 /**
  * The steps a wallet transaction goes through, in order (rule 2: simulate, then send the
- * simulated request). Not every flow uses every step: only deploy switches chain, only the art
- * fee waits for the server to verify the event.
+ * simulated request). Not every flow uses every step: only deploy prepares on the server and
+ * switches chain; both wait for the server to verify the event.
  */
-export type TxStep = 'switching' | 'simulating' | 'wallet' | 'confirming' | 'verifying'
+export type TxStep = 'preparing' | 'switching' | 'simulating' | 'wallet' | 'confirming' | 'verifying'
 
 export type TxFailure = {
   /**
