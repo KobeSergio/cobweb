@@ -543,15 +543,20 @@ async function main(): Promise<void> {
   })
 
   // 7 (setup). Mint groups and whitelist entries, created before the anonymous checks so there is
-  // something to (not) see in every table.
-  const groupInsert = await A.client
+  // something to (not) see in every table. Rows come only from the record functions (Phases,
+  // docs/specs/2026-10-15-phases.md, section 4), so the service role seeds the groups.
+  await check('mint_groups: A cannot insert a group; rows come only from the record functions', async () => {
+    const { data, error } = await A.client
+      .from('mint_groups')
+      .insert({ collection_id: colA.id, onchain_id: 1, name: 'Allowlist', price_wei: '1000000000000000' })
+      .select()
+    return expectError(error, PERMISSION, data)
+  })
+  const groupInsert = await admin
     .from('mint_groups')
     .insert({ collection_id: colA.id, onchain_id: 1, name: 'Allowlist', price_wei: '1000000000000000' })
     .select()
     .single()
-  await check('mint_groups: A creates a group under their own collection', async () =>
-    groupInsert.error ? describe(groupInsert.error) : null,
-  )
   const groupA = groupInsert.data as { id: string; updated_at: string } | null
 
   const entryWallet = '0x' + 'b'.repeat(40)
@@ -704,7 +709,7 @@ async function main(): Promise<void> {
 
   const colB = await insertCollection(B.client)
   const groupBInsert = colB.row
-    ? await B.client
+    ? await admin
         .from('mint_groups')
         .insert({ collection_id: colB.row.id, onchain_id: 1, name: 'B group' })
         .select()
@@ -1012,28 +1017,31 @@ async function main(): Promise<void> {
     return `${problem}; A then ${gone ? 'deleted it' : `could not delete it (${describe(del.error)})`}`
   })
 
-  {
-    const deployed = await insertCollection(A.client)
-    if (deployed.row) {
-      await admin
+  await check(
+    'collections and mint_groups: on a deployed collection the owner changes neither max_supply nor adds a group',
+    async () => {
+      const deployed = await insertCollection(A.client)
+      if (!deployed.row) return `setup: ${describe(deployed.error)}`
+      const set = await admin
         .from('collections')
         .update({ status: 'deployed', max_supply: 100, chain_id: 1, contract_address: '0x' + '4'.repeat(40) })
         .eq('id', deployed.row.id)
+      if (set.error) return `setup: ${describe(set.error)}`
       const upd = await A.client
         .from('collections')
         .update({ max_supply: 5 })
         .eq('id', deployed.row.id)
         .select()
+      const supply = expectError(upd.error, CHECK, upd.data)
+      if (supply) return `max_supply: ${supply}`
       const grp = await A.client
         .from('mint_groups')
         .insert({ collection_id: deployed.row.id, onchain_id: 9, name: 'Late' })
         .select()
-      info(
-        `on a deployed collection the owner can still change max_supply: ${!upd.error && upd.data.length === 1}` +
-          `, add mint groups: ${!grp.error}`,
-      )
-    }
-  }
+      const group = expectError(grp.error, PERMISSION, grp.data)
+      return group ? `mint group: ${group}` : null
+    },
+  )
 
   await artFoundation(A, B)
   await artTraitsAndRules(A, B)
@@ -1045,6 +1053,7 @@ async function main(): Promise<void> {
   await artRenderState(A, B)
   await artRenderCredit(A, B)
   await artDeploy(A, B)
+  await artPhases(A, B)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -5244,7 +5253,7 @@ async function artDeploy(A: Creator, B: Creator): Promise<void> {
   await check(
     'collection_record_deploy: records the deployment, marks the collection deployed on its chain, makes the link permanent and writes the launch phases',
     async () => {
-      const stale = await A.client
+      const stale = await admin
         .from('mint_groups')
         .insert({ collection_id: rendered.cid, onchain_id: 7, name: 'Old draft' })
       if (stale.error) return `setup group: ${describe(stale.error as DbError)}`
@@ -5468,6 +5477,440 @@ async function artDeploy(A: Creator, B: Creator): Promise<void> {
         .select()
       if (description.error) return `description: ${describe(description.error as DbError)}`
       return description.data.length === 1 ? null : 'the description did not change'
+    },
+  )
+}
+
+// ---------------------------------------------------------------------------------------------
+// 9k. Phases: the off-chain columns of mint_groups and their checks, the owner's column grant, the
+// positions, mint_group_move, mint_group_record and mint_groups_refresh
+// (docs/specs/2026-10-15-phases.md, section 4)
+// ---------------------------------------------------------------------------------------------
+type PhaseCheckRow = {
+  onchain_id: number
+  name: string
+  description: string
+  visible: boolean
+  position: number | null
+  price_wei: string
+  max_supply: number
+  start_at: string | null
+}
+
+async function phaseRows(cid: string): Promise<PhaseCheckRow[]> {
+  const { data, error } = await admin
+    .from('mint_groups')
+    .select('onchain_id, name, description, visible, position, price_wei::text, max_supply, start_at')
+    .eq('collection_id', cid)
+    .order('onchain_id')
+  if (error) throw new Error(`phases: ${describe(error as DbError)}`)
+  return data as unknown as PhaseCheckRow[]
+}
+
+type CopyState = { public_max_per_wallet: number; state_block: number | null; state_read_at: string | null }
+
+async function copyState(cid: string): Promise<CopyState> {
+  const { data, error } = await admin
+    .from('deployments')
+    .select('public_max_per_wallet, state_block, state_read_at')
+    .eq('collection_id', cid)
+    .single()
+  if (error) throw new Error(`copy state: ${describe(error as DbError)}`)
+  return data as CopyState
+}
+
+const NOT_DEPLOYED_SENTENCE = 'The contract is not deployed yet.'
+/** 1 November 2026 00:00 UTC plus the block number in seconds: each test block has its own time. */
+const blockTime = (block: number) => new Date((1_793_491_200 + block) * 1000).toISOString()
+
+const phaseRecordArgs = (
+  owner: string,
+  cid: string,
+  id: number,
+  name: string,
+  description = '',
+  visible = true,
+) => ({
+  p_collection_id: cid,
+  p_owner: owner,
+  p_onchain_id: id,
+  p_name: name,
+  p_description: description,
+  p_visible: visible,
+})
+
+const refreshArgs = (
+  owner: string,
+  cid: string,
+  block: number,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> => ({
+  p_collection_id: cid,
+  p_owner: owner,
+  p_block: block,
+  p_block_time: blockTime(block),
+  p_public_max_per_wallet: 3,
+  p_groups: [
+    { onchain_id: 0, price_wei: '0', max_supply: 2, start: 0 },
+    { onchain_id: 1, price_wei: '1000000000000000', max_supply: 1, start: 0 },
+  ],
+  ...overrides,
+})
+
+async function artPhases(A: Creator, B: Creator): Promise<void> {
+  const payer = A.account.address.toLowerCase()
+  // Rendered and recorded as deployed with Public (0) and Holders (1), as collection_record_deploy writes them.
+  const { cid } = await renderedFixture(A, payer, 151)
+  const recorded = await callArt(admin, 'collection_record_deploy', recordArgs(A.userId, cid, payer, 11))
+  if (recorded.error) throw new Error(`setup: record: ${describe(recorded.error)}`)
+  // A draft without a deployment: the record functions refuse it.
+  const draft = await insertCollection(A.client)
+  if (!draft.row) throw new Error(`setup: ${describe(draft.error)}`)
+  const draftId = draft.row.id
+  const update = (onchainId: number, patch: Record<string, unknown>) =>
+    A.client.from('mint_groups').update(patch).eq('collection_id', cid).eq('onchain_id', onchainId).select()
+  const move = (client: SupabaseClient, onchainId: number, up: boolean) =>
+    callArt(client, 'mint_group_move', { p_collection_id: cid, p_onchain_id: onchainId, p_up: up })
+  const positions = async () =>
+    (await phaseRows(cid)).map((row) => `${row.onchain_id}:${row.position}`).join(' ')
+
+  await check(
+    'mint_groups: the launch phases read positions 0 and 1, an empty description and shown',
+    async () => {
+      const rows = await phaseRows(cid)
+      const got = rows.map((row) => [row.onchain_id, row.position, row.description, row.visible])
+      return JSON.stringify(got) ===
+        JSON.stringify([
+          [0, 0, '', true],
+          [1, 1, '', true],
+        ])
+        ? null
+        : JSON.stringify(rows)
+    },
+  )
+
+  await check(
+    "mint_groups: a name of 41 characters, a name with outer spaces and another phase's name in other case are refused",
+    async () => {
+      const problems: string[] = []
+      for (const [label, name, codes] of [
+        ['41 characters', 'x'.repeat(41), CHECK],
+        ['outer spaces', ' Holders ', CHECK],
+        ["another phase's name in other case", 'PUBLIC', UNIQUE],
+      ] as const) {
+        const { data, error } = await update(1, { name })
+        const problem = expectError(error as DbError, codes, data)
+        if (problem) problems.push(`${label}: ${problem}`)
+      }
+      if (problems.length) return problems.join('; ')
+      return (await phaseRows(cid))[1]?.name === 'Holders' ? null : 'the name changed'
+    },
+  )
+
+  await check('mint_groups: a description of 501 characters is refused; 500 is kept', async () => {
+    const long = await update(1, { description: 'd'.repeat(501) })
+    const refused = expectError(long.error as DbError, CHECK, long.data)
+    if (refused) return `501: ${refused}`
+    const fits = await update(1, { description: 'd'.repeat(500) })
+    if (fits.error) return `500: ${describe(fits.error as DbError)}`
+    const kept = (await phaseRows(cid))[1]?.description.length
+    const reset = await update(1, { description: '' })
+    if (reset.error) return `reset: ${describe(reset.error as DbError)}`
+    return kept === 500 ? null : `kept ${kept} characters`
+  })
+
+  await check('mint_groups: the public sale cannot be hidden; another phase can', async () => {
+    const publicSale = await update(0, { visible: false })
+    const refused = expectSentence(publicSale.error as DbError, CHECK, 'mint_groups_public_shown')
+    if (refused) return `public sale: ${refused}`
+    const other = await update(1, { visible: false })
+    if (other.error) return `holders: ${describe(other.error as DbError)}`
+    const rows = await phaseRows(cid)
+    const back = await update(1, { visible: true })
+    if (back.error) return `back: ${describe(back.error as DbError)}`
+    return rows[0]?.visible === true && rows[1]?.visible === false ? null : JSON.stringify(rows)
+  })
+
+  await check('mint_groups: the owner updates the name, description, visibility and position', async () => {
+    const changed = await update(1, {
+      name: 'Holders club',
+      description: 'For holders.',
+      visible: false,
+      position: 5,
+    })
+    if (changed.error) return describe(changed.error as DbError)
+    const row = (await phaseRows(cid))[1]
+    const back = await update(1, { name: 'Holders', description: '', visible: true, position: 1 })
+    if (back.error) return `back: ${describe(back.error as DbError)}`
+    return row?.name === 'Holders club' &&
+      row.description === 'For holders.' &&
+      row.visible === false &&
+      row.position === 5
+      ? null
+      : JSON.stringify(row)
+  })
+
+  await check(
+    'mint_groups: the owner is refused the copies, onchain_id, an insert and a delete',
+    async () => {
+      const problems: string[] = []
+      for (const patch of [
+        { price_wei: '1' },
+        { max_supply: 0 },
+        { start_at: new Date().toISOString() },
+        { onchain_id: 5 },
+      ]) {
+        const { data, error } = await update(1, patch)
+        const problem = expectError(error as DbError, PERMISSION, data)
+        if (problem) problems.push(`${Object.keys(patch)[0]}: ${problem}`)
+      }
+      const insert = await A.client
+        .from('mint_groups')
+        .insert({ collection_id: cid, onchain_id: 5, name: 'Sneaky' })
+        .select()
+      const inserted = expectError(insert.error as DbError, PERMISSION, insert.data)
+      if (inserted) problems.push(`insert: ${inserted}`)
+      const removed = await A.client.from('mint_groups').delete().eq('collection_id', cid).select()
+      const deleted = expectError(removed.error as DbError, PERMISSION, removed.data)
+      if (deleted) problems.push(`delete: ${deleted}`)
+      if (problems.length) return problems.join('; ')
+      const rows = await phaseRows(cid)
+      return rows.length === 2 && rows[1]?.price_wei === '1000000000000000' && rows[1]?.max_supply === 1
+        ? null
+        : JSON.stringify(rows)
+    },
+  )
+
+  await check("mint_groups: B cannot update A's phases", async () => {
+    const { data, error } = await B.client
+      .from('mint_groups')
+      .update({ name: 'Hijacked' })
+      .eq('collection_id', cid)
+      .select()
+    const problem = expectNothing(error as DbError, data)
+    if (problem) return problem
+    return (await phaseRows(cid)).every((row) => row.name !== 'Hijacked') ? null : 'a name changed'
+  })
+
+  await check(
+    'mint_group_move: moves a phase up and down by swapping positions; an end row stays',
+    async () => {
+      const up = await move(A.client, 1, true)
+      if (up.error) return `up: ${describe(up.error)}`
+      const afterUp = await positions()
+      const down = await move(A.client, 1, false)
+      if (down.error) return `down: ${describe(down.error)}`
+      const afterDown = await positions()
+      const top = await move(A.client, 0, true)
+      const bottom = await move(A.client, 1, false)
+      if (top.error || bottom.error) return `end rows: ${describe(top.error ?? bottom.error)}`
+      const afterEnds = await positions()
+      return afterUp === '0:1 1:0' && afterDown === '0:0 1:1' && afterEnds === '0:0 1:1'
+        ? null
+        : `${afterUp} | ${afterDown} | ${afterEnds}`
+    },
+  )
+
+  await check(
+    "mint_group_move: B's session on A's phase is refused as not found; a signed-out caller cannot execute it",
+    async () => {
+      const stranger = await move(B.client, 1, true)
+      const notFound = expectSentence(stranger.error, PERMISSION, 'phase not found')
+      if (notFound) return `B: ${notFound}`
+      const signedOut = await move(anon, 1, true)
+      const denied = expectSentence(signedOut.error, PERMISSION, 'permission denied')
+      if (denied) return `signed out: ${denied}`
+      return (await positions()) === '0:0 1:1' ? null : 'the positions changed'
+    },
+  )
+
+  await check(
+    "mint_group_record and mint_groups_refresh: the owner's session and a signed-out caller cannot execute them",
+    async () => {
+      const problems: string[] = []
+      for (const [who, client] of [
+        ['owner session', A.client],
+        ['signed out', anon],
+      ] as const) {
+        const record = await callArt(
+          client,
+          'mint_group_record',
+          phaseRecordArgs(A.userId, cid, 2, 'Allowlist'),
+        )
+        const recordProblem = expectSentence(record.error, PERMISSION, 'permission denied')
+        if (recordProblem) problems.push(`${who} record: ${recordProblem}`)
+        const refresh = await callArt(client, 'mint_groups_refresh', refreshArgs(A.userId, cid, 1))
+        const refreshProblem = expectSentence(refresh.error, PERMISSION, 'permission denied')
+        if (refreshProblem) problems.push(`${who} refresh: ${refreshProblem}`)
+      }
+      return problems.length ? problems.join('; ') : null
+    },
+  )
+
+  await check(
+    'mint_group_record and mint_groups_refresh: a draft is refused as not deployed, another owner as not found',
+    async () => {
+      const problems: string[] = []
+      const draftRecord = await callArt(
+        admin,
+        'mint_group_record',
+        phaseRecordArgs(A.userId, draftId, 1, 'Early'),
+      )
+      const recordDraft = expectSentence(draftRecord.error, CHECK, NOT_DEPLOYED_SENTENCE)
+      if (recordDraft) problems.push(`record a draft: ${recordDraft}`)
+      const draftRefresh = await callArt(admin, 'mint_groups_refresh', refreshArgs(A.userId, draftId, 1))
+      const refreshDraft = expectSentence(draftRefresh.error, CHECK, NOT_DEPLOYED_SENTENCE)
+      if (refreshDraft) problems.push(`refresh a draft: ${refreshDraft}`)
+      const otherRecord = await callArt(
+        admin,
+        'mint_group_record',
+        phaseRecordArgs(B.userId, cid, 2, 'Allowlist'),
+      )
+      const recordOther = expectSentence(otherRecord.error, PERMISSION, 'collection not found')
+      if (recordOther) problems.push(`record for another owner: ${recordOther}`)
+      const otherRefresh = await callArt(admin, 'mint_groups_refresh', refreshArgs(B.userId, cid, 1))
+      const refreshOther = expectSentence(otherRefresh.error, PERMISSION, 'collection not found')
+      if (refreshOther) problems.push(`refresh for another owner: ${refreshOther}`)
+      if (problems.length) return problems.join('; ')
+      return (await countRows('mint_groups', 'collection_id', draftId)) === 0
+        ? null
+        : 'a row was written for the draft'
+    },
+  )
+
+  await check(
+    'mint_group_record: records a new phase at the next position with its name, description and visibility',
+    async () => {
+      const { data, error } = await callArt(
+        admin,
+        'mint_group_record',
+        phaseRecordArgs(A.userId, cid, 2, 'Allowlist', 'Friends of the project.', false),
+      )
+      if (error) return describe(error)
+      const returned = data as { onchain_id?: number; position?: number } | null
+      if (returned?.onchain_id !== 2 || returned.position !== 2) return `returned ${JSON.stringify(returned)}`
+      const added = (await phaseRows(cid))[2]
+      return added?.name === 'Allowlist' &&
+        added.description === 'Friends of the project.' &&
+        added.visible === false &&
+        added.price_wei === '0' &&
+        added.max_supply === 0 &&
+        added.start_at === null
+        ? null
+        : JSON.stringify(added)
+    },
+  )
+
+  await check(
+    'mint_group_record: on a phase that has a row it updates the name, description and visibility and keeps the position',
+    async () => {
+      const moved = await move(A.client, 2, true)
+      if (moved.error) return `setup move: ${describe(moved.error)}`
+      const { error } = await callArt(
+        admin,
+        'mint_group_record',
+        phaseRecordArgs(A.userId, cid, 2, 'Allowlist two', 'Renamed.', true),
+      )
+      if (error) return describe(error)
+      const rows = await phaseRows(cid)
+      const back = await move(A.client, 2, false)
+      if (back.error) return `move back: ${describe(back.error)}`
+      const two = rows[2]
+      return two?.name === 'Allowlist two' &&
+        two.description === 'Renamed.' &&
+        two.visible === true &&
+        two.position === 1 &&
+        rows[1]?.position === 2
+        ? null
+        : JSON.stringify(rows)
+    },
+  )
+
+  await check(
+    'mint_group_record: a taken name and a hidden public sale are refused as the index and the check raise them',
+    async () => {
+      const taken = await callArt(admin, 'mint_group_record', phaseRecordArgs(A.userId, cid, 3, 'holders'))
+      const nameProblem = expectSentence(taken.error, UNIQUE, 'mint_groups_name_key')
+      if (nameProblem) return `taken name: ${nameProblem}`
+      const hidden = await callArt(
+        admin,
+        'mint_group_record',
+        phaseRecordArgs(A.userId, cid, 0, 'Public', '', false),
+      )
+      const hiddenProblem = expectSentence(hidden.error, CHECK, 'mint_groups_public_shown')
+      if (hiddenProblem) return `hidden public sale: ${hiddenProblem}`
+      const rows = await phaseRows(cid)
+      return rows.length === 3 && rows[0]?.visible === true ? null : JSON.stringify(rows)
+    },
+  )
+
+  await check(
+    'mint_groups_refresh: writes the copies that differ, the cap, state_block and state_read_at, and answers true',
+    async () => {
+      const { data, error } = await callArt(
+        admin,
+        'mint_groups_refresh',
+        refreshArgs(A.userId, cid, 100, {
+          p_public_max_per_wallet: 5,
+          p_groups: [
+            { onchain_id: 0, price_wei: '2000', max_supply: 2, start: 1_793_491_260 },
+            { onchain_id: 1, price_wei: '1000000000000000', max_supply: 1, start: 0 },
+            { onchain_id: 2, price_wei: '5', max_supply: 0, start: 0 },
+            { onchain_id: 9, price_wei: '1', max_supply: 1, start: 0 },
+          ],
+        }),
+      )
+      if (error) return describe(error)
+      if (data !== true) return `answered ${JSON.stringify(data)}`
+      const rows = await phaseRows(cid)
+      const state = await copyState(cid)
+      const publicSale = rows[0]
+      const problems = [
+        publicSale?.price_wei === '2000' &&
+        publicSale.start_at !== null &&
+        Date.parse(publicSale.start_at) === 1_793_491_260_000
+          ? null
+          : `public sale ${JSON.stringify(publicSale)}`,
+        rows[2]?.price_wei === '5' ? null : `allowlist ${JSON.stringify(rows[2])}`,
+        rows.length === 3 ? null : `${rows.length} rows: the refresh inserted one`,
+        state.public_max_per_wallet === 5 ? null : `cap ${state.public_max_per_wallet}`,
+        state.state_block === 100 ? null : `state_block ${state.state_block}`,
+        state.state_read_at !== null && Date.parse(state.state_read_at) === Date.parse(blockTime(100))
+          ? null
+          : `state_read_at ${state.state_read_at}`,
+      ].filter(Boolean)
+      return problems.length ? problems.join('; ') : null
+    },
+  )
+
+  await check(
+    'mint_groups_refresh: an older block writes nothing and answers false; the same block writes again, a cap of 0 included',
+    async () => {
+      const older = await callArt(
+        admin,
+        'mint_groups_refresh',
+        refreshArgs(A.userId, cid, 99, { p_public_max_per_wallet: 7 }),
+      )
+      if (older.error) return `older: ${describe(older.error)}`
+      if (older.data !== false) return `the older block answered ${JSON.stringify(older.data)}`
+      const unchanged = await copyState(cid)
+      if (unchanged.public_max_per_wallet !== 5 || unchanged.state_block !== 100)
+        return `the older block wrote ${JSON.stringify(unchanged)}`
+      if ((await phaseRows(cid))[0]?.price_wei !== '2000') return 'the older block wrote a copy'
+      const same = await callArt(
+        admin,
+        'mint_groups_refresh',
+        refreshArgs(A.userId, cid, 100, { p_public_max_per_wallet: 0 }),
+      )
+      if (same.error) return `same block: ${describe(same.error)}`
+      const after = await copyState(cid)
+      const publicSale = (await phaseRows(cid))[0]
+      return same.data === true &&
+        after.public_max_per_wallet === 0 &&
+        publicSale?.price_wei === '0' &&
+        publicSale.start_at === null
+        ? null
+        : `${JSON.stringify(after)} ${JSON.stringify(publicSale)}`
     },
   )
 }

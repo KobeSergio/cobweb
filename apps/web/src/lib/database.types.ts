@@ -200,6 +200,8 @@ export type Database = {
           royalty_bps: number
           royalty_receiver: string
           salt: string
+          state_block: number | null
+          state_read_at: string | null
           tx_hash: string
         }
         Insert: {
@@ -221,6 +223,8 @@ export type Database = {
           royalty_bps: number
           royalty_receiver: string
           salt: string
+          state_block?: number | null
+          state_read_at?: string | null
           tx_hash: string
         }
         Update: {
@@ -242,6 +246,8 @@ export type Database = {
           royalty_bps?: number
           royalty_receiver?: string
           salt?: string
+          state_block?: number | null
+          state_read_at?: string | null
           tx_hash?: string
         }
         Relationships: [
@@ -309,35 +315,44 @@ export type Database = {
         Row: {
           collection_id: string
           created_at: string
+          description: string
           id: string
           max_supply: number
           name: string
           onchain_id: number
+          position: number | null
           price_wei: number
           start_at: string | null
           updated_at: string
+          visible: boolean
         }
         Insert: {
           collection_id: string
           created_at?: string
+          description?: string
           id?: string
           max_supply?: number
           name: string
           onchain_id: number
+          position?: number | null
           price_wei?: number
           start_at?: string | null
           updated_at?: string
+          visible?: boolean
         }
         Update: {
           collection_id?: string
           created_at?: string
+          description?: string
           id?: string
           max_supply?: number
           name?: string
           onchain_id?: number
+          position?: number | null
           price_wei?: number
           start_at?: string | null
           updated_at?: string
+          visible?: boolean
         }
         Relationships: [
           {
@@ -1377,6 +1392,8 @@ export type Database = {
           royalty_bps: number
           royalty_receiver: string
           salt: string
+          state_block: number | null
+          state_read_at: string | null
           tx_hash: string
         }
         SetofOptions: {
@@ -1385,6 +1402,51 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      mint_group_move: {
+        Args: { p_collection_id: string; p_onchain_id: number; p_up: boolean }
+        Returns: undefined
+      }
+      mint_group_record: {
+        Args: {
+          p_collection_id: string
+          p_description: string
+          p_name: string
+          p_onchain_id: number
+          p_owner: string
+          p_visible: boolean
+        }
+        Returns: {
+          collection_id: string
+          created_at: string
+          description: string
+          id: string
+          max_supply: number
+          name: string
+          onchain_id: number
+          position: number | null
+          price_wei: number
+          start_at: string | null
+          updated_at: string
+          visible: boolean
+        }
+        SetofOptions: {
+          from: '*'
+          to: 'mint_groups'
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      mint_groups_refresh: {
+        Args: {
+          p_block: number
+          p_block_time: string
+          p_collection_id: string
+          p_groups: Json
+          p_owner: string
+          p_public_max_per_wallet: number
+        }
+        Returns: boolean
       }
       record_upload: {
         Args: {
