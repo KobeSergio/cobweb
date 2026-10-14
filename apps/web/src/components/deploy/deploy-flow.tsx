@@ -12,7 +12,7 @@ import { Input } from '@cobweb/ui/components/input'
 import { Label } from '@cobweb/ui/components/label'
 import { Panel } from '@cobweb/ui/components/panel'
 import { StageFooter } from '@/components/shell/stage-footer'
-import { NOT_A_HASH, THROWN } from '@/lib/art/result'
+import { LINK_REQUIRED, NOT_A_HASH } from '@/lib/art/result'
 import { chainView } from '@/lib/chain/chain-view'
 import { slugState } from '@/lib/collections'
 import type { Tables } from '@/lib/database.types'
@@ -41,6 +41,7 @@ import { defaultPhases, DeployPhases, phaseErrors, type DraftPhase } from './dep
 import { DEPLOY_OUTCOMES, sampleDeployActions, useCreatorWallet, type DeployOutcome } from './deploy-sim'
 import { DeploySummary, type CostState, type FeesState } from './deploy-summary'
 import { DeployedView, SetUpDropButton } from './deployed-view'
+import { classifyError } from './tx-errors'
 import { isTxRunning, TX_IDLE, TxProgress } from './tx-progress'
 
 export type DeployFlowProps = {
@@ -75,7 +76,8 @@ const FIELD_IDS = {
 const PREDICT_DEBOUNCE_MS = 400
 const HASH_RE = /^0x[0-9a-fA-F]{64}$/
 const FORM_FIRST = 'Fill in the settings the contract was deployed with, then check the hash.'
-const DEPLOY_STOPPED = 'The deploy stopped unexpectedly'
+const PREDICT_FAILED = 'The address could not be predicted. Reload the page and try again.'
+const PREDICTING = 'Predicting the contract address.'
 
 /** The machine's form from the screen's values, or null while anything is invalid. */
 function toDeployForm(
@@ -190,6 +192,8 @@ export function DeployFlow(props: DeployFlowProps) {
   // The server's prediction for the current settings, refreshed 400 ms after the last change.
   const [prepared, setPrepared] = useState<Prepared | null>(null)
   const [predicting, setPredicting] = useState(false)
+  // The server's refusal to prepare (the link, the chain, the factory), shown where the address would be.
+  const [predictError, setPredictError] = useState<string | null>(null)
   const [fees, setFees] = useState<FeesState>(
     props.initialFees ? { status: 'ready', data: props.initialFees } : { status: 'loading', data: null },
   )
@@ -246,24 +250,35 @@ export function DeployFlow(props: DeployFlowProps) {
   }, [actions, chainId, chain?.factory, feesAttempt, record])
 
   // The server's prediction follows the form, 400 ms after the last change: the same action the deploy runs first.
+  // A refusal is kept and shown. The link is checked here first, so a reservation re-runs the prediction.
   useEffect(() => {
     if (readOnly || record || formKey === null) {
       setPrepared(null)
+      setPredictError(null)
+      setPredicting(false)
+      return
+    }
+    if (!linkSlug) {
+      setPrepared(null)
+      setPredictError(LINK_REQUIRED)
       setPredicting(false)
       return
     }
     let live = true
     setPredicting(true)
+    setPredictError(null)
     const timer = setTimeout(() => {
       actions.prepare(JSON.parse(formKey) as DeployForm).then(
         (result) => {
           if (!live) return
           setPrepared(result.ok ? result.data : null)
+          setPredictError(result.ok ? null : result.error)
           setPredicting(false)
         },
         () => {
           if (!live) return
           setPrepared(null)
+          setPredictError(PREDICT_FAILED)
           setPredicting(false)
         },
       )
@@ -272,12 +287,13 @@ export function DeployFlow(props: DeployFlowProps) {
       live = false
       clearTimeout(timer)
     }
-  }, [actions, readOnly, record, formKey])
+  }, [actions, readOnly, record, formKey, linkSlug])
 
   // The deploy cost, while the wallet is connected and on the deploy chain (sample mode always has one).
   useEffect(() => {
     if (!prepared) {
-      setCost({ kind: 'none' })
+      // Without a prepared call there is nothing to estimate; after a refusal the row says so, not "fill in".
+      setCost(predictError ? { kind: 'unknown' } : { kind: 'none' })
       return
     }
     if (!sample && !wallet.connected) {
@@ -301,7 +317,7 @@ export function DeployFlow(props: DeployFlowProps) {
     return () => {
       live = false
     }
-  }, [actions, prepared, sample, wallet.connected, wallet.chainId])
+  }, [actions, prepared, predictError, sample, wallet.connected, wallet.chainId])
 
   const ready =
     valid &&
@@ -335,6 +351,8 @@ export function DeployFlow(props: DeployFlowProps) {
       target?.focus()
       return
     }
+    // The final check shows the server's prediction, so it waits for one; the button is disabled meanwhile.
+    if (!prepared || predicting) return
     if (phase.step === 'failed') dispatch({ type: 'set', phase: TX_IDLE })
     setDialogOpen(true)
   }
@@ -372,9 +390,10 @@ export function DeployFlow(props: DeployFlowProps) {
         },
         dispatch,
       )
-    } catch {
-      // The machine classifies every failure it expects; a throw it did not must not leave the dialog on a spinner.
-      dispatch({ type: 'failed', failure: { kind: 'refused', title: DEPLOY_STOPPED, message: THROWN } })
+    } catch (error) {
+      // The machine classifies every failure it expects; a throw it did not must not leave the dialog on a
+      // spinner. A remembered hash stays in the store, so the recovery panel offers "Check again".
+      dispatch({ type: 'failed', failure: classifyError(error, 'confirming', 'deploy') })
     }
     if (!sample) setResumable(pendingDeploy(store, collection.id))
     if (!result) return
@@ -467,7 +486,13 @@ export function DeployFlow(props: DeployFlowProps) {
                 ? 'Fees could not be read.'
                 : !sample && !wallet.connected
                   ? 'Connect your wallet to deploy.'
-                  : null
+                  : !valid
+                    ? null
+                    : predictError
+                      ? predictError
+                      : predicting || !prepared
+                        ? PREDICTING
+                        : null
   const checking = !dialogOpen && phase.step !== 'idle'
 
   return (
@@ -503,7 +528,7 @@ export function DeployFlow(props: DeployFlowProps) {
               description="A deploy sent outside this page, or one this page lost, is recorded from its transaction hash. Cobweb checks it against the settings above."
             >
               <div className="space-y-4">
-                {resumable && phase.step === 'idle' && (
+                {resumable && !running && (
                   <Alert>
                     <InfoIcon aria-hidden="true" />
                     <AlertTitle>A deploy is waiting to be checked</AlertTitle>
@@ -519,7 +544,7 @@ export function DeployFlow(props: DeployFlowProps) {
                           onClick={() => void deploy(resumable)}
                           disabled={running}
                         >
-                          Check the deploy
+                          {phase.step === 'failed' ? 'Check again' : 'Check the deploy'}
                         </Button>
                         <Button variant="ghost" size="sm" onClick={discard} disabled={running}>
                           Discard this attempt
@@ -585,6 +610,7 @@ export function DeployFlow(props: DeployFlowProps) {
             cost={cost}
             predicted={prepared?.predicted ?? null}
             predicting={predicting}
+            predictError={predictError}
             payout={payoutAddress}
             royaltyBps={bps}
             royaltyReceiver={receiver}
@@ -607,7 +633,8 @@ export function DeployFlow(props: DeployFlowProps) {
               !linkSlug ||
               !chain ||
               fees.status !== 'ready' ||
-              (!sample && !wallet.connected)
+              (!sample && !wallet.connected) ||
+              (valid && (!prepared || predicting))
             }
           >
             <RocketIcon />

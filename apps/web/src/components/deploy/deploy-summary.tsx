@@ -36,6 +36,8 @@ export type SummaryProps = {
   predicted: Address | null
   /** A prediction is on its way: the settings changed less than 400 ms ago, or the server is answering. */
   predicting: boolean
+  /** The server's refusal to prepare, shown where the address would be; null when there is none. */
+  predictError: string | null
   payout: Address | null
   royaltyBps: number | null
   royaltyReceiver: Address | null
@@ -77,7 +79,7 @@ function costText(cost: CostState, symbol: string): string {
 
 /** The live summary beside the form: what will be deployed, where, and what it costs. */
 export function DeploySummary(props: SummaryProps) {
-  const { collection, chain, fees, cost, predicted, predicting, artSrc } = props
+  const { collection, chain, fees, cost, predicted, predicting, predictError, artSrc } = props
   const symbol = chain?.nativeSymbol ?? ''
 
   return (
@@ -105,6 +107,8 @@ export function DeploySummary(props: SummaryProps) {
         <SummaryRow label="Contract address">
           {predicted ? (
             <CopyValue value={predicted} label="Contract address" display={shortAddress(predicted, 6)} />
+          ) : predictError ? (
+            <span className="text-destructive-foreground text-[0.8125rem]">{predictError}</span>
           ) : (
             <span className="text-muted-foreground text-[0.8125rem]">
               {predicting ? 'Predicting' : 'Fill in the settings'}

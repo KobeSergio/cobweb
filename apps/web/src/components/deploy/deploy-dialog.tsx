@@ -134,7 +134,7 @@ export function DeployDialog({
         {phase.step !== 'idle' && (
           <TxProgress
             phase={phase}
-            txUrl={(hash) => explorerTxUrl(chain, hash)}
+            txUrl={chain.explorerUrl ? (hash) => explorerTxUrl(chain, hash) : undefined}
             steps={[
               {
                 step: 'preparing',
