@@ -222,6 +222,8 @@ done, with failure at any step and a way forward.
   in Phase 5, the transfer validator address, read and changeable, since the validator governs
   tradability).
 
+> **15 October 2026:** Phases and the Overview's minted total and live phases run on real data ([2026-10-15-phases.md](2026-10-15-phases.md)). What now comes from the server's read of the contract's `collectionState()`: each phase's price, allocation, minted count, flag, start and live status (only from `active`), the public limit and the minted total; the Overview's header takes its chain, contract and deploy time from the deployment record. What changed from the sample: the mint page switch moved from Edit details to each row's menu ("Hide from the mint page", "Show on the mint page", never for the public sale), saved at once as Move up and Move down are; a group registered on the contract outside Cobweb reads "Group N" with a "Not named" badge until it is named from its menu; the order is `mint_groups.position`, swapped one place at a time; Add phase takes its id from the contract's `mintGroups()` (the highest plus one) and records the name only after the receipt proves the registration, with "Check again" for a lost receipt; when the contract cannot be read, the screen shows the last copy with an alert and turns the on-chain controls off.
+
 ### 4.7 Public mint page (`/[slug]`)
 
 - Stands alone: slim top bar with identity and wallet button, no app sidebar, "Powered by Cobweb"
