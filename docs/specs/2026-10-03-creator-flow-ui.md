@@ -173,6 +173,8 @@ nullable, `slug_reserved_at timestamptz` records the reservation, and every writ
 `private.reserve_slug(collection_id, slug)`, which checks ownership, takes over a lapsed
 reservation, and refuses when the collection is deployed and already has an address.
 
+> **14 October 2026:** Deploy runs on real data ([2026-10-14-deploy.md](2026-10-14-deploy.md)). What changed from the sample: a collection whose fee was paid shows its one chain as a card ("Connected" or "Switch to <chain>") instead of the picker, which stays only for a deferred collection; the predicted address comes from the server (`prepareDeploy`, the same prediction the confirming action proves against the factory's event), debounced 400 ms after a change; the deploy cost is a gas estimate of the prepared call on the connected chain; name and symbol are read-only because they froze at lock, not at deploy; the deployed view's primary action is "Set up your drop" (Manage drop) and the mint page link is shown as text with the note that the page opens with Phase 6, since the public page is Phase 6; explorer links appear only on a chain with an explorer.
+
 ### 4.6 Manage drop
 
 Every transaction uses one shared sequence: checking (simulate), confirm in wallet, confirming,

@@ -99,6 +99,8 @@ creator's wallet is connected to at lock, passed by the screen and stored on the
 (`quote_chain_id`). Deploy (Phase 5) must use the same chain; it is recorded here so the fee and the
 contract live on one chain.
 
+> **14 October 2026:** done by [2026-10-14-deploy.md](2026-10-14-deploy.md), section 6.1: `prepareCore` deploys on the done real job's `quote_chain_id` and refuses the form's chain when it differs ('The contract goes on the chain the fee was paid on.'); a deferred collection, which paid nothing, picks its chain at deploy; `collection_record_deploy` writes `collections.chain_id` and it never changes, so `lockCore` quotes the real art of a deferred collection on the deployed chain.
+
 ## 5. The token list at lock
 
 - Generative: the stored `tokens` rows (`token_id`, `art_collection_id`, `dna`) are the list. The
