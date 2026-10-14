@@ -212,7 +212,7 @@ async function main(): Promise<void> {
       const hash = await send(creatorKey, record.contractAddress, call)
       if ((await rowsOf(cid)).some((row) => row.onchain_id === 2)) return 'a row exists before the confirm'
       const outcome = await confirmPhaseTxCore(ctx, hash, {
-        event: { eventName: 'MintGroupRegistered', args: { mintGroup: 2n } },
+        event: expectedFor(call),
         add: { onchainId: 2, name: 'Allowlist', description: 'Friends of the project.', visible: false },
       })
       if (!('data' in outcome)) return refusal(outcome)
@@ -225,7 +225,9 @@ async function main(): Promise<void> {
         added.named === true &&
         added.priceWei === '500000000000000' &&
         row?.onchain_id === 2 &&
-        row.position === 2
+        row.position === 2 &&
+        row.price_wei === '500000000000000' &&
+        row.max_supply === 1
         ? null
         : `${JSON.stringify(added)} ${JSON.stringify(row)}`
     },
@@ -276,14 +278,22 @@ async function main(): Promise<void> {
   await check(
     '7. close: after a start a day ahead, setMintGroupStatus(1, false) leaves the flag off and clears the start',
     async () => {
+      const { cid } = subject()
       const block = await chain.getBlock()
-      const scheduled = await change(phaseCalls.schedule(1, Number(block.timestamp) + 86_400))
+      const ahead = Number(block.timestamp) + 86_400
+      const scheduled = await change(phaseCalls.schedule(1, ahead))
       if (groupOf(scheduled.view, 1)?.scheduledStart === 0) return 'the start was not set'
+      const copied = (await rowsOf(cid)).find((entry) => entry.onchain_id === 1)?.start_at ?? null
+      if (copied === null || Date.parse(copied) / 1000 !== ahead) return `the start was not copied: ${copied}`
       const { view } = await change(phaseCalls.close(1))
       const group = groupOf(view, 1)
-      return group?.flag === false && group.scheduledStart === 0 && group.active === false
+      const row = (await rowsOf(cid)).find((entry) => entry.onchain_id === 1)
+      return group?.flag === false &&
+        group.scheduledStart === 0 &&
+        group.active === false &&
+        row?.start_at === null
         ? null
-        : JSON.stringify(group)
+        : `${JSON.stringify(group)} ${JSON.stringify(row)}`
     },
   )
 
@@ -302,7 +312,7 @@ async function main(): Promise<void> {
   await check(
     '9. floor: with Public open and one token minted, setMintGroupMaxSupply(0, 0) is refused at the check with the sentence and nothing sent; Holders is lowered to 0',
     async () => {
-      const { record } = subject()
+      const { cid, record } = subject()
       const address = record.contractAddress
       await change(phaseCalls.open(0))
       const [cost] = await chain.readContract({
@@ -338,9 +348,13 @@ async function main(): Promise<void> {
       if ((await chain.getTransactionCount({ address: creatorKey.address })) !== nonce)
         return 'a transaction was sent'
       const { view } = await change(phaseCalls.allocation(1, 0))
-      return groupOf(view, 1)?.maxSupply === 0 && groupOf(view, 0)?.minted === 1 && view.totalMinted === 1
+      const row = (await rowsOf(cid)).find((entry) => entry.onchain_id === 1)
+      return groupOf(view, 1)?.maxSupply === 0 &&
+        groupOf(view, 0)?.minted === 1 &&
+        view.totalMinted === 1 &&
+        row?.max_supply === 0
         ? null
-        : JSON.stringify(view.groups)
+        : `${JSON.stringify(view.groups)} ${JSON.stringify(row)}`
     },
   )
 
@@ -513,9 +527,11 @@ async function main(): Promise<void> {
         view.publicMaxPerWallet === 5 &&
         view.maxSupply === 3 &&
         order(view) === '0:Public 1:Holders 9:Late list 2:Allowlist' &&
-        view.groups.every((group) => group.minted === 0 && !group.active)
+        view.groups.every((group) => group.minted === 0 && !group.active) &&
+        groupOf(view, 1)?.maxSupply === 0 &&
+        groupOf(view, 1)?.priceWei === '2000000000000000'
         ? null
-        : `${JSON.stringify({ ...view, groups: order(view) })} ${JSON.stringify(copy)}`
+        : `${JSON.stringify({ ...view, groups: order(view) })} ${JSON.stringify(groupOf(view, 1))} ${JSON.stringify(copy)}`
     },
   )
 }
