@@ -43,6 +43,7 @@ pnpm --filter @cobweb/render test         # render core: compositing, metadata J
 pnpm --filter @cobweb/web verify:render   # the render worker end to end against local Supabase, local storage and Anvil
 pnpm --filter @cobweb/worker test         # the render worker: steps, adapters, the queue consumer
 pnpm --filter @cobweb/worker bench        # one batch of 100 tokens at 2048 x 2048: time, memory, CAR size
+pnpm --filter @cobweb/web render:local <collectionId>   # renders the collection's paid jobs on the laptop against local Supabase, local storage and Anvil; CARs go to a temp folder
 ```
 
 ## Rules

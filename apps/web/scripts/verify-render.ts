@@ -26,17 +26,15 @@
 //   pnpm --filter @cobweb/web chain:local    (then copy its two lines into apps/web/.env.local)
 //   pnpm --filter @cobweb/web verify:render
 //
-// Supabase and storage settings come from the environment or `supabase status -o env`; RPC_URL_31337
-// and FACTORY_ADDRESS_31337 from the environment or apps/web/.env.local. Refuses non-local endpoints.
+// Supabase, storage and chain settings come from scripts/render-deps.ts (the environment, `supabase status
+// -o env` and apps/web/.env.local), shared with render:local; it refuses non-local endpoints.
 // Never prints a key. Deletes every row and object it creates. Runs under
 // `node --conditions=react-server --import ./scripts/resolve-ts.mjs`.
 
-import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import {
   DeleteObjectsCommand,
   GetObjectCommand,
@@ -44,101 +42,34 @@ import {
   HeadObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
-  S3Client,
 } from '@aws-sdk/client-s3'
 import { CarReader } from '@ipld/car'
 import * as UnixFS from '@ipld/unixfs'
 import { createClient } from '@supabase/supabase-js'
 import { CID as IpldCid } from 'multiformats/cid'
-import {
-  createTestClient,
-  createWalletClient,
-  getAddress,
-  http,
-  parseEther,
-  publicActions,
-  type Hex,
-} from 'viem'
+import { createTestClient, createWalletClient, http, parseEther, publicActions, type Hex } from 'viem'
 import { generatePrivateKey, privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts'
 import { anvil } from 'viem/chains'
 import { createSiweMessage, generateSiweNonce } from 'viem/siwe'
 import type { Database } from '../src/lib/database.types.ts'
-
-const here = dirname(fileURLToPath(import.meta.url))
-const repoRoot = resolve(here, '../../..')
-
-// The two chain settings from apps/web/.env.local when the environment does not set them.
-const envFile = resolve(here, '../.env.local')
-if (existsSync(envFile))
-  for (const line of readFileSync(envFile, 'utf8').split('\n')) {
-    const [, name, value] = line.match(/^(RPC_URL_31337|FACTORY_ADDRESS_31337)=(.*)$/) ?? []
-    if (name && value && process.env[name] === undefined) process.env[name] = value.trim()
-  }
-
-let statusCache: Record<string, string> | null = null
-function supabaseStatus(): Record<string, string> {
-  if (statusCache) return statusCache
-  const out = execFileSync('supabase', ['status', '-o', 'env'], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  })
-  statusCache = {}
-  for (const line of out.split('\n')) {
-    const [, name, value] = line.match(/^([A-Z0-9_]+)=(.*)$/) ?? []
-    if (name && value !== undefined) statusCache[name] = value.replace(/^"(.*)"$/, '$1')
-  }
-  return statusCache
-}
-
-function config(envName: string, statusNames: string[], fallback?: string): string {
-  const fromEnv = process.env[envName]
-  if (fromEnv) return fromEnv
-  const status = supabaseStatus()
-  for (const name of statusNames) if (status[name]) return status[name]
-  if (fallback !== undefined) return fallback
-  throw new Error(`${envName} is unset and \`supabase status\` did not report ${statusNames.join(' or ')}`)
-}
+import {
+  adminClient,
+  clientOptions,
+  localConfig,
+  localDeps,
+  storageClient,
+  type LocalClient,
+  type LocalDeps,
+} from './render-deps.ts'
 
 const { factoryAbi, isLocalUrl, enqueueRender } = await import('@cobweb/shared')
 
-const url = config('NEXT_PUBLIC_SUPABASE_URL', ['API_URL'])
-const publishableKey = config('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY', ['PUBLISHABLE_KEY', 'ANON_KEY'])
-const serviceKey = config('SUPABASE_SERVICE_ROLE_KEY', ['SERVICE_ROLE_KEY', 'SECRET_KEY'])
-const storage = {
-  ART_S3_ENDPOINT: config('ART_S3_ENDPOINT', ['STORAGE_S3_URL']),
-  ART_S3_REGION: config('ART_S3_REGION', ['S3_PROTOCOL_REGION'], 'local'),
-  ART_S3_ACCESS_KEY_ID: config('ART_S3_ACCESS_KEY_ID', ['S3_PROTOCOL_ACCESS_KEY_ID']),
-  ART_S3_SECRET_ACCESS_KEY: config('ART_S3_SECRET_ACCESS_KEY', ['S3_PROTOCOL_ACCESS_KEY_SECRET']),
-  ART_S3_FORCE_PATH_STYLE: '1',
-}
-const ART_BUCKET = config('ART_S3_BUCKET', [], 'art')
-const RENDER_BUCKET = config('RENDER_S3_BUCKET', [], 'render')
-// The web app's storage module reads ART_S3_* and RENDER_S3_BUCKET from the environment (check 1b).
-for (const [name, value] of Object.entries(storage)) process.env[name] ??= value
-process.env.ART_S3_BUCKET ??= ART_BUCKET
-process.env.RENDER_S3_BUCKET ??= RENDER_BUCKET
-const rpc = process.env.RPC_URL_31337
-const factoryEnv = process.env.FACTORY_ADDRESS_31337
-if (!rpc || !factoryEnv) {
-  console.error(
-    'Set RPC_URL_31337 and FACTORY_ADDRESS_31337: run `pnpm --filter @cobweb/web chain:local` and copy its two lines into apps/web/.env.local.',
-  )
-  process.exit(2)
-}
-for (const endpoint of [url, rpc, storage.ART_S3_ENDPOINT])
-  if (!isLocalUrl(endpoint)) {
-    // The host only: a hosted RPC URL carries its key in the path.
-    let host = 'an unreadable address'
-    try {
-      host = new URL(endpoint).host
-    } catch {
-      // Keep the placeholder.
-    }
-    console.error(`Refusing to run: ${host} is not local (expected localhost or 127.0.0.1).`)
-    process.exit(2)
-  }
-const factory = getAddress(factoryEnv)
+// Every local setting, with non-local endpoints refused (scripts/render-deps.ts, shared with render:local).
+// It also fills the environment the web app's storage module and the worker's chain adapter read.
+const settings = localConfig()
+const { url, publishableKey, rpc, factory } = settings
+const ART_BUCKET = settings.artBucket
+const RENDER_BUCKET = settings.renderBucket
 
 // Imported after the environment is set, so the shared clients read the local chain settings.
 const { confirmCore, loadJob, lockCore, lockPlaceholderCore, retryCore, reviewLock, unlockCore } =
@@ -153,16 +84,14 @@ const worker = await import('@cobweb/worker')
 const local = await import('@cobweb/worker/local')
 type LockContext = import('../src/lib/art/lock-core.ts').LockContext
 type LockOutcome<T> = import('../src/lib/art/lock-core.ts').LockOutcome<T>
-type Deps = import('@cobweb/worker').Deps
 type RenderMessage = import('@cobweb/shared/render-queue').RenderMessage
 type Pinner = import('@cobweb/worker').Pinner
 type MemoryQueue = import('@cobweb/worker/local').MemoryQueue
 
-const clientOptions = { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } }
-type Client = ReturnType<typeof createClient<Database>>
-const admin: Client = createClient<Database>(url, serviceKey, clientOptions)
+type Client = LocalClient
+const admin: Client = adminClient(settings)
 const chain = createTestClient({ chain: anvil, mode: 'anvil', transport: http(rpc) }).extend(publicActions)
-const s3 = new S3Client(worker.artS3Options(storage))
+const s3 = storageClient(settings)
 const pins = mkdtempSync(join(tmpdir(), 'cobweb-verify-render-'))
 const CID = /^[a-z2-7]{59}$/
 
@@ -541,26 +470,26 @@ const logLines: string[] = []
 /** How many times the worker read a payment from the chain (the production adapter, counted). */
 let chainReads = 0
 
-/** The worker's ports: the production adapters for the database, storage and the chain; local doubles for the rest. */
-function depsFor(queue: MemoryQueue, pinner: Pinner): Deps & { queue: MemoryQueue } {
+/** The worker's ports from the shared module, with the chain reads counted and the log kept for a failure. */
+function depsFor(queue: MemoryQueue, pinner: Pinner): LocalDeps {
   const realChain = worker.viemChain(process.env)
-  return {
-    jobs: worker.supabaseJobs(admin),
-    store: worker.s3Store({ client: s3, bucket: ART_BUCKET }, { client: s3, bucket: RENDER_BUCKET }),
+  return localDeps(settings, {
+    admin,
+    s3,
+    queue,
+    pinner,
     chain: {
       jobPayment: async (job) => {
         chainReads += 1
         return realChain.jobPayment(job)
       },
     },
-    pinner,
-    queue,
     log: (event, fields = {}) => void logLines.push(`${event} ${JSON.stringify(fields)}`),
-  }
+  })
 }
 
 /** Enqueues the job's start message and drains the queue, as Vercel Queues and the consumer would. */
-async function render(jobId: string, deps: Deps & { queue: MemoryQueue }, retries = 0) {
+async function render(jobId: string, deps: LocalDeps, retries = 0) {
   await enqueueRender(deps.queue, { id: jobId, retries })
   return local.runLocal(deps)
 }
@@ -966,7 +895,7 @@ async function main(): Promise<void> {
   // The sweep's view 16 minutes from now of one job only: `render_jobs.updated_at` is kept by a trigger,
   // so a job cannot be backdated, and a job another developer left open in the local database must not be
   // touched. The id filter goes into the query itself, before its limit.
-  const sweepDeps = (deps: Deps & { queue: MemoryQueue }, jobId: string) => {
+  const sweepDeps = (deps: LocalDeps, jobId: string) => {
     const later = worker.supabaseJobs(admin, { now: () => Date.now() + 16 * 60_000 })
     return { ...deps, jobs: { ...deps.jobs, stuck: (minutes: number) => later.stuck(minutes, jobId) } }
   }
