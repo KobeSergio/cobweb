@@ -21,10 +21,17 @@ export type PhaseContext = {
   maxSupply: number
   /** Tokens airdropped (and burned): collection supply no phase can sell. */
   airdropped: number
-  /** The chain's time at the read; the dialogs' clocks start from it. Never liveness. */
+  /** The chain's time at the read; a new start defaults to a day after it. Never liveness. */
   blockTimestamp: number
+  /**
+   * The chain's estimated time now (the screen's `useChainClock`): the dialogs' relative labels, the
+   * calendar's first day and the schedule warning run on it. Never liveness.
+   */
+  now: number
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Every failure's sentence: the screen toasts it when its dialog was closed or replaced since. */
+  onFailed: (message: string) => void
   /** Phases' server: every confirm answers the fresh view. */
   server: PhasesServer
 }
@@ -69,6 +76,7 @@ export function StatusDialog({
       successMessage={nextStatus ? `${group.name} is open` : `${group.name} is closed`}
       request={phaseRequest(nextStatus ? phaseCalls.open(group.id) : phaseCalls.close(group.id), ctx)}
       onConfirmed={onView}
+      onFailed={ctx.onFailed}
     >
       <ul className="text-muted-foreground grid list-disc gap-1.5 pl-5 text-sm">
         {!nextStatus && group.scheduledStart > 0 && (
@@ -117,6 +125,7 @@ export function CloseAllDialog({ onView, ...ctx }: PhaseContext & { onView: (vie
       successMessage="Every phase is closed"
       request={phaseRequest(phaseCalls.closeAll(), ctx)}
       onConfirmed={onView}
+      onFailed={ctx.onFailed}
     >
       {scheduled.length > 0 && (
         <p className="text-muted-foreground text-sm">
@@ -146,6 +155,7 @@ export function ClearScheduleDialog({
       successMessage={`${group.name} is no longer scheduled`}
       request={phaseRequest(phaseCalls.clearSchedule(group.id), ctx)}
       onConfirmed={onView}
+      onFailed={ctx.onFailed}
     />
   )
 }
@@ -172,6 +182,7 @@ export function PriceDialog({
       successMessage={`${group.name} price changed`}
       request={phaseRequest(wei && !unchanged ? phaseCalls.price(group.id, wei) : null, ctx)}
       onConfirmed={onView}
+      onFailed={ctx.onFailed}
     >
       <PriceInput
         id={`${id}-price`}
@@ -217,6 +228,7 @@ export function SupplyDialog({
         ctx,
       )}
       onConfirmed={onView}
+      onFailed={ctx.onFailed}
     >
       <Field data-invalid={!!error}>
         <FieldLabel htmlFor={`${id}-supply`}>Max supply</FieldLabel>
@@ -269,6 +281,7 @@ export function PublicCapDialog({
       successMessage="Public limit changed"
       request={phaseRequest(error || next === cap ? null : phaseCalls.publicCap(next), ctx)}
       onConfirmed={onView}
+      onFailed={ctx.onFailed}
     >
       <Field data-invalid={!!error}>
         <FieldLabel htmlFor={`${id}-cap`}>Per wallet</FieldLabel>

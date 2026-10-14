@@ -46,9 +46,15 @@ export type TransactionDialogProps<T> = {
   chain: SupportedChain
   /** Shown in the toast and the done state, e.g. "Owl List is open". */
   successMessage: string
-  /** The server's answer once the change is confirmed: the fresh view on Phases, the hash on a tab still on sample data. */
+  /**
+   * The server's answer once the change is confirmed: the fresh view on Phases, the hash on a tab still on
+   * sample data. Called even when the run ends after the dialog closed or unmounted.
+   */
   onConfirmed?: (result: T) => void
-  /** The failure's sentence, when the sequence ends without a confirmed change. */
+  /**
+   * The failure's sentence, when the sequence ends without a confirmed change. Called even when the run ends
+   * after the dialog closed or unmounted, where only the parent can still tell the creator.
+   */
   onFailed?: (message: string) => void
   className?: string
 }
@@ -81,18 +87,20 @@ export function TransactionDialog<T>({
   const [phase, dispatch] = useReducer(deployReducer, TX_IDLE)
   const [switching, setSwitching] = useState(false)
   const run = useRef(0)
+  // False once the dialog has unmounted (another dialog opened in its place): a run still in flight then
+  // updates no state here, but its end still reaches the parent's callbacks.
+  const mounted = useRef(true)
   const resetTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const running = isTxRunning(phase)
   // A change sent but not confirmed in time is checked again, never sent again.
   const sentHash = retryHash(phase)
 
-  useEffect(
-    () => () => {
-      // Unmounted: drop any step still in flight.
-      run.current++
-    },
-    [],
-  )
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
 
   function reset() {
     run.current++
@@ -101,7 +109,8 @@ export function TransactionDialog<T>({
 
   function handleOpenChange(next: boolean) {
     clearTimeout(resetTimer.current)
-    // A transaction in flight keeps going if the dialog closes; the toast reports the result.
+    // A transaction in flight keeps going if the dialog closes; the parent's callbacks and the toast still
+    // report its end.
     if (!next && !running) resetTimer.current = setTimeout(reset, 200)
     onOpenChange(next)
   }
@@ -109,15 +118,21 @@ export function TransactionDialog<T>({
   async function start(checkHash?: Hex) {
     if (!request) return
     const current = request
+    // The parent's callbacks as they were when the run started: they answer its end even after the dialog
+    // closed or unmounted, so a late success still applies and a late failure still reaches the creator.
+    const confirmed = onConfirmed
+    const failed = onFailed
     const id = ++run.current
     // Each run starts from idle: a refusal before any step is its first event, and must not keep the last
     // run's step or transaction.
     dispatch({ type: 'set', phase: TX_IDLE })
     const last: { failure: TxFailure | null } = { failure: null }
     const report = (event: DeployEvent) => {
+      // A run superseded within this dialog (Try again, Back) reports nothing more.
       if (id !== run.current) return
       if (event.type === 'failed') last.failure = event.failure
-      dispatch(event)
+      // An unmounted dialog has no state to update; its parent still hears the end below.
+      if (mounted.current) dispatch(event)
     }
     setSwitching(!sample && !checkHash && account.chainId !== chainId)
     const call = current.call
@@ -156,11 +171,11 @@ export function TransactionDialog<T>({
     }
     if (id !== run.current) return
     if (result !== null) {
-      onConfirmed?.(result)
+      confirmed?.(result)
       toast.success(successMessage)
       return
     }
-    if (last.failure) onFailed?.(last.failure.message)
+    if (last.failure) failed?.(last.failure.message)
   }
 
   function submit(event: React.FormEvent) {

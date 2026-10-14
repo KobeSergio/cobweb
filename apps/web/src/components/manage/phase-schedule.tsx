@@ -13,7 +13,6 @@ import { Switch } from '@cobweb/ui/components/switch'
 import { deployReducer, type DeployEvent } from '@/components/deploy/deploy-machine'
 import { classifyError } from '@/components/deploy/tx-errors'
 import { isTxRunning, TX_IDLE, TxProgress, type TxFailure } from '@/components/deploy/tx-progress'
-import { useChainClock } from '@/components/mint/use-chain-clock'
 import {
   explorerTxUrl,
   formatUtc,
@@ -47,8 +46,8 @@ const fromCalendarDay = (date: Date) =>
 /**
  * Date and time in the creator's time zone, with what that means in UTC and the exact value
  * the transaction sends. Warns when the time has already passed on chain, or does not exist in the
- * zone (skipped by a daylight-saving change). `now` is the chain's estimated time (`useChainClock`):
- * it moves the labels, the calendar's first day and the warning, never liveness.
+ * zone (skipped by a daylight-saving change). `now` is the chain's estimated time (the screen's
+ * `useChainClock`): it moves the labels, the calendar's first day and the warning, never liveness.
  */
 function StartPicker({
   value,
@@ -149,7 +148,6 @@ export function ScheduleDialog({
   ...ctx
 }: PhaseContext & { group: MintGroup; onView: (view: PhasesView) => void }) {
   const timeZone = useTimeZone()
-  const now = useChainClock(ctx.blockTimestamp)
   const [start, setStart] = useState<ZonedStart>(() =>
     group.scheduledStart > 0
       ? unixToZoned(group.scheduledStart, timeZone)
@@ -167,8 +165,9 @@ export function ScheduleDialog({
       successMessage={`${group.name} is scheduled`}
       request={phaseRequest(unix === null ? null : phaseCalls.schedule(group.id, unix), ctx)}
       onConfirmed={onView}
+      onFailed={ctx.onFailed}
     >
-      <StartPicker value={start} onChange={setStart} now={now} timeZone={timeZone} />
+      <StartPicker value={start} onChange={setStart} now={ctx.now} timeZone={timeZone} />
     </TransactionDialog>
   )
 }
@@ -191,7 +190,6 @@ export function AddPhaseDialog({
 }) {
   const id = useId()
   const timeZone = useTimeZone()
-  const now = useChainClock(ctx.blockTimestamp)
   const { actions } = useManageActions()
   const [nextId, setNextId] = useState<number | null>(null)
   const [idUnread, setIdUnread] = useState(false)
@@ -271,6 +269,7 @@ export function AddPhaseDialog({
           : null
       }
       onConfirmed={onView}
+      onFailed={ctx.onFailed}
     >
       <div className="grid gap-5">
         <PhaseDetailsFields
@@ -314,7 +313,7 @@ export function AddPhaseDialog({
           <Switch id={`${id}-scheduled`} checked={scheduled} onCheckedChange={setScheduled} />
           <FieldLabel htmlFor={`${id}-scheduled`}>Schedule a start</FieldLabel>
         </Field>
-        {scheduled && <StartPicker value={start} onChange={setStart} now={now} timeZone={timeZone} />}
+        {scheduled && <StartPicker value={start} onChange={setStart} now={ctx.now} timeZone={timeZone} />}
         {idUnread ? (
           <p className="text-destructive-foreground text-[0.8125rem]">
             The contract could not be read for the next phase id. Close this and try again.

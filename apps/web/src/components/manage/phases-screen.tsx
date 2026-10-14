@@ -91,6 +91,9 @@ export function PhasesScreen({
   // The dialog stays mounted after it closes, so a transaction still confirming can finish.
   const [dialog, setDialog] = useState<OpenDialog | null>(null)
   const [open, setOpen] = useState(false)
+  // The key of the dialog on screen, if any: a failure that reaches a closed or replaced dialog is toasted.
+  const shownKey = useRef<number | null>(null)
+  shownKey.current = dialog && open ? dialog.key : null
   const [pending, setPending] = useState<PendingAdd | null>(null)
   const [reading, setReading] = useState(false)
   // Sample mode: what the simulated wallet sent, by hash, so the sample server applies exactly that call.
@@ -200,8 +203,13 @@ export function PhasesScreen({
     maxSupply: view.maxSupply,
     airdropped,
     blockTimestamp: view.blockTimestamp,
+    now,
     open,
     onOpenChange: setOpen,
+    // The dialog on screen shows its own failure; one closed or replaced since says it in a toast.
+    onFailed: (message) => {
+      if (shownKey.current !== dialog?.key) toast.error(message)
+    },
     server,
   }
   const dialogTarget = dialog ? view.groups.find((group) => group.id === dialog.groupId) : undefined
@@ -243,6 +251,7 @@ export function PhasesScreen({
             groups={view.groups}
             maxSupply={view.maxSupply}
             totalMinted={view.totalMinted}
+            reachable={reachable}
             onEdit={reachable ? (groupId) => act('supply', groupId) : undefined}
           />
         </Panel>

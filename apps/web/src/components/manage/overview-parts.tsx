@@ -18,7 +18,8 @@ import { count, localDateTime, percent, relativeTo, shortUtc, useTimeZone } from
 /**
  * The phases the chain reports as live, and the next one scheduled. Live comes from each
  * group's `active` field only; the schedule is shown as a time, never used to decide liveness.
- * While the contract cannot be read (`reachable` false), no phase is shown as live.
+ * While the contract cannot be read (`reachable` false), neither the live phases nor the next scheduled
+ * one is shown: the copy's schedule cannot say whether a phase has opened.
  */
 export function LiveNow({
   groups,
@@ -82,7 +83,7 @@ export function LiveNow({
       )}
 
       <div className="border-t pt-4">
-        {next ? (
+        {!reachable ? null : next ? (
           <div className="flex gap-3">
             <CalendarClockIcon aria-hidden="true" className="text-muted-foreground mt-0.5 size-4 shrink-0" />
             <div className="min-w-0 text-sm">

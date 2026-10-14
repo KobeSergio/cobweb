@@ -7,17 +7,21 @@ import { count, percent } from './format'
  * colour, filled with the accent as far as it has minted; what no phase holds is a dashed outline.
  * Every segment is labelled underneath, and a live phase says so in its label. No other shades. Airdrops use collection supply outside any
  * phase, so they can leave less mintable than the allocations add up to. With `onEdit`, each
- * phase's label opens its allocation (max supply) dialog.
+ * phase's label opens its allocation (max supply) dialog. While the contract cannot be read
+ * (`reachable` false), only the allocations show: no minted figures, airdropped or still mintable.
  */
 export function SupplyMap({
   groups,
   maxSupply,
   totalMinted,
+  reachable = true,
   onEdit,
 }: {
   groups: MintGroup[]
   maxSupply: number
   totalMinted: number
+  /** False while the groups are the copy, whose minted counts are unknown. */
+  reachable?: boolean
   onEdit?: (groupId: number) => void
 }) {
   const allocated = groups.reduce((sum, group) => sum + group.maxSupply, 0)
@@ -39,10 +43,12 @@ export function SupplyMap({
               className="bg-surface-3 relative min-w-2 overflow-hidden rounded-md"
               style={{ flexGrow: Math.max(1, group.maxSupply), flexBasis: 0 }}
             >
-              <span
-                className="bg-primary absolute inset-y-0 left-0"
-                style={{ width: `${percent(group.minted, group.maxSupply)}%` }}
-              />
+              {reachable && (
+                <span
+                  className="bg-primary absolute inset-y-0 left-0"
+                  style={{ width: `${percent(group.minted, group.maxSupply)}%` }}
+                />
+              )}
             </div>
           ))}
           {unallocated > 0 && (
@@ -58,7 +64,11 @@ export function SupplyMap({
               key={group.id}
               className="min-w-2 overflow-hidden"
               style={{ flexGrow: Math.max(1, group.maxSupply), flexBasis: 0 }}
-              title={`${group.name}: ${count(group.minted)} of ${count(group.maxSupply)} minted`}
+              title={
+                reachable
+                  ? `${group.name}: ${count(group.minted)} of ${count(group.maxSupply)} minted`
+                  : `${group.name}: ${count(group.maxSupply)} allocated`
+              }
             >
               {onEdit ? (
                 <button
@@ -66,10 +76,10 @@ export function SupplyMap({
                   onClick={() => onEdit(group.id)}
                   className="group/label focus-visible:ring-ring/50 block w-full min-w-0 rounded-sm text-left outline-none focus-visible:ring-[3px]"
                 >
-                  <SupplyLabel group={group} editable />
+                  <SupplyLabel group={group} reachable={reachable} editable />
                 </button>
               ) : (
-                <SupplyLabel group={group} />
+                <SupplyLabel group={group} reachable={reachable} />
               )}
             </li>
           ))}
@@ -87,13 +97,15 @@ export function SupplyMap({
       </div>
 
       <ul aria-hidden="true" className="text-muted-foreground flex flex-wrap gap-x-5 gap-y-1 text-xs">
-        <li className="flex items-center gap-1.5">
-          <span className="bg-primary size-2.5 rounded-xs" />
-          Minted
-        </li>
+        {reachable && (
+          <li className="flex items-center gap-1.5">
+            <span className="bg-primary size-2.5 rounded-xs" />
+            Minted
+          </li>
+        )}
         <li className="flex items-center gap-1.5">
           <span className="bg-surface-3 size-2.5 rounded-xs" />
-          Allocated, not minted yet
+          {reachable ? 'Allocated, not minted yet' : 'Allocated'}
         </li>
         {unallocated > 0 && (
           <li className="flex items-center gap-1.5">
@@ -114,16 +126,20 @@ export function SupplyMap({
           <dt className="text-muted-foreground">Not allocated</dt>
           <dd className="numeric text-base">{count(unallocated)}</dd>
         </div>
-        <div>
-          <dt className="text-muted-foreground">Airdropped</dt>
-          <dd className="numeric text-base">{count(airdropped)}</dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">Still mintable</dt>
-          <dd className="numeric text-base">{count(mintable)}</dd>
-        </div>
+        {reachable && (
+          <>
+            <div>
+              <dt className="text-muted-foreground">Airdropped</dt>
+              <dd className="numeric text-base">{count(airdropped)}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Still mintable</dt>
+              <dd className="numeric text-base">{count(mintable)}</dd>
+            </div>
+          </>
+        )}
       </dl>
-      {airdropped > 0 && mintable < phasesLeft && (
+      {reachable && airdropped > 0 && mintable < phasesLeft && (
         <p className="text-muted-foreground text-[0.8125rem]">
           Airdrops used {count(airdropped)} tokens of collection supply, so the phases can mint{' '}
           <span className="numeric">{count(mintable)}</span> more, not the{' '}
@@ -134,8 +150,19 @@ export function SupplyMap({
   )
 }
 
-/** A phase's name and minted of allocation under its segment; underlined when it opens the dialog. */
-function SupplyLabel({ group, editable }: { group: MintGroup; editable?: boolean }) {
+/**
+ * A phase's name and minted of allocation under its segment, or only its allocation while the contract
+ * cannot be read; underlined when it opens the dialog.
+ */
+function SupplyLabel({
+  group,
+  reachable,
+  editable,
+}: {
+  group: MintGroup
+  reachable: boolean
+  editable?: boolean
+}) {
   return (
     <>
       <span
@@ -154,8 +181,17 @@ function SupplyLabel({ group, editable }: { group: MintGroup; editable?: boolean
         </span>
       )}
       <span className="numeric text-muted-foreground block truncate text-xs">
-        {count(group.minted)} / {count(group.maxSupply)}
-        <span className="sr-only"> minted{editable && ', change allocation'}</span>
+        {reachable ? (
+          <>
+            {count(group.minted)} / {count(group.maxSupply)}
+            <span className="sr-only"> minted{editable && ', change allocation'}</span>
+          </>
+        ) : (
+          <>
+            {count(group.maxSupply)}
+            <span className="sr-only"> allocated{editable && ', change allocation'}</span>
+          </>
+        )}
       </span>
     </>
   )
