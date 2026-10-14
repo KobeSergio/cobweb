@@ -44,6 +44,7 @@ pnpm --filter @cobweb/web verify:render   # the render worker end to end against
 pnpm --filter @cobweb/worker test         # the render worker: steps, adapters, the queue consumer
 pnpm --filter @cobweb/worker bench        # one batch of 100 tokens at 2048 x 2048: time, memory, CAR size
 pnpm --filter @cobweb/web verify:deploy   # prepare, deploy through the factory, confirm from the event, the refusals, against local Supabase and Anvil
+pnpm --filter @cobweb/web verify:phases   # the chain read, each phase change sent and confirmed from its receipt, the refusals and the copy, against local Supabase and Anvil
 pnpm --filter @cobweb/web render:local <collectionId>   # renders the collection's paid jobs on the laptop against local Supabase, local storage and Anvil; CARs go to a temp folder
 ```
 

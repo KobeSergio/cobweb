@@ -18,7 +18,8 @@
     "verify:sweep": "node --conditions=react-server scripts/verify-sweep.ts",
     "verify:render": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-render.ts",
     "render:local": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/render-local.ts",
-    "verify:deploy": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-deploy.ts"
+    "verify:deploy": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-deploy.ts",
+    "verify:phases": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-phases.ts"
   },
   "devDependencies": {
     "@ipld/car": "5.4.7",
