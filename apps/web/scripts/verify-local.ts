@@ -1042,6 +1042,7 @@ async function main(): Promise<void> {
   await artEdits(A, B)
   await artLockAndPay(A, B)
   await artRenderState(A, B)
+  await artRenderCredit(A, B)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2964,7 +2965,7 @@ async function renderFixture(A: Creator, payer: string, tag: number, pay = true)
     )
     if (paid.error) throw new Error(`setup: pay: ${describe(paid.error)}`)
   }
-  return { cid, jobId }
+  return { cid, jobId, list }
 }
 
 type RenderJobCheck = {
@@ -4551,11 +4552,331 @@ async function artRenderState(A: Creator, B: Creator): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------------------------
+// 9i. The render credit: art_unlock on a failed paid job, private.render_credit through
+// art_render_credit, and art_lock recording a credited lock waived
+// (docs/specs/2026-10-14-render-screen-wiring.md, section 4)
+// ---------------------------------------------------------------------------------------------
+
+/** Takes a paid one-batch job to `failed` the way the worker does: the claim, a start, a final failure. */
+async function failRender(jobId: string, code: string, message: string): Promise<string | null> {
+  const { failed } = await runSteps(
+    [
+      ['art_claim_render', { p_job_id: jobId }],
+      ['art_batch_start', { p_job_id: jobId, p_index: 0 }],
+      ['art_batch_failed', { p_job_id: jobId, p_index: 0, p_code: code, p_message: message, p_final: true }],
+    ],
+    async () => '',
+  )
+  return failed
+}
+
+type CreditRow = {
+  id: string
+  state: string
+  error: string | null
+  error_code: string | null
+  finished_at: string | null
+  retries: number
+  payment_tx_hash: string | null
+  waived_by: string | null
+  waived_reason: string | null
+  credit_job_id: string | null
+  paid_at: string | null
+  quote_total_wei: string
+  quote_chain_id: number | null
+  quote_payer: string | null
+  quote_factory: string | null
+  quote_expires_at: string | null
+}
+
+async function creditRow(id: string): Promise<CreditRow> {
+  const { data, error } = await admin
+    .from('render_jobs')
+    .select(
+      'id, state, error, error_code, finished_at, retries, payment_tx_hash, waived_by, waived_reason, credit_job_id, paid_at, quote_total_wei::text, quote_chain_id, quote_payer, quote_factory, quote_expires_at',
+    )
+    .eq('id', id)
+    .single()
+  if (error) throw new Error(`credit row: ${describe(error as DbError)}`)
+  return data as unknown as CreditRow
+}
+
+const PINNED_ELSEWHERE = 'The pinning service answered with a different CID.'
+
+const creditOf = async (client: SupabaseClient, cid: string, count: number) =>
+  callArt(client, 'art_render_credit', { p_collection_id: cid, p_token_count: count })
+
+async function artRenderCredit(A: Creator, B: Creator): Promise<void> {
+  const payer = A.account.address.toLowerCase()
+  // A paid job failed by the worker, unlocked, then locked again on its credit.
+  const paid = await renderFixture(A, payer, 131)
+  // A paid job failed with payment-mismatch before the claim: no unlock, no credit.
+  const mismatch = await renderFixture(A, payer, 132)
+  // A paid job claimed and left rendering.
+  const rendering = await renderFixture(A, payer, 133)
+  // A paid job taken to done.
+  const finished = await renderFixture(A, payer, 134)
+  // A job waiting for payment, unlocked while unpaid.
+  const unpaid = await renderFixture(A, payer, 135, false)
+  let credited = ''
+
+  await check('render credit: the column exists and a credit link needs a waiver', async () => {
+    const row = await admin.from('render_jobs').select('credit_job_id').limit(1)
+    if (row.error) return describe(row.error as DbError)
+    const bad = await admin.from('render_jobs').update({ credit_job_id: paid.jobId }).eq('id', mismatch.jobId)
+    return expectError(bad.error as DbError, CHECK)
+  })
+
+  await check(
+    'art_unlock: a paid job the worker failed is unlocked, keeps its sentence and takes the code unlocked',
+    async () => {
+      const failed = await failRender(paid.jobId, 'cid-mismatch', PINNED_ELSEWHERE)
+      if (failed) return `setup: ${failed}`
+      const before = await creditRow(paid.jobId)
+      if (before.state !== 'failed' || (await lockState(paid.cid)).status !== 'art_locked')
+        return `setup: ${JSON.stringify(before)}`
+      const { error } = await callArt(A.client, 'art_unlock', { p_collection_id: paid.cid })
+      if (error) return describe(error)
+      const job = await creditRow(paid.jobId)
+      const state = await lockState(paid.cid)
+      const batch = (await batchesOf(paid.jobId))[0]
+      return job.state === 'failed' &&
+        job.error === PINNED_ELSEWHERE &&
+        job.error_code === 'unlocked' &&
+        job.finished_at === before.finished_at &&
+        job.retries === before.retries &&
+        job.payment_tx_hash === before.payment_tx_hash &&
+        batch?.state === 'failed' &&
+        state.art_locked_at === null &&
+        state.status === 'draft' &&
+        state.max_supply === null
+        ? null
+        : `${JSON.stringify(job)} ${JSON.stringify(batch)} ${JSON.stringify(state)}`
+    },
+  )
+
+  await check(
+    'art_render_credit: the owner sees the credit for the same count and a smaller one, none for a larger one',
+    async () => {
+      const same = await creditOf(A.client, paid.cid, 3)
+      if (same.error) return describe(same.error)
+      const smaller = await creditOf(A.client, paid.cid, 2)
+      if (smaller.error) return describe(smaller.error)
+      const larger = await creditOf(A.client, paid.cid, 4)
+      if (larger.error) return describe(larger.error)
+      return same.data === paid.jobId && smaller.data === paid.jobId && larger.data === null
+        ? null
+        : JSON.stringify({ same: same.data, smaller: smaller.data, larger: larger.data })
+    },
+  )
+
+  await check("art_render_credit: B's session on A's collection is refused as not found", async () => {
+    const { error } = await creditOf(B.client, paid.cid, 3)
+    return expectSentence(error, PERMISSION, 'collection not found')
+  })
+
+  await check('art_render_credit: the service role and a signed-out caller cannot execute it', async () => {
+    const problems: string[] = []
+    for (const [who, client] of [
+      ['service role', admin],
+      ['signed out', anon],
+    ] as const) {
+      const { error } = await creditOf(client, paid.cid, 3)
+      const problem = expectSentence(error, PERMISSION, 'permission denied')
+      if (problem) problems.push(`${who}: ${problem}`)
+    }
+    return problems.length ? problems.join('; ') : null
+  })
+
+  await check(
+    'art_lock: the next lock at the same count is waived on the credit, with the quote filled and the link set',
+    async () => {
+      const { data, error } = await callArt(admin, 'art_lock', lockArgs(A.userId, paid.cid, paid.list, payer))
+      if (error) return describe(error)
+      credited = idOf(data)
+      const job = await creditRow(credited)
+      const state = await lockState(paid.cid)
+      return job.state === 'waived' &&
+        job.waived_by === A.userId &&
+        job.waived_reason === 'credit' &&
+        job.credit_job_id === paid.jobId &&
+        job.paid_at !== null &&
+        job.payment_tx_hash === null &&
+        job.quote_total_wei === '75000000000000' &&
+        job.quote_chain_id === 31337 &&
+        job.quote_payer === payer &&
+        job.quote_factory === FACTORY_ADDRESS &&
+        job.quote_expires_at !== null &&
+        state.art_locked_at !== null &&
+        state.status === 'art_locked'
+        ? null
+        : `${JSON.stringify(job)} ${JSON.stringify(state)}`
+    },
+  )
+
+  await check('art_render_credit: a used credit is no longer offered', async () => {
+    const { data, error } = await creditOf(A.client, paid.cid, 3)
+    if (error) return describe(error)
+    return data === null ? null : `still offered: ${JSON.stringify(data)}`
+  })
+
+  await check('art_unlock: a waived job waiting for a worker stays locked', async () => {
+    const { error } = await callArt(A.client, 'art_unlock', { p_collection_id: paid.cid })
+    return expectSentence(error, CHECK, 'The art is paid for and stays locked.')
+  })
+
+  await check(
+    'render credit: a credited job that fails and is unlocked is the next credit, and the one before it stays used',
+    async () => {
+      const failed = await failRender(credited, 'dead-letter', 'The render stopped after three tries.')
+      if (failed) return `setup: ${failed}`
+      const unlock = await callArt(A.client, 'art_unlock', { p_collection_id: paid.cid })
+      if (unlock.error) return `unlock: ${describe(unlock.error)}`
+      const job = await creditRow(credited)
+      if (job.state !== 'failed' || job.error_code !== 'unlocked' || job.waived_reason !== 'credit')
+        return JSON.stringify(job)
+      const { data, error } = await creditOf(A.client, paid.cid, 3)
+      if (error) return describe(error)
+      return data === credited ? null : `credit ${JSON.stringify(data)}, expected the credited job`
+    },
+  )
+
+  await check('art_unlock: an already unlocked job is refused as not locked', async () => {
+    const { error } = await callArt(A.client, 'art_unlock', { p_collection_id: paid.cid })
+    return expectSentence(error, CHECK, 'The art is not locked.')
+  })
+
+  await check(
+    'art_lock: a larger lock pays in full and leaves the credit for a later, smaller lock',
+    async () => {
+      // A fourth token, so the next lock asks for more than the credit covers.
+      const first = await admin
+        .from('tokens')
+        .select('art_collection_id, dna')
+        .eq('collection_id', paid.cid)
+        .eq('token_id', 1)
+        .single()
+      if (first.error) return `setup: ${describe(first.error as DbError)}`
+      const art = first.data.art_collection_id
+      const dna = first.data.dna as string[]
+      const insert = await A.client.from('tokens').insert(tokenRow(paid.cid, art, 4, dna))
+      if (insert.error) return `setup: ${describe(insert.error as DbError)}`
+      const list = [...paid.list, { id: 4, collectionId: art, dna }]
+      const { data, error } = await callArt(admin, 'art_lock', lockArgs(A.userId, paid.cid, list, payer))
+      if (error) return describe(error)
+      const job = await creditRow(idOf(data))
+      if (job.state !== 'payment_due' || job.credit_job_id !== null || job.waived_by !== null)
+        return JSON.stringify(job)
+      const offered = await creditOf(A.client, paid.cid, 3)
+      if (offered.error) return describe(offered.error)
+      if (offered.data !== credited)
+        return `credit ${JSON.stringify(offered.data)} while a larger lock is open`
+      // Cancelled unpaid: the lock opens again and the credit is untouched.
+      const unlock = await callArt(A.client, 'art_unlock', { p_collection_id: paid.cid })
+      if (unlock.error) return `unlock: ${describe(unlock.error)}`
+      const cancelled = await creditRow(job.id)
+      const again = await creditOf(A.client, paid.cid, 3)
+      return cancelled.state === 'failed' &&
+        cancelled.error === 'unlocked' &&
+        cancelled.error_code === 'unlocked' &&
+        cancelled.payment_tx_hash === null &&
+        again.data === credited
+        ? null
+        : `${JSON.stringify(cancelled)} credit ${JSON.stringify(again.data)}`
+    },
+  )
+
+  await check('art_unlock: a job failed with payment-mismatch is refused, and leaves no credit', async () => {
+    const { error: fail } = await callArt(admin, 'art_batch_failed', {
+      p_job_id: mismatch.jobId,
+      p_index: null,
+      p_code: 'payment-mismatch',
+      p_message: 'The payment could not be verified on chain.',
+      p_final: true,
+    })
+    if (fail) return `setup: ${describe(fail)}`
+    const { error } = await callArt(A.client, 'art_unlock', { p_collection_id: mismatch.cid })
+    const refused = expectSentence(
+      error,
+      CHECK,
+      'The payment for this job could not be verified. Tell support about it.',
+    )
+    if (refused) return refused
+    const state = await lockState(mismatch.cid)
+    const credit = await creditOf(A.client, mismatch.cid, 1)
+    return state.art_locked_at !== null && credit.data === null
+      ? null
+      : `${JSON.stringify(state)} credit ${JSON.stringify(credit.data)}`
+  })
+
+  await check('art_unlock: a rendering job is refused as paid for', async () => {
+    const claim = await callArt(admin, 'art_claim_render', { p_job_id: rendering.jobId })
+    if (claim.error) return `setup: ${describe(claim.error)}`
+    const { error } = await callArt(A.client, 'art_unlock', { p_collection_id: rendering.cid })
+    const refused = expectSentence(error, CHECK, 'The art is paid for and stays locked.')
+    if (refused) return refused
+    return (await lockState(rendering.cid)).status === 'rendering'
+      ? null
+      : 'the refused call changed the collection'
+  })
+
+  await check('art_unlock: a done job is refused as not locked', async () => {
+    const { failed } = await runSteps(
+      [
+        ['art_claim_render', { p_job_id: finished.jobId }],
+        ['art_batch_start', { p_job_id: finished.jobId, p_index: 0 }],
+        [
+          'art_batch_done',
+          { p_job_id: finished.jobId, p_index: 0, p_images_cid: CID('k'), p_images_size: 64 },
+        ],
+        [
+          'art_render_finish',
+          { p_job_id: finished.jobId, p_metadata_cid: CID('l'), p_base_uri: `ipfs://${CID('l')}/` },
+        ],
+      ],
+      async () => '',
+    )
+    if (failed) return `setup: ${failed}`
+    const { error } = await callArt(A.client, 'art_unlock', { p_collection_id: finished.cid })
+    const refused = expectSentence(error, CHECK, 'The art is not locked.')
+    if (refused) return refused
+    const state = await lockState(finished.cid)
+    return state.status === 'rendered' && state.art_locked_at !== null ? null : JSON.stringify(state)
+  })
+
+  await check(
+    'art_unlock: an unpaid job is still cancelled with both fields unlocked, and is never a credit',
+    async () => {
+      const { error } = await callArt(A.client, 'art_unlock', { p_collection_id: unpaid.cid })
+      if (error) return describe(error)
+      const job = await creditRow(unpaid.jobId)
+      const state = await lockState(unpaid.cid)
+      const credit = await creditOf(A.client, unpaid.cid, 1)
+      return job.state === 'failed' &&
+        job.error === 'unlocked' &&
+        job.error_code === 'unlocked' &&
+        job.finished_at !== null &&
+        state.art_locked_at === null &&
+        state.status === 'draft' &&
+        credit.data === null
+        ? null
+        : `${JSON.stringify(job)} ${JSON.stringify(state)} credit ${JSON.stringify(credit.data)}`
+    },
+  )
+}
+
+// ---------------------------------------------------------------------------------------------
 // 10. Cleanup
 // ---------------------------------------------------------------------------------------------
 async function cleanup(): Promise<void> {
   await check('cleanup: delete render jobs created by this run', async () => {
     if (createdJobIds.size === 0) return null
+    // A credited lock points at the job it rests on (on delete restrict): clear the links first.
+    const unlinked = await admin
+      .from('render_jobs')
+      .update({ credit_job_id: null })
+      .in('id', [...createdJobIds])
+    if (unlinked.error) return describe(unlinked.error)
     const { error } = await admin
       .from('render_jobs')
       .delete()

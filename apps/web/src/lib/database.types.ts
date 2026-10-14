@@ -359,6 +359,7 @@ export type Database = {
           collage_key: string | null
           collection_id: string
           created_at: string
+          credit_job_id: string | null
           error: string | null
           error_code: string | null
           fee_per_token_wei: number
@@ -396,6 +397,7 @@ export type Database = {
           collage_key?: string | null
           collection_id: string
           created_at?: string
+          credit_job_id?: string | null
           error?: string | null
           error_code?: string | null
           fee_per_token_wei: number
@@ -433,6 +435,7 @@ export type Database = {
           collage_key?: string | null
           collection_id?: string
           created_at?: string
+          credit_job_id?: string | null
           error?: string | null
           error_code?: string | null
           fee_per_token_wei?: number
@@ -467,6 +470,13 @@ export type Database = {
             columns: ['collection_id']
             isOneToOne: false
             referencedRelation: 'collections'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'render_jobs_credit_job_id_fkey'
+            columns: ['credit_job_id']
+            isOneToOne: false
+            referencedRelation: 'render_jobs'
             referencedColumns: ['id']
           },
           {
@@ -771,6 +781,7 @@ export type Database = {
           collage_key: string | null
           collection_id: string
           created_at: string
+          credit_job_id: string | null
           error: string | null
           error_code: string | null
           fee_per_token_wei: number
@@ -841,6 +852,7 @@ export type Database = {
           collage_key: string | null
           collection_id: string
           created_at: string
+          credit_job_id: string | null
           error: string | null
           error_code: string | null
           fee_per_token_wei: number
@@ -922,6 +934,7 @@ export type Database = {
           collage_key: string | null
           collection_id: string
           created_at: string
+          credit_job_id: string | null
           error: string | null
           error_code: string | null
           fee_per_token_wei: number
@@ -968,6 +981,7 @@ export type Database = {
           collage_key: string | null
           collection_id: string
           created_at: string
+          credit_job_id: string | null
           error: string | null
           error_code: string | null
           fee_per_token_wei: number
@@ -1029,6 +1043,7 @@ export type Database = {
           collage_key: string | null
           collection_id: string
           created_at: string
+          credit_job_id: string | null
           error: string | null
           error_code: string | null
           fee_per_token_wei: number
@@ -1064,6 +1079,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      art_render_credit: { Args: { p_collection_id: string; p_token_count: number }; Returns: string }
       art_render_finish: {
         Args: {
           p_base_uri: string
@@ -1081,6 +1097,7 @@ export type Database = {
           collage_key: string | null
           collection_id: string
           created_at: string
+          credit_job_id: string | null
           error: string | null
           error_code: string | null
           fee_per_token_wei: number
@@ -1127,6 +1144,7 @@ export type Database = {
           collage_key: string | null
           collection_id: string
           created_at: string
+          credit_job_id: string | null
           error: string | null
           error_code: string | null
           fee_per_token_wei: number
@@ -1177,6 +1195,7 @@ export type Database = {
           collage_key: string | null
           collection_id: string
           created_at: string
+          credit_job_id: string | null
           error: string | null
           error_code: string | null
           fee_per_token_wei: number
