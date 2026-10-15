@@ -153,5 +153,6 @@ describe('what Whitelist relies on (docs/specs/2026-10-15-whitelist.md, section 
     ] as const) {
       expect(signatureOf(getAbiItem({ abi: abiOnly, name }))).toBe(signature)
     }
+    expect(namesOf(getAbiItem({ abi: abiOnly, name: 'ExceedsMintQuota' }))).toEqual(['requested', 'allowed'])
   })
 })
