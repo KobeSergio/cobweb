@@ -8,9 +8,9 @@ import { sampleManageActions, samplePhasesView } from './manage-sim'
 
 /**
  * The actions every `TransactionDialog` in Manage drop runs on (docs/specs/2026-10-15-phases.md, section
- * 7.3), with the collection's chain and the sign-in wallet the machine checks against. Phases provides the
- * real or the sample ones; the tabs still on sample data (Whitelist, Airdrop, Settings, the Overview's
- * Reveal) run on one shared sample target until their sub-projects.
+ * 7.3), with the collection's chain and the sign-in wallet the machine checks against. Phases and Whitelist
+ * provide the real or the sample ones; the tabs still on sample data (Airdrop, Settings, the Overview's Reveal)
+ * run on one shared sample target until their sub-project.
  */
 export type ManageTarget = { actions: ManageActions; chainId: number; wallet: Address }
 

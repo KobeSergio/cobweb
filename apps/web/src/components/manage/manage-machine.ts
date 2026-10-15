@@ -45,7 +45,7 @@ export type ManageInput = {
   /** The collection's chain. */
   chainId: number
   connectedChainId: number | undefined
-  /** A remembered add: checked, never sent again. */
+  /** The hash of a change already sent, a phase change or a chunk: checked, never sent again. */
   sentHash?: Hex
   /** The id an add registers, named in the sentence when its name turns out to be taken. */
   addId?: number
@@ -109,10 +109,10 @@ export async function verifyManage<T>(
 }
 
 /**
- * Whether the server's answer ends this attempt for good, so a remembered add is forgotten: the receipt
- * reverted or proved something else, or the added phase's name is taken. Any other refusal (a session that
- * ended, a thrown action, a chain not ready) says nothing about the transaction: the hash stays and
- * "Check again" is offered.
+ * Whether the server's answer ends this attempt for good, for a phase change and a chunk alike, so a
+ * remembered add or chunk is forgotten: the receipt reverted or proved something else, or the added phase's
+ * name is taken. Any other refusal (a session that ended, a thrown action, a chain not ready) says nothing
+ * about the transaction: the hash stays and "Check again" is offered.
  */
 export function isTerminalManageAnswer(error: string): boolean {
   return (

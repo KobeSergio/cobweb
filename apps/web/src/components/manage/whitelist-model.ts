@@ -1,154 +1,116 @@
-import { WHITELIST_CHUNK_SIZE, type GroupWhitelist, type Hex, type WhitelistEntry } from '@/lib/demo'
-import type { Recipient } from './recipients'
+import type { Address, Hex } from 'viem'
+import type { ChunkEntry, GroupList, ListEntry } from '@/lib/manage/whitelist-types'
+import { byAddress, isWritten, listOf, WHITELIST_MAX } from '@/lib/manage/whitelist-view'
 
 /**
- * A whitelist as the screen edits it. Every change is staged on the entry first; it reaches the
- * chain when the chunk holding it is written with `setMintQuota`. Re-sending an address is safe:
- * the contract stores the quota issued and the quota used apart, so a retried chunk never
- * re-grants spent quota.
+ * The Whitelist screen's local model (docs/specs/2026-10-15-whitelist.md, section 7.4): pure patches on a
+ * group's list, applied once the server accepts an edit, each mirroring what the database did (section 4.2) and
+ * counting again through `listOf`. Nothing here reaches the chain: an edit waits for the next chunk.
  */
-export type EntryState = 'onchain' | 'pending' | 'removing'
-/** `everWritten`: the address has reached the chain at least once, so removing it needs a write. */
-export type ListEntry = WhitelistEntry & { state: EntryState; everWritten: boolean }
-export type WrittenChunk = { size: number; txHash?: Hex }
 
-export type ListState = {
-  groupId: number
-  entries: ListEntry[]
-  chunkSize: number
-  /** Chunks already on chain, oldest first. */
-  written: WrittenChunk[]
-  /** Why the last write failed. It belongs to the next chunk, which is the one that failed. */
-  failure: string | null
+/** How the table shows an entry: on chain as listed, waiting for a chunk, or a removal waiting for its zero. */
+export type EntryState = 'written' | 'pending' | 'removing'
+
+export function entryState(entry: ListEntry): EntryState {
+  if (isWritten(entry)) return 'written'
+  return entry.quota === 0 ? 'removing' : 'pending'
 }
 
-export type PendingChunk = {
-  /** 1-based, continuing after the written chunks. */
+const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
+
+/** The list with new entries, counted again; entries stay in lowercase address order. */
+function withEntries(list: GroupList, entries: ListEntry[]): GroupList {
+  return listOf(list.onchainId, entries, list.quotaUsed, list.chunks)
+}
+
+/**
+ * An add as `whitelist_entries_add` makes it: a new address joins with its quota and no copy; a listed one takes
+ * the new quota (a staged removal gets its quota back) and keeps its copies.
+ */
+export function withAdded(list: GroupList, rows: ChunkEntry[]): GroupList {
+  const entries = [...list.entries]
+  for (const row of rows) {
+    const at = entries.findIndex((entry) => same(entry.address, row.address))
+    const listed = entries[at]
+    if (listed) entries[at] = { ...listed, quota: row.quota }
+    else entries.push({ address: row.address, quota: row.quota, writtenQuota: null, writtenTx: null })
+  }
+  return withEntries(list, entries.sort(byAddress))
+}
+
+/** One address's new quota. */
+export function withQuota(list: GroupList, address: Address, quota: number): GroupList {
+  return withEntries(
+    list,
+    list.entries.map((entry) => (same(entry.address, address) ? { ...entry, quota } : entry)),
+  )
+}
+
+/** Set quota for all: every entry above 0 takes the quota; staged removals stay at 0. */
+export function withQuotaForAll(list: GroupList, quota: number): GroupList {
+  return withEntries(
+    list,
+    list.entries.map((entry) => (entry.quota > 0 ? { ...entry, quota } : entry)),
+  )
+}
+
+/** A removal: an entry the chain never held (or holds at 0) leaves at once; a written one is staged at 0. */
+export function withRemoved(list: GroupList, address: Address): GroupList {
+  return withEntries(
+    list,
+    list.entries.flatMap((entry): ListEntry[] => {
+      if (!same(entry.address, address)) return [entry]
+      return entry.writtenQuota ? [{ ...entry, quota: 0 }] : []
+    }),
+  )
+}
+
+/** An entry put back as given (Undo, or Keep on a staged removal), in its place by address. */
+export function withRestored(list: GroupList, entry: ListEntry): GroupList {
+  const others = list.entries.filter((candidate) => !same(candidate.address, entry.address))
+  return withEntries(list, [...others, entry].sort(byAddress))
+}
+
+/**
+ * Room for an add under the 10,000 cap: the rows it would create (addresses not listed) and how many more the
+ * list holds. A staged removal is still a row until its zero is written, so it counts.
+ */
+export function capRoom(existing: Set<string>, rows: { address: string }[]): { fresh: number; room: number } {
+  const fresh = new Set(
+    rows.map((row) => row.address.toLowerCase()).filter((address) => !existing.has(address)),
+  ).size
+  return { fresh, room: Math.max(0, WHITELIST_MAX - existing.size) }
+}
+
+/** One row of the On-chain write panel: a chunk written, the next one (or the one that failed), or one waiting. */
+export type ChunkRow = {
   number: number
-  entries: ListEntry[]
-  status: 'pending' | 'failed'
+  addresses: number
+  status: 'written' | 'next' | 'failed' | 'waiting'
+  txHash?: Hex
   error?: string
 }
 
-/** Builds the editable state from the sample data's entries and chunk table. */
-export function fromGroupWhitelist(list: GroupWhitelist): ListState {
-  const written = list.chunks.filter((chunk) => chunk.status === 'written')
-  const writtenRanges = written.map((chunk) => [chunk.from, chunk.to] as const)
-  const failed = list.chunks.find((chunk) => chunk.status === 'failed')
-  return {
-    groupId: list.groupId,
-    chunkSize: list.chunkSize,
-    entries: list.entries.map((entry, index) => {
-      const onChain = writtenRanges.some(([from, to]) => index >= from && index < to)
-      return { ...entry, state: onChain ? 'onchain' : 'pending', everWritten: onChain }
-    }),
-    written: written.map((chunk) => ({ size: chunk.to - chunk.from, txHash: chunk.txHash })),
-    failure: failed ? (failed.error ?? 'The last write failed.') : null,
-  }
-}
-
-export function emptyList(groupId: number, chunkSize = WHITELIST_CHUNK_SIZE): ListState {
-  return { groupId, entries: [], chunkSize, written: [], failure: null }
-}
-
-/** Entries waiting to be written, split into transactions of `chunkSize`. */
-export function pendingChunks(state: ListState): PendingChunk[] {
-  const waiting = state.entries.filter((entry) => entry.state !== 'onchain')
-  const chunks: PendingChunk[] = []
-  for (let from = 0; from < waiting.length; from += state.chunkSize) {
+/**
+ * The chunks as the panel lists them: the written ones with their transactions, then what the unwritten entries
+ * need, `size` at a time, the first marked failed with its error after a failure in this visit.
+ */
+export function chunkRows(list: GroupList, size: number, failure: string | null): ChunkRow[] {
+  const rows: ChunkRow[] = list.chunks.map((chunk, index) => ({
+    number: index + 1,
+    addresses: chunk.addresses,
+    status: 'written',
+    txHash: chunk.txHash,
+  }))
+  const written = rows.length
+  for (let from = 0; from < list.unwritten; from += size) {
     const first = from === 0
-    chunks.push({
-      number: state.written.length + chunks.length + 1,
-      entries: waiting.slice(from, from + state.chunkSize),
-      status: first && state.failure ? 'failed' : 'pending',
-      error: first && state.failure ? state.failure : undefined,
+    rows.push({
+      number: written + from / size + 1,
+      addresses: Math.min(size, list.unwritten - from),
+      status: first ? (failure ? 'failed' : 'next') : 'waiting',
+      ...(first && failure ? { error: failure } : {}),
     })
   }
-  return chunks
+  return rows
 }
-
-/** A chunk landed: its entries are on chain, removals leave the list. */
-export function markWritten(state: ListState, chunk: PendingChunk, txHash: Hex): ListState {
-  const done = new Set(chunk.entries.map((entry) => entry.address))
-  return {
-    ...state,
-    failure: null,
-    written: [...state.written, { size: chunk.entries.length, txHash }],
-    entries: state.entries
-      .filter((entry) => !(done.has(entry.address) && entry.state === 'removing'))
-      .map((entry) => (done.has(entry.address) ? { ...entry, state: 'onchain', everWritten: true } : entry)),
-  }
-}
-
-export function markFailed(state: ListState, message: string): ListState {
-  return { ...state, failure: message }
-}
-
-/** Adds new addresses and restates existing ones with the new quota. */
-export function addEntries(
-  state: ListState,
-  rows: Recipient[],
-): { state: ListState; added: number; updated: number } {
-  const index = new Map(state.entries.map((entry, position) => [entry.address.toLowerCase(), position]))
-  const entries = [...state.entries]
-  let added = 0
-  let updated = 0
-  for (const row of rows) {
-    const at = index.get(row.address.toLowerCase())
-    if (at === undefined) {
-      entries.push({
-        address: row.address,
-        quota: row.amount,
-        minted: 0,
-        state: 'pending',
-        everWritten: false,
-      })
-      added++
-    } else {
-      const current = entries[at]!
-      if (current.quota !== row.amount || current.state === 'removing') {
-        entries[at] = { ...current, quota: row.amount, state: 'pending' }
-        updated++
-      }
-    }
-  }
-  return { state: { ...state, entries }, added, updated }
-}
-
-export function setQuota(state: ListState, address: string, quota: number): ListState {
-  return {
-    ...state,
-    entries: state.entries.map((entry) =>
-      entry.address === address && entry.quota !== quota ? { ...entry, quota, state: 'pending' } : entry,
-    ),
-  }
-}
-
-export function setQuotaForAll(state: ListState, quota: number): ListState {
-  return {
-    ...state,
-    entries: state.entries.map((entry) =>
-      entry.state === 'removing' || entry.quota === quota ? entry : { ...entry, quota, state: 'pending' },
-    ),
-  }
-}
-
-/**
- * Removes an address. One that never reached the chain simply leaves the list; one on chain is
- * written with quota 0 first, so it stays listed as "removing" until that chunk lands.
- */
-export function removeEntry(state: ListState, address: string): ListState {
-  const entry = state.entries.find((candidate) => candidate.address === address)
-  if (!entry) return state
-  return {
-    ...state,
-    entries: !entry.everWritten
-      ? state.entries.filter((candidate) => candidate.address !== address)
-      : state.entries.map((candidate) =>
-          candidate.address === address ? { ...candidate, state: 'removing' } : candidate,
-        ),
-  }
-}
-
-/** The quota sent for an entry: 0 for a removal. */
-export const sentQuota = (entry: ListEntry) => (entry.state === 'removing' ? 0 : entry.quota)
