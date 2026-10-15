@@ -3,12 +3,15 @@ import {
   ContractFunctionExecutionError,
   ContractFunctionRevertedError,
   ContractFunctionZeroDataError,
+  createPublicClient,
   erc721Abi,
+  http,
   multicall3Abi,
   type Address,
   type ContractFunctionParameters,
   type PublicClient,
 } from 'viem'
+import { foundry } from 'viem/chains'
 import { describe, expect, it } from 'vitest'
 import { readEach } from './read-each'
 
@@ -113,6 +116,26 @@ function parallelClient(fail?: (id: number) => Error | null) {
   return { client, most: () => most, blocks }
 }
 
+/**
+ * A real client on a chain without multicall3 (the parallel path) whose node answers every request as Geth,
+ * Arbitrum Nitro and op-geth answer a revert without data: -32000, "execution reverted", no `data`. The fake fetch
+ * answers everything, so no request leaves the process.
+ */
+function gethRevertClient(): PublicClient {
+  const answer = ({ id }: { id: number }) => ({
+    jsonrpc: '2.0',
+    id,
+    error: { code: -32000, message: 'execution reverted' },
+  })
+  const fetchFn = async (_url: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(init?.body as string) as { id: number } | { id: number }[]
+    return new Response(JSON.stringify(Array.isArray(body) ? body.map(answer) : answer(body)), {
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  return createPublicClient({ chain: foundry, transport: http('http://127.0.0.1:1', { fetchFn }) })
+}
+
 const expected = (count: number) => Array.from({ length: count }, (_, id) => (reverts(id) ? null : id * 2))
 
 describe('readEach', () => {
@@ -135,6 +158,10 @@ describe('readEach', () => {
     expect(await readEach<number>(client, calls(120))).toEqual(
       expected(120).map((answer, id) => (id === 60 ? null : answer)),
     )
+  })
+
+  it("reads a dataless revert answered as -32000 without data as the call's own revert (a Geth-style node)", async () => {
+    expect(await readEach<Address>(gethRevertClient(), [call(1)])).toEqual([null])
   })
 
   it('answers nothing for no calls', async () => {

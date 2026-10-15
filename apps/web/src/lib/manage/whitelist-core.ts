@@ -203,6 +203,8 @@ export async function confirmWhitelistChunkCore(
  * Adds rows and changes listed quotas (section 6.3), under the creator's client: WHITELIST_FULL when the new
  * addresses would pass 10,000 (nothing written), then pages of 1,000 to `whitelist_entries_add` in turn, the
  * answers summed. A page refused after others landed answers its sentence; the screen reads the view again.
+ * `rows` must already be unique by lowercase address (the action's `addEntriesShape` merges repeats, the last
+ * quota winning; a direct caller must do the same, since `whitelist_entries_add` raises 21000 on a repeat).
  */
 export async function addEntriesCore(
   ctx: WhitelistContext,

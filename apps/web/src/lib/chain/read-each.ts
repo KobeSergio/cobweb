@@ -3,6 +3,7 @@ import {
   ContractFunctionExecutionError,
   ContractFunctionRevertedError,
   ContractFunctionZeroDataError,
+  ExecutionRevertedError,
   type ContractFunctionParameters,
   type PublicClient,
 } from 'viem'
@@ -12,13 +13,19 @@ export const MULTICALL_GROUP = 500
 /** Calls read side by side where it has none (Anvil). */
 export const PARALLEL_GROUP = 50
 
-/** Whether a failed read is the call's own revert (or an empty answer), rather than the request failing. */
+/**
+ * Whether a failed read is the call's own revert (or an empty answer), rather than the request failing. A
+ * node's "execution reverted" without data counts as the call's own revert: Geth, Arbitrum Nitro and op-geth
+ * answer a dataless revert (an unknown selector's) as -32000, which viem reports as `ExecutionRevertedError`.
+ */
 export function revertedRead(error: unknown): boolean {
   return (
     error instanceof BaseError &&
     error.walk(
       (cause) =>
-        cause instanceof ContractFunctionRevertedError || cause instanceof ContractFunctionZeroDataError,
+        cause instanceof ContractFunctionRevertedError ||
+        cause instanceof ContractFunctionZeroDataError ||
+        cause instanceof ExecutionRevertedError,
     ) !== null
   )
 }
