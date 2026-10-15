@@ -68,7 +68,8 @@ export const TEST_CHAINS: readonly ChainConfig[] = [
 /**
  * Whether the test chains are hidden: in production, unless COBWEB_TEST_CHAINS is 1 (a hosted test
  * environment). Both variables are read as literal `process.env.NAME` expressions, which Next replaces in the
- * browser bundle.
+ * browser bundle and the server bundle alike. That fixes the switch at build time in the web app, so set
+ * COBWEB_TEST_CHAINS where the build runs and rebuild after changing it.
  */
 export const hidesTestChains = () =>
   process.env.NODE_ENV === 'production' && process.env.COBWEB_TEST_CHAINS !== '1'
