@@ -186,7 +186,7 @@ export function BurnQuantity({
 /**
  * The burn's confirmation: what it leaves, its fee, and typing "burn N" to enable the send, which sends one
  * batch to the dead address (docs/specs/2026-10-15-airdrop-settings.md, section 7.3). With `blocked` (the owner
- * check) it opens for reading, its action off.
+ * check, or a hash waiting) it opens for reading, its action off.
  */
 export function BurnDialog({
   open,
@@ -199,6 +199,8 @@ export function BurnDialog({
   confirm,
   pending,
   onBurned,
+  onFailed,
+  onRunningChange,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -210,6 +212,9 @@ export function BurnDialog({
   confirm: (hash: Hex) => Promise<ActionResult<AirdropView>>
   pending: { remember(hash: Hex): void; forget(): void }
   onBurned: (view: AirdropView) => void
+  onFailed: (message: string) => void
+  /** Each run's start and end, told even after the dialog closed: the screen keeps the burn off meanwhile. */
+  onRunningChange: (running: boolean) => void
 }) {
   const id = useId()
   const [typed, setTyped] = useState('')
@@ -230,6 +235,8 @@ export function BurnDialog({
       successMessage={`${tokensLabel(amount)} burned`}
       request={confirmed ? burnRequest(amount, feePerTokenWei, chain, confirm, pending) : null}
       onConfirmed={onBurned}
+      onFailed={onFailed}
+      onRunningChange={onRunningChange}
     >
       <dl className="divide-y rounded-lg border px-4">
         <Row label="Left to mint now">{count(remaining)}</Row>

@@ -48,6 +48,12 @@ export type TransactionDialogProps<T> = {
    * 7.1): shown under the review, with the action off. The dialog still opens, so the change can be read.
    */
   blocked?: string | null
+  /**
+   * Told true when a run starts and false when it ends: confirmed, failed, or stopped once the wait for the
+   * confirm ran out. Called even when the run ends after the dialog closed or unmounted, so the parent can keep
+   * its own actions off while a run it no longer shows is in flight.
+   */
+  onRunningChange?: (running: boolean) => void
   chain: SupportedChain
   /** Shown in the toast and the done state, e.g. "Owl List is open". */
   successMessage: string
@@ -81,6 +87,7 @@ export function TransactionDialog<T>({
   actionLabel,
   destructive,
   blocked = null,
+  onRunningChange,
   chain,
   successMessage,
   onConfirmed,
@@ -128,6 +135,7 @@ export function TransactionDialog<T>({
     // closed or unmounted, so a late success still applies and a late failure still reaches the creator.
     const confirmed = onConfirmed
     const failed = onFailed
+    const runningChange = onRunningChange
     const id = ++run.current
     // Each run starts from idle: a refusal before any step is its first event, and must not keep the last
     // run's step or transaction.
@@ -143,6 +151,8 @@ export function TransactionDialog<T>({
     setSwitching(!sample && !checkHash && account.chainId !== chainId)
     const call = current.call
     let result: T | null = null
+    // The parent hears the run start here and end below, even when the dialog closed or unmounted meanwhile.
+    runningChange?.(true)
     try {
       result = await runManage<T>(
         {
@@ -176,6 +186,8 @@ export function TransactionDialog<T>({
       // The machine words every failure it expects; one it did not must not leave the dialog on a spinner.
       report({ type: 'failed', failure: classifyError(error, 'confirming', 'manage') })
     }
+    // Every run that started ends here, a superseded one too, so the parent's count of runs in flight holds.
+    runningChange?.(false)
     if (id !== run.current) return
     if (result !== null) {
       confirmed?.(result)
