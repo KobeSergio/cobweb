@@ -20,6 +20,7 @@ import {
   NOT_THIS_CONTRACT,
   PHASE_REVERTED,
   SETTINGS_NOT_CONFIRMED,
+  WITHDRAWAL_NOT_CONFIRMED,
 } from '@/lib/art/result'
 import { matchPhaseEvent, type PhaseEventMatch } from '@/lib/chain/phase-events'
 import { readEach, revertedRead } from '@/lib/chain/read-each'
@@ -247,9 +248,10 @@ function setsBaseUri(input: Hex, uri: string): boolean {
 }
 
 /**
- * Confirms a Settings change from its receipt (section 6.4): not found yet is SETTINGS_NOT_CONFIRMED, which the
- * machine polls; reverted is PHASE_REVERTED. The level call must have gone to the collection's own validator at
- * the receipt's block and carry the validator's event; any other call the collection's event for it. A reveal is
+ * Confirms a Settings change from its receipt (section 6.4): not found yet is SETTINGS_NOT_CONFIRMED (a
+ * withdrawal's WITHDRAWAL_NOT_CONFIRMED, so its wait ends in its own sentence), which the machine polls; reverted
+ * is PHASE_REVERTED. The level call must have gone to the collection's own validator at the receipt's block, for
+ * this collection, and carry the validator's event; any other call the collection's event for it. A reveal is
  * also proven from its calldata, the URI being exactly the one sent; a withdrawal waits for the chain's depth and
  * is recorded from its event. Then the view is read at the receipt's block or later, which refreshes the copies.
  * A second confirm of the same hash answers the view again; a withdrawal stays recorded once.
@@ -263,6 +265,8 @@ export async function confirmSettingsTxCore(
   const base = await phaseBase(ctx)
   if (!base) return { refused: NOT_DEPLOYED }
   const hash = txHash.toLowerCase() as Hex
+  // A withdrawal not confirmed yet answers its own sentence, so the machine's timeout says what it means for it.
+  const notYet = call.functionName === 'withdrawMintFunds' ? WITHDRAWAL_NOT_CONFIRMED : SETTINGS_NOT_CONFIRMED
   let client: PublicClient
   try {
     client = publicClientFor(base.chainId)
@@ -276,20 +280,20 @@ export async function confirmSettingsTxCore(
     // Not mined yet, or not visible to this node yet: the machine asks again in 3 seconds.
     if (!(error instanceof TransactionReceiptNotFoundError))
       console.error(`The receipt could not be read: ${errorSummary(error)}`)
-    return { refused: SETTINGS_NOT_CONFIRMED }
+    return { refused: notYet }
   }
   // sic: viem types the receipt as always present; a node can still answer with nothing.
-  if (!receipt) return { refused: SETTINGS_NOT_CONFIRMED }
+  if (!receipt) return { refused: notYet }
   if (receipt.status === 'reverted') return { refused: PHASE_REVERTED }
   if (call.functionName === 'withdrawMintFunds') {
     // A withdrawal is recorded and never read from the chain again, so it waits for the chain's depth.
     try {
       const latest = await client.getBlockNumber({ cacheTime: 0 })
       if (!hasConfirmations(receipt.blockNumber, latest, confirmationsFor(base.chainId)))
-        return { refused: SETTINGS_NOT_CONFIRMED }
+        return { refused: notYet }
     } catch (error) {
       console.error(`The latest block could not be read: ${errorSummary(error)}`)
-      return { refused: SETTINGS_NOT_CONFIRMED }
+      return { refused: notYet }
     }
   }
   let match: PhaseEventMatch
@@ -307,6 +311,8 @@ export async function confirmSettingsTxCore(
       return { refused: SETTINGS_NOT_CONFIRMED }
     }
     if (validator.toLowerCase() !== call.target.address.toLowerCase()) return { refused: NOT_THIS_CONTRACT }
+    // The level is this collection's: the same wallet's change on another collection of the validator is not it.
+    if (call.args[0].toLowerCase() !== base.contract.toLowerCase()) return { refused: NOT_THIS_CHANGE }
     match = matchPhaseEvent(receipt, {
       contract: call.target.address,
       from: ctx.wallet,

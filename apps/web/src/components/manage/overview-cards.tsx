@@ -1,7 +1,7 @@
 'use client'
 
 import { ArrowUpRightIcon, EyeIcon } from 'lucide-react'
-import { useId, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { Address, Hex } from 'viem'
 import { Artwork } from '@cobweb/ui/components/artwork'
@@ -132,9 +132,13 @@ function Fact({
   )
 }
 
-/** The CID of an `ipfs://` link (before the first "/" after it), shortened: `bafybe…7xyz`. */
+/**
+ * The CID of an `ipfs://` link (before the first "/" after it), shortened: `bafybe…7xyz`. Any other link
+ * (one set outside Cobweb, `https://` or `ar://`) is shortened whole, so its scheme never stands for it.
+ */
 function shortCid(uri: string): string {
-  const cid = uri.replace(/^ipfs:\/\//, '').split('/')[0] ?? ''
+  if (!uri.startsWith('ipfs://')) return uri.length > 24 ? `${uri.slice(0, 16)}…${uri.slice(-6)}` : uri
+  const cid = uri.slice('ipfs://'.length).split('/')[0] ?? ''
   return cid.length > 14 ? `${cid.slice(0, 6)}…${cid.slice(-4)}` : cid
 }
 
@@ -153,6 +157,12 @@ function ContractPointer({
   // `at` freezes the view the dialog was opened with, so its text does not flip once it lands.
   const [dialog, setDialog] = useState<{ id: number; at: SettingsView } | null>(null)
   const [open, setOpen] = useState(false)
+  // The id of the dialog on screen, if any: a failure that reaches a closed or replaced dialog is toasted.
+  const shownId = useRef<number | null>(null)
+  shownId.current = dialog && open ? dialog.id : null
+  const failedFor = (id: number) => (message: string) => {
+    if (shownId.current !== id) toast.error(message)
+  }
   const off = !settings.realArtRendered
     ? 'The real art is not rendered yet. Reveal opens once it is on IPFS.'
     : settings.chainReachable
@@ -195,6 +205,7 @@ function ContractPointer({
           blocked={blocked}
           confirm={confirm}
           onConfirmed={onConfirmed}
+          onFailed={failedFor(dialog.id)}
           current={dialog.at.baseUri}
           targets={dialog.at.targets}
           pointer={dialog.at.pointer}

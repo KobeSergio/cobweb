@@ -139,6 +139,10 @@ export const AIRDROP_TIMED_OUT =
 export const SETTINGS_NOT_CONFIRMED = 'The setting has not been confirmed on chain yet.'
 export const SETTINGS_TIMED_OUT =
   'The setting is not confirmed yet. Read the contract again in a minute to see it.'
+// A withdrawal is counted in Withdrawn so far only once Cobweb confirms it, so its wait says so.
+export const WITHDRAWAL_NOT_CONFIRMED = 'The withdrawal has not been confirmed on chain yet.'
+export const WITHDRAWAL_TIMED_OUT =
+  'The withdrawal is not confirmed yet, and it may have landed. Check again in a minute: Withdrawn so far counts only the withdrawals Cobweb confirmed.'
 export const NOT_OWNER = (owner: string) =>
   `This wallet is not the contract's owner. Changes on chain need ${owner}.`
 export const IPFS_LINK_INVALID = 'Enter a full ipfs:// link with its CID.'

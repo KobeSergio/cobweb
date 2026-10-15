@@ -32,17 +32,21 @@ export type SettingsDialogBase = {
   blocked: string | null
   confirm: (hash: Hex, call: ManageCall) => Promise<ActionResult<SettingsView>>
   onConfirmed: (view: SettingsView) => void
+  /** A failure's sentence, told even when the run ends after the dialog closed, so the parent can say it. */
+  onFailed?: (message: string) => void
 }
 
 /**
  * A Settings change as its dialog sends it (docs/specs/2026-10-15-airdrop-settings.md, section 7.4): the call, its
  * review from the ABI on its contract (the transfer validator for the level, else the collection), and the
- * server's confirm of the hash with the call.
+ * server's confirm of the hash with the call. `pending` hears the sent hash and when it is confirmed or refused
+ * for good: Withdraw opens its dialog again while that dialog can still check the withdrawal.
  */
 export function settingsRequest(
   call: ManageCall,
   chain: SupportedChain,
   confirm: SettingsDialogBase['confirm'],
+  pending?: ManageRequest<SettingsView>['pending'],
 ): ManageRequest<SettingsView> {
   return {
     call,
@@ -52,6 +56,7 @@ export function settingsRequest(
       args: reviewOf(call, chain),
     },
     confirm: (hash) => confirm(hash, call),
+    pending,
   }
 }
 

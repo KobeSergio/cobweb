@@ -22,6 +22,8 @@ import {
   THROWN,
   WHITELIST_NOT_CONFIRMED,
   WHITELIST_TIMED_OUT,
+  WITHDRAWAL_NOT_CONFIRMED,
+  WITHDRAWAL_TIMED_OUT,
   type ActionResult,
 } from '@/lib/art/result'
 import type { AirdropJob, BatchEntry } from '@/lib/manage/airdrop-types'
@@ -88,14 +90,16 @@ const REVERTED_ON_CHAIN: TxFailure = {
 
 /**
  * The answers that mean "not confirmed yet", each with what the machine says when the wait runs out: a phase
- * change's, a whitelist chunk's (docs/specs/2026-10-15-whitelist.md, section 7.1), an airdrop batch's and a
- * Settings change's (docs/specs/2026-10-15-airdrop-settings.md, section 7.1).
+ * change's, a whitelist chunk's (docs/specs/2026-10-15-whitelist.md, section 7.1), an airdrop batch's, a
+ * Settings change's (docs/specs/2026-10-15-airdrop-settings.md, section 7.1) and a withdrawal's, which Withdrawn
+ * so far counts only once it is confirmed.
  */
 const NOT_CONFIRMED_YET = new Map([
   [PHASE_NOT_CONFIRMED, PHASE_TIMED_OUT],
   [WHITELIST_NOT_CONFIRMED, WHITELIST_TIMED_OUT],
   [AIRDROP_NOT_CONFIRMED, AIRDROP_TIMED_OUT],
   [SETTINGS_NOT_CONFIRMED, SETTINGS_TIMED_OUT],
+  [WITHDRAWAL_NOT_CONFIRMED, WITHDRAWAL_TIMED_OUT],
 ])
 
 /**

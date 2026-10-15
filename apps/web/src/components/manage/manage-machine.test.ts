@@ -22,6 +22,8 @@ import {
   UNSAVED,
   WHITELIST_NOT_CONFIRMED,
   WHITELIST_TIMED_OUT,
+  WITHDRAWAL_NOT_CONFIRMED,
+  WITHDRAWAL_TIMED_OUT,
   type ActionResult,
 } from '@/lib/art/result'
 import type { AirdropJob } from '@/lib/manage/airdrop-types'
@@ -518,6 +520,19 @@ describe('an airdrop batch and a Settings change (docs/specs/2026-10-15-airdrop-
     const late = fakeDeps(Array<ActionResult<string>>(50).fill(SETTING_NOT_YET))
     const { last } = await run(late.deps, { ...input, call: settingsCalls.withdraw() })
     expect(last).toMatchObject({ failure: { message: SETTINGS_TIMED_OUT } })
+  })
+
+  it('polls while the withdrawal is not confirmed yet, then stops after 2 minutes with its own sentence and keeps the hash', async () => {
+    const WITHDRAWAL_NOT_YET: ActionResult<string> = { ok: false, error: WITHDRAWAL_NOT_CONFIRMED }
+    const { deps, calls } = fakeDeps(Array<ActionResult<string>>(50).fill(WITHDRAWAL_NOT_YET))
+    const { last, phase } = await run(deps, { ...input, call: settingsCalls.withdraw() })
+    expect(calls.confirm).toBe(41)
+    expect(calls.forget).toBe(0)
+    expect(last).toEqual({
+      type: 'failed',
+      failure: { kind: 'unconfirmed', title: 'Change not confirmed yet', message: WITHDRAWAL_TIMED_OUT },
+    })
+    expect(retryHash(phase)).toBe(HASH)
   })
 
   it("names a refused fee in the chain's native unit", async () => {

@@ -266,6 +266,10 @@ export function TransactionDialog<T>({
                   {successMessage}
                 </p>
               )}
+              {/* Try again sends, so it follows the owner check; Check again only reads, and stays on. */}
+              {phase.step === 'failed' && !sentHash && blocked && (
+                <p className="text-muted-foreground text-[0.8125rem]">{blocked}</p>
+              )}
             </div>
           )}
 
@@ -299,7 +303,7 @@ export function TransactionDialog<T>({
                 <Button
                   type="button"
                   variant={destructive ? 'destructive' : 'default'}
-                  disabled={!request}
+                  disabled={!request || (!sentHash && !!blocked)}
                   onClick={() => void start(sentHash)}
                 >
                   {sentHash ? 'Check again' : 'Try again'}

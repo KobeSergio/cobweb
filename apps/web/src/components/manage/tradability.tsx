@@ -1,7 +1,8 @@
 'use client'
 
 import { LockIcon, LockOpenIcon, ShieldAlertIcon } from 'lucide-react'
-import { useId, useState } from 'react'
+import { useId, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { getAddress, isAddress, zeroAddress, type Hex } from 'viem'
 import { DEFAULT_TRANSFER_VALIDATOR } from '@cobweb/shared'
 import { Alert, AlertDescription } from '@cobweb/ui/components/alert'
@@ -49,13 +50,27 @@ export function TradabilitySettings({
     null,
   )
   const [open, setOpen] = useState(false)
+  // The id of the dialog on screen, if any: a failure that reaches a closed or replaced dialog is toasted.
+  const shownId = useRef<number | null>(null)
+  shownId.current = dialog && open ? dialog.id : null
+  const failedFor = (id: number | undefined) => (message: string) => {
+    if (shownId.current !== id) toast.error(message)
+  }
   const show = (key: 'level' | 'validator') => {
     setDialog({ key, id: Date.now(), at: view })
     setOpen(true)
   }
   const validator = view.transferValidator
   const level = view.level
-  const base = { open, onOpenChange: setOpen, chain, blocked, confirm, onConfirmed }
+  const base = {
+    open,
+    onOpenChange: setOpen,
+    chain,
+    blocked,
+    confirm,
+    onConfirmed,
+    onFailed: failedFor(dialog?.id),
+  }
   const atValidator = dialog?.at.transferValidator ?? null
 
   return (

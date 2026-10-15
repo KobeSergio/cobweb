@@ -67,6 +67,18 @@ export function SettingsScreen({ collection, view: initial, wallet, sample }: Se
   // One dialog at a time; it stays mounted after closing so a confirming transaction can finish.
   const [dialog, setDialog] = useState<{ key: DialogKey; id: number; at: SettingsView } | null>(null)
   const [open, setOpen] = useState(false)
+  // The id of the dialog on screen, if any: a failure that reaches a closed or replaced dialog is toasted.
+  const shownId = useRef<number | null>(null)
+  shownId.current = dialog && open ? dialog.id : null
+  const failedFor = (id: number | undefined) => (message: string) => {
+    if (shownId.current !== id) toast.error(message)
+  }
+  // By dialog id: the Withdraw dialog with a run in flight, and the one holding a withdrawal it sent that is
+  // neither confirmed nor refused yet. While either is the dialog on screen, Withdraw opens it again rather than a
+  // new one, as Airdrop's send does: no second withdrawal is sent from here while one is in flight, and one not
+  // confirmed in time can still be checked again.
+  const [withdrawRunning, setWithdrawRunning] = useState<number | null>(null)
+  const [withdrawHeld, setWithdrawHeld] = useState<number | null>(null)
   // Sample mode: what the simulated wallet sent, by hash.
   const [sampleSent] = useState(() => new Map<Hex, ManageCall>())
   const chain = chainView(view.chainId)
@@ -114,7 +126,22 @@ export function SettingsScreen({ collection, view: initial, wallet, sample }: Se
   const balance = view.creatorBalanceWei
   const pending = view.pendingBalanceWei
   const confirm = (hash: Hex, call: ManageCall) => server.confirm(hash, call)
-  const base = { open, onOpenChange: setOpen, chain, blocked, confirm, onConfirmed: setView }
+  const base = {
+    open,
+    onOpenChange: setOpen,
+    chain,
+    blocked,
+    confirm,
+    onConfirmed: setView,
+    onFailed: failedFor(dialog?.id),
+  }
+  const reopenWithdraw =
+    dialog?.key === 'withdraw' && (withdrawRunning === dialog.id || withdrawHeld === dialog.id)
+  /** What a Withdraw dialog's runs tell of their hash: held once sent, let go once confirmed or refused for good. */
+  const withdrawPending = (id: number) => ({
+    remember: () => setWithdrawHeld(id),
+    forget: () => setWithdrawHeld((held) => (held === id ? null : held)),
+  })
 
   return (
     <ManageActionsProvider value={target}>
@@ -172,9 +199,9 @@ export function SettingsScreen({ collection, view: initial, wallet, sample }: Se
                   </p>
                 </div>
                 <Button
-                  onClick={() => show('withdraw')}
-                  disabled={!!off || balance === null || BigInt(balance) === 0n}
-                  title={off ?? undefined}
+                  onClick={() => (reopenWithdraw ? setOpen(true) : show('withdraw'))}
+                  disabled={!reopenWithdraw && (!!off || balance === null || BigInt(balance) === 0n)}
+                  title={reopenWithdraw ? undefined : (off ?? undefined)}
                 >
                   Withdraw
                 </Button>
@@ -315,15 +342,24 @@ export function SettingsScreen({ collection, view: initial, wallet, sample }: Se
           <TransactionDialog
             key={dialog.id}
             open={open}
-            onOpenChange={setOpen}
+            onOpenChange={(next) => {
+              // Closed with no run in flight, the dialog starts over, so the withdrawal it held is not offered.
+              if (!next && withdrawRunning !== dialog.id)
+                setWithdrawHeld((held) => (held === dialog.id ? null : held))
+              setOpen(next)
+            }}
             chain={chain}
             blocked={blocked}
             title="Withdraw proceeds"
             description="The whole balance goes to the payout address in one transaction."
             actionLabel="Withdraw"
             successMessage="Proceeds withdrawn"
-            request={settingsRequest(settingsCalls.withdraw(), chain, confirm)}
+            request={settingsRequest(settingsCalls.withdraw(), chain, confirm, withdrawPending(dialog.id))}
             onConfirmed={setView}
+            onFailed={failedFor(dialog.id)}
+            onRunningChange={(running) =>
+              setWithdrawRunning((current) => (running ? dialog.id : current === dialog.id ? null : current))
+            }
           >
             <dl className="divide-y rounded-lg border px-4">
               <Row label="Amount" strong>
@@ -370,6 +406,7 @@ export function SettingsScreen({ collection, view: initial, wallet, sample }: Se
             successMessage={dialog.at.mintOnBehalf ? 'Mint on behalf is off' : 'Mint on behalf is on'}
             request={settingsRequest(settingsCalls.mintOnBehalf(!dialog.at.mintOnBehalf), chain, confirm)}
             onConfirmed={setView}
+            onFailed={failedFor(dialog.id)}
           />
         )}
       </div>
