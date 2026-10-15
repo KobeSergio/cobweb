@@ -11,9 +11,9 @@ import type { ChainState } from './phases-types'
  */
 
 /**
- * The transfer level and what the base URI points at: the shapes live in the shared package with `levelOf` and
- * `pointerOf` (docs/specs/2026-10-16-freshness-server.md, section 5.1), re-exported so the screens keep their
- * imports.
+ * The transfer level and what the base URI points at: the shapes live in the shared package with `levelOf`
+ * and `pointerOf` (docs/specs/2026-10-16-freshness-server.md, section 5.1), re-exported so the screens keep
+ * their imports.
  */
 export type { RevealPointer, RevealTargets, TransferLevelState } from '@cobweb/shared'
 

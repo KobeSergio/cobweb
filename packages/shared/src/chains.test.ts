@@ -141,7 +141,19 @@ describe('the test-chain switch (docs/specs/2026-10-16-freshness-server.md, sect
       vi.stubEnv('COBWEB_TEST_CHAINS', value)
       expect(hidesTestChains()).toBe(true)
       expect(chainById(31337)).toBeUndefined()
+      expect(() => confirmationsFor(31337)).toThrow('Chain 31337 is not configured.')
+      expect(() => factoryAddress(46630, env)).toThrow(
+        'The factory address for chain 46630 is not configured.',
+      )
       expect(() => rpcUrl(46630, env)).toThrow('The RPC URL for chain 46630 is not configured.')
     }
+  })
+
+  it('shows them outside production whatever COBWEB_TEST_CHAINS says', () => {
+    vi.stubEnv('NODE_ENV', 'development')
+    vi.stubEnv('COBWEB_TEST_CHAINS', '0')
+    expect(hidesTestChains()).toBe(false)
+    expect(ids()).toEqual([...LAUNCH_IDS, 11155111, 46630, 31337])
+    expect(confirmationsFor(31337)).toBe(1)
   })
 })
