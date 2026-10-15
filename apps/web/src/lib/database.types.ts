@@ -803,6 +803,9 @@ export type Database = {
           mint_group_id: string
           quota: number
           wallet_address: string
+          written_at: string | null
+          written_quota: number | null
+          written_tx: string | null
         }
         Insert: {
           collection_id: string
@@ -810,6 +813,9 @@ export type Database = {
           mint_group_id: string
           quota: number
           wallet_address: string
+          written_at?: string | null
+          written_quota?: number | null
+          written_tx?: string | null
         }
         Update: {
           collection_id?: string
@@ -817,6 +823,9 @@ export type Database = {
           mint_group_id?: string
           quota?: number
           wallet_address?: string
+          written_at?: string | null
+          written_quota?: number | null
+          written_tx?: string | null
         }
         Relationships: [
           {
@@ -1470,6 +1479,23 @@ export type Database = {
       swap_token_ids_for_check: {
         Args: { p_a: number; p_b: number; p_collection_id: string }
         Returns: undefined
+      }
+      whitelist_chunk_record: {
+        Args: {
+          p_collection_id: string
+          p_onchain_id: number
+          p_owner: string
+          p_rows: Json
+          p_tx: string
+        }
+        Returns: number
+      }
+      whitelist_entries_add: {
+        Args: { p_collection_id: string; p_onchain_id: number; p_rows: Json }
+        Returns: {
+          added: number
+          updated: number
+        }[]
       }
     }
     Enums: {

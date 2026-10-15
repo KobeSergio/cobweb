@@ -741,7 +741,7 @@ async function main(): Promise<void> {
       .select()
     return expectError(error, CHECK, data)
   })
-  await check('whitelist_entries: quota 0 rejected', async () => {
+  await check('whitelist_entries: a negative quota is refused', async () => {
     if (!groupA) return 'no group'
     const { data, error } = await A.client
       .from('whitelist_entries')
@@ -749,7 +749,7 @@ async function main(): Promise<void> {
         mint_group_id: groupA.id,
         collection_id: colA.id,
         wallet_address: '0x' + 'd'.repeat(40),
-        quota: 0,
+        quota: -1,
       })
       .select()
     return expectError(error, CHECK, data)
@@ -1054,6 +1054,7 @@ async function main(): Promise<void> {
   await artRenderCredit(A, B)
   await artDeploy(A, B)
   await artPhases(A, B)
+  await artWhitelist(A, B)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -5911,6 +5912,395 @@ async function artPhases(A: Creator, B: Creator): Promise<void> {
         publicSale.start_at === null
         ? null
         : `${JSON.stringify(after)} ${JSON.stringify(publicSale)}`
+    },
+  )
+}
+
+// ---------------------------------------------------------------------------------------------
+// 9l. Whitelist: a quota of 0, the owner's column grants, the copies and their checks,
+// whitelist_entries_add and whitelist_chunk_record (docs/specs/2026-10-15-whitelist.md, section 4)
+// ---------------------------------------------------------------------------------------------
+type EntryCheckRow = {
+  wallet_address: string
+  quota: number
+  written_quota: number | null
+  written_tx: string | null
+  written_at: string | null
+}
+
+/** A group's entries in address order, as the service role reads them. */
+async function entryRows(groupId: string): Promise<EntryCheckRow[]> {
+  const { data, error } = await admin
+    .from('whitelist_entries')
+    .select('wallet_address, quota, written_quota, written_tx, written_at')
+    .eq('mint_group_id', groupId)
+    .order('wallet_address')
+  if (error) throw new Error(`entries: ${describe(error as DbError)}`)
+  return data as EntryCheckRow[]
+}
+
+/** The row id of a collection's group, as the service role reads it. */
+async function groupRowId(cid: string, onchainId: number): Promise<string> {
+  const { data, error } = await admin
+    .from('mint_groups')
+    .select('id')
+    .eq('collection_id', cid)
+    .eq('onchain_id', onchainId)
+    .single()
+  if (error) throw new Error(`group ${onchainId}: ${describe(error as DbError)}`)
+  return (data as { id: string }).id
+}
+
+type Pair = { address: string; quota: number }
+
+/** A whitelist address no other section uses: lowercase, 40 hex digits. */
+const WL = (n: number) => ADDRESS40(0x5000_0000 + n)
+/** The hash of a chunk the checks record. */
+const CHUNK_TX = (n: number) => `0x${HEX64(0xc0de_0000 + n)}`
+const QUOTA_SENTENCE = 'The quota must be 1 to 10,000.'
+const PUBLIC_SALE_SENTENCE = 'The public sale has no whitelist.'
+const FULL_SENTENCE = 'A whitelist holds up to 10,000 addresses.'
+const NOT_THIS_CHANGE_SENTENCE = 'The transaction did not make this change.'
+
+const addArgs = (cid: string, onchainId: number, rows: Pair[]) => ({
+  p_collection_id: cid,
+  p_onchain_id: onchainId,
+  p_rows: rows,
+})
+
+const chunkArgs = (owner: string, cid: string, onchainId: number, tx: string, rows: Pair[]) => ({
+  p_collection_id: cid,
+  p_owner: owner,
+  p_onchain_id: onchainId,
+  p_tx: tx,
+  p_rows: rows,
+})
+
+async function artWhitelist(A: Creator, B: Creator): Promise<void> {
+  const payer = A.account.address.toLowerCase()
+  // Rendered and recorded as deployed with Public (0) and Holders (1), as 9k records one, and a third group
+  // recorded for the cap.
+  const { cid } = await renderedFixture(A, payer, 161)
+  const recorded = await callArt(admin, 'collection_record_deploy', recordArgs(A.userId, cid, payer, 12))
+  if (recorded.error) throw new Error(`setup: record: ${describe(recorded.error)}`)
+  const third = await callArt(admin, 'mint_group_record', phaseRecordArgs(A.userId, cid, 2, 'Full list'))
+  if (third.error) throw new Error(`setup: group 2: ${describe(third.error)}`)
+  const holders = await groupRowId(cid, 1)
+  const full = await groupRowId(cid, 2)
+  // A draft with a group the service role seeds: both functions refuse it as not deployed.
+  const draft = await insertCollection(A.client)
+  if (!draft.row) throw new Error(`setup: ${describe(draft.error)}`)
+  const draftId = draft.row.id
+  const draftGroup = await admin
+    .from('mint_groups')
+    .insert({ collection_id: draftId, onchain_id: 1, name: 'Early' })
+  if (draftGroup.error) throw new Error(`setup: draft group: ${describe(draftGroup.error as DbError)}`)
+
+  const entry = (address: string, quota: number, extra: Record<string, unknown> = {}) => ({
+    mint_group_id: holders,
+    collection_id: cid,
+    wallet_address: address,
+    quota,
+    ...extra,
+  })
+  const add = (client: SupabaseClient, onchainId: number, rows: Pair[], collection = cid) =>
+    callArt(client, 'whitelist_entries_add', addArgs(collection, onchainId, rows))
+  const record = (onchainId: number, tx: string, rows: Pair[], owner = A.userId, collection = cid) =>
+    callArt(admin, 'whitelist_chunk_record', chunkArgs(owner, collection, onchainId, tx, rows))
+  const rowOf = async (address: string) =>
+    (await entryRows(holders)).find((row) => row.wallet_address === address)
+  const nowhere = async (address: string) =>
+    (await countRows('whitelist_entries', 'wallet_address', address)) === 0
+
+  await check(
+    'whitelist_entries: the owner inserts an entry with a quota of 0 (a staged removal)',
+    async () => {
+      const { data, error } = await A.client
+        .from('whitelist_entries')
+        .insert(entry(WL(1), 0))
+        .select()
+      if (error) return describe(error as DbError)
+      return data.length === 1 ? null : `${data.length} row(s)`
+    },
+  )
+
+  await check('whitelist_entries: an owner insert carrying a copy is refused', async () => {
+    const problems: string[] = []
+    for (const copy of [
+      { written_quota: 1 },
+      { written_tx: CHUNK_TX(1) },
+      { written_at: new Date().toISOString() },
+    ]) {
+      const { data, error } = await A.client
+        .from('whitelist_entries')
+        .insert(entry(WL(2), 1, copy))
+        .select()
+      const problem = expectError(error as DbError, PERMISSION, data)
+      if (problem) problems.push(`${Object.keys(copy)[0]}: ${problem}`)
+    }
+    if (problems.length) return problems.join('; ')
+    return (await nowhere(WL(2))) ? null : 'a row was written'
+  })
+
+  await check(
+    'whitelist_entries: the owner updates quota and is refused the copies, wallet_address and mint_group_id',
+    async () => {
+      const quota = await A.client
+        .from('whitelist_entries')
+        .update({ quota: 3 })
+        .eq('mint_group_id', holders)
+        .eq('wallet_address', WL(1))
+        .select()
+      if (quota.error) return `quota: ${describe(quota.error as DbError)}`
+      if (quota.data.length !== 1) return `quota: ${quota.data.length} row(s)`
+      const problems: string[] = []
+      for (const patch of [
+        { written_quota: 3 },
+        { written_tx: CHUNK_TX(1) },
+        { written_at: new Date().toISOString() },
+        { wallet_address: WL(3) },
+        { mint_group_id: full },
+      ]) {
+        const { data, error } = await A.client
+          .from('whitelist_entries')
+          .update(patch)
+          .eq('mint_group_id', holders)
+          .eq('wallet_address', WL(1))
+          .select()
+        const problem = expectError(error as DbError, PERMISSION, data)
+        if (problem) problems.push(`${Object.keys(patch)[0]}: ${problem}`)
+      }
+      if (problems.length) return problems.join('; ')
+      const row = await rowOf(WL(1))
+      return row?.quota === 3 && row.written_quota === null ? null : JSON.stringify(row)
+    },
+  )
+
+  await check('whitelist_entries: a negative, malformed or partial copy is refused', async () => {
+    const at = new Date().toISOString()
+    const problems: string[] = []
+    for (const [label, copy] of [
+      ['negative', { written_quota: -1, written_tx: CHUNK_TX(1), written_at: at }],
+      ['malformed', { written_quota: 1, written_tx: `0x${'AB'.repeat(32)}`, written_at: at }],
+      ['partial', { written_quota: 1 }],
+    ] as const) {
+      const { data, error } = await admin
+        .from('whitelist_entries')
+        .update(copy)
+        .eq('mint_group_id', holders)
+        .eq('wallet_address', WL(1))
+        .select()
+      const problem = expectError(error as DbError, CHECK, data)
+      if (problem) problems.push(`${label}: ${problem}`)
+    }
+    if (problems.length) return problems.join('; ')
+    return (await rowOf(WL(1)))?.written_quota === null ? null : 'a copy was written'
+  })
+
+  await check('whitelist_entries_add: a signed-out caller cannot execute it', async () => {
+    const { error } = await add(anon, 1, [{ address: WL(4), quota: 1 }])
+    const problem = expectSentence(error, PERMISSION, 'permission denied')
+    if (problem) return problem
+    return (await nowhere(WL(4))) ? null : 'a row was written'
+  })
+
+  await check('whitelist_entries_add: a draft is refused as not deployed', async () => {
+    const { error } = await add(A.client, 1, [{ address: WL(4), quota: 1 }], draftId)
+    const problem = expectSentence(error, CHECK, NOT_DEPLOYED_SENTENCE)
+    if (problem) return problem
+    return (await nowhere(WL(4))) ? null : 'a row was written'
+  })
+
+  await check("whitelist_entries_add: B's session on A's group is refused as not found", async () => {
+    const { error } = await add(B.client, 1, [{ address: WL(4), quota: 1 }])
+    const problem = expectSentence(error, PERMISSION, 'phase not found')
+    if (problem) return problem
+    return (await nowhere(WL(4))) ? null : 'a row was written'
+  })
+
+  await check('whitelist_entries_add: a quota of 0 or 10,001 is refused', async () => {
+    const problems: string[] = []
+    for (const quota of [0, 10_001]) {
+      const { error } = await add(A.client, 1, [{ address: WL(4), quota }])
+      const problem = expectSentence(error, CHECK, QUOTA_SENTENCE)
+      if (problem) problems.push(`${quota}: ${problem}`)
+    }
+    if (problems.length) return problems.join('; ')
+    return (await nowhere(WL(4))) ? null : 'a row was written'
+  })
+
+  await check('whitelist_entries_add: the public sale is refused', async () => {
+    const { error } = await add(A.client, 0, [{ address: WL(4), quota: 1 }])
+    const problem = expectSentence(error, CHECK, PUBLIC_SALE_SENTENCE)
+    if (problem) return problem
+    return (await nowhere(WL(4))) ? null : 'a row was written'
+  })
+
+  await check(
+    'whitelist_entries_add: the 10,001st address is refused and nothing of that add is kept',
+    async () => {
+      const rows = (from: number, count: number): Pair[] =>
+        Array.from({ length: count }, (_, index) => ({ address: WL(10_000 + from + index), quota: 1 }))
+      const filled = await add(A.client, 2, rows(0, 9_999))
+      if (filled.error) return `9,999: ${describe(filled.error)}`
+      const over = await add(A.client, 2, rows(9_999, 2))
+      const problem = expectSentence(over.error, CHECK, FULL_SENTENCE)
+      if (problem) return problem
+      const kept = await countRows('whitelist_entries', 'mint_group_id', full)
+      return kept === 9_999 ? null : `${kept} rows`
+    },
+  )
+
+  await check(
+    'whitelist_entries_add: answers the rows it added and changed; a listed quota changes, its copies do not',
+    async () => {
+      const first = await add(A.client, 1, [
+        { address: WL(5), quota: 2 },
+        { address: WL(6), quota: 3 },
+      ])
+      if (first.error) return `first: ${describe(first.error)}`
+      const copy = await admin
+        .from('whitelist_entries')
+        .update({ written_quota: 2, written_tx: CHUNK_TX(2), written_at: new Date().toISOString() })
+        .eq('mint_group_id', holders)
+        .eq('wallet_address', WL(5))
+      if (copy.error) return `copy: ${describe(copy.error as DbError)}`
+      const second = await add(A.client, 1, [
+        { address: WL(5), quota: 5 },
+        { address: WL(6), quota: 3 },
+        { address: WL(7), quota: 1 },
+      ])
+      if (second.error) return `second: ${describe(second.error)}`
+      const counts = `${JSON.stringify(first.data)} ${JSON.stringify(second.data)}`
+      const five = await rowOf(WL(5))
+      return counts === '[{"added":2,"updated":0}] [{"added":1,"updated":1}]' &&
+        five?.quota === 5 &&
+        five.written_quota === 2 &&
+        five.written_tx === CHUNK_TX(2)
+        ? null
+        : `${counts} ${JSON.stringify(five)}`
+    },
+  )
+
+  await check(
+    "whitelist_chunk_record: the owner's session, a signed-out caller, a draft, another owner, an unknown group and a malformed hash are refused",
+    async () => {
+      const pair: Pair[] = [{ address: WL(8), quota: 1 }]
+      const problems: string[] = []
+      for (const [who, client] of [
+        ['owner session', A.client],
+        ['signed out', anon],
+      ] as const) {
+        const { error } = await callArt(
+          client,
+          'whitelist_chunk_record',
+          chunkArgs(A.userId, cid, 1, CHUNK_TX(3), pair),
+        )
+        const problem = expectSentence(error, PERMISSION, 'permission denied')
+        if (problem) problems.push(`${who}: ${problem}`)
+      }
+      const refusals: [string, DbError, string[], string][] = [
+        [
+          'draft',
+          (await record(1, CHUNK_TX(3), pair, A.userId, draftId)).error,
+          CHECK,
+          NOT_DEPLOYED_SENTENCE,
+        ],
+        [
+          'another owner',
+          (await record(1, CHUNK_TX(3), pair, B.userId)).error,
+          PERMISSION,
+          'collection not found',
+        ],
+        ['unknown group', (await record(9, CHUNK_TX(3), pair)).error, PERMISSION, 'phase not found'],
+        [
+          'malformed hash',
+          (await record(1, `0x${'AB'.repeat(32)}`, pair)).error,
+          CHECK,
+          NOT_THIS_CHANGE_SENTENCE,
+        ],
+      ]
+      for (const [label, error, codes, sentence] of refusals) {
+        const problem = expectSentence(error, codes, sentence)
+        if (problem) problems.push(`${label}: ${problem}`)
+      }
+      if (problems.length) return problems.join('; ')
+      return (await nowhere(WL(8))) ? null : 'a row was written'
+    },
+  )
+
+  await check(
+    'whitelist_chunk_record: writes the three copies of each pair above 0 and answers how many',
+    async () => {
+      const { data, error } = await record(1, CHUNK_TX(4), [
+        { address: WL(5), quota: 5 },
+        { address: WL(6), quota: 3 },
+      ])
+      if (error) return describe(error)
+      const five = await rowOf(WL(5))
+      const six = await rowOf(WL(6))
+      return data === 2 &&
+        five?.written_quota === 5 &&
+        five.written_tx === CHUNK_TX(4) &&
+        five.written_at !== null &&
+        six?.written_quota === 3 &&
+        six.written_tx === CHUNK_TX(4)
+        ? null
+        : `${JSON.stringify(data)} ${JSON.stringify([five, six])}`
+    },
+  )
+
+  await check(
+    'whitelist_chunk_record: a pair for an address Cobweb does not list creates its row, written',
+    async () => {
+      const { data, error } = await record(1, CHUNK_TX(5), [{ address: WL(9), quota: 4 }])
+      if (error) return describe(error)
+      const row = await rowOf(WL(9))
+      return data === 1 && row?.quota === 4 && row.written_quota === 4 && row.written_tx === CHUNK_TX(5)
+        ? null
+        : `${JSON.stringify(data)} ${JSON.stringify(row)}`
+    },
+  )
+
+  await check(
+    'whitelist_chunk_record: a written zero deletes its staged removal, keeps an address re-added meanwhile, and creates nothing for an unlisted zero',
+    async () => {
+      const staged = await A.client
+        .from('whitelist_entries')
+        .update({ quota: 0 })
+        .eq('mint_group_id', holders)
+        .in('wallet_address', [WL(5), WL(6)])
+      if (staged.error) return `stage: ${describe(staged.error as DbError)}`
+      const readded = await add(A.client, 1, [{ address: WL(6), quota: 2 }])
+      if (readded.error) return `re-add: ${describe(readded.error)}`
+      const { data, error } = await record(1, CHUNK_TX(6), [
+        { address: WL(5), quota: 0 },
+        { address: WL(6), quota: 0 },
+        { address: WL(10), quota: 0 },
+      ])
+      if (error) return describe(error)
+      const six = await rowOf(WL(6))
+      return data === 2 &&
+        (await nowhere(WL(5))) &&
+        (await nowhere(WL(10))) &&
+        six?.quota === 2 &&
+        six.written_quota === 0 &&
+        six.written_tx === CHUNK_TX(6)
+        ? null
+        : `${JSON.stringify(data)} ${JSON.stringify(await entryRows(holders))}`
+    },
+  )
+
+  await check(
+    'whitelist_chunk_record: the same transaction recorded twice answers 0 and keeps written_at',
+    async () => {
+      const before = await rowOf(WL(9))
+      const { data, error } = await record(1, CHUNK_TX(5), [{ address: WL(9), quota: 4 }])
+      if (error) return describe(error)
+      const after = await rowOf(WL(9))
+      return data === 0 && before?.written_at !== null && after?.written_at === before?.written_at
+        ? null
+        : `${JSON.stringify(data)} ${JSON.stringify([before, after])}`
     },
   )
 }
