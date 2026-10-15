@@ -35,6 +35,13 @@ describe('the log lines (docs/specs/2026-10-16-freshness-server.md, section 6.1)
   it("add an unexpected failure's code in capitals once, and a whole-number code only as errorLine does", () => {
     const invalid = Object.assign(new TypeError(`Invalid URL: ${KEYED_URL}`), { code: 'ERR_INVALID_URL' })
     expect(failureLine(invalid)).toBe('TypeError (ERR_INVALID_URL)')
+    // A port in use, as Node's listen reports it: the message names the address, and errno is not a code.
+    const inUse = Object.assign(new Error('listen EADDRINUSE: address already in use :::3100'), {
+      code: 'EADDRINUSE',
+      errno: -48,
+      syscall: 'listen',
+    })
+    expect(failureLine(inUse)).toBe('Error (EADDRINUSE)')
     expect(failureLine(new LimitExceededRpcError(rateLimit()))).toBe(
       'RpcRequestError (-32005): RPC Request failed.',
     )
