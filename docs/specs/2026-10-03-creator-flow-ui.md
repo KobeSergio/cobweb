@@ -226,6 +226,8 @@ done, with failure at any step and a way forward.
 
 > **15 October 2026:** The Whitelist tab runs on real data ([2026-10-15-whitelist.md](2026-10-15-whitelist.md)). What changed from the sample: there is no chunk table; each entry keeps a copy of what the chain was last proven to hold (`written_quota`, `written_tx`, `written_at`), and an entry is written when that copy equals its quota; the server builds the next chunk from the first 500 entries not written in address order, so a failed or lost chunk is resumed by writing the next one; a chunk is proven from its receipt and the transaction's calldata, never from the browser's list; a chunk sent but not confirmed waits above the tabs with "Check again" and "Discard"; Minted and Left are read from the contract for the 25 addresses on screen; the holder snapshot is a server action that reads an ERC-721 contract (checked through ERC-165) at one block, up to 20,000 tokens, on the chains Cobweb has an RPC for, and the same input serves Airdrop.
 
+> **16 October 2026:** Airdrop, Settings and the Overview's pointer, Reveal and proceeds run on real data ([2026-10-15-airdrop-settings.md](2026-10-15-airdrop-settings.md)). What changed from the sample: an airdrop goes in batches of at most 500 wallets and 1,000 tokens, each sent with exactly the contract's fee for its tokens as the value; the list is frozen at the first send and kept in the browser with "Check again" and "Discard", and a discarded batch that landed mints twice if it is sent again (the waiting panel says so); History is Cobweb's record of the batches it confirmed, with token ids from the receipt's `Transfer` logs, and airdrops sent outside Cobweb are not listed; a burn is at most 1,000 tokens a transaction; a repeated address's summed quantity is checked against 1,000; Settings reads the contract with copies for when it cannot be read; "Withdrawn so far" counts the withdrawals made through Cobweb; "Platform fees per token" comes from `fees()`; "Paid by minters" waits for Phase 6; Reveal offers the rendered metadata, the placeholder and another IPFS link; the level control follows the validator's code; a wallet that is not the contract's owner reads everything and sends nothing; the Overview's pointer also reads Custom, and its proceeds come from the contract.
+
 ### 4.7 Public mint page (`/[slug]`)
 
 - Stands alone: slim top bar with identity and wallet button, no app sidebar, "Powered by Cobweb"
@@ -349,6 +351,8 @@ A creator may deploy before the real art is finished:
   in [MASTER_PLAN.md](../MASTER_PLAN.md#open-decisions).
 - **Data:** the render job carries `placeholder: { cid, mediaType } | null` and the collection a
   deferred-art flag. Phase 3 adds the column; the sample data and `steps.ts` model it until then.
+
+> **16 October 2026:** As built ([2026-10-15-airdrop-settings.md](2026-10-15-airdrop-settings.md), section 7.4): "revert to placeholder" is offered whenever a placeholder job exists, also after the reveal; the rendered metadata is the real job's `base_uri` exactly (a single asset's ends in `/metadata.json`, so a CID alone cannot rebuild it); a custom link is a full `ipfs://` URI; and Reveal opens once the real set is rendered.
 
 ## 8. Acceptance criteria
 
