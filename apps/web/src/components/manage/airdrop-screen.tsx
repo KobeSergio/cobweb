@@ -319,6 +319,9 @@ export function AirdropScreen({
   const burnInvalid = left === null ? null : burnError(burnQuantity, left)
   const burnAmount = burnInvalid || left === null ? 0 : Number(burnQuantity)
   const burnLabel = `Burn ${tokensLabel(burnAmount)}`
+  // A burn in flight: the button opens that burn's dialog again, so it names that burn's amount, which the
+  // quantity above reads as 0 while the chain is unread.
+  const burnButtonLabel = reopenBurn && burnDialog ? `Burn ${tokensLabel(burnDialog.amount)}` : burnLabel
 
   /**
    * "Send airdrop" or "Send batch": freezes the list at the first send (not under the owner check) and opens batch
@@ -543,7 +546,7 @@ export function AirdropScreen({
                   }}
                 >
                   <FlameIcon aria-hidden="true" />
-                  {burnLabel}
+                  {burnButtonLabel}
                 </Button>
               </>
             ) : (
