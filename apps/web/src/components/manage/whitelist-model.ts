@@ -29,11 +29,17 @@ function withEntries(list: GroupList, entries: ListEntry[]): GroupList {
  */
 export function withAdded(list: GroupList, rows: ChunkEntry[]): GroupList {
   const entries = [...list.entries]
+  // Each address's place in `entries`, by lowercase address: one lookup per row, at the 10,000 cap too.
+  const places = new Map<string, number>(entries.map((entry, index) => [entry.address.toLowerCase(), index]))
   for (const row of rows) {
-    const at = entries.findIndex((entry) => same(entry.address, row.address))
+    const key = row.address.toLowerCase()
+    const at = places.get(key) ?? entries.length
     const listed = entries[at]
     if (listed) entries[at] = { ...listed, quota: row.quota }
-    else entries.push({ address: row.address, quota: row.quota, writtenQuota: null, writtenTx: null })
+    else {
+      places.set(key, at)
+      entries.push({ address: row.address, quota: row.quota, writtenQuota: null, writtenTx: null })
+    }
   }
   return withEntries(list, entries.sort(byAddress))
 }

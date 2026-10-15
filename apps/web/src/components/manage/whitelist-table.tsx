@@ -65,6 +65,8 @@ export function WhitelistTable({
     queryFn: () => usage.read(addresses),
     enabled: usage.on && addresses.length > 0,
     staleTime: USAGE_STALE_MS,
+    // Kept for the visit, so the export has Minted for every page read, not only the one on screen.
+    gcTime: Infinity,
     retry: false,
   })
 
@@ -133,7 +135,8 @@ export function WhitelistTable({
           <TableBody>
             {rows.map((entry, index) => {
               const state = entryState(entry)
-              const used = minted.data?.[index]
+              // A disabled read keeps its cache: while the chain cannot be read, Minted says "Not read".
+              const used = usage.on ? minted.data?.[index] : undefined
               const known = typeof used === 'number'
               return (
                 <TableRow key={entry.address} className={cn(state === 'removing' && 'text-muted-foreground')}>

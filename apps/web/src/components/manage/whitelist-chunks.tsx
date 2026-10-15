@@ -115,7 +115,7 @@ export function WhitelistChunks({
               style={{ flexGrow: row.addresses, flexBasis: 0 }}
             >
               <span className="sr-only">
-                Chunk {row.number}, {row.addresses} addresses,{' '}
+                Chunk {row.number}, {row.addresses} {row.addresses === 1 ? 'address' : 'addresses'},{' '}
                 {row.status === 'written' ? 'written' : row.status === 'failed' ? 'failed' : 'not written'}
               </span>
             </li>
@@ -128,7 +128,9 @@ export function WhitelistChunks({
           {rows.map((row) => (
             <li key={row.number} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5">
               <span className="w-20 font-medium">Chunk {row.number}</span>
-              <span className="numeric text-muted-foreground w-28">{count(row.addresses)} addresses</span>
+              <span className="numeric text-muted-foreground w-28">
+                {count(row.addresses)} {row.addresses === 1 ? 'address' : 'addresses'}
+              </span>
               {row.status === 'written' ? (
                 <StatusBadge status="done">Written</StatusBadge>
               ) : row.status === 'failed' ? (
