@@ -28,6 +28,56 @@ export type Database = {
   }
   public: {
     Tables: {
+      airdrops: {
+        Row: {
+          block: number
+          collection_id: string
+          confirmed_at: string
+          fee_paid_wei: number
+          first_token_id: number
+          kind: string
+          last_token_id: number
+          recipients: number
+          sent_by: string
+          tokens: number
+          tx_hash: string
+        }
+        Insert: {
+          block: number
+          collection_id: string
+          confirmed_at?: string
+          fee_paid_wei: number
+          first_token_id: number
+          kind: string
+          last_token_id: number
+          recipients: number
+          sent_by: string
+          tokens: number
+          tx_hash: string
+        }
+        Update: {
+          block?: number
+          collection_id?: string
+          confirmed_at?: string
+          fee_paid_wei?: number
+          first_token_id?: number
+          kind?: string
+          last_token_id?: number
+          recipients?: number
+          sent_by?: string
+          tokens?: number
+          tx_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'airdrops_collection_id_fkey'
+            columns: ['collection_id']
+            isOneToOne: false
+            referencedRelation: 'collections'
+            referencedColumns: ['id']
+          },
+        ]
+      }
       art_collections: {
         Row: {
           collection_id: string
@@ -195,6 +245,7 @@ export type Database = {
           factory: string
           mint_fee_bps: number
           mint_fee_flat_wei: number
+          mint_on_behalf: boolean
           payout_address: string
           public_max_per_wallet: number
           royalty_bps: number
@@ -202,6 +253,7 @@ export type Database = {
           salt: string
           state_block: number | null
           state_read_at: string | null
+          transfer_validator: string | null
           tx_hash: string
         }
         Insert: {
@@ -218,6 +270,7 @@ export type Database = {
           factory: string
           mint_fee_bps: number
           mint_fee_flat_wei: number
+          mint_on_behalf?: boolean
           payout_address: string
           public_max_per_wallet: number
           royalty_bps: number
@@ -225,6 +278,7 @@ export type Database = {
           salt: string
           state_block?: number | null
           state_read_at?: string | null
+          transfer_validator?: string | null
           tx_hash: string
         }
         Update: {
@@ -241,6 +295,7 @@ export type Database = {
           factory?: string
           mint_fee_bps?: number
           mint_fee_flat_wei?: number
+          mint_on_behalf?: boolean
           payout_address?: string
           public_max_per_wallet?: number
           royalty_bps?: number
@@ -248,6 +303,7 @@ export type Database = {
           salt?: string
           state_block?: number | null
           state_read_at?: string | null
+          transfer_validator?: string | null
           tx_hash?: string
         }
         Relationships: [
@@ -844,11 +900,62 @@ export type Database = {
           },
         ]
       }
+      withdrawals: {
+        Row: {
+          amount_wei: number
+          block: number
+          collection_id: string
+          confirmed_at: string
+          payout_address: string
+          tx_hash: string
+        }
+        Insert: {
+          amount_wei: number
+          block: number
+          collection_id: string
+          confirmed_at?: string
+          payout_address: string
+          tx_hash: string
+        }
+        Update: {
+          amount_wei?: number
+          block?: number
+          collection_id?: string
+          confirmed_at?: string
+          payout_address?: string
+          tx_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'withdrawals_collection_id_fkey'
+            columns: ['collection_id']
+            isOneToOne: false
+            referencedRelation: 'collections'
+            referencedColumns: ['id']
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      airdrop_record: {
+        Args: {
+          p_block: number
+          p_collection_id: string
+          p_fee_paid_wei: number
+          p_first_token_id: number
+          p_kind: string
+          p_last_token_id: number
+          p_owner: string
+          p_recipients: number
+          p_sent_by: string
+          p_tokens: number
+          p_tx: string
+        }
+        Returns: boolean
+      }
       art_batch_done: {
         Args: {
           p_images_cid: string
@@ -1396,6 +1503,7 @@ export type Database = {
           factory: string
           mint_fee_bps: number
           mint_fee_flat_wei: number
+          mint_on_behalf: boolean
           payout_address: string
           public_max_per_wallet: number
           royalty_bps: number
@@ -1403,6 +1511,7 @@ export type Database = {
           salt: string
           state_block: number | null
           state_read_at: string | null
+          transfer_validator: string | null
           tx_hash: string
         }
         SetofOptions: {
@@ -1476,6 +1585,16 @@ export type Database = {
         Args: { p_collection_id: string; p_slug: string }
         Returns: undefined
       }
+      settings_refresh: {
+        Args: {
+          p_block: number
+          p_block_time: string
+          p_collection_id: string
+          p_owner: string
+          p_settings: Json
+        }
+        Returns: boolean
+      }
       swap_token_ids_for_check: {
         Args: { p_a: number; p_b: number; p_collection_id: string }
         Returns: undefined
@@ -1496,6 +1615,17 @@ export type Database = {
           added: number
           updated: number
         }[]
+      }
+      withdrawal_record: {
+        Args: {
+          p_amount_wei: number
+          p_block: number
+          p_collection_id: string
+          p_owner: string
+          p_payout_address: string
+          p_tx: string
+        }
+        Returns: boolean
       }
     }
     Enums: {

@@ -571,7 +571,14 @@ async function main(): Promise<void> {
     return entryInsert.error ? describe(entryInsert.error) : null
   })
 
-  for (const table of ['profiles', 'collections', 'mint_groups', 'whitelist_entries']) {
+  for (const table of [
+    'profiles',
+    'collections',
+    'mint_groups',
+    'whitelist_entries',
+    'airdrops',
+    'withdrawals',
+  ]) {
     await check(`anon: reads nothing from ${table}`, async () => {
       const { data, error } = await anon.from(table).select()
       return expectNothing(error, data)
@@ -1055,6 +1062,7 @@ async function main(): Promise<void> {
   await artDeploy(A, B)
   await artPhases(A, B)
   await artWhitelist(A, B)
+  await artAirdropSettings(A, B)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -6301,6 +6309,516 @@ async function artWhitelist(A: Creator, B: Creator): Promise<void> {
       return data === 0 && before?.written_at !== null && after?.written_at === before?.written_at
         ? null
         : `${JSON.stringify(data)} ${JSON.stringify([before, after])}`
+    },
+  )
+}
+
+// ---------------------------------------------------------------------------------------------
+// 9m. Airdrop and Settings: the deployments copies, airdrops and withdrawals with airdrop_record and
+// withdrawal_record, and settings_refresh (docs/specs/2026-10-15-airdrop-settings.md, section 4)
+// ---------------------------------------------------------------------------------------------
+type AirdropCheckRow = {
+  tx_hash: string
+  kind: string
+  recipients: number
+  tokens: number
+  fee_paid_wei: string
+  first_token_id: number
+  last_token_id: number
+  block: number
+  sent_by: string
+}
+
+/** A collection's airdrop rows, as the service role reads them. */
+async function airdropRows(cid: string): Promise<AirdropCheckRow[]> {
+  const { data, error } = await admin
+    .from('airdrops')
+    .select(
+      'tx_hash, kind, recipients, tokens, fee_paid_wei::text, first_token_id, last_token_id, block, sent_by',
+    )
+    .eq('collection_id', cid)
+  if (error) throw new Error(`airdrops: ${describe(error as DbError)}`)
+  return data as unknown as AirdropCheckRow[]
+}
+
+type WithdrawalCheckRow = { tx_hash: string; amount_wei: string; payout_address: string; block: number }
+
+/** A collection's withdrawal rows, as the service role reads them. */
+async function withdrawalRows(cid: string): Promise<WithdrawalCheckRow[]> {
+  const { data, error } = await admin
+    .from('withdrawals')
+    .select('tx_hash, amount_wei::text, payout_address, block')
+    .eq('collection_id', cid)
+  if (error) throw new Error(`withdrawals: ${describe(error as DbError)}`)
+  return data as unknown as WithdrawalCheckRow[]
+}
+
+type SettingsCopyRow = {
+  payout_address: string
+  royalty_bps: number
+  royalty_receiver: string
+  base_uri: string
+  transfer_validator: string | null
+  mint_on_behalf: boolean
+  state_block: number | null
+  state_read_at: string | null
+}
+
+/** The deployment's settings copies and the read they came from, as the service role reads them. */
+async function settingsCopy(cid: string): Promise<SettingsCopyRow> {
+  const { data, error } = await admin
+    .from('deployments')
+    .select(
+      'payout_address, royalty_bps, royalty_receiver, base_uri, transfer_validator, mint_on_behalf, state_block, state_read_at',
+    )
+    .eq('collection_id', cid)
+    .single()
+  if (error) throw new Error(`settings copy: ${describe(error as DbError)}`)
+  return data as SettingsCopyRow
+}
+
+/** Each refusal as [label, error, codes, words]: null when every one was refused with its code and words. */
+function refusedAll(cases: [string, DbError, string[], string][]): string | null {
+  const problems = cases.flatMap(([label, error, codes, words]) => {
+    const problem = expectSentence(error, codes, words)
+    return problem ? [`${label}: ${problem}`] : []
+  })
+  return problems.length ? problems.join('; ') : null
+}
+
+/** An airdrop's hash for the checks. */
+const DROP_TX = (n: number) => `0x${HEX64(0xd209_0000 + n)}`
+/** A withdrawal's hash for the checks. */
+const WITHDRAW_TX = (n: number) => `0x${HEX64(0x3170_0000 + n)}`
+/** Limit Break's default validator, lowercase as the copy holds it. */
+const VALIDATOR = '0x721c008fdff27bf06e7e123956e2fe03b63342e3'
+
+const dropArgs = (
+  owner: string,
+  cid: string,
+  tx: string,
+  sentBy: string,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> => ({
+  p_collection_id: cid,
+  p_owner: owner,
+  p_tx: tx,
+  p_kind: 'airdrop',
+  p_recipients: 2,
+  p_tokens: 3,
+  p_fee_paid_wei: '300000000000000',
+  p_first_token_id: 1,
+  p_last_token_id: 3,
+  p_block: 40,
+  p_sent_by: sentBy,
+  ...overrides,
+})
+
+const withdrawArgs = (
+  owner: string,
+  cid: string,
+  tx: string,
+  payout: string,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> => ({
+  p_collection_id: cid,
+  p_owner: owner,
+  p_tx: tx,
+  p_amount_wei: '1000000000000000',
+  p_payout_address: payout,
+  p_block: 41,
+  ...overrides,
+})
+
+const settingsArgs = (
+  owner: string,
+  cid: string,
+  block: number,
+  settings: Record<string, unknown> = {},
+): Record<string, unknown> => ({
+  p_collection_id: cid,
+  p_owner: owner,
+  p_block: block,
+  p_block_time: blockTime(block),
+  p_settings: {
+    payout_address: ADDRESS40(0x5e77_0001),
+    royalty_bps: 750,
+    royalty_receiver: ADDRESS40(0x5e77_0002),
+    base_uri: `ipfs://${CID('f')}/`,
+    transfer_validator: VALIDATOR,
+    mint_on_behalf: true,
+    ...settings,
+  },
+})
+
+async function artAirdropSettings(A: Creator, B: Creator): Promise<void> {
+  const payer = A.account.address.toLowerCase()
+  // Rendered and recorded as deployed, as 9k records one.
+  const { cid } = await renderedFixture(A, payer, 171)
+  const recorded = await callArt(admin, 'collection_record_deploy', recordArgs(A.userId, cid, payer, 13))
+  if (recorded.error) throw new Error(`setup: record: ${describe(recorded.error)}`)
+  // A draft without a deployment: the three functions refuse it.
+  const draft = await insertCollection(A.client)
+  if (!draft.row) throw new Error(`setup: ${describe(draft.error)}`)
+  const draftId = draft.row.id
+  const drop = (
+    client: SupabaseClient,
+    overrides: Record<string, unknown> = {},
+    owner = A.userId,
+    at = cid,
+  ) => callArt(client, 'airdrop_record', dropArgs(owner, at, DROP_TX(2), payer, overrides))
+  const withdraw = (
+    client: SupabaseClient,
+    overrides: Record<string, unknown> = {},
+    owner = A.userId,
+    at = cid,
+  ) => callArt(client, 'withdrawal_record', withdrawArgs(owner, at, WITHDRAW_TX(2), payer, overrides))
+  const refresh = (
+    client: SupabaseClient,
+    block: number,
+    settings: Record<string, unknown> = {},
+    owner = A.userId,
+    at = cid,
+  ) => callArt(client, 'settings_refresh', settingsArgs(owner, at, block, settings))
+  const recordedRows = async () =>
+    (await countRows('airdrops', 'collection_id', cid)) +
+    (await countRows('withdrawals', 'collection_id', cid))
+  /** The owner's insert (when a row is given), update and delete on a table, each refused for want of a grant. */
+  const writesRefused = async (table: string, row: Record<string, unknown> | null) => {
+    const results: [string, { data: unknown; error: unknown }][] = []
+    if (row) results.push(['insert', await A.client.from(table).insert(row).select()])
+    results.push([
+      'update',
+      await A.client.from(table).update({ block: 99 }).eq('collection_id', cid).select(),
+    ])
+    results.push(['delete', await A.client.from(table).delete().eq('collection_id', cid).select()])
+    return results.flatMap(([label, result]) => {
+      const problem = expectError(result.error as DbError, PERMISSION, result.data)
+      return problem ? [`${table} ${label}: ${problem}`] : []
+    })
+  }
+  const ownerReads = async (client: SupabaseClient, table: string) => {
+    const { data, error } = await client.from(table).select('tx_hash').eq('collection_id', cid)
+    if (error) throw new Error(`${table}: ${describe(error as DbError)}`)
+    return data.length
+  }
+
+  await check(
+    'deployments: a new deployment reads transfer_validator null and mint_on_behalf false',
+    async () => {
+      const { data, error } = await A.client
+        .from('deployments')
+        .select('transfer_validator, mint_on_behalf')
+        .eq('collection_id', cid)
+        .single()
+      if (error) return describe(error as DbError)
+      return data.transfer_validator === null && data.mint_on_behalf === false ? null : JSON.stringify(data)
+    },
+  )
+
+  await check(
+    'airdrops and withdrawals: the owner reads nothing before a record, and a client insert, update or delete is refused',
+    async () => {
+      if ((await ownerReads(A.client, 'airdrops')) + (await ownerReads(A.client, 'withdrawals')) > 0)
+        return 'the owner read a row'
+      const problems = [
+        ...(await writesRefused('airdrops', {
+          tx_hash: DROP_TX(1),
+          collection_id: cid,
+          kind: 'airdrop',
+          recipients: 1,
+          tokens: 1,
+          fee_paid_wei: 0,
+          first_token_id: 1,
+          last_token_id: 1,
+          block: 1,
+          sent_by: payer,
+        })),
+        ...(await writesRefused('withdrawals', {
+          tx_hash: WITHDRAW_TX(1),
+          collection_id: cid,
+          amount_wei: 1,
+          payout_address: payer,
+          block: 1,
+        })),
+      ]
+      if (problems.length) return problems.join('; ')
+      return (await recordedRows()) === 0 ? null : 'a row was written'
+    },
+  )
+
+  await check("airdrop_record: a signed-out caller and the owner's session cannot execute it", async () => {
+    const problem = refusedAll([
+      ['signed out', (await drop(anon)).error, PERMISSION, 'permission denied'],
+      ['owner session', (await drop(A.client)).error, PERMISSION, 'permission denied'],
+    ])
+    if (problem) return problem
+    return (await recordedRows()) === 0 ? null : 'a row was written'
+  })
+
+  await check('airdrop_record: a draft is refused as not deployed, another owner as not found', async () => {
+    const problem = refusedAll([
+      ['draft', (await drop(admin, {}, A.userId, draftId)).error, CHECK, NOT_DEPLOYED_SENTENCE],
+      ['another owner', (await drop(admin, {}, B.userId)).error, PERMISSION, 'collection not found'],
+    ])
+    if (problem) return problem
+    return (await recordedRows()) === 0 ? null : 'a row was written'
+  })
+
+  await check('airdrop_record: a malformed hash, sender or kind is refused as not this change', async () => {
+    const problem = refusedAll([
+      ['hash', (await drop(admin, { p_tx: `0x${'AB'.repeat(32)}` })).error, CHECK, NOT_THIS_CHANGE_SENTENCE],
+      [
+        'sender',
+        (await drop(admin, { p_sent_by: `0x${'AB'.repeat(20)}` })).error,
+        CHECK,
+        NOT_THIS_CHANGE_SENTENCE,
+      ],
+      ['kind', (await drop(admin, { p_kind: 'mint' })).error, CHECK, NOT_THIS_CHANGE_SENTENCE],
+    ])
+    if (problem) return problem
+    return (await recordedRows()) === 0 ? null : 'a row was written'
+  })
+
+  await check(
+    'airdrop_record: a burn to two recipients, an id range that does not match the tokens, or a negative fee is refused',
+    async () => {
+      const problem = refusedAll([
+        ['burn', (await drop(admin, { p_kind: 'burn' })).error, CHECK, 'airdrops_burn_one_recipient'],
+        ['range', (await drop(admin, { p_last_token_id: 4 })).error, CHECK, 'airdrops_token_range'],
+        ['fee', (await drop(admin, { p_fee_paid_wei: '-1' })).error, CHECK, 'airdrops_fee_paid_wei_check'],
+      ])
+      if (problem) return problem
+      return (await recordedRows()) === 0 ? null : 'a row was written'
+    },
+  )
+
+  await check(
+    'airdrop_record: records the batch and answers true; the owner reads it and B reads nothing',
+    async () => {
+      const { data, error } = await drop(admin)
+      if (error) return describe(error)
+      const rows = await airdropRows(cid)
+      const expected: AirdropCheckRow = {
+        tx_hash: DROP_TX(2),
+        kind: 'airdrop',
+        recipients: 2,
+        tokens: 3,
+        fee_paid_wei: '300000000000000',
+        first_token_id: 1,
+        last_token_id: 3,
+        block: 40,
+        sent_by: payer,
+      }
+      return data === true &&
+        JSON.stringify(rows) === JSON.stringify([expected]) &&
+        (await ownerReads(A.client, 'airdrops')) === 1 &&
+        (await ownerReads(B.client, 'airdrops')) === 0
+        ? null
+        : `${JSON.stringify(data)} ${JSON.stringify(rows)}`
+    },
+  )
+
+  await check('airdrop_record: a second record of the hash answers false and changes nothing', async () => {
+    const { data, error } = await drop(admin, { p_block: 99, p_tokens: 1, p_last_token_id: 1 })
+    if (error) return describe(error)
+    const rows = await airdropRows(cid)
+    return data === false && rows.length === 1 && rows[0]?.block === 40 && rows[0].tokens === 3
+      ? null
+      : `${JSON.stringify(data)} ${JSON.stringify(rows)}`
+  })
+
+  await check('airdrops: the owner cannot update or delete a recorded row', async () => {
+    const problems = await writesRefused('airdrops', null)
+    if (problems.length) return problems.join('; ')
+    const rows = await airdropRows(cid)
+    return rows.length === 1 && rows[0]?.block === 40 ? null : JSON.stringify(rows)
+  })
+
+  await check(
+    "withdrawal_record: a signed-out caller and the owner's session cannot execute it",
+    async () => {
+      const problem = refusedAll([
+        ['signed out', (await withdraw(anon)).error, PERMISSION, 'permission denied'],
+        ['owner session', (await withdraw(A.client)).error, PERMISSION, 'permission denied'],
+      ])
+      if (problem) return problem
+      return (await countRows('withdrawals', 'collection_id', cid)) === 0 ? null : 'a row was written'
+    },
+  )
+
+  await check(
+    'withdrawal_record: a draft is refused as not deployed, another owner as not found, a malformed hash or payout address as not this change',
+    async () => {
+      const problem = refusedAll([
+        ['draft', (await withdraw(admin, {}, A.userId, draftId)).error, CHECK, NOT_DEPLOYED_SENTENCE],
+        ['another owner', (await withdraw(admin, {}, B.userId)).error, PERMISSION, 'collection not found'],
+        [
+          'hash',
+          (await withdraw(admin, { p_tx: `0x${'AB'.repeat(32)}` })).error,
+          CHECK,
+          NOT_THIS_CHANGE_SENTENCE,
+        ],
+        [
+          'payout address',
+          (await withdraw(admin, { p_payout_address: `0x${'AB'.repeat(20)}` })).error,
+          CHECK,
+          NOT_THIS_CHANGE_SENTENCE,
+        ],
+      ])
+      if (problem) return problem
+      return (await countRows('withdrawals', 'collection_id', cid)) === 0 ? null : 'a row was written'
+    },
+  )
+
+  await check('withdrawal_record: an amount of 0 is refused', async () => {
+    const problem = expectSentence(
+      (await withdraw(admin, { p_amount_wei: '0' })).error,
+      CHECK,
+      'withdrawals_amount_wei_check',
+    )
+    if (problem) return problem
+    return (await countRows('withdrawals', 'collection_id', cid)) === 0 ? null : 'a row was written'
+  })
+
+  await check(
+    'withdrawal_record: records the withdrawal and answers true; the owner reads it and B reads nothing',
+    async () => {
+      const { data, error } = await withdraw(admin)
+      if (error) return describe(error)
+      const rows = await withdrawalRows(cid)
+      const expected: WithdrawalCheckRow = {
+        tx_hash: WITHDRAW_TX(2),
+        amount_wei: '1000000000000000',
+        payout_address: payer,
+        block: 41,
+      }
+      return data === true &&
+        JSON.stringify(rows) === JSON.stringify([expected]) &&
+        (await ownerReads(A.client, 'withdrawals')) === 1 &&
+        (await ownerReads(B.client, 'withdrawals')) === 0
+        ? null
+        : `${JSON.stringify(data)} ${JSON.stringify(rows)}`
+    },
+  )
+
+  await check(
+    'withdrawal_record: a second record of the hash answers false and changes nothing; the owner cannot update or delete the row',
+    async () => {
+      const { data, error } = await withdraw(admin, { p_amount_wei: '5', p_block: 99 })
+      if (error) return describe(error)
+      const problems = await writesRefused('withdrawals', null)
+      if (problems.length) return problems.join('; ')
+      const rows = await withdrawalRows(cid)
+      return data === false &&
+        rows.length === 1 &&
+        rows[0]?.amount_wei === '1000000000000000' &&
+        rows[0].block === 41
+        ? null
+        : `${JSON.stringify(data)} ${JSON.stringify(rows)}`
+    },
+  )
+
+  await check("settings_refresh: a signed-out caller and the owner's session cannot execute it", async () => {
+    const problem = refusedAll([
+      ['signed out', (await refresh(anon, 100)).error, PERMISSION, 'permission denied'],
+      ['owner session', (await refresh(A.client, 100)).error, PERMISSION, 'permission denied'],
+    ])
+    if (problem) return problem
+    return (await settingsCopy(cid)).state_block === null ? null : 'a copy was written'
+  })
+
+  await check(
+    'settings_refresh: a draft is refused as not deployed, another owner as not found',
+    async () => {
+      const problem = refusedAll([
+        ['draft', (await refresh(admin, 100, {}, A.userId, draftId)).error, CHECK, NOT_DEPLOYED_SENTENCE],
+        [
+          'another owner',
+          (await refresh(admin, 100, {}, B.userId)).error,
+          PERMISSION,
+          'collection not found',
+        ],
+      ])
+      if (problem) return problem
+      return (await settingsCopy(cid)).state_block === null ? null : 'a copy was written'
+    },
+  )
+
+  await check(
+    'settings_refresh: writes the six copies, state_block and state_read_at, and answers true',
+    async () => {
+      const { data, error } = await refresh(admin, 100)
+      if (error) return describe(error)
+      const copy = await settingsCopy(cid)
+      return data === true &&
+        copy.payout_address === ADDRESS40(0x5e77_0001) &&
+        copy.royalty_bps === 750 &&
+        copy.royalty_receiver === ADDRESS40(0x5e77_0002) &&
+        copy.base_uri === `ipfs://${CID('f')}/` &&
+        copy.transfer_validator === VALIDATOR &&
+        copy.mint_on_behalf === true &&
+        copy.state_block === 100 &&
+        copy.state_read_at !== null &&
+        Date.parse(copy.state_read_at) === Date.parse(blockTime(100))
+        ? null
+        : `${JSON.stringify(data)} ${JSON.stringify(copy)}`
+    },
+  )
+
+  await check(
+    'settings_refresh: an older block answers false and writes nothing; the same block is accepted',
+    async () => {
+      const older = await refresh(admin, 99, { mint_on_behalf: false, base_uri: `ipfs://${CID('g')}/` })
+      if (older.error) return `older: ${describe(older.error)}`
+      const unchanged = await settingsCopy(cid)
+      if (older.data !== false || unchanged.mint_on_behalf !== true || unchanged.state_block !== 100)
+        return `the older block answered ${JSON.stringify(older.data)} and left ${JSON.stringify(unchanged)}`
+      const same = await refresh(admin, 100, { mint_on_behalf: false })
+      if (same.error) return `same block: ${describe(same.error)}`
+      const after = await settingsCopy(cid)
+      return same.data === true && after.mint_on_behalf === false && after.state_block === 100
+        ? null
+        : `${JSON.stringify(same.data)} ${JSON.stringify(after)}`
+    },
+  )
+
+  await check(
+    'settings_refresh: a royalty of 1,500 is copied; 10,001, a malformed address or a missing key is refused; the owner cannot update a copy',
+    async () => {
+      const copied = await refresh(admin, 101, { royalty_bps: 1500 })
+      if (copied.error) return `1,500: ${describe(copied.error)}`
+      if ((await settingsCopy(cid)).royalty_bps !== 1500) return 'a royalty of 1,500 was not copied'
+      const problem = refusedAll([
+        [
+          '10,001',
+          (await refresh(admin, 102, { royalty_bps: 10_001 })).error,
+          CHECK,
+          'deployments_royalty_bps_check',
+        ],
+        [
+          'malformed address',
+          (await refresh(admin, 102, { payout_address: `0x${'AB'.repeat(20)}` })).error,
+          CHECK,
+          'deployments_payout_address_check',
+        ],
+        [
+          'missing key',
+          (await refresh(admin, 102, { transfer_validator: undefined })).error,
+          ['23502'],
+          'Every setting is required.',
+        ],
+      ])
+      if (problem) return problem
+      const update = await A.client
+        .from('deployments')
+        .update({ royalty_bps: 100 })
+        .eq('collection_id', cid)
+        .select()
+      const refused = expectError(update.error as DbError, PERMISSION, update.data)
+      if (refused) return `owner update: ${refused}`
+      const copy = await settingsCopy(cid)
+      return copy.royalty_bps === 1500 && copy.state_block === 101 ? null : JSON.stringify(copy)
     },
   )
 }
