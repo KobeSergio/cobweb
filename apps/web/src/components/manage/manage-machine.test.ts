@@ -590,6 +590,21 @@ describe('the airdrop job kept in the browser', () => {
     expect(sentChunk(store, 'col-1')).toBeNull()
     rememberAirdropJob(store, 'col-1', burn)
     expect(airdropJob(store, 'col-1')).toEqual(burn)
+    // The largest job the screen freezes reads back whole: 500 wallets and 1,000 tokens a batch, 1,000 a wallet.
+    const full: AirdropJob = {
+      kind: 'airdrop',
+      batches: [
+        Array.from({ length: 500 }, () => ({ address: WALLET, amount: 2 })),
+        [{ address: STRANGER, amount: 1_000 }],
+      ],
+      sent: 1,
+      pending: HASH,
+    }
+    rememberAirdropJob(store, 'col-1', full)
+    expect(airdropJob(store, 'col-1')).toEqual(full)
+    const largestBurn: AirdropJob = { ...burn, batches: [[{ address: BURN_ADDRESS, amount: 1_000 }]] }
+    rememberAirdropJob(store, 'col-1', largestBurn)
+    expect(airdropJob(store, 'col-1')).toEqual(largestBurn)
     forgetAirdropJob(store, 'col-1')
     expect(airdropJob(store, 'col-1')).toBeNull()
   })
@@ -620,6 +635,16 @@ describe('the airdrop job kept in the browser', () => {
         ...burn,
         batches: [[{ address: BURN_ADDRESS, amount: 1 }], [{ address: BURN_ADDRESS, amount: 1 }]],
       }),
+      JSON.stringify({
+        ...burn,
+        batches: [
+          [
+            { address: BURN_ADDRESS, amount: 1 },
+            { address: BURN_ADDRESS, amount: 1 },
+          ],
+        ],
+      }),
+      JSON.stringify({ ...job, sent: 0.5 }),
     ]) {
       store.setItem('cobweb-airdrop:col-1', value)
       expect(airdropJob(store, 'col-1')).toBeNull()

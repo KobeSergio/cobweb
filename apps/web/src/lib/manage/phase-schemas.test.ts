@@ -173,6 +173,8 @@ describe('parseSentCall for Airdrop and Settings (docs/specs/2026-10-15-airdrop-
       settingsCalls.mintOnBehalf(false),
       settingsCalls.validator(zeroAddress),
       settingsCalls.level(DEFAULT_TRANSFER_VALIDATOR, COLLECTION, 9),
+      settingsCalls.level(DEFAULT_TRANSFER_VALIDATOR, COLLECTION, 0),
+      settingsCalls.level(DEFAULT_TRANSFER_VALIDATOR, COLLECTION, 1),
     ]
     for (const call of calls) {
       const parsed = parseSentCall(sentOf(call))

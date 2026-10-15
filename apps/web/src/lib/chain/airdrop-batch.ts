@@ -48,9 +48,11 @@ function mintedIds(receipt: PhaseReceipt, contract: string): bigint[] {
         data: log.data,
         topics: log.topics,
       })
+      // viem decodes any event of the ABI by its topic, whatever `eventName` says: the name is compared here.
+      if (event.eventName !== 'Transfer') continue
       if (event.args.from.toLowerCase() === zeroAddress) ids.push(event.args.tokenId)
     } catch {
-      // Another event of the collection.
+      // A log the collection's ABI does not decode.
     }
   }
   return ids.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))

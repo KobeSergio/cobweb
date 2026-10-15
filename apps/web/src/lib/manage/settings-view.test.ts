@@ -61,6 +61,8 @@ describe('pointerOf', () => {
 
   it('reads the placeholder for the placeholder job or the deploy-time link, and custom otherwise, exactly', () => {
     expect(pointerOf(PLACEHOLDER, targets)).toBe('placeholder')
+    // Deployed on its real job, then pointed at the placeholder job's link: the placeholder, not custom.
+    expect(pointerOf(PLACEHOLDER, { real: REAL, placeholder: PLACEHOLDER, start: REAL })).toBe('placeholder')
     expect(
       pointerOf(`ipfs://${CID('s')}`, { real: null, placeholder: null, start: `ipfs://${CID('s')}` }),
     ).toBe('placeholder')
@@ -76,6 +78,8 @@ describe('levelOf', () => {
     expect(levelOf(VALIDATOR, false, null)).toEqual({ kind: 'none', reason: 'no-code' })
     expect(levelOf(VALIDATOR, true, null)).toEqual({ kind: 'unread' })
     expect(levelOf(VALIDATOR, true, 9)).toEqual({ kind: 'level', level: 9 })
+    // Level 0 is the default (royalties enforced): a level, not a validator that did not answer.
+    expect(levelOf(VALIDATOR, true, 0)).toEqual({ kind: 'level', level: 0 })
   })
 })
 

@@ -66,6 +66,8 @@ describe('sampleApplySettings', () => {
       withdrawnWei: (
         BigInt(DEMO_ACTIVITY.proceeds.withdrawnWei) + BigInt(DEMO_ACTIVITY.proceeds.withdrawableWei)
       ).toString(),
+      // The contract keeps the platform's balance apart: a withdrawal leaves it.
+      platformBalanceWei: DEMO_ACTIVITY.proceeds.platformFeesWei,
     })
     expect(sampleApplySettings(settingsCalls.payout(A), view).payout).toBe(A)
     expect(sampleApplySettings(settingsCalls.royalty(A, 750), view)).toMatchObject({
@@ -85,6 +87,16 @@ describe('sampleApplySettings', () => {
     expect(
       sampleApplySettings(settingsCalls.level(DEFAULT_TRANSFER_VALIDATOR, view.contract, 9), view).level,
     ).toEqual({ kind: 'level', level: 9 })
+    // A new validator reads at the enforced level whatever the view held before (here, no validator).
+    const cleared = sampleApplySettings(settingsCalls.validator(zeroAddress), view)
+    expect(sampleApplySettings(settingsCalls.validator(A), cleared).level).toEqual({
+      kind: 'level',
+      level: 0,
+    })
+    // The level call sets the level it names.
+    expect(
+      sampleApplySettings(settingsCalls.level(DEFAULT_TRANSFER_VALIDATOR, view.contract, 1), view).level,
+    ).toEqual({ kind: 'level', level: 1 })
   })
 })
 

@@ -242,9 +242,10 @@ describe('matchPhaseEvent for Airdrop and Settings (docs/specs/2026-10-15-airdro
     const lower = logOf(CONTRACT, 'OwnerPayoutAddressUpdated', {
       newOwnerPayoutAddress: PAYOUT.toLowerCase(),
     })
-    expect(matchPhaseEvent(receipt([lower]), expect_(settingsCalls.payout(PAYOUT)))).toMatchObject({
-      ok: true,
-    })
+    // viem decodes the log's address checksummed, so the case under test is the wanted side's.
+    expect(
+      matchPhaseEvent(receipt([lower]), expect_(settingsCalls.payout(PAYOUT.toLowerCase() as Address))),
+    ).toMatchObject({ ok: true })
     expect(matchPhaseEvent(receipt([lower]), expect_(settingsCalls.payout(STRANGER)))).toEqual({
       ok: false,
       error: NOT_THIS_CHANGE,
@@ -266,6 +267,14 @@ describe('matchPhaseEvent for Airdrop and Settings (docs/specs/2026-10-15-airdro
       },
     )
     expect(airdropped).toEqual({ ok: true, args: { recipients: 2n, amount: 3n, feePaid: 300n } })
+  })
+
+  it('refuses a withdrawal whose receipt carries another event of the collection and no MintFundsWithdrawn', () => {
+    const other = logOf(CONTRACT, 'OwnerPayoutAddressUpdated', { newOwnerPayoutAddress: PAYOUT })
+    expect(matchPhaseEvent(receipt([other]), expect_(settingsCalls.withdraw()))).toEqual({
+      ok: false,
+      error: NOT_THIS_CHANGE,
+    })
   })
 
   it("matches the level on the validator with the validator's ABI, the level a number", () => {

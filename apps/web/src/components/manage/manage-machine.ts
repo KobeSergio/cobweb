@@ -54,7 +54,7 @@ export type ManageInput = {
   /** The collection's chain. */
   chainId: number
   connectedChainId: number | undefined
-  /** The hash of a change already sent, a phase change or a chunk: checked, never sent again. */
+  /** The hash of a change already sent (a phase change, a chunk, a batch, a burn, a setting): checked, not sent. */
   sentHash?: Hex
   /** The id an add registers, named in the sentence when its name turns out to be taken. */
   addId?: number
@@ -68,7 +68,7 @@ export type ManageDeps<T> = {
   simulate(call: ManageCall | null): Promise<() => Promise<Hex>>
   wait(hash: Hex): Promise<'success' | 'reverted'>
   confirm(hash: Hex): Promise<ActionResult<T>>
-  /** Add phase and the chunk write: keep the sent hash until the server confirms it. */
+  /** Add phase, the chunk write, a batch and a burn: keep the sent hash until the server confirms it. */
   remember?(hash: Hex): void
   forget?(): void
   sleep(ms: number): Promise<void>
@@ -123,10 +123,11 @@ export async function verifyManage<T>(
 }
 
 /**
- * Whether the server's answer ends this attempt for good, for a phase change and a chunk alike, so a
- * remembered add or chunk is forgotten: the receipt reverted or proved something else, or the added phase's
- * name is taken. Any other refusal (a session that ended, a thrown action, a chain not ready) says nothing
- * about the transaction: the hash stays and "Check again" is offered.
+ * Whether the server's answer ends this attempt for good, for every change alike (a phase change, a chunk,
+ * a batch, a burn or a setting), so a remembered add, chunk or batch hash is forgotten: the receipt reverted
+ * or proved something else, or the added phase's name is taken. Any other refusal (a session that ended, a
+ * thrown action, a chain not ready) says nothing about the transaction: the hash stays and "Check again" is
+ * offered.
  */
 export function isTerminalManageAnswer(error: string): boolean {
   return (
@@ -361,7 +362,7 @@ function batchEntryOf(value: unknown): BatchEntry | null {
 /**
  * The airdrop or burn this browser has in progress for the collection, or null. A stored value reads as none
  * unless every batch holds 1 to 500 recipients and at most 1,000 tokens, `sent` names a batch, the pending hash
- * is 32 bytes, and a burn is one batch of one entry to the dead address with its hash.
+ * is 32 bytes or null, and a burn is one batch of one entry to the dead address with its hash.
  */
 export function airdropJob(store: KeyStore | null, collectionId: string): AirdropJob | null {
   try {

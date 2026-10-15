@@ -1,7 +1,7 @@
 import { getAddress, type Address, type Hex } from 'viem'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { KeyStore } from '@/components/deploy/deploy-machine'
-import { DEMO_COLLECTION, DEMO_MINTER, DEMO_TOTAL_MINTED, sampleTxHash } from '@/lib/demo'
+import { DEMO_AIRDROPS, DEMO_COLLECTION, DEMO_MINTER, DEMO_TOTAL_MINTED, sampleTxHash } from '@/lib/demo'
 import type { AirdropView } from '@/lib/manage/airdrop-types'
 import { tokensOf } from '@/lib/manage/airdrop-view'
 import { airdropCalls, type ManageCall } from '@/lib/manage/phase-calls'
@@ -30,6 +30,10 @@ describe('sampleAirdropView', () => {
     ).toEqual([
       ['burn', 1, 2, 11, 21_499_995],
       ['airdrop', 4, 10, 1, 21_499_990],
+    ])
+    expect(view.history.map((row) => [row.lastTokenId, row.confirmedAt])).toEqual([
+      [12, DEMO_AIRDROPS[1]!.at],
+      [10, DEMO_AIRDROPS[0]!.at],
     ])
   })
 

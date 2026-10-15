@@ -9,7 +9,10 @@ export type InvalidRow = { line: number; text: string; reason: string }
 export type ParseResult = {
   rows: Recipient[]
   invalid: InvalidRow[]
-  /** Rows dropped because the address appeared earlier in the same input. */
+  /**
+   * Repeated lines merged into the address's earlier row (its amount replaced, or added to it). A summed
+   * repeat that would pass `maxAmount` is in `invalid` instead, and not counted here.
+   */
   duplicates: number
   /** The first line was a header and was skipped. */
   header: boolean
