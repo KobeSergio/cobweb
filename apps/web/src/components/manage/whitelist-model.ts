@@ -60,13 +60,17 @@ export function withQuotaForAll(list: GroupList, quota: number): GroupList {
   )
 }
 
-/** A removal: an entry the chain never held (or holds at 0) leaves at once; a written one is staged at 0. */
-export function withRemoved(list: GroupList, address: Address): GroupList {
+/**
+ * A removal as the server answered it (`removeEntry`'s `staged`): a row kept for a chunk to write its zero is
+ * staged at 0, a deleted one leaves at once. The server decides from the database's copy, which can be newer
+ * than this list's (a chunk confirmed from another tab or device).
+ */
+export function withRemoved(list: GroupList, address: Address, staged: boolean): GroupList {
   return withEntries(
     list,
     list.entries.flatMap((entry): ListEntry[] => {
       if (!same(entry.address, address)) return [entry]
-      return entry.writtenQuota ? [{ ...entry, quota: 0 }] : []
+      return staged ? [{ ...entry, quota: 0 }] : []
     }),
   )
 }

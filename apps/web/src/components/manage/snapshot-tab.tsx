@@ -82,9 +82,10 @@ export function SnapshotTab({
       }
       const amount: SnapshotAmount =
         mode === 'fixed' ? { kind: 'fixed', amount: fixedValue } : { kind: 'balance' }
+      const found = `${count(holders.length)} ${holders.length === 1 ? 'holder' : 'holders'}`
       onLoaded(
         holdersToText(holders, amount, maxAmount),
-        `${count(holders.length)} holders of ${shortAddress(contract.trim(), 4)} on ${chain.name} at block ${block}`,
+        `${found} of ${shortAddress(contract.trim(), 4)} on ${chain.name} at block ${block}`,
       )
     } catch {
       setFailure(SNAPSHOT_FAILED)

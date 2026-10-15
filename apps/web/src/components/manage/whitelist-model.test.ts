@@ -70,7 +70,7 @@ describe('the patches', () => {
   })
 
   it('re-adding a staged removal at its written quota reads it written again, with no chunk waiting (Review Focus 2)', () => {
-    const staged = withRemoved(listOf(1, [entry(SECOND, 2, 2, TX)], 0, chunks), SECOND)
+    const staged = withRemoved(listOf(1, [entry(SECOND, 2, 2, TX)], 0, chunks), SECOND, true)
     expect(entryState(staged.entries[0]!)).toBe('removing')
     expect(chunkPlanOf(staged)?.entries).toEqual([{ address: SECOND, quota: 0 }])
     const back = withAdded(staged, [{ address: SECOND, quota: 2 }])
@@ -87,26 +87,38 @@ describe('the patches', () => {
   })
 
   it('sets one quota for every entry above 0 and leaves a staged removal at 0', () => {
-    const staged = withRemoved(list, SECOND)
+    const staged = withRemoved(list, SECOND, true)
     expect(withQuotaForAll(staged, 2).entries.map((candidate) => candidate.quota)).toEqual([0, 2, 2])
   })
 
   it('stages a written removal at 0 and drops a never-written one, recounting the chunks', () => {
-    const staged = withRemoved(list, SECOND)
+    const staged = withRemoved(list, SECOND, true)
     expect(staged.entries[0]).toEqual(entry(SECOND, 0, 2, TX))
     expect(staged).toMatchObject({ total: 2, unwritten: 3 })
-    const dropped = withRemoved(list, FOURTH)
+    const dropped = withRemoved(list, FOURTH, false)
     expect(dropped.entries.map((candidate) => candidate.address)).toEqual([SECOND, THIRD])
+    // A copy of 0 is deleted on the server, so it answers not staged.
     const zeroWritten = listOf(1, [entry(SECOND, 2, 0, TX), entry(THIRD, 1, 1, TX)], 0, chunks)
-    expect(withRemoved(zeroWritten, SECOND).chunks).toEqual<WrittenChunk[]>([
+    expect(withRemoved(zeroWritten, SECOND, false).chunks).toEqual<WrittenChunk[]>([
       { txHash: TX, addresses: 1, writtenAt: 1 },
     ])
   })
 
+  it('stages at 0 what the server staged though this list has no copy (a chunk confirmed elsewhere)', () => {
+    const staged = withRemoved(list, FOURTH, true)
+    expect(staged.entries[2]).toEqual(entry(FOURTH, 0))
+    expect(entryState(staged.entries[2]!)).toBe('removing')
+    expect(staged).toMatchObject({ total: 2, unwritten: 2 })
+    expect(chunkPlanOf(staged)?.entries).toEqual([
+      { address: THIRD, quota: 3 },
+      { address: FOURTH, quota: 0 },
+    ])
+  })
+
   it('puts an entry back in its place by address', () => {
-    const dropped = withRemoved(list, FOURTH)
+    const dropped = withRemoved(list, FOURTH, false)
     expect(withRestored(dropped, entry(FOURTH, 1)).entries).toEqual(list.entries)
-    const staged = withRemoved(list, SECOND)
+    const staged = withRemoved(list, SECOND, true)
     expect(withRestored(staged, entry(SECOND, 2, 2, TX)).entries).toEqual(list.entries)
   })
 })
@@ -120,7 +132,7 @@ describe('capRoom', () => {
       fresh: 1,
       room: 9_998,
     })
-    const staged = withRemoved(list, SECOND)
+    const staged = withRemoved(list, SECOND, true)
     expect(capRoom(new Set(staged.entries.map((candidate) => candidate.address.toLowerCase())), [])).toEqual({
       fresh: 0,
       room: 9_997,

@@ -76,7 +76,9 @@ export function WhitelistChunks({
           <p className="text-muted-foreground text-[0.8125rem]">
             {waiting > 0
               ? `${count(waiting)} ${waiting === 1 ? 'address waits' : 'addresses wait'} for a chunk. Until it is written, the chain keeps the quota it had, or none.`
-              : 'Every address is on chain.'}{' '}
+              : list.total === 0
+                ? 'No addresses yet.'
+                : 'Every address is on chain.'}{' '}
             Up to {count(WHITELIST_CHUNK)} addresses go in each transaction.
           </p>
         </div>

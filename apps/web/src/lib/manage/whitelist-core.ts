@@ -1,3 +1,4 @@
+import { confirmationsFor, hasConfirmations } from '@cobweb/shared'
 import { collectionAbi } from '@cobweb/shared/collection-abi'
 import { publicClientFor } from '@cobweb/shared/server'
 import {
@@ -32,6 +33,7 @@ import {
 import type { StateReader } from './phases-types'
 import type { ChunkEntry, ChunkPlan, GroupList, WhitelistView } from './whitelist-types'
 import {
+  byAddress,
   chunkPlanOf,
   entriesOf,
   listOf,
@@ -148,6 +150,8 @@ export async function nextChunkCore(
  * Confirms a chunk (section 6.2): the receipt (not found yet is WHITELIST_NOT_CONFIRMED, which the machine
  * polls; reverted is PHASE_REVERTED), the transaction's input (not found yet, the same), the proof from the
  * calldata, then the copies through `whitelist_chunk_record` and the view read at the receipt's block or later.
+ * The copies are written only once the receipt is at the chain's confirmation depth (until then
+ * WHITELIST_NOT_CONFIRMED, which the machine polls), because nothing reads them from the chain again.
  * The browser sends only the hash and the group. A second confirm of the same hash answers the view again.
  */
 export async function confirmWhitelistChunkCore(
@@ -177,6 +181,16 @@ export async function confirmWhitelistChunkCore(
   // sic: viem types the receipt as always present; a node can still answer with nothing.
   if (!receipt) return { refused: WHITELIST_NOT_CONFIRMED }
   if (receipt.status === 'reverted') return { refused: PHASE_REVERTED }
+  // A receipt too shallow to survive a reorg is not recorded yet; the machine keeps asking. cacheTime 0:
+  // viem reuses a block number for the poll interval, which can read older than the receipt just fetched.
+  try {
+    const latest = await client.getBlockNumber({ cacheTime: 0 })
+    if (!hasConfirmations(receipt.blockNumber, latest, confirmationsFor(base.chainId)))
+      return { refused: WHITELIST_NOT_CONFIRMED }
+  } catch (error) {
+    console.error(`The latest block could not be read: ${errorSummary(error)}`)
+    return { refused: WHITELIST_NOT_CONFIRMED }
+  }
   let input: Hex
   try {
     input = (await client.getTransaction({ hash })).input
@@ -227,9 +241,11 @@ export async function addEntriesCore(
   let added = 0
   let updated = 0
   for (let from = 0; from < rows.length; from += ADD_PAGE) {
+    // Address order, the order a chunk's record locks rows in, so an add and a confirm cannot deadlock.
     const page = rows
       .slice(from, from + ADD_PAGE)
       .map((row) => ({ address: row.address.toLowerCase(), quota: row.quota }))
+      .sort(byAddress)
     const { data, error } = await ctx.supabase.rpc('whitelist_entries_add', {
       p_collection_id: ctx.collection.id,
       p_onchain_id: onchainId,

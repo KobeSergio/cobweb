@@ -430,21 +430,33 @@ function GroupWhitelist({
     )
   }
 
-  async function restore(entry: ListEntry) {
+  /** An entry put back as given (Undo, or Keep); true once the server saved it. */
+  async function restore(entry: ListEntry): Promise<boolean> {
     const answer = await settled(server.setEntryQuota(group.id, entry.address, entry.quota))
-    if (!answer.ok) return void toast.error(answer.error)
+    if (!answer.ok) {
+      toast.error(answer.error)
+      return false
+    }
     onPatch((current) => withRestored(current, entry))
+    return true
+  }
+
+  /** Keep on a staged removal: back to the quota the chain holds, toasted like the quota edit it is. */
+  async function keep(entry: ListEntry) {
+    if (await restore({ ...entry, quota: entry.writtenQuota ?? entry.quota })) toast.success('Quota saved.')
   }
 
   async function remove(address: Address) {
     const before = list.entries.find((entry) => entry.address === address)
     const answer = await settled(server.removeEntry(group.id, address))
     if (!answer.ok) return void toast.error(answer.error)
-    onPatch((current) => withRemoved(current, address))
+    // Staged or deleted as the server answered, since its copy can be newer than this list's.
+    const { staged } = answer.data
+    onPatch((current) => withRemoved(current, address, staged))
     if (!before) return
     // Undo: a staged removal gets its quota back; a deleted entry comes back as a new row, without copies.
-    const back: ListEntry = answer.data.staged ? before : { ...before, writtenQuota: null, writtenTx: null }
-    toast(answer.data.staged ? 'Removal staged. Write the next chunk to apply it.' : 'Address removed.', {
+    const back: ListEntry = staged ? before : { ...before, writtenQuota: null, writtenTx: null }
+    toast(staged ? 'Removal staged. Write the next chunk to apply it.' : 'Address removed.', {
       action: { label: 'Undo', onClick: () => void restore(back) },
     })
   }
@@ -573,7 +585,7 @@ function GroupWhitelist({
           }}
           onQuota={(address, quota) => void setQuota(address, quota)}
           onRemove={(address) => void remove(address)}
-          onRestore={(entry) => void restore({ ...entry, quota: entry.writtenQuota ?? entry.quota })}
+          onRestore={(entry) => void keep(entry)}
           toolbar={
             <>
               <Button variant="ghost" size="sm" onClick={exportCsv} disabled={list.entries.length === 0}>
