@@ -1,9 +1,10 @@
-// The local deploy fixture verify:deploy, verify:phases and verify:whitelist share (docs/specs/2026-10-15-phases.md,
-// section 10), so they cannot drift: the local settings with non-local endpoints refused, the service client
-// and the Anvil client, the PASS and FAIL lines, the SIWE sign-in, a seeded generative collection, the
-// lock and deploy contexts the write helpers build, the payment, the render functions, the factory call,
-// and `deployedCollection`, which locks, pays, renders, links, prepares, deploys and confirms through the
-// cores. Every row it creates is tracked, and `removeFixtures` deletes them. Never prints a key.
+// The local deploy fixture verify:deploy, verify:phases, verify:whitelist, verify:airdrop and verify:settings share
+// (docs/specs/2026-10-15-phases.md, section 10), so they cannot drift: the local settings with non-local endpoints
+// refused, the service client and the Anvil client, the PASS and FAIL lines, the SIWE sign-in, a seeded generative
+// collection, the lock and deploy contexts the write helpers build, the payment, the render functions, the factory
+// call, `deployedCollection`, which locks, pays, renders, links, prepares, deploys and confirms through the cores,
+// and a manage call simulated and sent as the manage machine does. Every row it creates is tracked, and
+// `removeFixtures` deletes them. Never prints a key.
 
 import { createClient } from '@supabase/supabase-js'
 import {
@@ -12,12 +13,14 @@ import {
   http,
   parseAbi,
   publicActions,
+  type Abi,
   type Address,
   type Hex,
 } from 'viem'
 import type { PrivateKeyAccount } from 'viem/accounts'
 import { anvil } from 'viem/chains'
 import { createSiweMessage, generateSiweNonce } from 'viem/siwe'
+import { collectionAbi } from '@cobweb/shared/collection-abi'
 import type { RenderQueue } from '@cobweb/shared/render-queue'
 import type { Database } from '../src/lib/database.types.ts'
 import { adminClient, clientOptions, localConfig, type LocalClient } from './render-deps.ts'
@@ -37,12 +40,15 @@ export const { readLockCollection } = await import('../src/lib/art/lock-collecti
 export const { confirmDeployCore, prepareCore, readDeployment } =
   await import('../src/lib/deploy/deploy-core.ts')
 export const { collectionArgsOf } = await import('../src/lib/deploy/deploy-args.ts')
+const { abiOf } = await import('../src/lib/manage/phase-calls.ts')
+const { classifyError } = await import('../src/components/deploy/tx-errors.ts')
 export type LockContext = import('../src/lib/art/lock-core.ts').LockContext
 export type DeployContext = import('../src/lib/deploy/deploy-core.ts').DeployContext
 export type DeployOutcome<T> = import('../src/lib/deploy/deploy-core.ts').DeployOutcome<T>
 export type DeployForm = import('../src/lib/deploy/deploy-types.ts').DeployForm
 export type Prepared = import('../src/lib/deploy/deploy-types.ts').Prepared
 export type DeployRecord = import('../src/lib/deploy/deploy-types.ts').DeployRecord
+export type ManageCall = import('../src/lib/manage/phase-calls.ts').ManageCall
 
 export const admin: LocalClient = adminClient(settings)
 export const chain = createTestClient({ chain: anvil, mode: 'anvil', transport: http(rpc) }).extend(
@@ -305,6 +311,62 @@ export type CollectionRow = {
   slug_reserved_at: string | null
 }
 
+/**
+ * The simulation the manage machine runs for a call (docs/specs/2026-10-15-airdrop-settings.md, section 7.1): on
+ * the call's contract (the collection, or the validator for the level call), with its ABI and its value.
+ */
+function simulateCall(account: PrivateKeyAccount, collection: Address, call: ManageCall) {
+  return chain.simulateContract({
+    address: call.target?.address ?? collection,
+    abi: abiOf(call) as Abi,
+    functionName: call.functionName,
+    args: call.args,
+    value: call.value,
+    account,
+  })
+}
+
+/** Simulates a manage call as wagmi does, sends exactly the simulated request from the account and waits. */
+export async function sendCall(
+  account: PrivateKeyAccount,
+  collection: Address,
+  call: ManageCall,
+): Promise<Hex> {
+  const { request } = await simulateCall(account, collection, call)
+  const wallet = createWalletClient({ account, chain: anvil, transport: http(rpc) })
+  const hash = await wallet.writeContract(request)
+  const receipt = await chain.waitForTransactionReceipt({ hash })
+  if (receipt.status !== 'success') throw new Error(`${call.functionName} reverted: ${hash}`)
+  return hash
+}
+
+/** How the simulation refuses a manage call, in the creator's words with the chain's symbol, or that it passed. */
+export async function simulationSentence(
+  account: PrivateKeyAccount,
+  collection: Address,
+  call: ManageCall,
+): Promise<string> {
+  try {
+    await simulateCall(account, collection, call)
+    return 'the simulation passed'
+  } catch (error) {
+    return classifyError(error, 'simulating', 'manage', 'ETH').message
+  }
+}
+
+/** `transferOwnership(to)` from the account (the scripts' owner check; Cobweb never sends it), and waits. */
+export async function handOver(account: PrivateKeyAccount, collection: Address, to: Address): Promise<void> {
+  const owner = createWalletClient({ account, chain: anvil, transport: http(rpc) })
+  const hash = await owner.writeContract({
+    address: collection,
+    abi: collectionAbi,
+    functionName: 'transferOwnership',
+    args: [to],
+  })
+  const receipt = await chain.waitForTransactionReceipt({ hash })
+  if (receipt.status !== 'success') throw new Error(`transferOwnership reverted: ${hash}`)
+}
+
 /** The collection's row as the service role reads it. */
 export async function collectionRow(cid: string): Promise<CollectionRow> {
   const { data, error } = await admin
@@ -386,8 +448,8 @@ export async function deployedCollection(
 }
 
 /**
- * Deletes every job, collection (its deployment, phases and whitelist entries cascade) and user the run created,
- * or says what is left.
+ * Deletes every job, collection (its deployment, phases, whitelist entries, airdrops and withdrawals cascade) and
+ * user the run created, or says what is left.
  */
 export async function removeFixtures(): Promise<string | null> {
   if (collectionIds.length) {
@@ -408,6 +470,14 @@ export async function removeFixtures(): Promise<string | null> {
       .in('collection_id', collectionIds)
     if (entries.error) return `whitelist_entries: ${entries.error.message}`
     if (entries.count) return `${entries.count} whitelist entries left`
+    for (const table of ['airdrops', 'withdrawals'] as const) {
+      const records = await admin
+        .from(table)
+        .select('*', { count: 'exact', head: true })
+        .in('collection_id', collectionIds)
+      if (records.error) return `${table}: ${records.error.message}`
+      if (records.count) return `${records.count} ${table} left`
+    }
   }
   for (const id of userIds) {
     const { error } = await admin.auth.admin.deleteUser(id)

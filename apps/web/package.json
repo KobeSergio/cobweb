@@ -20,7 +20,9 @@
     "render:local": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/render-local.ts",
     "verify:deploy": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-deploy.ts",
     "verify:phases": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-phases.ts",
-    "verify:whitelist": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-whitelist.ts"
+    "verify:whitelist": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-whitelist.ts",
+    "verify:airdrop": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-airdrop.ts",
+    "verify:settings": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-settings.ts"
   },
   "devDependencies": {
     "@ipld/car": "5.4.7",
