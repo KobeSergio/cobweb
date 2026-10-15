@@ -1,3 +1,4 @@
+import type { Address } from 'viem'
 import { describe, expect, it } from 'vitest'
 import { PHASE_NAME_EMPTY, PHASE_NAME_LONG } from '@/components/manage/phase-rules'
 import { DESCRIPTION_TOO_LONG, UNSAVED } from '@/lib/art/result'
@@ -97,5 +98,39 @@ describe('phaseAddShape and phaseDetailsShape', () => {
     expect(parse(onchainIdShape, 1.5)).toEqual({ ok: false, error: UNSAVED })
     expect(parse(directionShape, 'up')).toEqual({ ok: true, data: 'up' })
     expect(parse(directionShape, 'left')).toEqual({ ok: false, error: UNSAVED })
+  })
+})
+
+describe('parseSentCall for a chunk (docs/specs/2026-10-15-whitelist.md, section 7.1)', () => {
+  const A: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
+  const B: Address = '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
+
+  it('accepts checksummed addresses with as many quotas of 0 to 10,000, and answers the chunk unchanged', () => {
+    const call = phaseCalls.quotas(2, [A, B], [10_000, 0])
+    const parsed = parseSentCall(sentOf(call))
+    expect(parsed.ok).toBe(true)
+    if (parsed.ok) expect(callOf(parsed.data)).toEqual(call)
+  })
+
+  it.each<[string, unknown]>([
+    ['a lowercase address', { functionName: 'setMintQuota', args: [[A.toLowerCase()], '1', ['1']] }],
+    [
+      'a broken checksum',
+      { functionName: 'setMintQuota', args: [['0x70997970c51812dc3A010C7d01b50e0d17dc79C8'], '1', ['1']] },
+    ],
+    [
+      'addresses and quotas of different lengths',
+      { functionName: 'setMintQuota', args: [[A, B], '1', ['1']] },
+    ],
+    ['an empty chunk', { functionName: 'setMintQuota', args: [[], '1', []] }],
+    [
+      '501 addresses',
+      { functionName: 'setMintQuota', args: [Array(501).fill(A), '1', Array(501).fill('1')] },
+    ],
+    ['a quota of 10,001', { functionName: 'setMintQuota', args: [[A], '1', ['10001']] }],
+    ['a quota as a number', { functionName: 'setMintQuota', args: [[A], '1', [1]] }],
+    ['a group above 2,147,483,647', { functionName: 'setMintQuota', args: [[A], '2147483648', ['1']] }],
+  ])('refuses %s as UNSAVED', (_label, input) => {
+    expect(parseSentCall(input)).toEqual({ ok: false, error: UNSAVED })
   })
 })

@@ -1,5 +1,15 @@
 import { collectionAbi } from '@cobweb/shared/collection-abi'
-import { concat, encodeAbiParameters, encodeFunctionData, toFunctionSelector, type Hex } from 'viem'
+import {
+  concat,
+  encodeAbiParameters,
+  encodeFunctionData,
+  getAddress,
+  pad,
+  toFunctionSelector,
+  toHex,
+  type Address,
+  type Hex,
+} from 'viem'
 import { describe, expect, it } from 'vitest'
 import type { SupportedChain } from '@/lib/demo/types'
 import { callOf, expectedEvent, phaseCalls, reviewOf, sentOf, type ManageCall } from './phase-calls'
@@ -156,5 +166,50 @@ describe('sentOf and callOf', () => {
       eventName: 'SalePriceChanged',
       args: { mintGroup: 3n, newPrice: 1_000_000_000_000_000_000_000_001n },
     })
+  })
+})
+
+describe('the quota call (docs/specs/2026-10-15-whitelist.md, section 7.1)', () => {
+  const A: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
+  const B: Address = '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
+  const CHUNK: ManageCall = phaseCalls.quotas(1, [A, B], [1_240, 0])
+
+  it('encodes setMintQuota with the addresses first, as the hand-written signature does', () => {
+    expect(encoded(CHUNK)).toBe(
+      handEncoded(
+        'setMintQuota(address[],uint256,uint256[])',
+        [{ type: 'address[]' }, UINT, { type: 'uint256[]' }],
+        [[A, B], 1n, [1_240n, 0n]],
+      ),
+    )
+  })
+
+  it('expects MintQuotasAdded for the group and the number of addresses', () => {
+    expect(expectedEvent(CHUNK)).toEqual({
+      eventName: 'MintQuotasAdded',
+      args: { mintGroup: 1n, numberOfAddresses: 2n },
+    })
+  })
+
+  it('round trips the arrays through decimal strings', () => {
+    expect(sentOf(CHUNK)).toEqual({ functionName: 'setMintQuota', args: [[A, B], '1', ['1240', '0']] })
+    expect(callOf(sentOf(CHUNK))).toEqual(CHUNK)
+  })
+
+  it('reviews a chunk as counts: its addresses, the group, its quotas and their total', () => {
+    const addresses = Array.from({ length: 500 }, (_, index) =>
+      getAddress(pad(toHex(index + 1), { size: 20 })),
+    )
+    const quotas = addresses.map((_, index) => (index < 240 ? 3 : 2))
+    expect(reviewOf(phaseCalls.quotas(1, addresses, quotas), BASE)).toEqual([
+      { name: 'addressesToAdd', value: '500 addresses' },
+      { name: 'mintGroup', value: '1' },
+      { name: 'mintQuotas', value: '500 quotas, 1,240 in total' },
+    ])
+    expect(reviewOf(phaseCalls.quotas(3, [A], [2]), BASE)).toEqual([
+      { name: 'addressesToAdd', value: '1 address' },
+      { name: 'mintGroup', value: '3' },
+      { name: 'mintQuotas', value: '1 quota, 2 in total' },
+    ])
   })
 })

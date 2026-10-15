@@ -1,3 +1,4 @@
+import { getAddress, isAddress } from 'viem'
 import { z } from 'zod'
 import {
   PHASE_DESCRIPTION_MAX,
@@ -8,6 +9,7 @@ import {
 import { DESCRIPTION_TOO_LONG, UNSAVED } from '@/lib/art/result'
 import type { SentCall } from './phase-calls'
 import { INT_MAX } from './phases-view'
+import { QUOTA_MAX, WHITELIST_CHUNK } from './whitelist-view'
 
 /**
  * What the Phases actions accept from the browser (docs/specs/2026-10-15-phases.md, section 6.4), checked
@@ -49,8 +51,14 @@ export const phaseAddShape = z.object(
 // One refine each: zod runs every check of a string, so a separate regex would not stop BigInt('1.5').
 const idText = z.string().refine((value) => /^\d{1,10}$/.test(value) && Number(value) <= INT_MAX)
 const uintText = z.string().refine((value) => /^\d{1,78}$/.test(value) && BigInt(value) <= UINT256_MAX)
+// A chunk's parts (docs/specs/2026-10-15-whitelist.md, section 7.1): checksummed addresses and quotas of 0 to 10,000.
+const checksummed = z.string().refine((value) => isAddress(value) && value === getAddress(value))
+const quotaText = z.string().refine((value) => /^\d{1,5}$/.test(value) && Number(value) <= QUOTA_MAX)
 
-/** A sent call: ids 0 to 2,147,483,647, every uint256 a decimal string, in each function's argument order. */
+/**
+ * A sent call: ids 0 to 2,147,483,647, every uint256 a decimal string, in each function's argument order; a
+ * chunk is 1 to 500 checksummed addresses with as many quotas.
+ */
 export const sentCallShape = z.discriminatedUnion('functionName', [
   z.object({
     functionName: z.literal('registerMintGroup'),
@@ -62,6 +70,16 @@ export const sentCallShape = z.discriminatedUnion('functionName', [
   z.object({ functionName: z.literal('setMintGroupMaxSupply'), args: z.tuple([idText, uintText]) }),
   z.object({ functionName: z.literal('setPublicMaxMintPerWallet'), args: z.tuple([uintText]) }),
   z.object({ functionName: z.literal('stopOrStartAllMintGroups'), args: z.tuple([z.boolean()]) }),
+  z.object({
+    functionName: z.literal('setMintQuota'),
+    args: z
+      .tuple([
+        z.array(checksummed).min(1).max(WHITELIST_CHUNK),
+        idText,
+        z.array(quotaText).min(1).max(WHITELIST_CHUNK),
+      ])
+      .refine(([addresses, , quotas]) => addresses.length === quotas.length),
+  }),
 ])
 
 /** A sent call from the browser, or UNSAVED whatever is wrong with it. */

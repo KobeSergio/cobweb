@@ -77,6 +77,10 @@ describe('classifyError for a change in Manage drop (docs/specs/2026-10-15-phase
       [STRANGER],
       `Only the contract's owner can make this change, and ${STRANGER} is not the owner.`,
     ],
+    ['ArrayLengthMismatch', [], 'The addresses and quotas do not line up. Reload and try again.'],
+    ['PublicGroupHasNoQuota', [], 'The public sale has no whitelist.'],
+    ['NotInWhitelist', [STRANGER, 2n], `${STRANGER} is not on the whitelist of phase 2.`],
+    ['ExceedsMintQuota', [1_500n, 1_200n], 'This wallet can mint 1,200 more in this phase, not 1,500.'],
   ])('words %s (%s) from the decoded revert, ending "Nothing was sent."', (errorName, args, sentence) => {
     expect(classifyError(simulationRevert(errorName, args), 'simulating', 'manage')).toEqual({
       kind: 'reverted',

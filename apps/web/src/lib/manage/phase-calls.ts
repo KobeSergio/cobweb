@@ -1,12 +1,12 @@
 import { collectionAbi } from '@cobweb/shared/collection-abi'
-import { getAbiItem, type AbiFunction, type ContractFunctionArgs } from 'viem'
+import { getAbiItem, type AbiFunction, type Address, type ContractFunctionArgs } from 'viem'
 import { formatNative, formatUtc } from '@/lib/demo/helpers'
 import type { SupportedChain } from '@/lib/demo/types'
 
 /**
  * The collection calls Manage drop sends (docs/specs/2026-10-15-phases.md, section 7.1), built in one
- * place for the browser, the server and verify:phases. Pure. The next two sub-projects add their
- * functions to `ManageFunction`.
+ * place for the browser, the server and the verify scripts. Pure. Whitelist adds `setMintQuota`
+ * (docs/specs/2026-10-15-whitelist.md, section 7.1); Airdrop and Settings add theirs.
  */
 export type ManageFunction =
   | 'registerMintGroup'
@@ -16,6 +16,7 @@ export type ManageFunction =
   | 'setMintGroupMaxSupply'
   | 'setPublicMaxMintPerWallet'
   | 'stopOrStartAllMintGroups'
+  | 'setMintQuota'
 
 /** A call as viem takes it: the function name and its arguments typed from the collection's ABI. */
 export type ManageCall = {
@@ -25,8 +26,11 @@ export type ManageCall = {
   }
 }[ManageFunction]
 
-/** A call as it crosses the server action boundary: every uint256 as a decimal string, booleans as they are. */
-export type SentCall = { functionName: ManageFunction; args: (string | boolean)[] }
+/**
+ * A call as it crosses the server action boundary: every uint256 as a decimal string, booleans as they are,
+ * an array as an array of strings.
+ */
+export type SentCall = { functionName: ManageFunction; args: (string | boolean | string[])[] }
 
 /**
  * The collection event a call must leave in its receipt, with viem's argument names (section 6.3). Close
@@ -40,8 +44,9 @@ export type ExpectedEvent =
   | { eventName: 'SalePriceChanged'; args: { mintGroup: bigint; newPrice: bigint } }
   | { eventName: 'MintGroupMaxSupplyUpdated'; args: { mintGroup: bigint; newMaxSupply: bigint } }
   | { eventName: 'PublicMaxMintPerWalletChanged'; args: { newMaxMintPerWallet: bigint } }
+  | { eventName: 'MintQuotasAdded'; args: { mintGroup: bigint; numberOfAddresses: bigint } }
 
-/** The builders the Phases dialogs use. Prices are wei as decimal strings, so no wei is lost. */
+/** The builders the Phases and Whitelist dialogs use. Prices are wei as decimal strings, so no wei is lost. */
 export const phaseCalls: {
   register(id: number, priceWei: string, maxSupply: number, startUnix: number): ManageCall
   open(id: number): ManageCall
@@ -52,6 +57,7 @@ export const phaseCalls: {
   clearSchedule(id: number): ManageCall
   price(id: number, priceWei: string): ManageCall
   allocation(id: number, maxSupply: number): ManageCall
+  quotas(id: number, addresses: Address[], quotas: number[]): ManageCall
 } = {
   register: (id, priceWei, maxSupply, startUnix) => ({
     functionName: 'registerMintGroup',
@@ -71,6 +77,11 @@ export const phaseCalls: {
   allocation: (id, maxSupply) => ({
     functionName: 'setMintGroupMaxSupply',
     args: [BigInt(id), BigInt(maxSupply)],
+  }),
+  // The contract takes the addresses first: setMintQuota(addressesToAdd, mintGroup, mintQuotas_).
+  quotas: (id, addresses, quotas) => ({
+    functionName: 'setMintQuota',
+    args: [addresses, BigInt(id), quotas.map((quota) => BigInt(quota))],
   }),
 }
 
@@ -97,21 +108,34 @@ export function expectedEvent(call: ManageCall): ExpectedEvent {
       }
     case 'setPublicMaxMintPerWallet':
       return { eventName: 'PublicMaxMintPerWalletChanged', args: { newMaxMintPerWallet: call.args[0] } }
+    case 'setMintQuota':
+      return {
+        eventName: 'MintQuotasAdded',
+        args: { mintGroup: call.args[1], numberOfAddresses: BigInt(call.args[0].length) },
+      }
   }
 }
 
+/** One argument of a call, whatever the function. */
+type CallArg = bigint | boolean | readonly (bigint | Address)[]
+
+const sentArg = (arg: CallArg): string | boolean | string[] =>
+  typeof arg === 'boolean'
+    ? arg
+    : typeof arg === 'bigint'
+      ? arg.toString()
+      : arg.map((item) => item.toString())
+
 /** A call as the browser sends it to the confirm action. */
 export function sentOf(call: ManageCall): SentCall {
-  return {
-    functionName: call.functionName,
-    args: call.args.map((arg) => (typeof arg === 'boolean' ? arg : arg.toString())),
-  }
+  return { functionName: call.functionName, args: call.args.map(sentArg) }
 }
 
 /** A sent call back as viem takes it. The shape is checked first (`parseSentCall`), so every value converts. */
 export function callOf(sent: SentCall): ManageCall {
   const uint = (index: number) => BigInt(sent.args[index] as string)
   const bool = (index: number) => sent.args[index] === true
+  const list = (index: number) => sent.args[index] as string[]
   switch (sent.functionName) {
     case 'registerMintGroup':
       return { functionName: 'registerMintGroup', args: [uint(0), uint(1), uint(2), uint(3)] }
@@ -127,20 +151,38 @@ export function callOf(sent: SentCall): ManageCall {
       return { functionName: 'setPublicMaxMintPerWallet', args: [uint(0)] }
     case 'stopOrStartAllMintGroups':
       return { functionName: 'stopOrStartAllMintGroups', args: [bool(0)] }
+    case 'setMintQuota':
+      return {
+        functionName: 'setMintQuota',
+        args: [list(0).map((address) => address as Address), uint(1), list(2).map((quota) => BigInt(quota))],
+      }
   }
 }
 
 const PRICE_INPUTS = new Set(['price', 'newMintPrice'])
 
+/** `1 address`, `500 addresses`, with thousands separators. */
+const counted = (value: number | bigint, one: string, many: string) =>
+  `${value.toLocaleString('en-US')} ${value === 1 || value === 1n ? one : many}`
+
+/** An array argument as counts: the addresses, or the quotas with their total. */
+function listValue(name: string, values: readonly (bigint | Address)[]): string {
+  if (name !== 'mintQuotas') return counted(values.length, 'address', 'addresses')
+  const total = values.reduce<bigint>((sum, value) => sum + (typeof value === 'bigint' ? value : 0n), 0n)
+  return `${counted(values.length, 'quota', 'quotas')}, ${total.toLocaleString('en-US')} in total`
+}
+
 /**
  * The rows the dialog shows before signing: the ABI's argument names (a trailing underscore dropped) with
- * readable values, a price as the native amount and its wei, a start as UTC and its Unix value.
+ * readable values, a price as the native amount and its wei, a start as UTC and its Unix value, an array as
+ * counts (a chunk's addresses, its quotas and their total).
  */
 export function reviewOf(call: ManageCall, chain: SupportedChain): { name: string; value: string }[] {
   const item = getAbiItem({ abi: collectionAbi, name: call.functionName }) as AbiFunction
-  return call.args.map((arg, index) => {
+  return call.args.map((arg: CallArg, index) => {
     const name = (item.inputs[index]?.name ?? `argument ${index + 1}`).replace(/_$/, '')
     if (typeof arg === 'boolean') return { name, value: String(arg) }
+    if (typeof arg !== 'bigint') return { name, value: listValue(name, arg) }
     if (PRICE_INPUTS.has(name))
       return { name, value: `${formatNative(arg, chain.nativeSymbol, 18)} (${arg} wei)` }
     if (name === 'startTimestamp')

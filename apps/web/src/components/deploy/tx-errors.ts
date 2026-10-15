@@ -1,3 +1,4 @@
+import { WRONG_GROUP } from '@/lib/art/result'
 import type { TxFailure } from './tx-progress'
 
 /**
@@ -110,8 +111,9 @@ function revertOf(chain: unknown[]): { errorName: string; args: readonly unknown
 }
 
 /**
- * The collection's custom errors in the creator's words (docs/specs/2026-10-15-phases.md, section 7.2), or
- * null for any other. Phases' owner check is OpenZeppelin's `OwnableUnauthorizedAccount`, read as `Unauthorized`.
+ * The collection's custom errors in the creator's words (docs/specs/2026-10-15-phases.md, section 7.2; the
+ * quota errors from docs/specs/2026-10-15-whitelist.md, section 6.6), or null for any other. Phases' owner
+ * check is OpenZeppelin's `OwnableUnauthorizedAccount`, read as `Unauthorized`.
  */
 export function revertSentence(errorName: string, args: readonly unknown[]): string | null {
   const count = (value: unknown) => Number(value).toLocaleString('en-US')
@@ -129,6 +131,14 @@ export function revertSentence(errorName: string, args: readonly unknown[]): str
     case 'Unauthorized':
     case 'OwnableUnauthorizedAccount':
       return `Only the contract's owner can make this change, and ${String(args[0])} is not the owner.`
+    case 'ArrayLengthMismatch':
+      return 'The addresses and quotas do not line up. Reload and try again.'
+    case 'PublicGroupHasNoQuota':
+      return WRONG_GROUP
+    case 'NotInWhitelist':
+      return `${String(args[0])} is not on the whitelist of phase ${String(args[1])}.`
+    case 'ExceedsMintQuota':
+      return `This wallet can mint ${count(args[1])} more in this phase, not ${count(args[0])}.`
     default:
       return null
   }

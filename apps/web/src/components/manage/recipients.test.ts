@@ -1,6 +1,7 @@
 import { getAddress } from 'viem'
 import { describe, expect, it } from 'vitest'
-import { parseRecipients, toCsv, type ParseOptions } from './recipients'
+import { ZERO_ADDRESS } from '@/lib/art/result'
+import { parseRecipients, toCsv, type InvalidRow, type ParseOptions } from './recipients'
 
 const WHITELIST: ParseOptions = {
   defaultAmount: 1,
@@ -51,6 +52,15 @@ describe('parseRecipients', () => {
     const airdrop = parseRecipients(`${A},2\n${A},5`, AIRDROP)
     expect(airdrop.rows[0]!.amount).toBe(7)
     expect(airdrop.duplicates).toBe(1)
+  })
+
+  it('refuses the zero address with its line number, for a whitelist and an airdrop alike', () => {
+    const zero = '0x0000000000000000000000000000000000000000'
+    for (const options of [WHITELIST, AIRDROP]) {
+      const result = parseRecipients(`${A},2\n${zero},1\n${B}`, options)
+      expect(result.invalid).toEqual<InvalidRow[]>([{ line: 2, text: `${zero},1`, reason: ZERO_ADDRESS }])
+      expect(result.rows.map((row) => row.line)).toEqual([1, 3])
+    }
   })
 
   it('takes semicolons, tabs and spaces, and the default amount', () => {

@@ -1,4 +1,5 @@
 import { getAddress, isAddress } from 'viem'
+import { ZERO_ADDRESS } from '@/lib/art/result'
 import type { Address } from '@/lib/demo'
 
 /** One valid row: a checksummed address and its amount (a quota or a token quantity). */
@@ -29,8 +30,8 @@ const SPLIT = /[,;\t]|\s+/
 /**
  * Parses pasted or uploaded text, one recipient per line: `address` or `address,amount`.
  * Separators may be commas, semicolons, tabs or spaces. A first line without an address is
- * treated as a header. Addresses are validated with viem, normalised to their checksum, and
- * deduplicated; every rejected line is reported with its line number.
+ * treated as a header. Addresses are validated with viem, the zero address refused, normalised to their
+ * checksum, and deduplicated; every rejected line is reported with its line number.
  */
 export function parseRecipients(text: string, options: ParseOptions): ParseResult {
   const lines = text.split(/\r?\n/)
@@ -62,6 +63,11 @@ export function parseRecipients(text: string, options: ParseOptions): ParseResul
         ? 'The checksum does not match. Check the address for a typo.'
         : 'Not a valid address.'
       invalid.push({ line, text: trimmed, reason })
+      return
+    }
+    // The zero address can neither mint nor receive a token (docs/specs/2026-10-15-whitelist.md, section 7.4).
+    if (/^0x0{40}$/i.test(first)) {
+      invalid.push({ line, text: trimmed, reason: ZERO_ADDRESS })
       return
     }
     let amount = options.defaultAmount
