@@ -53,7 +53,9 @@ export function chainTier(states: readonly (ChainState | null)[]): Tier {
 /**
  * The delay to the next tick: the tier's interval counted from this tick's start (0 when the tick ran
  * longer), shortened on an idle chain to the moment the nearest start's window opens, estimated as that
- * read's `readAt` plus the seconds from its block time to the start less 15.
+ * read's `readAt` plus the seconds from its block time to the start less 15. The early wake is never
+ * sooner than one fast interval after the tick's start, so a read that stays frozen cannot make the chain
+ * read back to back.
  */
 export function nextDelayMs(
   tier: Tier,
@@ -67,7 +69,7 @@ export function nextDelayMs(
       for (const group of state.groups) {
         if (group.startTimestamp === 0) continue
         const opensIn = group.startTimestamp - FAST_BEFORE_S - state.blockTimestamp
-        if (opensIn > 0) next = Math.min(next, readAt + opensIn * 1_000)
+        if (opensIn > 0) next = Math.min(next, Math.max(startedAt + TIER_MS.fast, readAt + opensIn * 1_000))
       }
   return Math.max(0, next - now)
 }

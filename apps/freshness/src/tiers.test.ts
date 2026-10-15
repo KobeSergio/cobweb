@@ -100,4 +100,11 @@ describe('nextDelayMs', () => {
     expect(nextDelayMs('fast', [{ state: scheduled(-5), readAt: 10_000 }], 10_000, 10_000)).toBe(1_000)
     expect(nextDelayMs('fast', [{ state: scheduled(15.5), readAt: 10_000 }], 10_000, 10_000)).toBe(1_000)
   })
+
+  it('never wakes sooner than one fast tick after the tick starts while a stale read says the window has opened', () => {
+    // Read at 0 s, 23 s before a start: its window opened at 8 s, before this tick began at 10 s.
+    expect(nextDelayMs('idle', [{ state: scheduled(23), readAt: 0 }], 10_000, 10_000)).toBe(1_000)
+    // The floor counts from the tick's start, not from when the tick ended.
+    expect(nextDelayMs('idle', [{ state: scheduled(23), readAt: 0 }], 10_000, 10_400)).toBe(600)
+  })
 })
