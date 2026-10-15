@@ -59,6 +59,7 @@ const {
 const { fetchHoldersCore } = await import('../src/lib/manage/snapshot-core.ts')
 const { phaseCalls } = await import('../src/lib/manage/phase-calls.ts')
 const { addEntriesShape } = await import('../src/lib/manage/whitelist-schemas.ts')
+const { readAll } = await import('../src/lib/art/read-all.ts')
 const {
   NOT_A_CONTRACT,
   NOT_DEPLOYED,
@@ -92,18 +93,14 @@ type EntryRow = {
 
 /** A group's entries as the service role reads them, every page, in lowercase address order. */
 async function entryRows(groupId: string): Promise<EntryRow[]> {
-  const rows: EntryRow[] = []
-  for (let from = 0; ; from += 1_000) {
-    const { data, error } = await admin
+  const rows = await readAll<EntryRow>((from, to) =>
+    admin
       .from('whitelist_entries')
       .select('wallet_address, quota, written_quota, written_tx, written_at')
       .eq('mint_group_id', groupId)
       .order('wallet_address')
-      .range(from, from + 999)
-    if (error) throw new Error(`entries: ${error.message}`)
-    rows.push(...data)
-    if (data.length < 1_000) break
-  }
+      .range(from, to),
+  )
   return rows.sort((a, b) =>
     a.wallet_address < b.wallet_address ? -1 : a.wallet_address > b.wallet_address ? 1 : 0,
   )
@@ -237,13 +234,15 @@ async function main(): Promise<void> {
   )
 
   await check(
-    '3. add: 1,100 addresses, the stranger first, answer 1,100 added in two pages; Set quota for all to 2 changes 1,100; 20 others re-added at 1 answer 20 updated',
+    '3. add: 1,100 addresses, the stranger first, answer 1,100 added in two pages; Set quota for all to 2 changes 1,100, then 0 a second time; 20 others re-added at 1 answer 20 updated',
     async () => {
       const { ctx } = subject()
       const added = await addEntriesCore(ctx, 1, shaped(listed.map((address) => ({ address, quota: 1 }))))
       if (!('data' in added)) return `add: ${refusal(added)}`
       const all = await setQuotaForAllCore(ctx, 1, 2)
       if (!('data' in all)) return `all: ${refusal(all)}`
+      const allAgain = await setQuotaForAllCore(ctx, 1, 2)
+      if (!('data' in allAgain)) return `all again: ${refusal(allAgain)}`
       const again = await addEntriesCore(
         ctx,
         1,
@@ -255,12 +254,13 @@ async function main(): Promise<void> {
       return added.data.added === 1_100 &&
         added.data.updated === 0 &&
         all.data.changed === 1_100 &&
+        allAgain.data.changed === 0 &&
         again.data.added === 0 &&
         again.data.updated === 20 &&
         rows.length === 1_100 &&
         ones === 20
         ? null
-        : `${JSON.stringify([added.data, all.data, again.data])}, ${rows.length} rows, ${ones} at 1`
+        : `${JSON.stringify([added.data, all.data, allAgain.data, again.data])}, ${rows.length} rows, ${ones} at 1`
     },
   )
 
@@ -369,14 +369,16 @@ async function main(): Promise<void> {
       if (!('data' in again)) return refusal(again)
       const rows = await entryRows(holdersId)
       const same = before === JSON.stringify(rows)
+      const pairs = rows
+        .filter((row) => row.written_tx === hash)
+        .map((row) => ({ address: row.wallet_address, quota: row.quota }))
+      if (pairs.length !== 500) return `${pairs.length} entries carry chunk 2's hash, not 500`
       const recorded = await admin.rpc('whitelist_chunk_record', {
         p_collection_id: cid,
         p_owner: creator.userId,
         p_onchain_id: 1,
         p_tx: hash,
-        p_rows: rows
-          .filter((row) => row.written_tx === hash)
-          .map((row) => ({ address: row.wallet_address, quota: row.quota })),
+        p_rows: pairs,
       })
       const list = holdersList(again.data)
       return same && list?.written === 1_100 && list.chunks.length === 3 && recorded.data === 0

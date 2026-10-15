@@ -401,12 +401,13 @@ export async function removeFixtures(): Promise<string | null> {
     const groups = await admin.from('mint_groups').select('id').in('collection_id', collectionIds)
     if (groups.error) return `mint_groups: ${groups.error.message}`
     if (groups.data.length) return `${groups.data.length} mint group(s) left`
+    // Counted, not read: a read answers at most 1,000 rows (max_rows), and a run can leave more.
     const entries = await admin
       .from('whitelist_entries')
-      .select('wallet_address')
+      .select('*', { count: 'exact', head: true })
       .in('collection_id', collectionIds)
     if (entries.error) return `whitelist_entries: ${entries.error.message}`
-    if (entries.data.length) return `${entries.data.length} whitelist entries left`
+    if (entries.count) return `${entries.count} whitelist entries left`
   }
   for (const id of userIds) {
     const { error } = await admin.auth.admin.deleteUser(id)
