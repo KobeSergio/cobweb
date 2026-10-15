@@ -1,6 +1,6 @@
 import { validatorAbi } from '@cobweb/shared'
 import { collectionAbi } from '@cobweb/shared/collection-abi'
-import { encodeEventTopics, toEventSelector, type Address, type Hex } from 'viem'
+import { encodeEventTopics, HttpRequestError, toEventSelector, type Address, type Hex } from 'viem'
 import { describe, expect, it } from 'vitest'
 import { marksOf, MAX_LOG_RANGE, scanLogs, watchedTopics, type GetLogs, type ScanTarget } from './logs.ts'
 
@@ -122,6 +122,17 @@ describe('scanLogs', () => {
       marks: new Set([A.toLowerCase(), B.toLowerCase()]),
       gap: true,
       failure: 'RangeError',
+    })
+  })
+
+  it('names a viem failure by its name and short message, never by its message, which carries the URL', async () => {
+    const { getLogs } = fakeGetLogs(
+      new HttpRequestError({ url: 'https://rpc.example/v2/secret-key', status: 429 }),
+    )
+    expect(await scanLogs(getLogs, 100n, 110n, hot, [])).toEqual({
+      marks: new Set([A.toLowerCase(), B.toLowerCase()]),
+      gap: true,
+      failure: 'HttpRequestError: HTTP request failed.',
     })
   })
 })

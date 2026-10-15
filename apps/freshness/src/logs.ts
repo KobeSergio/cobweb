@@ -1,7 +1,7 @@
 import { validatorAbi } from '@cobweb/shared'
 import { collectionAbi } from '@cobweb/shared/collection-abi'
 import { getAbiItem, toEventSelector, type Address, type Hex } from 'viem'
-import { errorName } from './health.ts'
+import { errorLine } from './health.ts'
 
 /**
  * The log scan (docs/specs/2026-10-16-freshness-server.md, section 6.5): one `eth_getLogs` per chain and tick
@@ -84,7 +84,10 @@ export type GetLogs = (filter: {
   toBlock: bigint
 }) => Promise<readonly LogLike[]>
 
-/** What a scan found: the collections to read in full, and whether it was a gap (skipped or failed). */
+/**
+ * What a scan found: the collections to read in full, whether it was a gap (skipped or failed), and the
+ * failure as the log writes it (its name and viem's short message, never its message), or null.
+ */
 export type Scan = { marks: Set<string>; gap: boolean; failure: string | null }
 
 /**
@@ -110,6 +113,6 @@ export async function scanLogs(
     })
     return { marks: marksOf(logs, hot), gap: false, failure: null }
   } catch (error) {
-    return { marks: everyHot, gap: true, failure: errorName(error) }
+    return { marks: everyHot, gap: true, failure: errorLine(error) }
   }
 }

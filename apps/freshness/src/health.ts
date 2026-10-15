@@ -15,7 +15,8 @@ export type ChainHealth = {
   /** The head the last good tick read; null before one. */
   block: number | null
   /**
-   * Seconds since the block time of that head (0 when the chain's clock is ahead); null before a good tick.
+   * Seconds since the block time of that head (0 when the chain's clock is ahead); null before a good tick
+   * and while the chain has no hot collection.
    */
   lagSeconds: number | null
   /** The last good tick's time (ISO); null before one. */

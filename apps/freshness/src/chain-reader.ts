@@ -20,7 +20,7 @@ import {
 import { errorLine, errorName, type ChainHealth } from './health.ts'
 import type { HotEntry, HotSet } from './hot-set.ts'
 import { scanLogs, type GetLogs } from './logs.ts'
-import { chainTier, nextDelayMs } from './tiers.ts'
+import { chainTier, nextDelayMs, TIER_MS, type Tier } from './tiers.ts'
 
 /** The fees `collectionState()` carries, wei as decimal strings. */
 export type FeeWei = { mintFeeFlatWei: string; mintFeeBps: number; airdropFeePerTokenWei: string }
@@ -49,13 +49,18 @@ const extrasCalls = (address: Address): ContractFunctionParameters[] => [
   { address, abi: collectionAbi, functionName: 'getTransferValidator' },
 ]
 
+/** The tier a chain's entries need: the fastest of theirs, or null with none. */
+const tierAmong = (entries: readonly HotEntry[]): Tier | null =>
+  entries.length ? chainTier(entries.map((entry) => entry.read?.state ?? null)) : null
+
 /**
  * The reader of one chain (docs/specs/2026-10-16-freshness-server.md, section 6.4). A tick expires the
  * chain's entries (with none left the reader stops and forgets its scanned block), reads the head, counts an
  * entry read at the head or later as read now, scans the logs since the last scanned block, then reads every
  * other entry's `collectionState()` at the head in one `readEach`, with the extras where they are due, and
  * the levels after it. Ticks never overlap: a wake during a tick runs one more tick after it. The next tick
- * starts one interval after this one started, or at once when it ran longer.
+ * starts one interval after this one started, or at once when it ran longer. A tick that throws outside its
+ * own try counts as failed like any other, and the reader goes on.
  */
 export function chainReader(
   chain: ChainConfig,
@@ -89,6 +94,13 @@ export function chainReader(
         },
       ],
     })
+
+  /** Counts a failed tick, named for /health and logged as its name and viem's short message, never more. */
+  function failed(error: unknown): void {
+    failedTicks++
+    lastError = errorName(error)
+    console.error(`A tick on ${chain.name} failed: ${errorLine(error)}`)
+  }
 
   /**
    * Each collection's level on its validator at the head, as Settings reads it: none for the zero validator
@@ -155,7 +167,12 @@ export function chainReader(
     })
     if (!calls.length) return
     const answers = await readEach<unknown>(client, calls, { blockNumber: head })
-    // A call answering null leaves its entry as it was, its mark included.
+    // A call answering null leaves its entry as it was, its mark included; each such call is logged.
+    for (const [index, call] of calls.entries())
+      if (answers[index] === null) {
+        const named = `${call.functionName} on ${call.address} (${chain.name})`
+        console.error(`The call ${named} answered nothing; the collection stays as it was.`)
+      }
     const answered = plans.filter(({ at, extras }) =>
       answers.slice(at, at + (extras ? 5 : 1)).every((answer) => answer !== null),
     )
@@ -170,6 +187,7 @@ export function chainReader(
     for (const { entry, at, extras } of answered) {
       const raw = answers[at] as CollectionStateResult
       const previous = entry.read
+      // An entry whose extras were not due has a previous read: a new entry always reads them.
       let read: Extras
       if (extras) {
         const [receiver, bps] = answers[at + 2] as readonly [Address, bigint]
@@ -181,8 +199,7 @@ export function chainReader(
           transferValidator: levelAsks[asked]!.validator,
           transferLevel: levels[asked]!,
         }
-      } else if (previous) read = previous.extras
-      else continue
+      } else read = previous!.extras
       entry.read = {
         state: chainStateOf(raw, head),
         fees: {
@@ -238,7 +255,7 @@ export function chainReader(
         if (scan.gap) logGaps++
         if (scan.failure)
           console.error(
-            `The log scan on ${chain.name} failed (${scan.failure}); every hot collection is read in full.`,
+            `The log scan on ${chain.name} failed, so every hot collection is read in full: ${scan.failure}`,
           )
         for (const entry of entries) if (scan.marks.has(entry.address.toLowerCase())) entry.marked = true
         scanned = head
@@ -249,9 +266,7 @@ export function chainReader(
       if (times.length) headTime = Math.max(...times)
       lastGoodTickAt = Date.now()
     } catch (error) {
-      failedTicks++
-      lastError = errorName(error)
-      console.error(`A tick on ${chain.name} failed: ${errorLine(error)}`)
+      failed(error)
     }
     const current = hot.onChain(chain.id)
     const reads = current.flatMap((entry) =>
@@ -261,18 +276,34 @@ export function chainReader(
     return nextDelayMs(tier, reads, startedAt, Date.now())
   }
 
+  /**
+   * A tick that threw outside its own try counts as failed, and the next tick comes one interval of the
+   * chain's tier later (idle when even the tier cannot be read), so the reader never stops on it and nothing
+   * rejects unhandled.
+   */
+  function afterThrow(error: unknown): number {
+    failed(error)
+    try {
+      return TIER_MS[tierAmong(hot.onChain(chain.id)) ?? 'idle']
+    } catch {
+      return TIER_MS.idle
+    }
+  }
+
   function start(): void {
     if (stopped || running) return
     if (timer) clearTimeout(timer)
     timer = null
-    running = tick().then((delay) => {
-      running = null
-      if (stopped) return
-      if (again) {
-        again = false
-        start()
-      } else if (delay !== null) timer = setTimeout(start, delay)
-    })
+    running = tick()
+      .catch(afterThrow)
+      .then((delay) => {
+        running = null
+        if (stopped) return
+        if (again) {
+          again = false
+          start()
+        } else if (delay !== null) timer = setTimeout(start, delay)
+      })
   }
 
   return {
@@ -293,9 +324,13 @@ export function chainReader(
         chainId: chain.id,
         name: chain.name,
         hot: entries.length,
-        tier: entries.length ? chainTier(entries.map((entry) => entry.read?.state ?? null)) : null,
+        tier: tierAmong(entries),
         block: block === null ? null : Number(block),
-        lagSeconds: headTime === null ? null : Math.max(0, Math.round(Date.now() / 1_000 - headTime)),
+        // With no hot entry there is no read to count the lag from.
+        lagSeconds:
+          !entries.length || headTime === null
+            ? null
+            : Math.max(0, Math.round(Date.now() / 1_000 - headTime)),
         lastGoodTickAt: lastGoodTickAt === null ? null : new Date(lastGoodTickAt).toISOString(),
         failedTicks,
         lastError,

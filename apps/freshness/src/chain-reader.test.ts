@@ -12,13 +12,15 @@ import {
 } from 'viem'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { chainReader } from './chain-reader.ts'
-import { hotSet } from './hot-set.ts'
+import { hotSet, type HotSet } from './hot-set.ts'
 
 const ANVIL = chainById(31337, false)!
 const A: Address = '0x0409454C375c8a6aB05383bFB6D9FcDe9ebB8F85'
 const B: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
 const OWNER: Address = '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
 const VALIDATOR: Address = '0x721C008fdff27BF06E7E123956E2Fe03B63342e3'
+/** A validator with no code at its address. */
+const BARE_VALIDATOR: Address = '0x90F79bf6EB2c4f870365E785982E1f101E93b906'
 
 /**
  * `collectionState()` at a block: one open group with allocation left, so the chain ticks at the 2 s tier.
@@ -37,6 +39,24 @@ const stateAt = (block: bigint): CollectionStateResult => ({
   ],
 })
 
+/**
+ * `collectionState()` at a block on an idle collection whose one group starts 23 s after block 100's time.
+ */
+const scheduledAt = (block: bigint): CollectionStateResult => ({
+  ...stateAt(block),
+  groups: [
+    {
+      id: 0n,
+      price: 0n,
+      maxSupply: 3n,
+      minted: 1n,
+      startTimestamp: 1_800_000_123n,
+      activeFlag: true,
+      active: false,
+    },
+  ],
+})
+
 /** A revert as viem reports it for one call. */
 const reverted = (functionName: string) =>
   new ContractFunctionExecutionError(
@@ -47,6 +67,10 @@ const reverted = (functionName: string) =>
       functionName,
     },
   )
+
+/** An RPC failure as viem reports it: its message carries the URL, with the provider's key. */
+const rpcDown = (status: number): HttpRequestError =>
+  new HttpRequestError({ url: 'https://rpc.example/v2/secret-key', status })
 
 /** The base URI's log, as `setBaseURI` leaves it. */
 const metadataLog = (address: Address) => ({
@@ -68,11 +92,22 @@ function fakeChain() {
     /** Mine a block after each head read, as a busy chain does. */
     autoMine: false,
     calls: [] as string[],
+    /** The argument of each head read. */
+    headArgs: [] as unknown[],
     logs: [] as { address: Address; topics: Hex[] }[],
+    /** The `address` list of each log scan. */
+    logAddresses: [] as Address[][],
+    /** When set, every log scan throws it. */
+    logsFailure: null as Error | null,
     /** `<function> <address>` pairs that revert. */
     reverts: new Set<string>(),
     baseUris: new Map<string, string>(),
+    /** Each collection's validator, by its address; VALIDATOR when not set. */
+    validators: new Map<string, Address>(),
+    /** Whether VALIDATOR has code; no other address has any. */
     validatorHasCode: false,
+    /** `collectionState()` at a block. */
+    state: stateAt,
     /** When set, every head read waits for it. */
     gate: null as Promise<void> | null,
     failure: null as Error | null,
@@ -81,8 +116,9 @@ function fakeChain() {
   }
   const client = {
     chain: { contracts: {} },
-    async getBlockNumber() {
+    async getBlockNumber(args?: unknown) {
       chain.calls.push('head')
+      chain.headArgs.push(args)
       chain.headsInFlight++
       chain.mostHeadsInFlight = Math.max(chain.mostHeadsInFlight, chain.headsInFlight)
       try {
@@ -93,13 +129,15 @@ function fakeChain() {
         chain.headsInFlight--
       }
     },
-    async request({ params }: { params: [{ fromBlock: Hex; toBlock: Hex }] }) {
+    async request({ params }: { params: [{ address: Address[]; fromBlock: Hex; toBlock: Hex }] }) {
       chain.calls.push(`logs ${BigInt(params[0].fromBlock)}-${BigInt(params[0].toBlock)}`)
+      chain.logAddresses.push(params[0].address)
+      if (chain.logsFailure) throw chain.logsFailure
       return chain.logs
     },
     async getCode({ address }: { address: Address }) {
       chain.calls.push(`code ${address}`)
-      return chain.validatorHasCode ? '0x6080' : undefined
+      return chain.validatorHasCode && address === VALIDATOR ? '0x6080' : undefined
     },
     async readContract({
       address,
@@ -112,11 +150,11 @@ function fakeChain() {
     }) {
       chain.calls.push(`${functionName} ${address} @${blockNumber}`)
       if (chain.reverts.has(`${functionName} ${address}`)) throw reverted(functionName)
-      if (functionName === 'collectionState') return stateAt(blockNumber)
+      if (functionName === 'collectionState') return chain.state(blockNumber)
       if (functionName === 'owner') return OWNER
       if (functionName === 'royaltyInfo') return [OWNER, 500n]
       if (functionName === 'baseURI') return chain.baseUris.get(address) ?? 'ipfs://first/'
-      if (functionName === 'getTransferValidator') return VALIDATOR
+      if (functionName === 'getTransferValidator') return chain.validators.get(address) ?? VALIDATOR
       if (functionName === 'getCollectionSecurityPolicy') return { transferSecurityLevel: 9 }
       throw new Error(`unexpected ${functionName}`)
     },
@@ -203,6 +241,7 @@ describe('chainReader (docs/specs/2026-10-16-freshness-server.md, section 6.4)',
 
   it('leaves a collection whose call answers null as it was, mark included, and reads the others (Review Focus 2)', async () => {
     const { chain, client } = fakeChain()
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
     const hot = hotSet()
     const reader = chainReader(ANVIL, hot, client)
     const a = hot.join(31337, A, Date.now()).entry
@@ -216,6 +255,9 @@ describe('chainReader (docs/specs/2026-10-16-freshness-server.md, section 6.4)',
     await vi.advanceTimersByTimeAsync(2_000)
     expect([a.read?.state.block, a.read?.extras.baseUri, a.marked]).toEqual([100n, 'ipfs://first/', true])
     expect([b.read?.state.block, b.read?.extras.baseUri, b.marked]).toEqual([101n, 'ipfs://second/', false])
+    expect(errors.mock.calls.map((call) => String(call[0]))).toEqual([
+      `The call baseURI on ${A} (Anvil) answered nothing; the collection stays as it was.`,
+    ])
     chain.head = 102n
     chain.logs = []
     chain.reverts.clear()
@@ -319,13 +361,197 @@ describe('chainReader (docs/specs/2026-10-16-freshness-server.md, section 6.4)',
     const heads = chain.calls.filter((call) => call === 'head').length
     await vi.advanceTimersByTimeAsync(60_000)
     expect(chain.calls.filter((call) => call === 'head')).toHaveLength(heads)
-    expect(reader.health()).toMatchObject({ hot: 0, tier: null })
+    expect(reader.health()).toMatchObject({ hot: 0, tier: null, lagSeconds: null })
     chain.head = 150n
     chain.calls.length = 0
     hot.join(31337, A, Date.now())
     reader.wake()
     await settle()
     expect(chain.calls.slice(0, 2)).toEqual(['head', `collectionState ${A} @150`])
+    await reader.stop()
+  })
+
+  it('counts a head unchanged since the last read as a read now, with no log scan and no call (reconciliation 10)', async () => {
+    const { chain, client } = fakeChain()
+    const hot = hotSet()
+    const reader = chainReader(ANVIL, hot, client)
+    const { entry } = hot.join(31337, A, Date.now())
+    reader.wake()
+    await settle()
+    chain.calls.length = 0
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(chain.calls).toEqual(['head'])
+    expect([entry.read?.state.block, entry.readAt]).toEqual([100n, 1_002_000])
+    await reader.stop()
+  })
+
+  it('counts a failed scan and a range over 500 blocks as gaps, reads every hot collection in full after each, and scans on from the head', async () => {
+    const { chain, client } = fakeChain()
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const hot = hotSet()
+    const reader = chainReader(ANVIL, hot, client)
+    hot.join(31337, A, Date.now())
+    hot.join(31337, B, Date.now())
+    reader.wake()
+    await settle()
+    const scansAndOwners = () =>
+      chain.calls.filter((call) => call.startsWith('logs') || call.startsWith('owner'))
+    chain.head = 101n
+    chain.logsFailure = rpcDown(429)
+    chain.calls.length = 0
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(scansAndOwners()).toEqual(['logs 101-101', `owner ${A} @101`, `owner ${B} @101`])
+    expect(reader.health().logGaps).toBe(1)
+    chain.logsFailure = null
+    chain.head = 701n
+    chain.calls.length = 0
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(scansAndOwners()).toEqual([`owner ${A} @701`, `owner ${B} @701`])
+    expect(reader.health().logGaps).toBe(2)
+    chain.head = 702n
+    chain.calls.length = 0
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(scansAndOwners()).toEqual(['logs 702-702'])
+    expect(reader.health()).toMatchObject({ logGaps: 2, failedTicks: 0, lastError: null })
+    expect(errors.mock.calls.map((call) => String(call[0]))).toEqual([
+      'The log scan on Anvil failed, so every hot collection is read in full: HttpRequestError: HTTP request failed.',
+    ])
+    await reader.stop()
+  })
+
+  it('leaves a marked collection whose validator call answers null as it was, mark included, and still reads the others', async () => {
+    const { chain, client } = fakeChain()
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const hot = hotSet()
+    const reader = chainReader(ANVIL, hot, client)
+    const a = hot.join(31337, A, Date.now()).entry
+    const b = hot.join(31337, B, Date.now()).entry
+    reader.wake()
+    await settle()
+    chain.head = 101n
+    chain.logs = [metadataLog(A)]
+    chain.reverts.add(`getTransferValidator ${A}`)
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect([a.read?.state.block, a.marked]).toEqual([100n, true])
+    expect([b.read?.state.block, b.marked]).toEqual([101n, false])
+    expect(reader.health()).toMatchObject({ failedTicks: 0, lastError: null })
+    expect(errors.mock.calls.map((call) => String(call[0]))).toEqual([
+      `The call getTransferValidator on ${A} (Anvil) answered nothing; the collection stays as it was.`,
+    ])
+    await reader.stop()
+  })
+
+  it("reads the head past viem's cache, and scans the validators found with code, not one without (section 6.5)", async () => {
+    const { chain, client } = fakeChain()
+    chain.validatorHasCode = true
+    chain.validators.set(B, BARE_VALIDATOR)
+    const hot = hotSet()
+    const reader = chainReader(ANVIL, hot, client)
+    hot.join(31337, A, Date.now())
+    hot.join(31337, B, Date.now())
+    reader.wake()
+    await settle()
+    chain.head = 101n
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(chain.headArgs).toEqual([{ cacheTime: 0 }, { cacheTime: 0 }])
+    expect(chain.logAddresses).toEqual([[A, B, VALIDATOR]])
+    await reader.stop()
+  })
+
+  it('stops only once the tick in flight has ended, then leaves no timer and reads nothing more', async () => {
+    const { chain, client } = fakeChain()
+    const hot = hotSet()
+    const reader = chainReader(ANVIL, hot, client)
+    hot.join(31337, A, Date.now())
+    reader.wake()
+    await settle()
+    let release = () => {}
+    chain.gate = new Promise<void>((resolve) => (release = resolve))
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(chain.headsInFlight).toBe(1)
+    let stopped = false
+    const stopping = reader.stop().then(() => {
+      stopped = true
+    })
+    await settle()
+    expect(stopped).toBe(false)
+    chain.gate = null
+    release()
+    await stopping
+    expect(vi.getTimerCount()).toBe(0)
+    const heads = chain.calls.filter((call) => call === 'head').length
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(chain.calls.filter((call) => call === 'head')).toHaveLength(heads)
+  })
+
+  it('clears the next tick when stopped between ticks, and reads nothing on a later wake', async () => {
+    const { chain, client } = fakeChain()
+    const hot = hotSet()
+    const reader = chainReader(ANVIL, hot, client)
+    hot.join(31337, A, Date.now())
+    reader.wake()
+    await settle()
+    expect(vi.getTimerCount()).toBe(1)
+    await reader.stop()
+    expect(vi.getTimerCount()).toBe(0)
+    reader.wake()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(chain.calls.filter((call) => call === 'head')).toHaveLength(1)
+  })
+
+  it('never reads back to back while an idle read stays frozen past its start window (Important 1)', async () => {
+    const { chain, client } = fakeChain()
+    chain.state = scheduledAt
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const hot = hotSet()
+    const reader = chainReader(ANVIL, hot, client)
+    hot.join(31337, A, Date.now())
+    reader.wake()
+    await settle()
+    expect(reader.health().tier).toBe('idle')
+    chain.failure = rpcDown(503)
+    chain.calls.length = 0
+    await vi.advanceTimersByTimeAsync(60_000)
+    const heads = chain.calls.filter((call) => call === 'head').length
+    expect(heads).toBeGreaterThan(0)
+    expect(heads).toBeLessThanOrEqual(61)
+    expect(reader.health().failedTicks).toBe(heads)
+    const lines = errors.mock.calls.map((call) => String(call[0]))
+    expect(lines).toHaveLength(heads)
+    expect(new Set(lines)).toEqual(
+      new Set(['A tick on Anvil failed: HttpRequestError: HTTP request failed.']),
+    )
+    await reader.stop()
+  })
+
+  it('counts a tick that throws outside its try as failed, logs its name and ticks again', async () => {
+    const { chain, client } = fakeChain()
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const set = hotSet()
+    let breaks = false
+    const hot: HotSet = {
+      ...set,
+      onChain(chainId) {
+        if (breaks) {
+          breaks = false
+          throw new TypeError('the hot set broke')
+        }
+        return set.onChain(chainId)
+      },
+    }
+    const reader = chainReader(ANVIL, hot, client)
+    hot.join(31337, A, Date.now())
+    reader.wake()
+    await settle()
+    breaks = true
+    chain.calls.length = 0
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(chain.calls).toEqual([])
+    expect(reader.health()).toMatchObject({ failedTicks: 1, lastError: 'TypeError' })
+    expect(errors.mock.calls.map((call) => String(call[0]))).toEqual(['A tick on Anvil failed: TypeError'])
+    chain.head = 101n
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(chain.calls).toEqual(['head', 'logs 101-101', `collectionState ${A} @101`])
     await reader.stop()
   })
 })
