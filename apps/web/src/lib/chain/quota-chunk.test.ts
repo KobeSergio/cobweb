@@ -60,11 +60,11 @@ describe('proveQuotaChunk', () => {
   })
 
   it("keeps an address's last quota when the calldata repeats it, in any case, as the contract does", () => {
-    const repeated = phaseCalls.quotas(1, [A, B, A.toLowerCase() as Address], [1, 2, 3])
+    const repeated = phaseCalls.quotas(1, [A, B, A.toLowerCase() as Address], [3, 2, 0])
     expect(proveQuotaChunk(receipt([quotasAdded(1n, 3n)]), inputOf(repeated), expected)).toEqual<ChunkProof>({
       ok: true,
       pairs: [
-        { address: A.toLowerCase(), quota: 3 },
+        { address: A.toLowerCase(), quota: 0 },
         { address: B.toLowerCase(), quota: 2 },
       ],
     })

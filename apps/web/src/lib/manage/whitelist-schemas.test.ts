@@ -57,12 +57,12 @@ describe('addEntriesShape', () => {
       parse(addEntriesShape, [
         { address: A, quota: 2 },
         { address: B, quota: 1 },
-        { address: A.toLowerCase(), quota: 5 },
+        { address: A.toLowerCase(), quota: 1 },
       ]),
     ).toEqual({
       ok: true,
       data: [
-        { address: A, quota: 5 },
+        { address: A, quota: 1 },
         { address: B, quota: 1 },
       ],
     })
