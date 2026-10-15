@@ -22,9 +22,11 @@
     "verify:phases": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-phases.ts",
     "verify:whitelist": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-whitelist.ts",
     "verify:airdrop": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-airdrop.ts",
-    "verify:settings": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-settings.ts"
+    "verify:settings": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-settings.ts",
+    "verify:freshness": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-freshness.ts"
   },
   "devDependencies": {
+    "@cobweb/freshness": "workspace:^",
     "@ipld/car": "5.4.7",
     "@ipld/unixfs": "3.0.0",
     "@tailwindcss/postcss": "^4.3.3",

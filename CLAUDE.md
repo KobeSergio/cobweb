@@ -13,13 +13,13 @@ A no-code NFT launchpad with one linear flow: Details, Art (Layers, Rules, Gener
 
 ```
 apps/web           Next.js app: creator dashboard, mint page, and the render queue consumer and sweep cron (Vercel)
-apps/freshness     Railway service that reads chain state for mint pages
+apps/freshness     Railway service that reads chain state for mint pages: the state and wallet endpoints, run from source on Node 24
 services/render    Render library: layers to images, CARs and CIDs (pure; no network)
 services/worker    Render worker: ports, steps, adapters, queue consumer, local runner. Runs inside apps/web on Vercel
 contracts/         Foundry: factory and collection
 packages/dna       Trait assignment engine
 packages/ui        Component library
-packages/shared    Chain config, factory ABI and addresses, job ids, the render queue contract (browser entry) and viem clients (server entry)
+packages/shared    Chain config, factory ABI and addresses, job ids, the render queue contract and the pure chain readers (browser entry), viem clients (server entry, and the clients entry the freshness server imports)
 supabase/          Migrations and policies
 legacy/            Old Kingdomly repos. Not in git. Read-only
 ```
@@ -48,6 +48,9 @@ pnpm --filter @cobweb/web verify:phases   # the chain read, each phase change se
 pnpm --filter @cobweb/web verify:whitelist   # the list, each chunk sent and confirmed from its receipt and calldata, the refusals and the snapshot, against local Supabase and Anvil
 pnpm --filter @cobweb/web verify:airdrop  # each batch and burn sent and proven from its receipt and calldata, the fee, the refusals, the owner check and a 500-wallet batch's gas, against local Supabase and Anvil
 pnpm --filter @cobweb/web verify:settings   # the read, each setting sent and confirmed from its receipt, the copies, the refusals and the owner check, against local Supabase and Anvil
+pnpm --filter @cobweb/freshness dev       # the freshness server on port 3100 against the chains in apps/freshness/.env
+pnpm --filter @cobweb/freshness test      # the freshness server: tiers, the hot set, the ETag, degraded, the delegation filter, the wallet windows
+pnpm --filter @cobweb/web verify:freshness   # the freshness server in process against Anvil: liveness at T-1 and at T, the ETag, the refusals, the wallet endpoint and degraded
 pnpm --filter @cobweb/web render:local <collectionId>   # renders the collection's paid jobs on the laptop against local Supabase, local storage and Anvil; CARs go to a temp folder
 ```
 

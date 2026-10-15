@@ -1,99 +1,42 @@
-// The local deploy fixture verify:deploy, verify:phases, verify:whitelist, verify:airdrop and verify:settings share
-// (docs/specs/2026-10-15-phases.md, section 10), so they cannot drift: the local settings with non-local endpoints
-// refused, the service client and the Anvil client, the PASS and FAIL lines, the SIWE sign-in, a seeded generative
-// collection, the lock and deploy contexts the write helpers build, the payment, the render functions, the factory
-// call, `deployedCollection`, which locks, pays, renders, links, prepares, deploys and confirms through the cores,
-// and a manage call simulated and sent as the manage machine does. Every row it creates is tracked, and
-// `removeFixtures` deletes them. Never prints a key.
+// The local deploy fixture verify:deploy, verify:phases, verify:whitelist, verify:airdrop and verify:settings
+// share (docs/specs/2026-10-15-phases.md, section 10), so they cannot drift: the Supabase half (the local
+// settings with non-local endpoints refused, the service client, the SIWE sign-in, a seeded generative
+// collection, the lock and deploy contexts the write helpers build, the render functions, and
+// `deployedCollection`, which locks, pays, renders, links, prepares, deploys and confirms through the cores)
+// over the chain half in chain-fixture.ts, which it re-exports (docs/specs/2026-10-16-freshness-server.md,
+// section 7.3). Every row it creates is tracked, and `removeFixtures` deletes them. Never prints a key.
 
 import { createClient } from '@supabase/supabase-js'
-import {
-  createTestClient,
-  createWalletClient,
-  http,
-  parseAbi,
-  publicActions,
-  type Abi,
-  type Address,
-  type Hex,
-} from 'viem'
+import type { Hex } from 'viem'
 import type { PrivateKeyAccount } from 'viem/accounts'
-import { anvil } from 'viem/chains'
 import { createSiweMessage, generateSiweNonce } from 'viem/siwe'
-import { collectionAbi } from '@cobweb/shared/collection-abi'
 import type { RenderQueue } from '@cobweb/shared/render-queue'
 import type { Database } from '../src/lib/database.types.ts'
+import { CID, deploy, HEX64, pay } from './chain-fixture.ts'
 import { adminClient, clientOptions, localConfig, type LocalClient } from './render-deps.ts'
 
-// Every local setting, with non-local endpoints refused (scripts/render-deps.ts). It also fills the
-// environment the shared chain clients read (RPC_URL_31337, FACTORY_ADDRESS_31337).
-export const settings = localConfig()
-export const rpc: string = settings.rpc
-export const factory: Address = settings.factory
+export * from './chain-fixture.ts'
 
-// Imported after the environment is set, so the shared clients read the local chain settings.
-export const { collectionSalt, encodeCollectionArgs, factoryAbi, predictCollectionAddress } =
-  await import('@cobweb/shared')
-export const { COLLECTION_CODE_HASH, COLLECTION_CREATION_CODE } = await import('@cobweb/shared/collection')
+// Every local setting, with non-local endpoints refused (scripts/render-deps.ts, whose chain part is
+// chain-fixture.ts's).
+export const settings = localConfig()
+
+// Imported after the environment is set, so the cores read the local settings.
 export const { confirmCore, lockCore } = await import('../src/lib/art/lock-core.ts')
 export const { readLockCollection } = await import('../src/lib/art/lock-collection.ts')
 export const { confirmDeployCore, prepareCore, readDeployment } =
   await import('../src/lib/deploy/deploy-core.ts')
 export const { collectionArgsOf } = await import('../src/lib/deploy/deploy-args.ts')
-const { abiOf } = await import('../src/lib/manage/phase-calls.ts')
-const { classifyError } = await import('../src/components/deploy/tx-errors.ts')
 export type LockContext = import('../src/lib/art/lock-core.ts').LockContext
 export type DeployContext = import('../src/lib/deploy/deploy-core.ts').DeployContext
 export type DeployOutcome<T> = import('../src/lib/deploy/deploy-core.ts').DeployOutcome<T>
 export type DeployForm = import('../src/lib/deploy/deploy-types.ts').DeployForm
 export type Prepared = import('../src/lib/deploy/deploy-types.ts').Prepared
 export type DeployRecord = import('../src/lib/deploy/deploy-types.ts').DeployRecord
-export type ManageCall = import('../src/lib/manage/phase-calls.ts').ManageCall
 
 export const admin: LocalClient = adminClient(settings)
-export const chain = createTestClient({ chain: anvil, mode: 'anvil', transport: http(rpc) }).extend(
-  publicActions,
-)
 /** A queue that sends nothing: the render is driven by hand, not by a worker. */
 const silentQueue: RenderQueue = { send: async () => {} }
-export const CID = (letter: string) => `bafybei${letter.repeat(52)}`
-export const HEX64 = (n: number) => n.toString(16).padStart(64, '0')
-/** The factory's approval view, which the shipped ABI leaves out (the app never asks it). */
-const approvalAbi = parseAbi(['function isCreationCodeApproved(bytes32 codeHash) view returns (bool)'])
-
-let passed = 0
-const failed: string[] = []
-
-/** A check returns null on success, or a description of what happened instead. */
-export async function check(name: string, fn: () => Promise<string | null>): Promise<void> {
-  let problem: string | null
-  try {
-    problem = await fn()
-  } catch (e) {
-    problem = `threw ${e instanceof Error ? e.message : String(e)}`
-  }
-  if (problem === null) {
-    passed++
-    console.log(`PASS ${name}`)
-  } else {
-    failed.push(name)
-    console.log(`FAIL ${name}: ${problem}`)
-  }
-}
-
-/** Runs the checks, then the cleanup whatever happened, prints the totals and exits non-zero on any failure. */
-export async function runChecks(main: () => Promise<void>, cleanup: () => Promise<void>): Promise<never> {
-  try {
-    await main()
-  } catch (e) {
-    failed.push('run')
-    console.log(`FAIL run: ${e instanceof Error ? e.message : String(e)}`)
-  } finally {
-    await cleanup()
-  }
-  console.log(`\n${passed} passed, ${failed.length} failed`)
-  process.exit(failed.length ? 1 : 0)
-}
 
 const userIds: string[] = []
 const collectionIds: string[] = []
@@ -245,21 +188,6 @@ export async function deployContextFor(
 export const refusal = <T>(outcome: DeployOutcome<T>) =>
   'refused' in outcome ? outcome.refused : 'error' in outcome ? `db ${outcome.error?.code}` : 'accepted'
 
-/** Pays for a job from the account through the factory and waits for the receipt. */
-export async function pay(account: PrivateKeyAccount, jobId: Hex, value: bigint): Promise<Hex> {
-  const wallet = createWalletClient({ account, chain: anvil, transport: http(rpc) })
-  const hash = await wallet.writeContract({
-    address: factory,
-    abi: factoryAbi,
-    functionName: 'payForArt',
-    args: [jobId],
-    value,
-  })
-  const receipt = await chain.waitForTransactionReceipt({ hash })
-  if (receipt.status !== 'success') throw new Error(`payForArt reverted: ${hash}`)
-  return hash
-}
-
 /** The render functions with the service role, from a paid (or placeholder) job to done, as the worker would. */
 export async function finishRender(
   jobId: string,
@@ -289,82 +217,12 @@ export async function finishRender(
   return null
 }
 
-/** Sends deployCollection with the shipped creation code, the given arguments and salt, and waits for the receipt. */
-export async function deploy(account: PrivateKeyAccount, encodedArgs: Hex, salt: Hex): Promise<Hex> {
-  const wallet = createWalletClient({ account, chain: anvil, transport: http(rpc) })
-  const hash = await wallet.writeContract({
-    address: factory,
-    abi: factoryAbi,
-    functionName: 'deployCollection',
-    args: [COLLECTION_CREATION_CODE, encodedArgs, salt],
-  })
-  const receipt = await chain.waitForTransactionReceipt({ hash })
-  if (receipt.status !== 'success') throw new Error(`deployCollection reverted: ${hash}`)
-  return hash
-}
-
 export type CollectionRow = {
   status: string
   chain_id: number | null
   contract_address: string | null
   slug: string | null
   slug_reserved_at: string | null
-}
-
-/**
- * The simulation the manage machine runs for a call (docs/specs/2026-10-15-airdrop-settings.md, section 7.1): on
- * the call's contract (the collection, or the validator for the level call), with its ABI and its value.
- */
-function simulateCall(account: PrivateKeyAccount, collection: Address, call: ManageCall) {
-  return chain.simulateContract({
-    address: call.target?.address ?? collection,
-    abi: abiOf(call) as Abi,
-    functionName: call.functionName,
-    args: call.args,
-    value: call.value,
-    account,
-  })
-}
-
-/** Simulates a manage call as wagmi does, sends exactly the simulated request from the account and waits. */
-export async function sendCall(
-  account: PrivateKeyAccount,
-  collection: Address,
-  call: ManageCall,
-): Promise<Hex> {
-  const { request } = await simulateCall(account, collection, call)
-  const wallet = createWalletClient({ account, chain: anvil, transport: http(rpc) })
-  const hash = await wallet.writeContract(request)
-  const receipt = await chain.waitForTransactionReceipt({ hash })
-  if (receipt.status !== 'success') throw new Error(`${call.functionName} reverted: ${hash}`)
-  return hash
-}
-
-/** How the simulation refuses a manage call, in the creator's words with the chain's symbol, or that it passed. */
-export async function simulationSentence(
-  account: PrivateKeyAccount,
-  collection: Address,
-  call: ManageCall,
-): Promise<string> {
-  try {
-    await simulateCall(account, collection, call)
-    return 'the simulation passed'
-  } catch (error) {
-    return classifyError(error, 'simulating', 'manage', 'ETH').message
-  }
-}
-
-/** `transferOwnership(to)` from the account (the scripts' owner check; Cobweb never sends it), and waits. */
-export async function handOver(account: PrivateKeyAccount, collection: Address, to: Address): Promise<void> {
-  const owner = createWalletClient({ account, chain: anvil, transport: http(rpc) })
-  const hash = await owner.writeContract({
-    address: collection,
-    abi: collectionAbi,
-    functionName: 'transferOwnership',
-    args: [to],
-  })
-  const receipt = await chain.waitForTransactionReceipt({ hash })
-  if (receipt.status !== 'success') throw new Error(`transferOwnership reverted: ${hash}`)
 }
 
 /** The collection's row as the service role reads it. */
@@ -380,22 +238,6 @@ export async function collectionRow(cid: string): Promise<CollectionRow> {
 
 /** The mint page link each fixture collection reserves. */
 export const slugFor = (cid: string) => `deploy-${cid.slice(0, 8)}`
-
-/** Anvil answers as 31337 and the factory approves the shipped creation code hash, or why not. */
-export async function chainReady(): Promise<string | null> {
-  if ((await chain.getChainId()) !== 31337) return 'not chain 31337'
-  const code = await chain.getCode({ address: factory })
-  if (!code || code === '0x') return `no contract at ${factory}; run chain:local again`
-  const approved = await chain.readContract({
-    address: factory,
-    abi: approvalAbi,
-    functionName: 'isCreationCodeApproved',
-    args: [COLLECTION_CODE_HASH],
-  })
-  return approved
-    ? null
-    : `the factory does not approve ${COLLECTION_CODE_HASH}; run forge build, the copy script and chain:local again`
-}
 
 /**
  * Locks a seeded collection, pays for it from the creator's wallet, renders it to done and reserves its
