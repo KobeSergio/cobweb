@@ -156,3 +156,96 @@ describe('what Whitelist relies on (docs/specs/2026-10-15-whitelist.md, section 
     expect(namesOf(getAbiItem({ abi: abiOnly, name: 'ExceedsMintQuota' }))).toEqual(['requested', 'allowed'])
   })
 })
+
+/** Whether each input of an event is indexed, in order. */
+const indexedOf = (item: { inputs: readonly { indexed?: boolean }[] }) =>
+  item.inputs.map((input) => input.indexed === true)
+
+describe('what Airdrop and Settings rely on (docs/specs/2026-10-15-airdrop-settings.md, section 5)', () => {
+  it('carries the calls they send, with their selectors and argument names, airdropNFTs payable', () => {
+    for (const [name, signature, inputs] of [
+      ['airdropNFTs', 'airdropNFTs(address[],uint256[])', ['recipients', 'amounts']],
+      ['withdrawMintFunds', 'withdrawMintFunds()', []],
+      ['setOwnerPayoutAddress', 'setOwnerPayoutAddress(address)', ['newOwnerPayoutAddress']],
+      ['setDefaultRoyalty', 'setDefaultRoyalty(address,uint96)', ['receiver', 'feeNumerator']],
+      ['setBaseURI', 'setBaseURI(string)', ['newBaseURI']],
+      ['setMintOnBehalfStatus', 'setMintOnBehalfStatus(bool)', ['status']],
+      ['setTransferValidator', 'setTransferValidator(address)', ['transferValidator_']],
+      ['setFees', 'setFees(uint256,uint256,uint256)', ['mintFeeFlat', 'mintFeeBps', 'airdropFeePerToken']],
+      ['transferOwnership', 'transferOwnership(address)', ['newOwner']],
+    ] as const) {
+      const item = getAbiItem({ abi: abiOnly, name })
+      expect(toFunctionSelector(item)).toBe(toFunctionSelector(signature))
+      expect(namesOf(item)).toEqual(inputs)
+    }
+    expect(getAbiItem({ abi: abiOnly, name: 'airdropNFTs' }).stateMutability).toBe('payable')
+  })
+
+  it('carries the views the two reads make', () => {
+    for (const [name, signature] of [
+      ['fees', 'fees()'],
+      ['creatorBalance', 'creatorBalance()'],
+      ['platformBalance', 'platformBalance()'],
+      ['pendingBalance', 'pendingBalance(address)'],
+      ['ownerPayoutAddress', 'ownerPayoutAddress()'],
+      ['royaltyInfo', 'royaltyInfo(uint256,uint256)'],
+      ['baseURI', 'baseURI()'],
+      ['getTransferValidator', 'getTransferValidator()'],
+      ['DEFAULT_TRANSFER_VALIDATOR', 'DEFAULT_TRANSFER_VALIDATOR()'],
+      ['owner', 'owner()'],
+      ['tokenURI', 'tokenURI(uint256)'],
+    ] as const) {
+      expect(toFunctionSelector(getAbiItem({ abi: abiOnly, name }))).toBe(toFunctionSelector(signature))
+    }
+  })
+
+  it('carries the events the proofs match, with the inputs the proofs read from topics indexed', () => {
+    for (const [name, signature, indexed] of [
+      ['NFTsAirdropped', 'NFTsAirdropped(uint256,uint256,uint256)', [false, false, false]],
+      ['MintFundsWithdrawn', 'MintFundsWithdrawn(address,uint256)', [true, false]],
+      ['OwnerPayoutAddressUpdated', 'OwnerPayoutAddressUpdated(address)', [false]],
+      ['DefaultRoyaltyUpdated', 'DefaultRoyaltyUpdated(address,uint96)', [false, false]],
+      ['MintOnBehalfUpdated', 'MintOnBehalfUpdated(bool)', [false]],
+      ['TransferValidatorUpdated', 'TransferValidatorUpdated(address,address)', [false, false]],
+      ['BatchMetadataUpdate', 'BatchMetadataUpdate(uint256,uint256)', [true, true]],
+      ['Transfer', 'Transfer(address,address,uint256)', [true, true, true]],
+    ] as const) {
+      const item = getAbiItem({ abi: abiOnly, name })
+      expect(toEventSelector(item)).toBe(toEventSelector(signature))
+      expect(indexedOf(item)).toEqual(indexed)
+    }
+    expect(namesOf(getAbiItem({ abi: abiOnly, name: 'NFTsAirdropped' }))).toEqual([
+      'recipients',
+      'amount',
+      'feePaid',
+    ])
+    expect(namesOf(getAbiItem({ abi: abiOnly, name: 'MintFundsWithdrawn' }))).toEqual([
+      'payoutAddress',
+      'amount',
+    ])
+  })
+
+  it('carries the errors the new sentences decode', () => {
+    for (const [name, signature] of [
+      ['ExceedsMaxSupply', 'ExceedsMaxSupply(uint256,uint256)'],
+      ['InsufficientEther', 'InsufficientEther(uint256,uint256)'],
+      ['TransferToNonERC721ReceiverImplementer', 'TransferToNonERC721ReceiverImplementer()'],
+      ['NothingToWithdraw', 'NothingToWithdraw()'],
+      ['WithdrawFailed', 'WithdrawFailed()'],
+      [
+        'CreatorTokenBase__InvalidTransferValidatorContract',
+        'CreatorTokenBase__InvalidTransferValidatorContract()',
+      ],
+      ['ERC2981InvalidDefaultRoyalty', 'ERC2981InvalidDefaultRoyalty(uint256,uint256)'],
+      ['ERC2981InvalidDefaultRoyaltyReceiver', 'ERC2981InvalidDefaultRoyaltyReceiver(address)'],
+      ['MintToZeroAddress', 'MintToZeroAddress()'],
+    ] as const) {
+      expect(signatureOf(getAbiItem({ abi: abiOnly, name }))).toBe(signature)
+    }
+    expect(namesOf(getAbiItem({ abi: abiOnly, name: 'ExceedsMaxSupply' }))).toEqual([
+      'requested',
+      'available',
+    ])
+    expect(namesOf(getAbiItem({ abi: abiOnly, name: 'InsufficientEther' }))).toEqual(['required', 'provided'])
+  })
+})
