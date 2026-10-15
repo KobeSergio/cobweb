@@ -6619,6 +6619,13 @@ async function artAirdropSettings(A: Creator, B: Creator): Promise<void> {
     },
   )
 
+  await check('airdrops: anon reads nothing from the recorded airdrop', async () => {
+    // With the row present, reading nothing proves anon cannot read it.
+    if ((await countRows('airdrops', 'tx_hash', DROP_TX(2))) !== 1) return 'no recorded airdrop to read'
+    const { data, error } = await anon.from('airdrops').select('tx_hash').eq('tx_hash', DROP_TX(2))
+    return expectNothing(error, data)
+  })
+
   await check('airdrop_record: a second record of the hash answers false and changes nothing', async () => {
     const { data, error } = await drop(admin, { p_block: 99, p_tokens: 1, p_last_token_id: 1 })
     if (error) return describe(error)
@@ -6701,6 +6708,14 @@ async function artAirdropSettings(A: Creator, B: Creator): Promise<void> {
         : `${JSON.stringify(data)} ${JSON.stringify(rows)}`
     },
   )
+
+  await check('withdrawals: anon reads nothing from the recorded withdrawal', async () => {
+    // With the row present, reading nothing proves anon cannot read it.
+    if ((await countRows('withdrawals', 'tx_hash', WITHDRAW_TX(2))) !== 1)
+      return 'no recorded withdrawal to read'
+    const { data, error } = await anon.from('withdrawals').select('tx_hash').eq('tx_hash', WITHDRAW_TX(2))
+    return expectNothing(error, data)
+  })
 
   await check(
     'withdrawal_record: a second record of the hash answers false and changes nothing; the owner cannot update or delete the row',
