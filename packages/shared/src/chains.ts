@@ -1,10 +1,23 @@
 import { getAddress, isAddress, type Address } from 'viem'
-import { anvil, arbitrum, base, berachain, mainnet, monad, robinhood, sepolia, type Chain } from 'viem/chains'
+import {
+  anvil,
+  arbitrum,
+  base,
+  berachain,
+  mainnet,
+  monad,
+  robinhood,
+  robinhoodTestnet,
+  sepolia,
+  type Chain,
+} from 'viem/chains'
 
 /**
- * The chains Cobweb runs on (CLAUDE.md, launch chains) plus Sepolia and a local Anvil chain outside
- * production. Each names the environment variables that configure it: `RPC_URL_<id>` (server only)
- * and `FACTORY_ADDRESS_<id>`. A chain is ready for payments when both are set.
+ * The chains Cobweb runs on (CLAUDE.md, launch chains) plus the test chains: Sepolia, Robinhood Chain Testnet
+ * and a local Anvil chain, shown outside production and, with COBWEB_TEST_CHAINS=1, in a hosted test
+ * environment (docs/specs/2026-10-16-freshness-server.md, section 5.4). Each names the environment variables
+ * that configure it: `RPC_URL_<id>` (server only) and `FACTORY_ADDRESS_<id>`. A chain is ready for payments
+ * when both are set.
  */
 export type ChainConfig = {
   id: number
@@ -45,24 +58,32 @@ export const LAUNCH_CHAINS: readonly ChainConfig[] = [
   entry(robinhood, 'Robinhood Chain', false, 3),
 ]
 
+/** Robinhood Chain Testnet rehearses Robinhood Chain, so it asks for the same 3 confirmations. */
 export const TEST_CHAINS: readonly ChainConfig[] = [
   entry(sepolia, 'Sepolia', true, 2),
+  entry(robinhoodTestnet, 'Robinhood Chain Testnet', true, 3),
   entry(anvil, 'Anvil', true, 1),
 ]
 
-export const isProduction = () => process.env.NODE_ENV === 'production'
+/**
+ * Whether the test chains are hidden: in production, unless COBWEB_TEST_CHAINS is 1 (a hosted test
+ * environment). Both variables are read as literal `process.env.NAME` expressions, which Next replaces in the
+ * browser bundle.
+ */
+export const hidesTestChains = () =>
+  process.env.NODE_ENV === 'production' && process.env.COBWEB_TEST_CHAINS !== '1'
 
-export function availableChains(production = isProduction()): readonly ChainConfig[] {
-  return production ? LAUNCH_CHAINS : [...LAUNCH_CHAINS, ...TEST_CHAINS]
+export function availableChains(hideTestChains = hidesTestChains()): readonly ChainConfig[] {
+  return hideTestChains ? LAUNCH_CHAINS : [...LAUNCH_CHAINS, ...TEST_CHAINS]
 }
 
-export function chainById(id: number, production = isProduction()): ChainConfig | undefined {
-  return availableChains(production).find((chain) => chain.id === id)
+export function chainById(id: number, hideTestChains = hidesTestChains()): ChainConfig | undefined {
+  return availableChains(hideTestChains).find((chain) => chain.id === id)
 }
 
 /** How many blocks deep a payment must be on a chain. Throws a sentence for a chain that is not offered. */
-export function confirmationsFor(id: number, production = isProduction()): number {
-  const chain = chainById(id, production)
+export function confirmationsFor(id: number, hideTestChains = hidesTestChains()): number {
+  const chain = chainById(id, hideTestChains)
   if (!chain) throw new Error(`Chain ${id} is not configured.`)
   return chain.confirmations
 }
@@ -73,8 +94,12 @@ export function hasConfirmations(receiptBlock: bigint, latest: bigint, required:
 }
 
 /** The factory on a chain, checksummed. Throws a sentence when the chain or its variable is not set. */
-export function factoryAddress(id: number, env: Env = process.env, production = isProduction()): Address {
-  const chain = chainById(id, production)
+export function factoryAddress(
+  id: number,
+  env: Env = process.env,
+  hideTestChains = hidesTestChains(),
+): Address {
+  const chain = chainById(id, hideTestChains)
   const value = chain ? env[chain.factoryEnv] : undefined
   if (!value || !isAddress(value, { strict: false }))
     throw new Error(`The factory address for chain ${id} is not configured.`)

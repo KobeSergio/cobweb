@@ -7,6 +7,9 @@ const nextConfig: NextConfig = {
   // sharp is a native module: loaded from node_modules at run time, never bundled.
   serverExternalPackages: ['sharp'],
   poweredByHeader: false,
+  // The test-chain switch (docs/specs/2026-10-16-freshness-server.md, section 7.2): Next replaces
+  // process.env.COBWEB_TEST_CHAINS with the build's value, so the browser's chain list matches the server's.
+  env: { COBWEB_TEST_CHAINS: process.env.COBWEB_TEST_CHAINS ?? '' },
   experimental: {
     // A token action carries one chunk of at most CHUNK_BUDGET_BYTES (3.5 MB of JSON, and at most
     // TOKEN_CHUNK, 10,000 rows) in the token-ops module. Vercel caps a request body at 4.5 MB, so
