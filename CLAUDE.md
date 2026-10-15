@@ -46,7 +46,7 @@ pnpm --filter @cobweb/worker bench        # one batch of 100 tokens at 2048 x 20
 pnpm --filter @cobweb/web verify:deploy   # prepare, deploy through the factory, confirm from the event, the refusals, against local Supabase and Anvil
 pnpm --filter @cobweb/web verify:phases   # the chain read, each phase change sent and confirmed from its receipt, the refusals and the copy, against local Supabase and Anvil
 pnpm --filter @cobweb/web verify:whitelist   # the list, each chunk sent and confirmed from its receipt and calldata, the refusals and the snapshot, against local Supabase and Anvil
-pnpm --filter @cobweb/web verify:airdrop    # each batch and burn sent and proven from its receipt and calldata, the fee, the refusals, the owner check and a 500-wallet batch's gas, against local Supabase and Anvil
+pnpm --filter @cobweb/web verify:airdrop  # each batch and burn sent and proven from its receipt and calldata, the fee, the refusals, the owner check and a 500-wallet batch's gas, against local Supabase and Anvil
 pnpm --filter @cobweb/web verify:settings   # the read, each setting sent and confirmed from its receipt, the copies, the refusals and the owner check, against local Supabase and Anvil
 pnpm --filter @cobweb/web render:local <collectionId>   # renders the collection's paid jobs on the laptop against local Supabase, local storage and Anvil; CARs go to a temp folder
 ```

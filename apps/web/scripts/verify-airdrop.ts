@@ -306,10 +306,13 @@ async function main(): Promise<void> {
   )
 
   await check(
-    '9. burn: a burn of one is confirmed as a burn row with ids 3 to 3, the dead address holds token 3, left 0, the history newest first',
+    '9. burn: a burn of one is confirmed as a burn row with ids 3 to 3 and with the fee the event says was paid, the dead address holds token 3, left 0, the history newest first',
     async () => {
       const { cid, record } = subject()
-      const { view } = await airdrop(airdropCalls.burn(1, FEE.toString()))
+      // One wei over the fee, as when the admin lowers the fee after the read: the contract refunds the excess,
+      // and the row carries the fee the event says was paid.
+      const burn = airdropCalls.burn(1, FEE.toString())
+      const { view } = await airdrop({ ...burn, value: FEE + 1n } as ManageCall)
       const [latest] = await airdropRows(cid)
       const owner = await chain.readContract({
         address: record.contractAddress,
@@ -320,6 +323,7 @@ async function main(): Promise<void> {
       return latest?.kind === 'burn' &&
         latest.recipients === 1 &&
         latest.tokens === 1 &&
+        latest.fee_paid_wei === FEE.toString() &&
         latest.first_token_id === 3 &&
         latest.last_token_id === 3 &&
         owner === BURN_ADDRESS &&

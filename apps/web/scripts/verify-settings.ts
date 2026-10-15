@@ -1,6 +1,6 @@
 // Checks Settings against a LOCAL Anvil chain and LOCAL Supabase (docs/specs/2026-10-15-airdrop-settings.md,
 // section 10): a collection deployed through the factory with Public (0.001 ETH, 3, 2 per wallet) of three tokens,
-// a royalty of 5% to the creator and the creator as payout; the read at one block and its copies; every change
+// a royalty of 5% to the creator and another address as payout; the read at one block and its copies; every change
 // built with settingsCalls (Open with phaseCalls), simulated as wagmi does, sent from the creator's key (the
 // contract's owner) and confirmed through the core from its receipt: nothing to withdraw, a withdrawal, the same
 // hash again, the payout, the royalty, a custom link and back to the real job, mint on behalf, the validator;
@@ -69,6 +69,8 @@ const CUSTOM = `ipfs://${CID('f')}/`
 
 /** A fresh address for each tag, from its keccak. */
 const fresh = (tag: string): Address => getAddress(`0x${keccak256(toHex(tag)).slice(26)}`)
+/** The payout the collection is deployed with: not the creator, so a withdrawal's payout comes from its event. */
+const DEPLOY_PAYOUT = fresh('deploy payout')
 
 type CopyRow = {
   payout_address: string
@@ -140,7 +142,7 @@ async function main(): Promise<void> {
 
   const form: DeployForm = {
     chainId: 31337,
-    payout: creatorKey.address,
+    payout: DEPLOY_PAYOUT,
     royaltyBps: 500,
     royaltyReceiver: creatorKey.address,
     publicMaxPerWallet: 2,
@@ -176,10 +178,9 @@ async function main(): Promise<void> {
   let mintHash: Hex | null = null
   let royaltyHash: Hex | null = null
   let customHash: Hex | null = null
-  let onBehalfHash: Hex | null = null
 
   await check(
-    '2. read: the owner, balances of 0, nothing withdrawn, fees of 0, the payout and 5% to the creator, the real base URI revealed, mint on behalf off, the default validator without code; the copies equal the read',
+    '2. read: the owner, balances of 0, nothing withdrawn, fees of 0, the deploy-time payout and 5% to the creator, the real base URI revealed, mint on behalf off, the default validator without code; the copies equal the read',
     async () => {
       deployed = await deployedCollection(creator, form, 'settings')
       const view = await read()
@@ -200,7 +201,7 @@ async function main(): Promise<void> {
           ? null
           : `money ${JSON.stringify(view)}`,
         settingsOf(view) ===
-        JSON.stringify([creatorKey.address, 500, creatorKey.address, REAL, DEFAULT_TRANSFER_VALIDATOR, false])
+        JSON.stringify([DEPLOY_PAYOUT, 500, creatorKey.address, REAL, DEFAULT_TRANSFER_VALIDATOR, false])
           ? null
           : `settings ${settingsOf(view)}`,
         view.pointer === 'revealed' &&
@@ -232,7 +233,7 @@ async function main(): Promise<void> {
   )
 
   await check(
-    "4. withdraw: with Public open and the stranger's mint for 0.001 ETH the balance reads 1000000000000000; the withdrawal confirmed records its amount, the creator and the receipt's block, and the view reads 0 and withdrawn 1000000000000000",
+    "4. withdraw: with Public open and the stranger's mint for 0.001 ETH the balance reads 1000000000000000; the withdrawal confirmed records its amount, the deploy-time payout and the receipt's block, and the view reads 0 and withdrawn 1000000000000000",
     async () => {
       const { cid, ctx, record } = subject()
       const address = record.contractAddress
@@ -261,7 +262,7 @@ async function main(): Promise<void> {
         {
           tx_hash: hash,
           amount_wei: PUBLIC_PRICE.toString(),
-          payout_address: creatorKey.address.toLowerCase(),
+          payout_address: DEPLOY_PAYOUT.toLowerCase(),
           block: Number(receipt.blockNumber),
         },
       ]
@@ -286,7 +287,7 @@ async function main(): Promise<void> {
         p_owner: creator.userId,
         p_tx: withdrawHash,
         p_amount_wei: 1_000_000_000_000_000,
-        p_payout_address: creatorKey.address.toLowerCase(),
+        p_payout_address: DEPLOY_PAYOUT.toLowerCase(),
         p_block: row?.block ?? 0,
       })
       if (recorded.error) return `record: ${recorded.error.message}`
@@ -300,7 +301,7 @@ async function main(): Promise<void> {
   )
 
   await check(
-    '6. payout: a fresh address confirmed reads in the view and the copy, readDeployment still answers the creator, and the zero address is refused by the shape',
+    '6. payout: a fresh address confirmed reads in the view and the copy, readDeployment still answers the deploy-time payout, and the zero address is refused by the shape',
     async () => {
       const { cid } = subject()
       const payout = fresh('payout')
@@ -310,7 +311,7 @@ async function main(): Promise<void> {
       const zero = parseSentCall(sentOf(settingsCalls.payout(zeroAddress)), SETTINGS_FUNCTIONS)
       return view.payout === payout &&
         getAddress(copy.payout_address) === payout &&
-        record?.payout === creatorKey.address &&
+        record?.payout === DEPLOY_PAYOUT &&
         !zero.ok &&
         zero.error === UNSAVED
         ? null
@@ -388,7 +389,6 @@ async function main(): Promise<void> {
     async () => {
       const { cid } = subject()
       const on = await change(settingsCalls.mintOnBehalf(true))
-      onBehalfHash = on.hash
       const copyOn = await copyOf(cid)
       const off = await change(settingsCalls.mintOnBehalf(false))
       const copyOff = await copyOf(cid)
@@ -451,10 +451,10 @@ async function main(): Promise<void> {
   )
 
   await check(
-    "13. refusals: the royalty's hash as a payout change, the stranger's mint, the deploy, and a level call aimed at the factory with mint on behalf's hash; nothing changes",
+    "13. refusals: the royalty's hash as a payout change, the stranger's mint, the deploy, and a level call aimed at the factory with the deploy's hash; nothing changes",
     async () => {
       const { cid, ctx, hash: deployHash } = subject()
-      if (!royaltyHash || !mintHash || !onBehalfHash) return 'a hash is missing'
+      if (!royaltyHash || !mintHash) return 'a hash is missing'
       const before = await copyOf(cid)
       const problems: string[] = []
       for (const [label, hash, call, sentence] of [
@@ -463,7 +463,7 @@ async function main(): Promise<void> {
         ['deploy', deployHash, settingsCalls.mintOnBehalf(true), NOT_THIS_CONTRACT],
         [
           'level at the factory',
-          onBehalfHash,
+          deployHash,
           settingsCalls.level(factory, subject().record.contractAddress, 9),
           NOT_THIS_CONTRACT,
         ],
