@@ -93,8 +93,8 @@ export function deployChains(): DeployChain[] {
   return availableChains().map((chain) => ({ ...chainView(chain.id), factory: factoryOn(chain.id) }))
 }
 
-/** The collection's latest done job of a kind, or null. */
-async function doneJobRow(
+/** The collection's latest done job of a kind, or null. Settings reads its base URI as a reveal target. */
+export async function doneJobRow(
   supabase: LockClient,
   collectionId: string,
   kind: 'real' | 'placeholder',
@@ -225,9 +225,11 @@ export async function prepareCore(ctx: DeployContext, form: DeployForm): Promise
  * The numeric columns as text, so no wei is lost (PostgREST answers numeric as a JSON number). The public
  * limit and the launch phases come from `args`, the constructor as prepared: `public_max_per_wallet` and
  * the `mint_groups` prices are the copies Phases refreshes (docs/specs/2026-10-15-phases.md, section 7.5).
+ * So do the base URI, the payout address and the royalty: their columns are the copies Settings refreshes
+ * (docs/specs/2026-10-15-airdrop-settings.md, section 6.4), and the deployed view shows what landed.
  */
 const DEPLOYMENT_COLUMNS =
-  'collection_id, chain_id, contract_address, tx_hash, deployer, deployed_at, base_uri, payout_address, royalty_bps, royalty_receiver, args, mint_fee_flat_wei::text, mint_fee_bps, airdrop_fee_per_token_wei::text'
+  'collection_id, chain_id, contract_address, tx_hash, deployer, deployed_at, args, mint_fee_flat_wei::text, mint_fee_bps, airdrop_fee_per_token_wei::text'
 
 type DeploymentRow = {
   collection_id: string
@@ -236,10 +238,6 @@ type DeploymentRow = {
   tx_hash: string
   deployer: string
   deployed_at: string
-  base_uri: string
-  payout_address: string
-  royalty_bps: number
-  royalty_receiver: string
   args: PreparedArgs
   mint_fee_flat_wei: string
   mint_fee_bps: number
@@ -272,10 +270,10 @@ export async function readDeployment(
     txHash: row.tx_hash as Hex,
     deployer: getAddress(row.deployer),
     deployedAt: Math.floor(Date.parse(row.deployed_at) / 1000),
-    baseUri: row.base_uri,
-    payout: getAddress(row.payout_address),
-    royaltyBps: row.royalty_bps,
-    royaltyReceiver: getAddress(row.royalty_receiver),
+    baseUri: row.args.baseUri,
+    payout: getAddress(row.args.payout),
+    royaltyBps: row.args.royaltyBps,
+    royaltyReceiver: getAddress(row.args.royaltyReceiver),
     publicMaxPerWallet: Number(row.args.publicMaxPerWallet),
     fees: {
       mintFeeFlatWei: row.mint_fee_flat_wei,

@@ -4,7 +4,7 @@ import { cache } from 'react'
 import { txHash as txHashSchema } from '@/lib/art/lock-schemas'
 import type { ActionResult } from '@/lib/art/result'
 import { parse } from '@/lib/art/schemas'
-import { callOf, expectedEvent, type SentCall } from '@/lib/manage/phase-calls'
+import { callOf, expectedEvent, PHASE_FUNCTIONS, type SentCall } from '@/lib/manage/phase-calls'
 import {
   directionShape,
   onchainIdShape,
@@ -38,7 +38,7 @@ export async function getPhases(collectionId: string): Promise<ActionResult<Phas
   return phasesWrite(collectionId, (ctx) => phasesViewCore(ctx, readOnce))
 }
 
-/** Confirms an on-chain change from its receipt, then answers the fresh view. */
+/** Confirms an on-chain change from its receipt, then answers the fresh view. Only a Phases call is taken. */
 export async function confirmPhaseTx(
   collectionId: string,
   txHash: string,
@@ -46,7 +46,7 @@ export async function confirmPhaseTx(
 ): Promise<ActionResult<PhasesView>> {
   const hash = parse(txHashSchema, txHash)
   if (!hash.ok) return hash
-  const call = parseSentCall(sent)
+  const call = parseSentCall(sent, PHASE_FUNCTIONS)
   if (!call.ok) return call
   return phasesWrite(collectionId, (ctx) =>
     confirmPhaseTxCore(ctx, hash.data, { event: expectedEvent(callOf(call.data)) }),

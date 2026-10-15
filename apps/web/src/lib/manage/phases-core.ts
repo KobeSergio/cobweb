@@ -1,6 +1,13 @@
 import { collectionAbi } from '@cobweb/shared/collection-abi'
 import { publicClientFor } from '@cobweb/shared/server'
-import { getAddress, TransactionReceiptNotFoundError, type Address, type Hex, type PublicClient } from 'viem'
+import {
+  getAddress,
+  TransactionReceiptNotFoundError,
+  type Address,
+  type ContractFunctionReturnType,
+  type Hex,
+  type PublicClient,
+} from 'viem'
 import { errorSummary } from '@/lib/art/lock-core'
 import {
   CHAIN_NOT_READY,
@@ -27,6 +34,37 @@ import { copyView, liveView, refreshPayload } from './phases-view'
  */
 export type PhasesContext = DeployContext
 
+/** What viem answers for `collectionState()`. */
+export type CollectionStateResult = ContractFunctionReturnType<
+  typeof collectionAbi,
+  'view',
+  'collectionState'
+>
+
+/**
+ * `collectionState()` as the screens read it, at the block it was read at: the mapping the Phases, Airdrop and
+ * Settings readers share (docs/specs/2026-10-15-airdrop-settings.md, section 6.2).
+ */
+export function chainStateOf(state: CollectionStateResult, block: bigint): ChainState {
+  return {
+    block,
+    blockTimestamp: Number(state.blockTimestamp),
+    maxSupply: Number(state.maxSupply),
+    totalMinted: Number(state.totalMinted),
+    publicMaxMintPerWallet: Number(state.publicMaxMintPerWallet),
+    mintOnBehalfActive: state.mintOnBehalfActive,
+    groups: state.groups.map((group) => ({
+      id: Number(group.id),
+      priceWei: group.price.toString(),
+      maxSupply: Number(group.maxSupply),
+      minted: Number(group.minted),
+      startTimestamp: Number(group.startTimestamp),
+      flag: group.activeFlag,
+      active: group.active,
+    })),
+  }
+}
+
 /**
  * `collectionState()` at the latest block, or at `atLeast` when the node is behind it, through the
  * server's client for the chain. A failure is logged and answers null, as `readCollectionFees` does.
@@ -43,23 +81,7 @@ export const readCollectionState: StateReader = async (chainId, address, atLeast
       functionName: 'collectionState',
       blockNumber: block,
     })
-    return {
-      block,
-      blockTimestamp: Number(state.blockTimestamp),
-      maxSupply: Number(state.maxSupply),
-      totalMinted: Number(state.totalMinted),
-      publicMaxMintPerWallet: Number(state.publicMaxMintPerWallet),
-      mintOnBehalfActive: state.mintOnBehalfActive,
-      groups: state.groups.map((group) => ({
-        id: Number(group.id),
-        priceWei: group.price.toString(),
-        maxSupply: Number(group.maxSupply),
-        minted: Number(group.minted),
-        startTimestamp: Number(group.startTimestamp),
-        flag: group.activeFlag,
-        active: group.active,
-      })),
-    }
+    return chainStateOf(state, block)
   } catch (error) {
     console.error(`The collection state could not be read on chain ${chainId}: ${errorSummary(error)}`)
     return null
@@ -107,9 +129,10 @@ export async function phaseBase(ctx: PhasesContext): Promise<PhaseBase | null> {
 /**
  * Writes the copies from a read through `mint_groups_refresh` with the read's block, so a slower read
  * never overwrites a newer one. A value too large for its column, or a refresh that fails, is logged
- * and never fails the view.
+ * and never fails the view. Settings refreshes them too, with its own read's block, before its settings
+ * copies (docs/specs/2026-10-15-airdrop-settings.md, section 6.4).
  */
-async function refreshCopies(ctx: PhasesContext, state: ChainState): Promise<void> {
+export async function refreshPhaseCopies(ctx: PhasesContext, state: ChainState): Promise<void> {
   const payload = refreshPayload(state)
   if (!payload) {
     console.error(
@@ -146,7 +169,7 @@ async function viewOf(ctx: PhasesContext, base: PhaseBase, state: ChainState | n
       maxSupply: ctx.collection.max_supply ?? 0,
       readAt: base.readAt,
     })
-  await refreshCopies(ctx, state)
+  await refreshPhaseCopies(ctx, state)
   return liveView({ chainId: base.chainId, contract: base.contract, rows: base.rows }, state)
 }
 
