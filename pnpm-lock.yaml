@@ -33,7 +33,14 @@ importers:
         specifier: ^5.0.3
         version: 5.0.3(@types/node@26.6.4)(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0))
 
-  apps/freshness: {}
+  apps/freshness:
+    dependencies:
+      '@cobweb/shared':
+        specifier: workspace:^
+        version: link:../../packages/shared
+      viem:
+        specifier: ^2.57.2
+        version: 2.57.2(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)(zod@4.6.5)
 
   apps/web:
     dependencies:
@@ -7009,7 +7016,7 @@ snapshots:
 
   '@scure/bip32@1.7.0':
     dependencies:
-      '@noble/curves': 1.9.1
+      '@noble/curves': 1.9.7
       '@noble/hashes': 1.8.0
       '@scure/base': 1.2.6
 
