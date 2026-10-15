@@ -1,9 +1,8 @@
 'use client'
 
-import { ExternalLinkIcon, InfoIcon, RotateCwIcon, UploadIcon } from 'lucide-react'
+import { InfoIcon, RotateCwIcon, UploadIcon } from 'lucide-react'
 import { useReducer } from 'react'
 import { toast } from 'sonner'
-import type { Hex } from 'viem'
 import { Alert, AlertDescription, AlertTitle } from '@cobweb/ui/components/alert'
 import { Button } from '@cobweb/ui/components/button'
 import { Spinner } from '@cobweb/ui/components/spinner'
@@ -12,33 +11,15 @@ import { cn } from '@cobweb/ui/lib/utils'
 import { deployReducer, type DeployEvent } from '@/components/deploy/deploy-machine'
 import { classifyError } from '@/components/deploy/tx-errors'
 import { isTxRunning, TX_IDLE, TxProgress, type TxFailure } from '@/components/deploy/tx-progress'
-import { explorerTxUrl, shortAddress, type MintGroup, type SupportedChain } from '@/lib/demo'
+import type { MintGroup, SupportedChain } from '@/lib/demo'
 import type { GroupList, SentChunk, WhitelistView } from '@/lib/manage/whitelist-types'
 import { WHITELIST_CHUNK } from '@/lib/manage/whitelist-view'
+import { TxLink } from './bits'
 import { count } from './format'
 import { useManageActions } from './manage-context'
 import { runManage } from './manage-machine'
 import type { ChunkRow } from './whitelist-model'
 import type { WhitelistServer } from './whitelist-server'
-
-/** A transaction: a link to the chain's explorer, or the hash as text where it has none (Anvil). */
-function TxLink({ chain, hash, label }: { chain: SupportedChain; hash: Hex; label?: string }) {
-  if (!chain.explorerUrl)
-    return <span className="numeric text-muted-foreground text-[0.8125rem] break-all">{hash}</span>
-  return (
-    <a
-      href={explorerTxUrl(chain, hash)}
-      target="_blank"
-      rel="noreferrer"
-      className="numeric text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex items-center gap-1 rounded-sm text-[0.8125rem] outline-none focus-visible:ring-2"
-    >
-      {label && <span className="font-sans">{label}</span>}
-      {shortAddress(hash, 6)}
-      <ExternalLinkIcon aria-hidden="true" className="size-3" />
-      <span className="sr-only">(opens the block explorer)</span>
-    </a>
-  )
-}
 
 /**
  * The on-chain write (docs/specs/2026-10-15-whitelist.md, section 7.3): one block per `setMintQuota`

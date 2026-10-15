@@ -1,36 +1,31 @@
 'use client'
 
-import { ExternalLinkIcon, FlameIcon } from 'lucide-react'
+import { FlameIcon } from 'lucide-react'
 import { useId, useState } from 'react'
+import type { Hex } from 'viem'
 import { Badge } from '@cobweb/ui/components/badge'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@cobweb/ui/components/field'
 import { Input } from '@cobweb/ui/components/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@cobweb/ui/components/table'
-import {
-  DEAD_ADDRESS,
-  explorerTxUrl,
-  formatNative,
-  mulWei,
-  shortAddress,
-  type AirdropRecord,
-  type Hex,
-  type SupportedChain,
-} from '@/lib/demo'
-import { Row } from './bits'
+import type { ActionResult } from '@/lib/art/result'
+import { formatNative, mulWei, shortAddress, type SupportedChain } from '@/lib/demo'
+import type { AirdropRow, AirdropView } from '@/lib/manage/airdrop-types'
+import { AIRDROP_MAX_TOKENS, BURN_ADDRESS } from '@/lib/manage/airdrop-view'
+import { burnRequest, tokensLabel } from './airdrop-dialogs'
+import { Row, TxLink } from './bits'
 import { count, relativeTo, shortUtc } from './format'
-import { sampleRequest } from './manage-sim'
 import { toCsv } from './recipients'
 import { TransactionDialog } from './transaction-dialog'
 
-/** Token ids an airdrop minted, `#41 to #50`, or a dash when the record has none. */
-export function tokenRange(airdrop: AirdropRecord): string {
-  if (!airdrop.firstTokenId) return '-'
-  const last = airdrop.firstTokenId + airdrop.tokens - 1
-  return last === airdrop.firstTokenId ? `#${airdrop.firstTokenId}` : `#${airdrop.firstTokenId} to #${last}`
+/** Token ids a recorded airdrop minted: `#41 to #50`, or `#41` for one. */
+export function tokenRange(airdrop: AirdropRow): string {
+  return airdrop.firstTokenId === airdrop.lastTokenId
+    ? `#${airdrop.firstTokenId}`
+    : `#${airdrop.firstTokenId} to #${airdrop.lastTokenId}`
 }
 
-/** The history as CSV, one row per transaction, as legacy's "Export CSV" (which listed recipients). */
-export function airdropHistoryCsv(airdrops: AirdropRecord[], chain: SupportedChain): string {
+/** History as CSV, one row per transaction in History's order (newest first), as legacy's "Export CSV". */
+export function airdropHistoryCsv(airdrops: AirdropRow[], chain: SupportedChain): string {
   return toCsv([
     [
       'date_utc',
@@ -41,27 +36,25 @@ export function airdropHistoryCsv(airdrops: AirdropRecord[], chain: SupportedCha
       `fee_${chain.nativeSymbol.toLowerCase()}`,
       'tx_hash',
     ],
-    ...[...airdrops]
-      .sort((a, b) => b.at - a.at)
-      .map((airdrop) => [
-        new Date(airdrop.at * 1000).toISOString(),
-        airdrop.burn ? 'burn' : 'airdrop',
-        airdrop.recipients,
-        airdrop.tokens,
-        tokenRange(airdrop),
-        formatNative(airdrop.feePaidWei, '', 18).trim().replace(/,/g, ''),
-        airdrop.txHash,
-      ]),
+    ...airdrops.map((airdrop) => [
+      new Date(airdrop.confirmedAt * 1000).toISOString(),
+      airdrop.kind,
+      airdrop.recipients,
+      airdrop.tokens,
+      tokenRange(airdrop),
+      formatNative(airdrop.feePaidWei, '', 18).trim().replace(/,/g, ''),
+      airdrop.txHash,
+    ]),
   ])
 }
 
-/** Past airdrops and burns, newest first. */
+/** The batches and burns Cobweb confirmed, newest first. When is when Cobweb recorded each. */
 export function AirdropHistory({
   airdrops,
   chain,
   readAt,
 }: {
-  airdrops: AirdropRecord[]
+  airdrops: AirdropRow[]
   chain: SupportedChain
   readAt: number
 }) {
@@ -72,7 +65,6 @@ export function AirdropHistory({
       </p>
     )
   }
-  const sorted = [...airdrops].sort((a, b) => b.at - a.at)
   return (
     <Table>
       <TableHeader>
@@ -87,16 +79,16 @@ export function AirdropHistory({
         </TableRow>
       </TableHeader>
       <TableBody>
-        {sorted.map((airdrop) => (
+        {airdrops.map((airdrop) => (
           <TableRow key={airdrop.txHash}>
             <TableCell className="pl-6">
-              <span className="numeric text-sm">{shortUtc(airdrop.at)}</span>
+              <span className="numeric text-sm">{shortUtc(airdrop.confirmedAt)}</span>
               <span className="text-muted-foreground block text-[0.8125rem]">
-                {relativeTo(airdrop.at, readAt)}
+                {relativeTo(airdrop.confirmedAt, readAt)}
               </span>
             </TableCell>
             <TableCell>
-              {airdrop.burn ? (
+              {airdrop.kind === 'burn' ? (
                 <Badge variant="destructive">
                   <FlameIcon aria-hidden="true" />
                   Burn
@@ -114,16 +106,7 @@ export function AirdropHistory({
               {formatNative(airdrop.feePaidWei, chain.nativeSymbol)}
             </TableCell>
             <TableCell className="pr-6 text-right">
-              <a
-                href={explorerTxUrl(chain, airdrop.txHash)}
-                target="_blank"
-                rel="noreferrer"
-                className="numeric text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex items-center gap-1 rounded-sm text-[0.8125rem] outline-none focus-visible:ring-2"
-              >
-                {shortAddress(airdrop.txHash, 6)}
-                <ExternalLinkIcon aria-hidden="true" className="size-3" />
-                <span className="sr-only">, view on explorer</span>
-              </a>
+              <TxLink chain={chain} hash={airdrop.txHash} />
             </TableCell>
           </TableRow>
         ))}
@@ -132,17 +115,19 @@ export function AirdropHistory({
   )
 }
 
-/** Why a burn quantity cannot be sent, or null. */
+/** Why a burn quantity cannot be sent, or null: a whole number, no more than is left, 1,000 at most at a time. */
 export function burnError(quantity: string, remaining: number): string | null {
   const amount = Number(quantity)
   if (!/^\d+$/.test(quantity) || amount < 1) return 'Enter a whole number of 1 or more.'
   if (amount > remaining) return `Only ${count(remaining)} tokens are left to mint.`
+  if (amount > AIRDROP_MAX_TOKENS) return 'Burn up to 1,000 tokens at a time.'
   return null
 }
 
 /**
- * Burn mode's input, in place of the recipients: how many tokens to mint straight to the dead
- * address (MASTER_PLAN, Contracts: burn), where nobody can ever use them.
+ * Burn mode's input, in place of the recipients: how many tokens to mint straight to the dead address
+ * (MASTER_PLAN, Contracts: burn), where nobody can ever use them. `remaining` is null while the contract cannot
+ * be read.
  */
 export function BurnQuantity({
   quantity,
@@ -153,14 +138,14 @@ export function BurnQuantity({
   quantity: string
   onChange: (value: string) => void
   error: string | null
-  remaining: number
+  remaining: number | null
 }) {
   const id = useId()
   return (
     <div className="grid gap-4">
       <p className="text-muted-foreground text-sm">
         Burning mints tokens to the dead address,{' '}
-        <span className="numeric">{shortAddress(DEAD_ADDRESS, 6)}</span>, where nobody can ever use them. Use
+        <span className="numeric">{shortAddress(BURN_ADDRESS, 6)}</span>, where nobody can ever use them. Use
         it to shrink a drop that will not sell out. It cannot be undone, and it costs the airdrop fee per
         token.
       </p>
@@ -170,7 +155,7 @@ export function BurnQuantity({
           id={`${id}-quantity`}
           type="number"
           min={1}
-          max={remaining}
+          max={Math.min(remaining ?? AIRDROP_MAX_TOKENS, AIRDROP_MAX_TOKENS)}
           value={quantity}
           onChange={(event) => onChange(event.target.value)}
           aria-invalid={!!error}
@@ -178,9 +163,19 @@ export function BurnQuantity({
         />
         {error ? (
           <FieldError id={`${id}-quantity-help`}>{error}</FieldError>
-        ) : (
+        ) : remaining !== null && remaining <= AIRDROP_MAX_TOKENS ? (
           <FieldDescription id={`${id}-quantity-help`}>
             Up to <span className="numeric">{count(remaining)}</span>, the tokens left to mint.
+          </FieldDescription>
+        ) : (
+          <FieldDescription id={`${id}-quantity-help`}>
+            Up to 1,000 at a time.
+            {remaining !== null && (
+              <>
+                {' '}
+                <span className="numeric">{count(remaining)}</span> are left to mint.
+              </>
+            )}
           </FieldDescription>
         )}
       </Field>
@@ -188,7 +183,11 @@ export function BurnQuantity({
   )
 }
 
-/** The burn's confirmation: what it leaves, its fee, and typing "burn N" to enable the send. */
+/**
+ * The burn's confirmation: what it leaves, its fee, and typing "burn N" to enable the send, which sends one
+ * batch to the dead address (docs/specs/2026-10-15-airdrop-settings.md, section 7.3). With `blocked` (the owner
+ * check) it opens for reading, its action off.
+ */
 export function BurnDialog({
   open,
   onOpenChange,
@@ -196,6 +195,9 @@ export function BurnDialog({
   amount,
   remaining,
   feePerTokenWei,
+  blocked,
+  confirm,
+  pending,
   onBurned,
 }: {
   open: boolean
@@ -204,14 +206,16 @@ export function BurnDialog({
   amount: number
   remaining: number
   feePerTokenWei: string
-  onBurned: (hash: Hex) => void
+  blocked: string | null
+  confirm: (hash: Hex) => Promise<ActionResult<AirdropView>>
+  pending: { remember(hash: Hex): void; forget(): void }
+  onBurned: (view: AirdropView) => void
 }) {
   const id = useId()
   const [typed, setTyped] = useState('')
   const fee = mulWei(feePerTokenWei, amount)
   const phrase = `burn ${amount}`
   const confirmed = typed.trim().toLowerCase() === phrase
-  const noun = amount === 1 ? 'token' : 'tokens'
 
   return (
     <TransactionDialog
@@ -219,24 +223,12 @@ export function BurnDialog({
       onOpenChange={onOpenChange}
       chain={chain}
       destructive
-      title={`Burn ${count(amount)} ${noun}`}
+      blocked={blocked}
+      title={`Burn ${tokensLabel(amount)}`}
       description="The tokens are minted to the dead address and counted against supply for good. This cannot be undone."
-      actionLabel={`Burn ${count(amount)} ${noun}`}
-      successMessage={`${count(amount)} ${noun} burned`}
-      request={
-        confirmed
-          ? sampleRequest({
-              contract: 'Collection',
-              functionName: 'airdropNFTs',
-              args: [
-                { name: 'recipients', value: `[${shortAddress(DEAD_ADDRESS, 6)}]` },
-                { name: 'amounts', value: `[${amount}]` },
-              ],
-              valueWei: fee,
-              check: () => (amount > remaining ? 'ExceedsMaxSupply' : null),
-            })
-          : null
-      }
+      actionLabel={`Burn ${tokensLabel(amount)}`}
+      successMessage={`${tokensLabel(amount)} burned`}
+      request={confirmed ? burnRequest(amount, feePerTokenWei, chain, confirm, pending) : null}
       onConfirmed={onBurned}
     >
       <dl className="divide-y rounded-lg border px-4">
@@ -261,13 +253,13 @@ export function BurnDialog({
   )
 }
 
-/** Left to mint now and after the send; `after` null means the send is more than is left. */
+/** Left to mint now and after the send: `after` null means the send is more than is left; `remaining` null, not read. */
 export function SupplyNote({
   remaining,
   after,
   label,
 }: {
-  remaining: number
+  remaining: number | null
   after: number | null
   label: string
 }) {
@@ -275,12 +267,22 @@ export function SupplyNote({
     <div className="bg-well shadow-inset rounded-lg px-3 py-2.5 text-[0.8125rem]">
       <p className="flex justify-between">
         <span className="text-muted-foreground">Left to mint</span>
-        <span className="numeric">{count(remaining)}</span>
+        <span className={remaining === null ? 'text-muted-foreground' : 'numeric'}>
+          {remaining === null ? 'Not read' : count(remaining)}
+        </span>
       </p>
       <p className="flex justify-between">
         <span className="text-muted-foreground">{label}</span>
-        <span className={after === null ? 'numeric text-destructive-foreground' : 'numeric'}>
-          {after === null ? 'Not enough' : count(after)}
+        <span
+          className={
+            remaining === null
+              ? 'text-muted-foreground'
+              : after === null
+                ? 'numeric text-destructive-foreground'
+                : 'numeric'
+          }
+        >
+          {remaining === null ? 'Not read' : after === null ? 'Not enough' : count(after)}
         </span>
       </p>
     </div>

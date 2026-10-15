@@ -6,7 +6,14 @@ import { toast } from 'sonner'
 import { Button } from '@cobweb/ui/components/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@cobweb/ui/components/tooltip'
 import { cn } from '@cobweb/ui/lib/utils'
-import { explorerAddressUrl, shortAddress, type Address, type SupportedChain } from '@/lib/demo'
+import {
+  explorerAddressUrl,
+  explorerTxUrl,
+  shortAddress,
+  type Address,
+  type Hex,
+  type SupportedChain,
+} from '@/lib/demo'
 import { count } from './format'
 
 /** Copies `value` and confirms with a tick for a moment. */
@@ -139,6 +146,25 @@ export function Pager({
         </Button>
       </div>
     </nav>
+  )
+}
+
+/** A transaction: a link to the chain's explorer, or the hash as text where it has none (Anvil). */
+export function TxLink({ chain, hash, label }: { chain: SupportedChain; hash: Hex; label?: string }) {
+  if (!chain.explorerUrl)
+    return <span className="numeric text-muted-foreground text-[0.8125rem] break-all">{hash}</span>
+  return (
+    <a
+      href={explorerTxUrl(chain, hash)}
+      target="_blank"
+      rel="noreferrer"
+      className="numeric text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex items-center gap-1 rounded-sm text-[0.8125rem] outline-none focus-visible:ring-2"
+    >
+      {label && <span className="font-sans">{label}</span>}
+      {shortAddress(hash, 6)}
+      <ExternalLinkIcon aria-hidden="true" className="size-3" />
+      <span className="sr-only">(opens the block explorer)</span>
+    </a>
   )
 }
 

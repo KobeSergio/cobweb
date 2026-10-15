@@ -190,7 +190,6 @@ export const DEMO_CREATOR: Address = '0x7a3c51e9d2b04f68a1c3e5b7d9f0a2c4e6b8d0f2
 export const DEMO_PAYOUT: Address = '0x5e1f0c9b8a7d6e5f4c3b2a1908f7e6d5c4b3a291'
 export const DEMO_MINTER: Address = '0x3b9d2c1a0f8e7d6c5b4a39281706f5e4d3c2b1a0'
 export const DEMO_VAULT: Address = '0x9c8b7a6f5e4d3c2b1a09f8e7d6c5b4a392817065'
-export const DEAD_ADDRESS: Address = '0x000000000000000000000000000000000000dead'
 
 // ---------------------------------------------------------------------------------------------
 // Lock and upload
