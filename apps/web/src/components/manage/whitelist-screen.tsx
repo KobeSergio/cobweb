@@ -177,6 +177,19 @@ export function WhitelistScreen({
     void queryClient.invalidateQueries({ queryKey: ['whitelist-minted', collection.id] })
   }
 
+  /**
+   * A chunk confirmed, by its dialog or by the waiting panel's "Check again": the group's failure goes and
+   * the fresh view replaces this one.
+   */
+  function confirmed(next: WhitelistView, onchainId: number) {
+    setFailures((current) => {
+      const left = { ...current }
+      delete left[onchainId]
+      return left
+    })
+    replace(next)
+  }
+
   async function readAgain() {
     setReading(true)
     const result = await settled(server.read())
@@ -269,7 +282,7 @@ export function WhitelistScreen({
             group={view.groups.find((candidate) => candidate.id === pending.onchainId)}
             chain={chain}
             server={server}
-            onView={replace}
+            onView={(next) => confirmed(next, pending.onchainId)}
             onForget={forgetPending}
           />
         )}
@@ -349,14 +362,7 @@ export function WhitelistScreen({
                 forget: forgetPending,
               },
             )}
-            onConfirmed={(next) => {
-              setFailures((current) => {
-                const left = { ...current }
-                delete left[writing.plan.onchainId]
-                return left
-              })
-              replace(next)
-            }}
+            onConfirmed={(next) => confirmed(next, writing.plan.onchainId)}
             onFailed={(message) => {
               setFailures((current) => ({ ...current, [writing.plan.onchainId]: message }))
               // The dialog on screen shows its own failure; one closed since says it in a toast.
