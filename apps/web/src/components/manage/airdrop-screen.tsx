@@ -68,6 +68,9 @@ const TEMPLATE = {
   text: 'address,quantity\n0x5e1f0c9b8a7d6e5f4c3b2a1908f7e6d5c4b3a291,2\n0x3b9d2c1a0f8e7d6c5b4a39281706f5e4d3c2b1a0,1\n',
 }
 const PENDING_REASON = 'Confirm or discard the waiting transaction first.'
+// A run still in flight in a closed dialog: the send or the burn button opens that dialog again.
+const BATCH_RUNNING = 'A transaction is still in progress. Open it from Send batch to finish it.'
+const BURN_RUNNING = 'A transaction is still in progress. Open it from Burn to finish it.'
 const DISCARDED = 'Discarded before it was confirmed.'
 
 /** A server answer, or "Try again" when the action itself threw. */
@@ -130,9 +133,9 @@ export function AirdropScreen({
   // Whether the burn dialog is on screen when a run ends: a failure that reaches a closed dialog is toasted.
   const burnShown = useRef(false)
   burnShown.current = burnOpen
-  // Runs in flight in the two dialogs, on screen or closed (`onRunningChange`): until each has ended, nothing is
-  // sent and neither the list nor the burn switch changes, so a run still waiting on the wallet can neither send
-  // its batch twice nor lose its hash.
+  // Runs in flight in the two dialogs, on screen or closed (`onRunningChange`). Until each has ended, the
+  // send and the burn buttons open its dialog again rather than a new one, and neither the list nor the burn
+  // switch changes, so a run still waiting on the wallet can neither send its batch twice nor lose its hash.
   const [runs, setRuns] = useState(0)
   // Sample mode: what the simulated wallet sent, by hash, so the sample server applies exactly that call.
   const [sampleSent] = useState(() => new Map<Hex, ManageCall>())
@@ -271,10 +274,15 @@ export function AirdropScreen({
   const left = view.left
   const owner = view.owner
   const blocked = owner !== null && owner.toLowerCase() !== wallet.toLowerCase() ? NOT_OWNER(owner) : null
+  // A dialog's run in flight while that dialog is closed. The burn switch stays off meanwhile, so the mode
+  // tells whose run it is: the send button, or the burn button in burn mode, opens that dialog again whatever
+  // else would keep it off, under its usual label.
   const inFlight = runs > 0
+  const reopenBatch = inFlight && !burn && dialog !== null
+  const reopenBurn = inFlight && burn && burnDialog !== null && left !== null
   // The first reason that applies: the chain unread, then the owner check (the dialogs open, their action off),
-  // then a hash waiting to be confirmed or a dialog's run in flight, which may still send.
-  const off = !reachable ? UNREADABLE_REASON : !blocked && (job?.pending || inFlight) ? PENDING_REASON : null
+  // then a hash waiting to be confirmed.
+  const off = !reachable ? UNREADABLE_REASON : !blocked && job?.pending ? PENDING_REASON : null
   const sending = job?.kind === 'airdrop' ? job : null
   const rows = sending ? sending.batches.flat() : result.rows
   const tokens = tokensOf(rows)
@@ -292,6 +300,11 @@ export function AirdropScreen({
    * answered, its run may still send, so a batch never gets a second dialog.
    */
   function sendNext() {
+    // The batch's run still in flight in its closed dialog: that dialog opens again, to follow the run.
+    if (reopenBatch) {
+      setDialogOpen(true)
+      return
+    }
     if (fee === null) return
     let active = sending
     if (!active) {
@@ -389,12 +402,14 @@ export function AirdropScreen({
                   Burn instead of sending
                 </label>
                 <p id="airdrop-burn-help" className="text-muted-foreground text-[0.8125rem]">
-                  {job?.kind === 'burn'
-                    ? 'Confirm or discard the waiting burn first.'
-                    : job
-                      ? 'Finish or stop the airdrop in progress first.'
-                      : inFlight
-                        ? PENDING_REASON
+                  {inFlight
+                    ? burn
+                      ? BURN_RUNNING
+                      : BATCH_RUNNING
+                    : job?.kind === 'burn'
+                      ? 'Confirm or discard the waiting burn first.'
+                      : job
+                        ? 'Finish or stop the airdrop in progress first.'
                         : 'Mints a quantity to the dead address, shrinking what is left to sell.'}
                 </p>
               </div>
@@ -426,8 +441,8 @@ export function AirdropScreen({
                   variant="ghost"
                   size="sm"
                   className="w-fit"
-                  disabled={!!sending.pending || inFlight}
-                  title={sending.pending || inFlight ? PENDING_REASON : undefined}
+                  disabled={inFlight || !!sending.pending}
+                  title={inFlight ? BATCH_RUNNING : sending.pending ? PENDING_REASON : undefined}
                   onClick={() => {
                     // Batches already sent are on chain; keeping them in the list would send them twice.
                     if (sending.sent > 0) setText('')
@@ -480,9 +495,14 @@ export function AirdropScreen({
                 </p>
                 <Button
                   variant="destructive"
-                  disabled={!!burnInvalid || !!off || fee === null || left === null}
-                  title={off ?? undefined}
+                  disabled={!reopenBurn && (!!burnInvalid || !!off || fee === null || left === null)}
+                  title={reopenBurn ? undefined : (off ?? undefined)}
                   onClick={() => {
+                    // The burn's run still in flight in its closed dialog: that dialog opens again.
+                    if (reopenBurn) {
+                      setBurnOpen(true)
+                      return
+                    }
                     if (fee === null) return
                     // The same burn opens its dialog again until it is confirmed: closed before the wallet
                     // answered, its run may still send, so a burn never gets a second dialog.
@@ -561,8 +581,8 @@ export function AirdropScreen({
                 )}
                 <Button
                   onClick={sendNext}
-                  disabled={rows.length === 0 || tooMany || stale || !!off || fee === null}
-                  title={off ?? undefined}
+                  disabled={!reopenBatch && (rows.length === 0 || tooMany || stale || !!off || fee === null)}
+                  title={reopenBatch ? undefined : (off ?? undefined)}
                 >
                   <SendIcon aria-hidden="true" />
                   {sending
