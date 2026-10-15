@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { artWriteError, lockWriteError, phasesWriteError } from './db-error'
+import { artWriteError, lockWriteError, phasesWriteError, whitelistWriteError } from './db-error'
 import {
   ALREADY_LOCKED,
   ART_CHANGED,
@@ -49,6 +49,10 @@ import {
   PHASE_NAME_TAKEN,
   PUBLIC_SHOWN,
   UNSAVED,
+  NAME_FIRST,
+  QUOTA_RANGE,
+  WHITELIST_FULL,
+  WRONG_GROUP,
 } from './result'
 
 describe('artWriteError', () => {
@@ -218,5 +222,40 @@ describe('phasesWriteError', () => {
       }),
     ).toBe(UNSAVED)
     expect(phasesWriteError(null)).toBe(UNSAVED)
+  })
+})
+
+describe('whitelistWriteError', () => {
+  it('names the phase first for a group without a row, and reads any other refused owner check as not found', () => {
+    expect(whitelistWriteError({ code: '42501', message: 'phase not found' })).toBe(NAME_FIRST)
+    expect(whitelistWriteError({ code: '42501', message: 'collection not found' })).toBe(NOT_FOUND)
+    expect(
+      whitelistWriteError({ code: '42501', message: 'permission denied for function whitelist_entries_add' }),
+    ).toBe(NOT_FOUND)
+  })
+
+  it('passes the whitelist sentences through', () => {
+    for (const sentence of [NOT_DEPLOYED, WHITELIST_FULL, QUOTA_RANGE, WRONG_GROUP])
+      expect(whitelistWriteError({ code: '23514', message: sentence })).toBe(sentence)
+  })
+
+  it('says "reload" for anything else', () => {
+    expect(
+      whitelistWriteError({
+        code: '23514',
+        message:
+          'new row for relation "whitelist_entries" violates check constraint "whitelist_entries_wallet_address_check"',
+      }),
+    ).toBe(UNSAVED)
+    expect(
+      whitelistWriteError({
+        code: '21000',
+        message: 'ON CONFLICT DO UPDATE command cannot affect row a second time',
+      }),
+    ).toBe(UNSAVED)
+    expect(whitelistWriteError({ code: '23514', message: 'The transaction did not make this change.' })).toBe(
+      UNSAVED,
+    )
+    expect(whitelistWriteError(null)).toBe(UNSAVED)
   })
 })

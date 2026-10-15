@@ -113,3 +113,20 @@ export const PHASE_TIMED_OUT =
   'The change is not confirmed yet. Read the contract again in a minute to see it.'
 // Naming a group that has no row reads the chain first; this is said when it does not answer.
 export const CONTRACT_UNREADABLE = 'The contract could not be read. Try again in a minute.'
+
+// Whitelist (docs/specs/2026-10-15-whitelist.md, section 6.6). The database raises the first three as they are.
+export const WHITELIST_FULL = 'A whitelist holds up to 10,000 addresses.'
+export const QUOTA_RANGE = 'The quota must be 1 to 10,000.'
+export const WRONG_GROUP = 'The public sale has no whitelist.'
+// Said by the server or the screen (the database does not raise these).
+export const ZERO_ADDRESS = 'The zero address cannot mint or receive tokens.'
+export const WHITELIST_NOT_CONFIRMED = 'The chunk has not been confirmed on chain yet.'
+export const WHITELIST_TIMED_OUT =
+  'The chunk is not confirmed yet. Check again in a minute; sending it again is safe.'
+export const NOT_A_CONTRACT = (chain: string) => `There is no contract at this address on ${chain}.`
+export const NOT_ERC721 = (chain: string) => `This address is not an ERC-721 contract on ${chain}.`
+export const NO_TOTAL_SUPPLY = 'This contract does not report its total supply.'
+export const SNAPSHOT_TOO_LARGE = 'Snapshots cover collections up to 20,000 tokens for now.'
+export const NO_HOLDERS = 'No holders found. Check the address and the chain.'
+export const SNAPSHOT_CHAIN = 'Cobweb cannot read this chain yet. Choose another chain.'
+export const SNAPSHOT_FAILED = 'The snapshot could not be taken. Try again in a moment.'

@@ -23,6 +23,7 @@ import {
   JOB_UNLOCKED,
   LOCKED,
   LINK_REQUIRED,
+  NAME_FIRST,
   NO_CHAIN,
   NO_PAYMENT_DUE,
   NO_PAYMENT_FOR_JOB,
@@ -45,6 +46,7 @@ import {
   PAYMENT_USED_FOR_JOB,
   PLACEHOLDER_LOCKED,
   PUBLIC_SHOWN,
+  QUOTA_RANGE,
   QUOTE_EXPIRED,
   QUOTE_FROZEN,
   QUOTE_NOT_EXPIRED,
@@ -58,6 +60,8 @@ import {
   TRAIT_CAP,
   UNSAVED,
   UPLOAD_CAP,
+  WHITELIST_FULL,
+  WRONG_GROUP,
 } from './result'
 
 export type DbError = { code?: string; message: string } | null
@@ -182,5 +186,20 @@ export function phasesWriteError(error: DbError): string {
     if (error.message.includes('mint_groups_public_shown')) return PUBLIC_SHOWN
     if (PHASES_SENTENCES.has(error.message)) return error.message
   }
+  return UNSAVED
+}
+
+/** Sentences the whitelist functions raise (supabase/migrations/20261015100000_whitelist.sql). */
+const WHITELIST_SENTENCES = new Set([NOT_DEPLOYED, WHITELIST_FULL, QUOTA_RANGE, WRONG_GROUP])
+
+/**
+ * A failed whitelist write, by SQLSTATE, in the creator's words (docs/specs/2026-10-15-whitelist.md, section
+ * 6.6): a group Cobweb has no row for is named first, any other refused owner check reads as not found, and
+ * the functions' own sentences pass through.
+ */
+export function whitelistWriteError(error: DbError): string {
+  if (!error) return UNSAVED
+  if (error.code === '42501') return error.message === 'phase not found' ? NAME_FIRST : NOT_FOUND
+  if (error.code === '23514' && WHITELIST_SENTENCES.has(error.message)) return error.message
   return UNSAVED
 }
