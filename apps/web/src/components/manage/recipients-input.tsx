@@ -1,7 +1,7 @@
 'use client'
 
 import { AlertTriangleIcon, DownloadIcon, FileUpIcon, PlusIcon } from 'lucide-react'
-import { useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Button } from '@cobweb/ui/components/button'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@cobweb/ui/components/field'
 import { Input } from '@cobweb/ui/components/input'
@@ -30,10 +30,12 @@ export function RecipientsInput({
   onTextChange: (text: string) => void
   options: ParseOptions
   template: { fileName: string; text: string }
-  /** The chains a holder snapshot can read, and the one selected first. */
+  /** The chains a holder snapshot can read, the one selected first, and the read itself. */
   snapshot?: SnapshotSource
 }) {
   const [snapshotNote, setSnapshotNote] = useState<string | null>(null)
+  // The busy state lives here because the tab unmounts when another tab is selected.
+  const [snapshotBusy, setSnapshotBusy] = useState(false)
   const id = useId()
   const [fileName, setFileName] = useState<string | null>(null)
   const [reading, setReading] = useState(false)
@@ -42,6 +44,11 @@ export function RecipientsInput({
   const [address, setAddress] = useState('')
   const [amount, setAmount] = useState(String(options.defaultAmount))
   const [manualError, setManualError] = useState<string | null>(null)
+  // A snapshot lands after a long read and must append to the text as it is then, not as it was at the click.
+  const latest = useRef(text)
+  useEffect(() => {
+    latest.current = text
+  }, [text])
 
   async function takeFile(file: File | undefined) {
     if (!file) return
@@ -196,8 +203,11 @@ export function RecipientsInput({
             source={snapshot}
             amountName={options.amountName}
             maxAmount={options.maxAmount}
+            busy={snapshotBusy}
+            onBusyChange={setSnapshotBusy}
             onLoaded={(lines, summary) => {
-              onTextChange(text.trim() ? `${text.trimEnd()}\n${lines}` : lines)
+              const current = latest.current
+              onTextChange(current.trim() ? `${current.trimEnd()}\n${lines}` : lines)
               setSnapshotNote(`Added ${summary}. Review them below before you continue.`)
             }}
           />

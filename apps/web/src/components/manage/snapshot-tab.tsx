@@ -34,11 +34,17 @@ export function SnapshotTab({
   source,
   amountName,
   maxAmount,
+  busy,
+  onBusyChange,
   onLoaded,
 }: {
   source: SnapshotSource
   amountName: string
   maxAmount: number
+  /** Whether a read is running; kept by the parent so a tab switch does not lose it. */
+  busy: boolean
+  /** Called when a read starts and when it ends. */
+  onBusyChange: (busy: boolean) => void
   onLoaded: (lines: string, summary: string) => void
 }) {
   const id = useId()
@@ -47,7 +53,6 @@ export function SnapshotTab({
   const [touched, setTouched] = useState(false)
   const [mode, setMode] = useState<SnapshotAmount['kind']>('balance')
   const [fixed, setFixed] = useState('1')
-  const [loading, setLoading] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
 
   const addressError = snapshotAddressError(contract)
@@ -61,7 +66,8 @@ export function SnapshotTab({
   async function take() {
     setTouched(true)
     if (addressError || fixedError || !chain) return
-    setLoading(true)
+    if (busy) return
+    onBusyChange(true)
     setFailure(null)
     try {
       const result = await source.fetch(chain.id, contract.trim())
@@ -83,7 +89,7 @@ export function SnapshotTab({
     } catch {
       setFailure(SNAPSHOT_FAILED)
     } finally {
-      setLoading(false)
+      onBusyChange(false)
     }
   }
 
@@ -159,9 +165,9 @@ export function SnapshotTab({
         {fixedError && <FieldError>{fixedError}</FieldError>}
       </Field>
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="button" variant="secondary" onClick={take} disabled={loading}>
-          {loading ? <Spinner /> : <CameraIcon aria-hidden="true" />}
-          {loading ? 'Taking snapshot' : 'Take snapshot'}
+        <Button type="button" variant="secondary" onClick={take} disabled={busy}>
+          {busy ? <Spinner /> : <CameraIcon aria-hidden="true" />}
+          {busy ? 'Taking snapshot' : 'Take snapshot'}
         </Button>
         {chain && (
           <FieldDescription className="text-[0.8125rem]">
