@@ -76,33 +76,33 @@ export function sampleAirdropView(
 /**
  * The view after an `airdropNFTs` lands, as `airdrop_record` records it: a row with ids after the minted total, the
  * fee times its tokens, the next block and its kind from the recipients, newest first, and its tokens minted. A hash
- * already listed changes nothing.
+ * already listed changes nothing. On an unread view (`?chain=unreachable`) the row follows the newest recorded id
+ * at the sample's fee, and minted and left stay unknown.
  */
 export function sampleApplyAirdrop(call: ManageCall, view: AirdropView, hash: Hex): AirdropView {
   const txHash = hash.toLowerCase() as Hex
   if (call.functionName !== 'airdropNFTs' || view.history.some((row) => row.txHash === txHash)) return view
   const [recipients, amounts] = call.args
   const tokens = Number(amounts.reduce((sum, amount) => sum + amount, 0n))
-  const minted = view.totalMinted ?? 0
+  const minted = view.totalMinted ?? Math.max(0, ...view.history.map((entry) => entry.lastTokenId))
+  const fee = view.feePerTokenWei ?? DEMO_DEPLOYMENT.fees.airdropFeePerTokenWei
   const [only] = recipients
   const row: AirdropRow = {
     txHash,
     kind: recipients.length === 1 && only?.toLowerCase() === BURN_ADDRESS.toLowerCase() ? 'burn' : 'airdrop',
     recipients: recipients.length,
     tokens,
-    feePaidWei: (BigInt(view.feePerTokenWei ?? '0') * BigInt(tokens)).toString(),
+    feePaidWei: (BigInt(fee) * BigInt(tokens)).toString(),
     firstTokenId: minted + 1,
     lastTokenId: minted + tokens,
     block: Math.max(0, ...view.history.map((entry) => entry.block)) + 1,
     confirmedAt: view.readAt,
   }
+  const history = [row, ...view.history]
+  // Unread, as the core answers when its read after the record fails: the row, with minted and left unknown.
+  if (view.totalMinted === null) return { ...view, history }
   const totalMinted = minted + tokens
-  return {
-    ...view,
-    history: [row, ...view.history],
-    totalMinted,
-    left: Math.max(0, view.maxSupply - totalMinted),
-  }
+  return { ...view, history, totalMinted, left: Math.max(0, view.maxSupply - totalMinted) }
 }
 
 /**

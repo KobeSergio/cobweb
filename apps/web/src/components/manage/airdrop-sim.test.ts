@@ -77,6 +77,19 @@ describe('sampleApplyAirdrop', () => {
     expect(sampleApplyAirdrop(call, after, HASH)).toBe(after)
   })
 
+  it('keeps an unread view unread: the row after the newest id, minted and left still unknown', () => {
+    const unread: AirdropView = sampleAirdropView({ max_supply: DEMO_COLLECTION.maxSupply }, WALLET, {
+      chainReachable: false,
+    })
+    const after = sampleApplyAirdrop(airdropCalls.batch([{ address: A, amount: 3 }], '0'), unread, HASH)
+    expect(after).toMatchObject({ totalMinted: null, left: null, chainReachable: false })
+    expect(after.history[0]).toMatchObject({
+      firstTokenId: 13,
+      lastTokenId: 15,
+      feePaidWei: '150000000000000',
+    })
+  })
+
   it('records a burn to the dead address as a burn', () => {
     expect(sampleApplyAirdrop(airdropCalls.burn(2, '0'), view, HASH).history[0]).toMatchObject({
       kind: 'burn',

@@ -1,5 +1,5 @@
 import type { Hex } from 'viem'
-import type { AirdropJob } from '@/lib/manage/airdrop-types'
+import type { AirdropJob, BatchEntry } from '@/lib/manage/airdrop-types'
 import { batchesOf, BURN_ADDRESS, tokensOf } from '@/lib/manage/airdrop-view'
 import type { Recipient } from './recipients'
 
@@ -29,6 +29,26 @@ export function withPending(job: AirdropJob, hash: Hex | null): AirdropJob | nul
 export function withConfirmed(job: AirdropJob): AirdropJob | null {
   const sent = job.sent + 1
   return sent >= job.batches.length ? null : { ...job, sent, pending: null }
+}
+
+/**
+ * Whether a job still waits on batch `index` with exactly these entries, compared by value: a copy of the job read
+ * back in another tab matches too, and a job whose `sent` has moved past `index` does not.
+ */
+export function waitsOn(
+  job: AirdropJob | null,
+  index: number,
+  batch: readonly BatchEntry[] | undefined,
+): boolean {
+  const current = job?.batches[index]
+  return (
+    !!job &&
+    !!batch &&
+    !!current &&
+    job.sent === index &&
+    current.length === batch.length &&
+    current.every((entry, i) => entry.address === batch[i]?.address && entry.amount === batch[i]?.amount)
+  )
 }
 
 /** The tokens of the batches not confirmed yet, the pending one included. */

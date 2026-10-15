@@ -127,18 +127,20 @@ export function burnError(quantity: string, remaining: number): string | null {
 /**
  * Burn mode's input, in place of the recipients: how many tokens to mint straight to the dead address
  * (MASTER_PLAN, Contracts: burn), where nobody can ever use them. `remaining` is null while the contract cannot
- * be read.
+ * be read. `disabled` while a burn is in flight, so the quote keeps describing the burn being sent.
  */
 export function BurnQuantity({
   quantity,
   onChange,
   error,
   remaining,
+  disabled = false,
 }: {
   quantity: string
   onChange: (value: string) => void
   error: string | null
   remaining: number | null
+  disabled?: boolean
 }) {
   const id = useId()
   return (
@@ -158,6 +160,7 @@ export function BurnQuantity({
           max={Math.min(remaining ?? AIRDROP_MAX_TOKENS, AIRDROP_MAX_TOKENS)}
           value={quantity}
           onChange={(event) => onChange(event.target.value)}
+          disabled={disabled}
           aria-invalid={!!error}
           aria-describedby={`${id}-quantity-help`}
         />

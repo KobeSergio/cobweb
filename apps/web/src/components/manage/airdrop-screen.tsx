@@ -21,7 +21,7 @@ import type { AirdropJob, AirdropView, BatchEntry } from '@/lib/manage/airdrop-t
 import { AIRDROP_MAX_PER_ADDRESS, batchesOf, BURN_ADDRESS, tokensOf } from '@/lib/manage/airdrop-view'
 import type { ManageCall } from '@/lib/manage/phase-calls'
 import { batchRequest, PendingBatchPanel, tokensLabel, walletsLabel } from './airdrop-dialogs'
-import { burnJob, frozenJob, unsentTokens, withConfirmed, withPending } from './airdrop-job'
+import { burnJob, frozenJob, unsentTokens, waitsOn, withConfirmed, withPending } from './airdrop-job'
 import {
   AirdropHistory,
   airdropHistoryCsv,
@@ -36,7 +36,7 @@ import { Row } from './bits'
 import { count, downloadText, relativeTo } from './format'
 import { realManageActions } from './manage-actions'
 import { ManageActionsProvider, type ManageTarget } from './manage-context'
-import { airdropJob, forgetAirdropJob, rememberAirdropJob } from './manage-machine'
+import { airdropJob, airdropKey, forgetAirdropJob, rememberAirdropJob } from './manage-machine'
 import { sampleManageActions, samplePhasesView } from './manage-sim'
 import { UNREADABLE_REASON } from './phase-row'
 import { parseRecipients, type ParseOptions } from './recipients'
@@ -126,6 +126,8 @@ export function AirdropScreen({
     key: number
     amount: number
     fee: string
+    /** Left to mint when it opened: shown while a read after it does not answer, so the dialog never unmounts. */
+    remaining: number
     /** Its burn confirmed: the next burn gets a dialog of its own. */
     done?: boolean
   } | null>(null)
@@ -187,6 +189,26 @@ export function AirdropScreen({
     setJob(stored)
   }, [sample, samplePending, collection.id])
 
+  // Another tab of this collection changed the job: follow it, so this tab neither sends a batch that tab sent nor
+  // writes an older job over it (one job per collection, docs/specs/2026-10-15-airdrop-settings.md, section 7.1).
+  useEffect(() => {
+    if (sample) return
+    const follow = (event: StorageEvent) => {
+      if (event.key !== null && event.key !== airdropKey(collection.id)) return
+      const before = jobRef.current
+      const stored = airdropJob(browserStore(), collection.id)
+      jobRef.current = stored
+      setJob(stored)
+      // This tab's failure was for a batch that tab has since acted on.
+      setFailure(null)
+      // An airdrop that tab ended with batches on chain takes the list with it, as it does there: kept here, the
+      // list could be sent again.
+      if (!stored && before?.kind === 'airdrop' && (before.sent > 0 || before.pending)) setText('')
+    }
+    window.addEventListener('storage', follow)
+    return () => window.removeEventListener('storage', follow)
+  }, [sample, collection.id])
+
   /** The job in progress, in state and, outside sample mode, in the browser's store. */
   function commit(next: AirdropJob | null) {
     jobRef.current = next
@@ -197,17 +219,15 @@ export function AirdropScreen({
   }
 
   /**
-   * What the runs of one batch write, `batch` being its entries in the job: its sent hash, kept until the server
-   * confirms it or forgotten; its failure; and, once it is confirmed, the job moved on (`withConfirmed`; after the
-   * last batch the job and the text go). Each applies only while the job still waits on that batch. The dialog,
-   * closed mid-run, and "Check again" can both confirm one hash: the second finds the job past its batch and writes
-   * nothing, so it never marks the next batch sent or clears the next batch's hash.
+   * What the runs of one batch write, `batch` being its entries and `index` its place in the job: its sent hash,
+   * kept until the server confirms it or forgotten; its failure; and, once it is confirmed, the job moved on
+   * (`withConfirmed`; after the last batch the job and the text go). Each applies only while the job still waits on
+   * that batch, compared by value (`waitsOn`), so a job another tab wrote and this one followed still matches. The
+   * dialog, closed mid-run, and "Check again" can both confirm one hash: the second finds the job past its batch
+   * and writes nothing, so it never marks the next batch sent or clears the next batch's hash.
    */
-  function batchWrites(batch: BatchEntry[] | undefined) {
-    const waiting = () => {
-      const current = jobRef.current
-      return current && batch && current.batches[current.sent] === batch ? current : null
-    }
+  function batchWrites(batch: BatchEntry[] | undefined, index: number) {
+    const waiting = () => (waitsOn(jobRef.current, index, batch) ? jobRef.current : null)
     return {
       remember: (hash: Hex) => {
         const current = waiting()
@@ -247,13 +267,17 @@ export function AirdropScreen({
         mine = next.batches[0]
         commit(next)
       },
-      forget: () => batchWrites(mine).forget(),
+      forget: () => batchWrites(mine, 0).forget(),
     }
   }
 
-  /** A burn confirmed: its job went with its hash, so only the quantity starts again. */
+  /**
+   * A burn confirmed, by its dialog or the waiting panel: its job went with its hash, so the quantity starts again
+   * and its dialog is done, so the next burn gets a dialog of its own.
+   */
   function burned() {
     setBurnQuantity('1')
+    setBurnDialog((current) => current && { ...current, done: true })
   }
 
   /** A dialog's run started (true) or ended (false), told even after the dialog closed or unmounted. */
@@ -279,7 +303,7 @@ export function AirdropScreen({
   // else would keep it off, under its usual label.
   const inFlight = runs > 0
   const reopenBatch = inFlight && !burn && dialog !== null
-  const reopenBurn = inFlight && burn && burnDialog !== null && left !== null
+  const reopenBurn = inFlight && burn && burnDialog !== null
   // The first reason that applies: the chain unread, then the owner check (the dialogs open, their action off),
   // then a hash waiting to be confirmed.
   const off = !reachable ? UNREADABLE_REASON : !blocked && job?.pending ? PENDING_REASON : null
@@ -288,7 +312,9 @@ export function AirdropScreen({
   const tokens = tokensOf(rows)
   const batches = sending ? sending.batches : batchesOf(rows)
   const unsent = sending ? unsentTokens(sending) : tokens
-  const tooMany = left !== null && unsent > left
+  // A batch waiting on its hash may have landed, and a read after that already counts its tokens out of `left`:
+  // the over-supply alert waits for its confirm (the sends are off meanwhile).
+  const tooMany = left !== null && !sending?.pending && unsent > left
   const stale = deferred !== text
   const burnInvalid = left === null ? null : burnError(burnQuantity, left)
   const burnAmount = burnInvalid || left === null ? 0 : Number(burnQuantity)
@@ -324,8 +350,8 @@ export function AirdropScreen({
 
   const dialogTokens = dialog ? tokensOf(dialog.entries) : 0
   // The writes of the batch waiting on its hash (the panel's runs) and of the batch the dialog was opened on (its runs).
-  const waitingWrites = job ? batchWrites(job.batches[job.sent]) : null
-  const dialogWrites = dialog ? batchWrites(dialog.entries) : null
+  const waitingWrites = job ? batchWrites(job.batches[job.sent], job.sent) : null
+  const dialogWrites = dialog ? batchWrites(dialog.entries, dialog.index) : null
   // The dialogs follow the screen's order: the owner check, then a hash waiting, which no dialog sends past.
   const dialogBlocked = blocked ?? (job?.pending ? PENDING_REASON : null)
 
@@ -428,6 +454,7 @@ export function AirdropScreen({
                 onChange={setBurnQuantity}
                 error={burnInvalid}
                 remaining={left}
+                disabled={inFlight}
               />
             ) : sending ? (
               <div className="grid gap-2 text-sm">
@@ -503,13 +530,13 @@ export function AirdropScreen({
                       setBurnOpen(true)
                       return
                     }
-                    if (fee === null) return
+                    if (fee === null || left === null) return
                     // The same burn opens its dialog again until it is confirmed: closed before the wallet
                     // answered, its run may still send, so a burn never gets a second dialog.
                     setBurnDialog(
                       burnDialog && !burnDialog.done && burnDialog.amount === burnAmount
-                        ? { ...burnDialog, fee }
-                        : { key: Date.now(), amount: burnAmount, fee },
+                        ? { ...burnDialog, fee, remaining: left }
+                        : { key: Date.now(), amount: burnAmount, fee, remaining: left },
                     )
                     setBurnOpen(true)
                   }}
@@ -538,7 +565,7 @@ export function AirdropScreen({
                 </p>
                 <SupplyNote
                   remaining={left}
-                  after={left === null || tooMany ? null : left - unsent}
+                  after={left === null || unsent > left ? null : left - unsent}
                   label="After this airdrop"
                 />
                 <p className="text-muted-foreground text-[0.8125rem]">
@@ -617,14 +644,14 @@ export function AirdropScreen({
           <AirdropHistory airdrops={view.history} chain={chain} readAt={view.readAt} />
         </Panel>
 
-        {burnDialog && left !== null && (
+        {burnDialog && (
           <BurnDialog
             key={burnDialog.key}
             open={burnOpen}
             onOpenChange={setBurnOpen}
             chain={chain}
             amount={burnDialog.amount}
-            remaining={left}
+            remaining={left ?? burnDialog.remaining}
             feePerTokenWei={burnDialog.fee}
             blocked={dialogBlocked}
             confirm={(hash) => server.confirm(hash)}
@@ -632,7 +659,6 @@ export function AirdropScreen({
             onBurned={(next) => {
               setView(next)
               burned()
-              setBurnDialog((current) => current && { ...current, done: true })
             }}
             onFailed={(message) => {
               // The dialog on screen shows its own failure; one closed since says it in a toast.

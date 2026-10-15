@@ -328,7 +328,8 @@ export function forgetChunk(store: KeyStore | null, collectionId: string): void 
   }
 }
 
-const airdropKeyFor = (collectionId: string) => `cobweb-airdrop:${collectionId}`
+/** The store's key for the collection's job: the Airdrop screen also follows another tab's writes to it. */
+export const airdropKey = (collectionId: string) => `cobweb-airdrop:${collectionId}`
 
 /**
  * Keeps the airdrop or burn in progress for the collection, one job per collection
@@ -337,7 +338,7 @@ const airdropKeyFor = (collectionId: string) => `cobweb-airdrop:${collectionId}`
  */
 export function rememberAirdropJob(store: KeyStore | null, collectionId: string, job: AirdropJob): void {
   try {
-    store?.setItem(airdropKeyFor(collectionId), JSON.stringify(job))
+    store?.setItem(airdropKey(collectionId), JSON.stringify(job))
   } catch {
     // Storage blocked or full: the job is kept for this visit only.
   }
@@ -366,7 +367,7 @@ function batchEntryOf(value: unknown): BatchEntry | null {
  */
 export function airdropJob(store: KeyStore | null, collectionId: string): AirdropJob | null {
   try {
-    const value = store?.getItem(airdropKeyFor(collectionId)) ?? null
+    const value = store?.getItem(airdropKey(collectionId)) ?? null
     if (!value) return null
     const parsed = JSON.parse(value) as {
       kind?: unknown
@@ -402,7 +403,7 @@ export function airdropJob(store: KeyStore | null, collectionId: string): Airdro
 
 export function forgetAirdropJob(store: KeyStore | null, collectionId: string): void {
   try {
-    store?.removeItem(airdropKeyFor(collectionId))
+    store?.removeItem(airdropKey(collectionId))
   } catch {
     // Storage blocked: nothing was kept.
   }
