@@ -15,7 +15,7 @@
 // and apps/web/.env.local, and refuses non-local endpoints. Never prints a key. Deletes every row it
 // creates. Runs under `node --conditions=react-server --import ./scripts/resolve-ts.mjs`.
 
-import { createWalletClient, http, parseEther, type Address, type Hex } from 'viem'
+import { createWalletClient, http, parseEther, type Abi, type Address, type Hex } from 'viem'
 import { generatePrivateKey, privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts'
 import { anvil } from 'viem/chains'
 import { collectionAbi } from '@cobweb/shared/collection-abi'
@@ -88,9 +88,10 @@ async function copyOf(cid: string): Promise<CopyRow> {
 
 /** Simulates the call as wagmi does, sends exactly the simulated request from the account and waits. */
 async function send(account: PrivateKeyAccount, address: Address, call: ManageCall): Promise<Hex> {
+  // The wide ABI type: a ManageCall may name the validator's call too, which this script never sends.
   const { request } = await chain.simulateContract({
     address,
-    abi: collectionAbi,
+    abi: collectionAbi as Abi,
     functionName: call.functionName,
     args: call.args,
     account,
@@ -336,7 +337,7 @@ async function main(): Promise<void> {
         const floor = phaseCalls.allocation(0, 0)
         await chain.simulateContract({
           address,
-          abi: collectionAbi,
+          abi: collectionAbi as Abi,
           functionName: floor.functionName,
           args: floor.args,
           account: creatorKey,

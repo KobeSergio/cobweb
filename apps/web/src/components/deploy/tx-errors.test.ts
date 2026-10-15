@@ -3,9 +3,11 @@ import {
   ContractFunctionExecutionError,
   ContractFunctionRevertedError,
   encodeErrorResult,
+  zeroAddress,
   type Address,
 } from 'viem'
 import { describe, expect, it } from 'vitest'
+import { ZERO_ADDRESS } from '@/lib/art/result'
 import { classifyError } from './tx-errors'
 
 describe('classifyError', () => {
@@ -77,10 +79,36 @@ describe('classifyError for a change in Manage drop (docs/specs/2026-10-15-phase
       [STRANGER],
       `Only the contract's owner can make this change, and ${STRANGER} is not the owner.`,
     ],
-    ['ArrayLengthMismatch', [], 'The addresses and quotas do not line up. Reload and try again.'],
+    ['ArrayLengthMismatch', [], 'The addresses and amounts do not line up. Reload and try again.'],
     ['PublicGroupHasNoQuota', [], 'The public sale has no whitelist.'],
     ['NotInWhitelist', [STRANGER, 2n], `${STRANGER} is not on the whitelist of phase 2.`],
     ['ExceedsMintQuota', [1_500n, 1_200n], 'This wallet can mint 1,200 more in this phase, not 1,500.'],
+    ['ExceedsMaxSupply', [1_500n, 1_204n], 'Only 1,204 tokens are left to mint, not 1,500.'],
+    ['ExceedsMaxSupply', [2n, 1n], 'Only 1 token is left to mint, not 2.'],
+    ['ExceedsMaxSupply', [3n, 0n], 'No tokens are left to mint.'],
+    [
+      'TransferToNonERC721ReceiverImplementer',
+      [],
+      'One recipient is a contract that cannot receive ERC-721 tokens. Send to wallets only.',
+    ],
+    ['NothingToWithdraw', [], 'There is nothing to withdraw: the balance is 0.'],
+    [
+      'WithdrawFailed',
+      [],
+      'The payout address did not accept the funds. Change the payout address, then withdraw again.',
+    ],
+    [
+      'CreatorTokenBase__InvalidTransferValidatorContract',
+      [],
+      'There is no contract at that address on this chain. A validator must be a contract, or the zero address to remove the check.',
+    ],
+    ['ERC2981InvalidDefaultRoyalty', [10_001n, 10_000n], 'The royalty cannot be more than 100%.'],
+    [
+      'ERC2981InvalidDefaultRoyaltyReceiver',
+      [zeroAddress],
+      'The royalty recipient cannot be the zero address.',
+    ],
+    ['MintToZeroAddress', [], ZERO_ADDRESS],
   ])('words %s (%s) from the decoded revert, ending "Nothing was sent."', (errorName, args, sentence) => {
     expect(classifyError(simulationRevert(errorName, args), 'simulating', 'manage')).toEqual({
       kind: 'reverted',
@@ -89,10 +117,18 @@ describe('classifyError for a change in Manage drop (docs/specs/2026-10-15-phase
     })
   })
 
+  it('reads the airdrop fee as a native amount with the chain symbol, and in wei without one', () => {
+    const short = simulationRevert('InsufficientEther', [100_000_000_000_000n, 99_999_999_999_999n])
+    expect(classifyError(short, 'simulating', 'manage', 'ETH').message).toBe(
+      'The airdrop fee is 0.0001 ETH and 0.000099999999999999 ETH was sent. Read again for the current fee. Nothing was sent.',
+    )
+    expect(classifyError(short, 'simulating', 'manage').message).toBe(
+      'The airdrop fee is 100000000000000 wei and 99999999999999 wei was sent. Read again for the current fee. Nothing was sent.',
+    )
+  })
+
   it('falls back to the short message for any other revert, and keeps the factory wording for payment and deploy', () => {
-    expect(
-      classifyError(simulationRevert('ExceedsMaxSupply', [5n, 1n]), 'simulating', 'manage').message,
-    ).toBe(
+    expect(classifyError(simulationRevert('FeeBpsTooHigh', [10_001n]), 'simulating', 'manage').message).toBe(
       'The check against the contract failed: The contract function "setMintGroupMaxSupply" reverted. Nothing was sent.',
     )
     expect(classifyError(new Error('fetch failed'), 'simulating', 'manage').message).toBe(

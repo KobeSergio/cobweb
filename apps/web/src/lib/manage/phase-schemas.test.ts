@@ -1,9 +1,19 @@
-import type { Address } from 'viem'
+import { DEFAULT_TRANSFER_VALIDATOR } from '@cobweb/shared'
+import { zeroAddress, type Address } from 'viem'
 import { describe, expect, it } from 'vitest'
 import { PHASE_NAME_EMPTY, PHASE_NAME_LONG } from '@/components/manage/phase-rules'
 import { DESCRIPTION_TOO_LONG, UNSAVED } from '@/lib/art/result'
 import { parse } from '@/lib/art/schemas'
-import { callOf, phaseCalls, sentOf, type ManageCall } from './phase-calls'
+import {
+  airdropCalls,
+  callOf,
+  PHASE_FUNCTIONS,
+  phaseCalls,
+  sentOf,
+  SETTINGS_FUNCTIONS,
+  settingsCalls,
+  type ManageCall,
+} from './phase-calls'
 import {
   directionShape,
   onchainIdShape,
@@ -33,7 +43,7 @@ describe('parseSentCall', () => {
   })
 
   it.each<[string, unknown]>([
-    ['an unknown function', { functionName: 'withdrawMintFunds', args: [] }],
+    ['an unknown function', { functionName: 'renounceOwnership', args: [] }],
     ['a missing argument', { functionName: 'changeSalePrice', args: ['1000'] }],
     ['an extra argument', { functionName: 'setPublicMaxMintPerWallet', args: ['5', '6'] }],
     ['an id above 2,147,483,647', { functionName: 'setMintGroupStatus', args: ['2147483648', true] }],
@@ -132,5 +142,104 @@ describe('parseSentCall for a chunk (docs/specs/2026-10-15-whitelist.md, section
     ['a group above 2,147,483,647', { functionName: 'setMintQuota', args: [[A], '2147483648', ['1']] }],
   ])('refuses %s as UNSAVED', (_label, input) => {
     expect(parseSentCall(input)).toEqual({ ok: false, error: UNSAVED })
+  })
+})
+
+describe('parseSentCall for Airdrop and Settings (docs/specs/2026-10-15-airdrop-settings.md, section 7.1)', () => {
+  const A: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
+  const COLLECTION: Address = '0x0409454C375c8a6aB05383bFB6D9FcDe9ebB8F85'
+  const URI = `ipfs://bafybei${'e'.repeat(52)}/`
+  const TARGET = { contract: 'validator', address: DEFAULT_TRANSFER_VALIDATOR }
+  const level = (args: unknown[], target: unknown = TARGET) => ({
+    functionName: 'setTransferSecurityLevelOfCollection',
+    args,
+    target,
+  })
+  const batch = (count: number, amount: string) => ({
+    functionName: 'airdropNFTs',
+    args: [Array(count).fill(A), Array(count).fill(amount)],
+    value: '0',
+  })
+
+  it('accepts every call the screens build, with its value and target, and answers it unchanged', () => {
+    const calls: ManageCall[] = [
+      airdropCalls.batch([{ address: A, amount: 1000 }], '100'),
+      airdropCalls.burn(2, '0'),
+      settingsCalls.withdraw(),
+      settingsCalls.payout(A),
+      settingsCalls.royalty(A, 1000),
+      settingsCalls.royalty(A, 0),
+      settingsCalls.baseUri(URI),
+      settingsCalls.mintOnBehalf(false),
+      settingsCalls.validator(zeroAddress),
+      settingsCalls.level(DEFAULT_TRANSFER_VALIDATOR, COLLECTION, 9),
+    ]
+    for (const call of calls) {
+      const parsed = parseSentCall(sentOf(call))
+      expect(parsed.ok).toBe(true)
+      if (parsed.ok) expect(callOf(parsed.data)).toEqual(call)
+    }
+  })
+
+  it('strips a value or a target sent with another function', () => {
+    expect(parseSentCall({ ...sentOf(settingsCalls.payout(A)), value: '5', target: TARGET })).toEqual({
+      ok: true,
+      data: { functionName: 'setOwnerPayoutAddress', args: [A] },
+    })
+  })
+
+  it.each<[string, unknown]>([
+    ['a 501st recipient', batch(501, '1')],
+    [
+      'a 1,001st token',
+      {
+        functionName: 'airdropNFTs',
+        args: [
+          [A, A],
+          ['1000', '1'],
+        ],
+        value: '0',
+      },
+    ],
+    ['an amount of 0', batch(1, '0')],
+    [
+      'recipients and amounts of different lengths',
+      { functionName: 'airdropNFTs', args: [[A, A], ['1']], value: '0' },
+    ],
+    ['a lowercase recipient', { functionName: 'airdropNFTs', args: [[A.toLowerCase()], ['1']], value: '0' }],
+    ['an airdrop without its value', { functionName: 'airdropNFTs', args: [[A], ['1']] }],
+    ['a withdrawal with an argument', { functionName: 'withdrawMintFunds', args: ['1'] }],
+    ['the zero payout address', { functionName: 'setOwnerPayoutAddress', args: [zeroAddress] }],
+    ['a royalty of 1,001', { functionName: 'setDefaultRoyalty', args: [A, '1001'] }],
+    ['the zero royalty recipient', { functionName: 'setDefaultRoyalty', args: [zeroAddress, '500'] }],
+    ['a link without ipfs://', { functionName: 'setBaseURI', args: [`bafybei${'e'.repeat(52)}`] }],
+    ['a link past 512 characters', { functionName: 'setBaseURI', args: [`${URI}${'x'.repeat(512)}`] }],
+    ['mint on behalf as text', { functionName: 'setMintOnBehalfStatus', args: ['true'] }],
+    ['a level of 2', level([COLLECTION, '2', false, false, false])],
+    ['a flag turned on', level([COLLECTION, '9', true, false, false])],
+    [
+      'a level call without its target',
+      { functionName: 'setTransferSecurityLevelOfCollection', args: [COLLECTION, '9', false, false, false] },
+    ],
+    [
+      'a level call to the zero address',
+      level([COLLECTION, '9', false, false, false], { contract: 'validator', address: zeroAddress }),
+    ],
+  ])('refuses %s as UNSAVED', (_label, input) => {
+    expect(parseSentCall(input)).toEqual({ ok: false, error: UNSAVED })
+  })
+
+  it("refuses a function outside the confirm's own: no airdrop, Settings or quota call on Phases, no Phases call on Settings", () => {
+    for (const call of [
+      airdropCalls.burn(1, '0'),
+      settingsCalls.withdraw(),
+      settingsCalls.level(DEFAULT_TRANSFER_VALIDATOR, COLLECTION, 0),
+      phaseCalls.quotas(1, [A], [1]),
+    ])
+      expect(parseSentCall(sentOf(call), PHASE_FUNCTIONS)).toEqual({ ok: false, error: UNSAVED })
+    for (const call of [phaseCalls.open(1), airdropCalls.burn(1, '0')])
+      expect(parseSentCall(sentOf(call), SETTINGS_FUNCTIONS)).toEqual({ ok: false, error: UNSAVED })
+    expect(parseSentCall(sentOf(phaseCalls.open(1)), PHASE_FUNCTIONS).ok).toBe(true)
+    expect(parseSentCall(sentOf(settingsCalls.withdraw()), SETTINGS_FUNCTIONS).ok).toBe(true)
   })
 })

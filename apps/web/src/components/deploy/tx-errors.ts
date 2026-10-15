@@ -1,4 +1,5 @@
-import { WRONG_GROUP } from '@/lib/art/result'
+import { WRONG_GROUP, ZERO_ADDRESS } from '@/lib/art/result'
+import { formatNative } from '@/lib/demo/helpers'
 import type { TxFailure } from './tx-progress'
 
 /**
@@ -112,11 +113,15 @@ function revertOf(chain: unknown[]): { errorName: string; args: readonly unknown
 
 /**
  * The collection's custom errors in the creator's words (docs/specs/2026-10-15-phases.md, section 7.2; the
- * quota errors from docs/specs/2026-10-15-whitelist.md, section 6.6), or null for any other. Phases' owner
- * check is OpenZeppelin's `OwnableUnauthorizedAccount`, read as `Unauthorized`.
+ * quota errors from docs/specs/2026-10-15-whitelist.md, section 6.6; the airdrop, withdrawal, validator and
+ * royalty errors from docs/specs/2026-10-15-airdrop-settings.md, section 6.6), or null for any other. Phases'
+ * owner check is OpenZeppelin's `OwnableUnauthorizedAccount`, read as `Unauthorized`. Counts carry separators;
+ * an amount reads in the chain's native unit with `symbol`, or in wei without one.
  */
-export function revertSentence(errorName: string, args: readonly unknown[]): string | null {
+export function revertSentence(errorName: string, args: readonly unknown[], symbol?: string): string | null {
   const count = (value: unknown) => Number(value).toLocaleString('en-US')
+  const amount = (value: unknown) =>
+    symbol ? formatNative(BigInt(value as bigint), symbol, 18) : `${BigInt(value as bigint)} wei`
   switch (errorName) {
     case 'BelowMinted':
       return `It cannot go below ${count(args[0])}, the tokens this phase has already minted.`
@@ -132,20 +137,50 @@ export function revertSentence(errorName: string, args: readonly unknown[]): str
     case 'OwnableUnauthorizedAccount':
       return `Only the contract's owner can make this change, and ${String(args[0])} is not the owner.`
     case 'ArrayLengthMismatch':
-      return 'The addresses and quotas do not line up. Reload and try again.'
+      return 'The addresses and amounts do not line up. Reload and try again.'
     case 'PublicGroupHasNoQuota':
       return WRONG_GROUP
     case 'NotInWhitelist':
       return `${String(args[0])} is not on the whitelist of phase ${String(args[1])}.`
     case 'ExceedsMintQuota':
       return `This wallet can mint ${count(args[1])} more in this phase, not ${count(args[0])}.`
+    case 'ExceedsMaxSupply': {
+      const left = Number(args[1])
+      if (left === 0) return 'No tokens are left to mint.'
+      if (left === 1) return `Only 1 token is left to mint, not ${count(args[0])}.`
+      return `Only ${count(args[1])} tokens are left to mint, not ${count(args[0])}.`
+    }
+    case 'InsufficientEther':
+      return `The airdrop fee is ${amount(args[0])} and ${amount(args[1])} was sent. Read again for the current fee.`
+    case 'TransferToNonERC721ReceiverImplementer':
+      return 'One recipient is a contract that cannot receive ERC-721 tokens. Send to wallets only.'
+    case 'NothingToWithdraw':
+      return 'There is nothing to withdraw: the balance is 0.'
+    case 'WithdrawFailed':
+      return 'The payout address did not accept the funds. Change the payout address, then withdraw again.'
+    case 'CreatorTokenBase__InvalidTransferValidatorContract':
+      return 'There is no contract at that address on this chain. A validator must be a contract, or the zero address to remove the check.'
+    case 'ERC2981InvalidDefaultRoyalty':
+      return 'The royalty cannot be more than 100%.'
+    case 'ERC2981InvalidDefaultRoyaltyReceiver':
+      return 'The royalty recipient cannot be the zero address.'
+    case 'MintToZeroAddress':
+      return ZERO_ADDRESS
     default:
       return null
   }
 }
 
-/** A wallet or chain error as the creator reads it, for the step it happened at. */
-export function classifyError(error: unknown, at: TxErrorStep, subject: TxSubject = 'payment'): TxFailure {
+/**
+ * A wallet or chain error as the creator reads it, for the step it happened at. `symbol` is the chain's native
+ * symbol, for the amounts a change's revert names.
+ */
+export function classifyError(
+  error: unknown,
+  at: TxErrorStep,
+  subject: TxSubject = 'payment',
+  symbol?: string,
+): TxFailure {
   const words = WORDS[subject]
   const chain = causes(error)
   const rejected = chain.some(
@@ -170,7 +205,7 @@ export function classifyError(error: unknown, at: TxErrorStep, subject: TxSubjec
     if (subject === 'manage') {
       const revert = revertOf(chain)
       const sentence =
-        (revert && revertSentence(revert.errorName, revert.args)) ??
+        (revert && revertSentence(revert.errorName, revert.args, symbol)) ??
         `The check against the contract failed: ${short}`
       return { kind: 'reverted', title: words.simulateTitle, message: `${sentence} Nothing was sent.` }
     }

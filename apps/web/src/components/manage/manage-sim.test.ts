@@ -191,7 +191,7 @@ describe('the quota call on the sample (docs/specs/2026-10-15-whitelist.md, sect
 
   it('refuses unequal lengths, the public sale and an unknown group as the contract would', () => {
     expect(sentence({ functionName: 'setMintQuota', args: [[A], 1n, [1n, 2n]] })).toBe(
-      'The addresses and quotas do not line up. Reload and try again. Nothing was sent.',
+      'The addresses and amounts do not line up. Reload and try again. Nothing was sent.',
     )
     expect(sentence(phaseCalls.quotas(0, [A], [1]))).toBe(
       'The public sale has no whitelist. Nothing was sent.',

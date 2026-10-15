@@ -1,6 +1,9 @@
+import { DEFAULT_TRANSFER_VALIDATOR, validatorAbi } from '@cobweb/shared'
+import { collectionAbi } from '@cobweb/shared/collection-abi'
 import type { Address, Hex } from 'viem'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Config } from 'wagmi'
+import { airdropCalls, settingsCalls } from '@/lib/manage/phase-calls'
 import { realManageActions } from './manage-actions'
 
 type Receipt = { status: 'success' | 'reverted' }
@@ -11,9 +14,15 @@ const wagmi = vi.hoisted(() => {
   const getPublicClient = vi.fn<(config: Config, parameters: { chainId: number }) => FakeClient | undefined>(
     () => ({ waitForTransactionReceipt }),
   )
-  return { waitForTransactionReceipt, getPublicClient }
+  const simulateContract = vi.fn<(config: Config, parameters: unknown) => Promise<{ request: unknown }>>()
+  const writeContract = vi.fn<(config: Config, request: unknown) => Promise<Hex>>()
+  return { waitForTransactionReceipt, getPublicClient, simulateContract, writeContract }
 })
-vi.mock('wagmi/actions', () => ({ getPublicClient: wagmi.getPublicClient }))
+vi.mock('wagmi/actions', () => ({
+  getPublicClient: wagmi.getPublicClient,
+  simulateContract: wagmi.simulateContract,
+  writeContract: wagmi.writeContract,
+}))
 
 const HASH: Hex = `0x${'ab'.repeat(32)}`
 const config = {} as Config
@@ -52,5 +61,46 @@ describe('realManageActions wait', () => {
     wagmi.getPublicClient.mockReturnValueOnce(undefined)
     await expect(realManageActions(config, target).wait(HASH)).rejects.toThrow('No RPC for this chain')
     expect(wagmi.waitForTransactionReceipt).not.toHaveBeenCalled()
+  })
+})
+
+describe('realManageActions simulate (docs/specs/2026-10-15-airdrop-settings.md, section 7.1)', () => {
+  const request = { simulated: true }
+
+  beforeEach(() => {
+    wagmi.simulateContract.mockReset()
+    wagmi.writeContract.mockReset()
+    wagmi.simulateContract.mockResolvedValue({ request })
+    wagmi.writeContract.mockResolvedValue(HASH)
+  })
+
+  it('simulates a batch on the collection with its value, then sends the simulated request unchanged', async () => {
+    const call = airdropCalls.batch([{ address: target.wallet, amount: 2 }], '100')
+    const send = await realManageActions(config, target).simulate(call)
+    expect(wagmi.simulateContract).toHaveBeenCalledWith(config, {
+      address: target.contract,
+      abi: collectionAbi,
+      functionName: 'airdropNFTs',
+      args: call.args,
+      value: 200n,
+      chainId: 31337,
+      account: target.wallet,
+    })
+    expect(await send()).toBe(HASH)
+    expect(wagmi.writeContract).toHaveBeenCalledWith(config, request)
+  })
+
+  it("simulates the level call on the validator's address with the validator's ABI and no value", async () => {
+    const call = settingsCalls.level(DEFAULT_TRANSFER_VALIDATOR, target.contract, 9)
+    await realManageActions(config, target).simulate(call)
+    expect(wagmi.simulateContract).toHaveBeenCalledWith(config, {
+      address: DEFAULT_TRANSFER_VALIDATOR,
+      abi: validatorAbi,
+      functionName: 'setTransferSecurityLevelOfCollection',
+      args: [target.contract, 9, false, false, false],
+      value: undefined,
+      chainId: 31337,
+      account: target.wallet,
+    })
   })
 })

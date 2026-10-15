@@ -1,9 +1,9 @@
 import { collectionAbi } from '@cobweb/shared/collection-abi'
-import type { Address, Hex } from 'viem'
+import type { Abi, Address, Hex } from 'viem'
 import type { Config } from 'wagmi'
 import { getPublicClient, readContract, simulateContract, switchChain, writeContract } from 'wagmi/actions'
 import type { ActionResult } from '@/lib/art/result'
-import type { ManageCall } from '@/lib/manage/phase-calls'
+import { abiOf, type ManageCall } from '@/lib/manage/phase-calls'
 
 /**
  * What a change in Manage drop does in the browser, in one shape for both modes
@@ -31,7 +31,10 @@ export type TxRequest = {
 
 export type ManageActions = {
   switchChain(chainId: number): Promise<void>
-  /** Simulates the call on the collection; resolves with the function that sends the simulated request, unchanged. */
+  /**
+   * Simulates the call on its contract (the collection, or the validator for the level call) with its value;
+   * resolves with the function that sends the simulated request, unchanged.
+   */
   simulate(call: ManageCall): Promise<() => Promise<Hex>>
   wait(hash: Hex): Promise<'success' | 'reverted'>
   /** The id Add phase registers: the highest of `mintGroups()` plus one (0 is the public sale). */
@@ -52,7 +55,7 @@ export type ManageRequest<T> = {
   pending?: { remember(hash: Hex): void; forget(): void }
 }
 
-/** The real actions: wagmi switches, simulates on the collection, sends the simulated request and waits. */
+/** The real actions: wagmi switches, simulates on the call's contract, sends the simulated request and waits. */
 export function realManageActions(
   config: Config,
   target: { chainId: number; contract: Address; wallet: Address },
@@ -64,11 +67,13 @@ export function realManageActions(
     simulate: async (call) => {
       // The chain is named here and carried on the simulated request, so viem checks the send against it.
       // The account is the sign-in wallet: wagmi refuses to send the request from a wallet that does not hold it.
+      // A payable call carries its value, and the level call goes to the validator with the validator's ABI.
       const simulated = await simulateContract(config, {
-        address: target.contract,
-        abi: collectionAbi,
+        address: call.target?.address ?? target.contract,
+        abi: abiOf(call) as Abi,
         functionName: call.functionName,
         args: call.args,
+        value: call.value,
         chainId: target.chainId,
         account: target.wallet,
       })

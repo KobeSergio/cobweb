@@ -1,3 +1,4 @@
+import { validatorAbi } from '@cobweb/shared'
 import { collectionAbi } from '@cobweb/shared/collection-abi'
 import {
   concat,
@@ -7,12 +8,27 @@ import {
   pad,
   toFunctionSelector,
   toHex,
+  zeroAddress,
+  type Abi,
   type Address,
   type Hex,
 } from 'viem'
 import { describe, expect, it } from 'vitest'
 import type { SupportedChain } from '@/lib/demo/types'
-import { callOf, expectedEvent, phaseCalls, reviewOf, sentOf, type ManageCall } from './phase-calls'
+import { BURN_ADDRESS } from './airdrop-view'
+import {
+  abiOf,
+  airdropCalls,
+  callOf,
+  expectedEvent,
+  PHASE_FUNCTIONS,
+  phaseCalls,
+  reviewOf,
+  sentOf,
+  SETTINGS_FUNCTIONS,
+  settingsCalls,
+  type ManageCall,
+} from './phase-calls'
 
 const BASE: SupportedChain = {
   id: 8453,
@@ -23,6 +39,7 @@ const BASE: SupportedChain = {
 }
 const UINT = { type: 'uint256' } as const
 const BOOL = { type: 'bool' } as const
+const ADDRESS = { type: 'address' } as const
 
 /** The calldata a hand-written signature gives for the same values. */
 function handEncoded(signature: string, types: readonly { type: string }[], values: readonly unknown[]): Hex {
@@ -30,7 +47,7 @@ function handEncoded(signature: string, types: readonly { type: string }[], valu
 }
 
 const encoded = (call: ManageCall) =>
-  encodeFunctionData({ abi: collectionAbi, functionName: call.functionName, args: call.args })
+  encodeFunctionData({ abi: abiOf(call) as Abi, functionName: call.functionName, args: call.args })
 
 describe('phaseCalls', () => {
   it('encodes each call as the hand-written signature does, the price first in changeSalePrice', () => {
@@ -211,5 +228,193 @@ describe('the quota call (docs/specs/2026-10-15-whitelist.md, section 7.1)', () 
       { name: 'mintGroup', value: '3' },
       { name: 'mintQuotas', value: '1 quota, 2 in total' },
     ])
+  })
+})
+
+describe('the airdrop calls (docs/specs/2026-10-15-airdrop-settings.md, section 7.1)', () => {
+  const A: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
+  const B: Address = '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
+  const C: Address = '0x90F79bf6EB2c4f870365E785982E1f101E93b906'
+  const FEE = '100000000000000'
+  const BATCH: ManageCall = airdropCalls.batch(
+    [
+      { address: A, amount: 2 },
+      { address: B, amount: 1 },
+      { address: C, amount: 1 },
+    ],
+    FEE,
+  )
+
+  it("encodes airdropNFTs as the hand-written signature does, its value the fee times this batch's tokens", () => {
+    expect(encoded(BATCH)).toBe(
+      handEncoded(
+        'airdropNFTs(address[],uint256[])',
+        [{ type: 'address[]' }, { type: 'uint256[]' }],
+        [
+          [A, B, C],
+          [2n, 1n, 1n],
+        ],
+      ),
+    )
+    expect(BATCH.value).toBe(400_000_000_000_000n)
+    expect(abiOf(BATCH)).toBe(collectionAbi)
+  })
+
+  it('burns as one batch to the dead address, its value the fee for its tokens', () => {
+    expect(airdropCalls.burn(2, FEE)).toEqual({
+      functionName: 'airdropNFTs',
+      args: [[BURN_ADDRESS], [2n]],
+      value: 200_000_000_000_000n,
+    })
+  })
+
+  it('expects NFTsAirdropped for the recipients and the tokens', () => {
+    expect(expectedEvent(BATCH)).toEqual({
+      eventName: 'NFTsAirdropped',
+      args: { recipients: 3n, amount: 4n },
+    })
+  })
+
+  it('round trips the value through a decimal string', () => {
+    expect(sentOf(BATCH)).toEqual({
+      functionName: 'airdropNFTs',
+      args: [
+        [A, B, C],
+        ['2', '1', '1'],
+      ],
+      value: '400000000000000',
+    })
+    expect(callOf(sentOf(BATCH))).toEqual(BATCH)
+  })
+
+  it('reviews a batch as counts, then its value as the native amount and its wei', () => {
+    expect(reviewOf(BATCH, BASE)).toEqual([
+      { name: 'recipients', value: '3 addresses' },
+      { name: 'amounts', value: '3 amounts, 4 tokens in total' },
+      { name: 'Value', value: '0.0004 ETH (400000000000000 wei)' },
+    ])
+    expect(reviewOf(airdropCalls.burn(1, FEE), BASE)).toEqual([
+      { name: 'recipients', value: '1 address' },
+      { name: 'amounts', value: '1 amount, 1 token in total' },
+      { name: 'Value', value: '0.0001 ETH (100000000000000 wei)' },
+    ])
+  })
+})
+
+describe('the Settings calls (docs/specs/2026-10-15-airdrop-settings.md, section 7.1)', () => {
+  const A: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
+  const COLLECTION: Address = '0x0409454C375c8a6aB05383bFB6D9FcDe9ebB8F85'
+  const VALIDATOR: Address = '0x721C008fdff27BF06E7E123956E2Fe03B63342e3'
+  const URI = `ipfs://bafybei${'e'.repeat(52)}/`
+  const calls: ManageCall[] = [
+    settingsCalls.withdraw(),
+    settingsCalls.payout(A),
+    settingsCalls.royalty(A, 750),
+    settingsCalls.baseUri(URI),
+    settingsCalls.mintOnBehalf(true),
+    settingsCalls.validator(zeroAddress),
+    settingsCalls.level(VALIDATOR, COLLECTION, 9),
+  ]
+
+  it('encodes each call as the hand-written signature does, the level call with the validator ABI', () => {
+    expect(calls.map(encoded)).toEqual([
+      toFunctionSelector('withdrawMintFunds()'),
+      handEncoded('setOwnerPayoutAddress(address)', [ADDRESS], [A]),
+      handEncoded('setDefaultRoyalty(address,uint96)', [ADDRESS, { type: 'uint96' }], [A, 750n]),
+      handEncoded('setBaseURI(string)', [{ type: 'string' }], [URI]),
+      handEncoded('setMintOnBehalfStatus(bool)', [BOOL], [true]),
+      handEncoded('setTransferValidator(address)', [ADDRESS], [zeroAddress]),
+      handEncoded(
+        'setTransferSecurityLevelOfCollection(address,uint8,bool,bool,bool)',
+        [ADDRESS, { type: 'uint8' }, BOOL, BOOL, BOOL],
+        [COLLECTION, 9, false, false, false],
+      ),
+    ])
+  })
+
+  it('sends the level call to the validator with its ABI, and every other call to the collection', () => {
+    const level = settingsCalls.level(VALIDATOR, COLLECTION, 0)
+    expect(level.target).toEqual({ contract: 'validator', address: VALIDATOR })
+    expect(abiOf(level)).toBe(validatorAbi)
+    expect(calls.slice(0, 6).map((call) => [call.target, abiOf(call) === collectionAbi])).toEqual(
+      Array(6).fill([undefined, true]),
+    )
+  })
+
+  it('names the event each call leaves', () => {
+    expect(calls.map(expectedEvent)).toEqual([
+      { eventName: 'MintFundsWithdrawn', args: {} },
+      { eventName: 'OwnerPayoutAddressUpdated', args: { newOwnerPayoutAddress: A } },
+      { eventName: 'DefaultRoyaltyUpdated', args: { receiver: A, feeNumerator: 750n } },
+      { eventName: 'BatchMetadataUpdate', args: { fromTokenId: 1n, toTokenId: 2n ** 256n - 1n } },
+      { eventName: 'MintOnBehalfUpdated', args: { newStatus: true } },
+      { eventName: 'TransferValidatorUpdated', args: { newValidator: zeroAddress } },
+      { eventName: 'SetTransferSecurityLevel', args: { collection: COLLECTION, level: 9 } },
+    ])
+  })
+
+  it('round trips each call, the level call with its target', () => {
+    for (const call of calls) expect(callOf(sentOf(call))).toEqual(call)
+    expect(sentOf(settingsCalls.level(VALIDATOR, COLLECTION, 9))).toEqual({
+      functionName: 'setTransferSecurityLevelOfCollection',
+      args: [COLLECTION, '9', false, false, false],
+      target: { contract: 'validator', address: VALIDATOR },
+    })
+  })
+
+  it("reviews each call with the ABI's names: a royalty in percent, a level with its title, no validator as removing the check", () => {
+    expect(calls.map((call) => reviewOf(call, BASE))).toEqual([
+      [],
+      [{ name: 'newOwnerPayoutAddress', value: A }],
+      [
+        { name: 'receiver', value: A },
+        { name: 'feeNumerator', value: '750 (7.5%)' },
+      ],
+      [{ name: 'newBaseURI', value: URI }],
+      [{ name: 'status', value: 'true' }],
+      [
+        {
+          name: 'transferValidator',
+          value: '0x0000000000000000000000000000000000000000 (removes the check)',
+        },
+      ],
+      [
+        { name: 'collection', value: COLLECTION },
+        { name: 'level', value: '9 (locked)' },
+        { name: 'disableAuthorizationMode', value: 'false' },
+        { name: 'disableWildcardOperators', value: 'false' },
+        { name: 'enableAccountFreezingMode', value: 'false' },
+      ],
+    ])
+    expect(reviewOf(settingsCalls.validator(VALIDATOR), BASE)).toEqual([
+      { name: 'transferValidator', value: VALIDATOR },
+    ])
+    const levelRow = (level: number) =>
+      reviewOf(
+        {
+          functionName: 'setTransferSecurityLevelOfCollection',
+          args: [COLLECTION, level, false, false, false],
+          target: { contract: 'validator', address: VALIDATOR },
+        },
+        BASE,
+      )[1]
+    expect([0, 1, 5].map(levelRow)).toEqual([
+      { name: 'level', value: '0 (royalties enforced)' },
+      { name: 'level', value: '1 (royalties not enforced)' },
+      { name: 'level', value: '5' },
+    ])
+  })
+
+  it('lists the functions each confirm accepts', () => {
+    expect([...PHASE_FUNCTIONS]).toEqual([
+      'registerMintGroup',
+      'setMintGroupStatus',
+      'scheduleMintGroupStart',
+      'changeSalePrice',
+      'setMintGroupMaxSupply',
+      'setPublicMaxMintPerWallet',
+      'stopOrStartAllMintGroups',
+    ])
+    expect([...SETTINGS_FUNCTIONS]).toEqual(calls.map((call) => call.functionName))
   })
 })

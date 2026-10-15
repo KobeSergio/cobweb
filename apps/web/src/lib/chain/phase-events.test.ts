@@ -1,15 +1,17 @@
+import { validatorAbi } from '@cobweb/shared'
 import { collectionAbi } from '@cobweb/shared/collection-abi'
 import {
   encodeAbiParameters,
   encodeEventTopics,
   getAbiItem,
+  zeroAddress,
   type AbiEvent,
   type Address,
   type Hex,
 } from 'viem'
 import { describe, expect, it } from 'vitest'
 import { NOT_FROM_WALLET, NOT_THIS_CHANGE, NOT_THIS_CONTRACT } from '@/lib/art/result'
-import { expectedEvent, phaseCalls, type ManageCall } from '@/lib/manage/phase-calls'
+import { expectedEvent, phaseCalls, settingsCalls, type ManageCall } from '@/lib/manage/phase-calls'
 import { matchPhaseEvent, type PhaseReceipt } from './phase-events'
 
 const CONTRACT: Address = '0x0409454C375c8a6aB05383bFB6D9FcDe9ebB8F85'
@@ -21,7 +23,11 @@ type ReceiptLog = PhaseReceipt['logs'][number]
 type EventName = Extract<(typeof collectionAbi)[number], { type: 'event' }>['name']
 
 /** A log of a collection event, encoded as the contract emits it: indexed arguments in topics, the rest in data. */
-function logOf(address: Address, eventName: EventName, args: Record<string, bigint | boolean>): ReceiptLog {
+function logOf(
+  address: Address,
+  eventName: EventName,
+  args: Record<string, bigint | boolean | string>,
+): ReceiptLog {
   const item = getAbiItem({ abi: collectionAbi, name: eventName }) as AbiEvent
   const indexed = Object.fromEntries(
     item.inputs.filter((input) => input.indexed).map((input) => [input.name ?? '', args[input.name ?? '']]),
@@ -84,7 +90,9 @@ describe('matchPhaseEvent', () => {
       { newMaxMintPerWallet: 5n },
     ],
   ])('matches %s by its event and arguments', (_label, call, eventName, args) => {
-    expect(matchPhaseEvent(receipt([logOf(CONTRACT, eventName, args)]), expect_(call))).toEqual({ ok: true })
+    expect(matchPhaseEvent(receipt([logOf(CONTRACT, eventName, args)]), expect_(call))).toMatchObject({
+      ok: true,
+    })
   })
 
   it('refuses a transaction sent to another contract, and a contract creation', () => {
@@ -164,7 +172,7 @@ describe('matchPhaseEvent', () => {
         from: WALLET.toLowerCase(),
         event: expectedEvent(phaseCalls.open(1)),
       }),
-    ).toEqual({ ok: true })
+    ).toMatchObject({ ok: true })
   })
 
   it('matches Close all whatever number of groups it closed (Review Focus 3)', () => {
@@ -177,6 +185,112 @@ describe('matchPhaseEvent', () => {
           ]),
           expect_(phaseCalls.closeAll()),
         ),
-      ).toEqual({ ok: true })
+      ).toMatchObject({ ok: true })
+  })
+})
+
+describe('matchPhaseEvent for Airdrop and Settings (docs/specs/2026-10-15-airdrop-settings.md, section 6.4)', () => {
+  const PAYOUT: Address = '0x90F79bf6EB2c4f870365E785982E1f101E93b906'
+  const VALIDATOR: Address = '0x721C008fdff27BF06E7E123956E2Fe03B63342e3'
+
+  /** The validator's level event: the collection indexed, the level in data. */
+  function levelLog(level: number, address: Address = VALIDATOR): ReceiptLog {
+    return {
+      address,
+      topics: encodeEventTopics({
+        abi: validatorAbi,
+        eventName: 'SetTransferSecurityLevel',
+        args: { collection: CONTRACT },
+      }) as ReceiptLog['topics'],
+      data: encodeAbiParameters([{ type: 'uint8' }], [level]),
+    }
+  }
+
+  it.each<[string, ManageCall, EventName, Record<string, bigint | boolean | string>]>([
+    [
+      'a payout',
+      settingsCalls.payout(PAYOUT),
+      'OwnerPayoutAddressUpdated',
+      { newOwnerPayoutAddress: PAYOUT },
+    ],
+    [
+      'a royalty',
+      settingsCalls.royalty(PAYOUT, 750),
+      'DefaultRoyaltyUpdated',
+      { receiver: PAYOUT, feeNumerator: 750n },
+    ],
+    ['mint on behalf', settingsCalls.mintOnBehalf(true), 'MintOnBehalfUpdated', { newStatus: true }],
+    [
+      'a validator, whatever the old one was',
+      settingsCalls.validator(zeroAddress),
+      'TransferValidatorUpdated',
+      { oldValidator: VALIDATOR, newValidator: zeroAddress },
+    ],
+    [
+      'a base URI',
+      settingsCalls.baseUri(`ipfs://bafybei${'e'.repeat(52)}/`),
+      'BatchMetadataUpdate',
+      { fromTokenId: 1n, toTokenId: 2n ** 256n - 1n },
+    ],
+  ])('matches %s by its event and arguments', (_label, call, eventName, args) => {
+    expect(matchPhaseEvent(receipt([logOf(CONTRACT, eventName, args)]), expect_(call))).toMatchObject({
+      ok: true,
+    })
+  })
+
+  it('compares an address argument without case, and refuses another address', () => {
+    const lower = logOf(CONTRACT, 'OwnerPayoutAddressUpdated', {
+      newOwnerPayoutAddress: PAYOUT.toLowerCase(),
+    })
+    expect(matchPhaseEvent(receipt([lower]), expect_(settingsCalls.payout(PAYOUT)))).toMatchObject({
+      ok: true,
+    })
+    expect(matchPhaseEvent(receipt([lower]), expect_(settingsCalls.payout(STRANGER)))).toEqual({
+      ok: false,
+      error: NOT_THIS_CHANGE,
+    })
+  })
+
+  it('answers the decoded arguments: a withdrawal its amount and payout address, an airdrop its fee', () => {
+    const withdrawn = matchPhaseEvent(
+      receipt([logOf(CONTRACT, 'MintFundsWithdrawn', { payoutAddress: PAYOUT, amount: 1_000n })]),
+      expect_(settingsCalls.withdraw()),
+    )
+    expect(withdrawn).toEqual({ ok: true, args: { payoutAddress: PAYOUT, amount: 1_000n } })
+    const airdropped = matchPhaseEvent(
+      receipt([logOf(CONTRACT, 'NFTsAirdropped', { recipients: 2n, amount: 3n, feePaid: 300n })]),
+      {
+        contract: CONTRACT,
+        from: WALLET,
+        event: { eventName: 'NFTsAirdropped', args: { recipients: 2n, amount: 3n } },
+      },
+    )
+    expect(airdropped).toEqual({ ok: true, args: { recipients: 2n, amount: 3n, feePaid: 300n } })
+  })
+
+  it("matches the level on the validator with the validator's ABI, the level a number", () => {
+    const expected = {
+      contract: VALIDATOR,
+      from: WALLET,
+      event: expectedEvent(settingsCalls.level(VALIDATOR, CONTRACT, 9)),
+      abi: validatorAbi,
+    }
+    const sent = { to: VALIDATOR }
+    expect(matchPhaseEvent(receipt([levelLog(9)], sent), expected)).toEqual({
+      ok: true,
+      args: { collection: CONTRACT, level: 9 },
+    })
+    expect(matchPhaseEvent(receipt([levelLog(1)], sent), expected)).toEqual({
+      ok: false,
+      error: NOT_THIS_CHANGE,
+    })
+    expect(matchPhaseEvent(receipt([levelLog(9, ELSEWHERE)], sent), expected)).toEqual({
+      ok: false,
+      error: NOT_THIS_CHANGE,
+    })
+    expect(matchPhaseEvent(receipt([levelLog(9)], sent), { ...expected, abi: undefined })).toEqual({
+      ok: false,
+      error: NOT_THIS_CHANGE,
+    })
   })
 })

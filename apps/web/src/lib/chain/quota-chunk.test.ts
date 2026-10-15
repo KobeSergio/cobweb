@@ -4,13 +4,14 @@ import {
   encodeEventTopics,
   encodeFunctionData,
   getAbiItem,
+  type Abi,
   type AbiEvent,
   type Address,
   type Hex,
 } from 'viem'
 import { describe, expect, it } from 'vitest'
 import { NOT_FROM_WALLET, NOT_THIS_CHANGE, NOT_THIS_CONTRACT } from '@/lib/art/result'
-import { phaseCalls, type ManageCall } from '@/lib/manage/phase-calls'
+import { abiOf, phaseCalls, type ManageCall } from '@/lib/manage/phase-calls'
 import type { PhaseReceipt } from './phase-events'
 import { proveQuotaChunk, type ChunkProof } from './quota-chunk'
 
@@ -25,7 +26,7 @@ type ReceiptLog = PhaseReceipt['logs'][number]
 
 /** The calldata the wallet sends for a call. */
 const inputOf = (call: ManageCall): Hex =>
-  encodeFunctionData({ abi: collectionAbi, functionName: call.functionName, args: call.args })
+  encodeFunctionData({ abi: abiOf(call) as Abi, functionName: call.functionName, args: call.args })
 
 /** `MintQuotasAdded` as the contract emits it: neither argument is indexed, so both sit in data. */
 function quotasAdded(group: bigint, count: bigint, address: Address = CONTRACT): ReceiptLog {

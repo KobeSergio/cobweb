@@ -23,6 +23,7 @@ import {
   parseEther,
   toHex,
   zeroAddress,
+  type Abi,
   type Address,
   type Hex,
 } from 'viem'
@@ -120,9 +121,10 @@ async function groupRowId(cid: string, onchainId: number): Promise<string> {
 
 /** Simulates the call as wagmi does, sends exactly the simulated request from the account and waits. */
 async function send(account: PrivateKeyAccount, address: Address, call: ManageCall): Promise<Hex> {
+  // The wide ABI type: a ManageCall may name the validator's call too, which this script never sends.
   const { request } = await chain.simulateContract({
     address,
-    abi: collectionAbi,
+    abi: collectionAbi as Abi,
     functionName: call.functionName,
     args: call.args,
     account,
