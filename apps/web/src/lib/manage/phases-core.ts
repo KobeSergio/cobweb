@@ -1,13 +1,7 @@
+import { chainStateOf } from '@cobweb/shared'
 import { collectionAbi } from '@cobweb/shared/collection-abi'
 import { publicClientFor } from '@cobweb/shared/server'
-import {
-  getAddress,
-  TransactionReceiptNotFoundError,
-  type Address,
-  type ContractFunctionReturnType,
-  type Hex,
-  type PublicClient,
-} from 'viem'
+import { getAddress, TransactionReceiptNotFoundError, type Address, type Hex, type PublicClient } from 'viem'
 import { errorSummary } from '@/lib/art/lock-core'
 import {
   CHAIN_NOT_READY,
@@ -33,37 +27,6 @@ import { copyView, liveView, refreshPayload } from './phases-view'
  * never does. The server writes the chain's copies only from its own read, never from browser values.
  */
 export type PhasesContext = DeployContext
-
-/** What viem answers for `collectionState()`. */
-export type CollectionStateResult = ContractFunctionReturnType<
-  typeof collectionAbi,
-  'view',
-  'collectionState'
->
-
-/**
- * `collectionState()` as the screens read it, at the block it was read at: the mapping the Phases, Airdrop and
- * Settings readers share (docs/specs/2026-10-15-airdrop-settings.md, section 6.2).
- */
-export function chainStateOf(state: CollectionStateResult, block: bigint): ChainState {
-  return {
-    block,
-    blockTimestamp: Number(state.blockTimestamp),
-    maxSupply: Number(state.maxSupply),
-    totalMinted: Number(state.totalMinted),
-    publicMaxMintPerWallet: Number(state.publicMaxMintPerWallet),
-    mintOnBehalfActive: state.mintOnBehalfActive,
-    groups: state.groups.map((group) => ({
-      id: Number(group.id),
-      priceWei: group.price.toString(),
-      maxSupply: Number(group.maxSupply),
-      minted: Number(group.minted),
-      startTimestamp: Number(group.startTimestamp),
-      flag: group.activeFlag,
-      active: group.active,
-    })),
-  }
-}
 
 /**
  * `collectionState()` at the latest block, or at `atLeast` when the node is behind it, through the

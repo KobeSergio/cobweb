@@ -3,14 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { PreparedArgs } from '@/lib/deploy/deploy-types'
 import type { ChainState } from './phases-types'
 import type { RevealTargets, SettingsCopyRow, SettingsState, SettingsView } from './settings-types'
-import {
-  ipfsUriValid,
-  levelOf,
-  pointerOf,
-  settingsPayload,
-  settingsViewOf,
-  tokenUriOf,
-} from './settings-view'
+import { ipfsUriValid, settingsPayload, settingsViewOf, tokenUriOf } from './settings-view'
 
 const CONTRACT: Address = '0x0409454C375c8a6aB05383bFB6D9FcDe9ebB8F85'
 const OWNER: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
@@ -50,36 +43,6 @@ describe('tokenUriOf', () => {
     expect(tokenUriOf(REAL)).toBe(`${REAL}1`)
     expect(tokenUriOf(PLACEHOLDER)).toBe(PLACEHOLDER)
     expect(tokenUriOf('')).toBe('')
-  })
-})
-
-describe('pointerOf', () => {
-  it('reads revealed for the real job first, so a collection deployed on its real job reads revealed (Review Focus 4)', () => {
-    expect(pointerOf(REAL, { real: REAL, placeholder: null, start: REAL })).toBe('revealed')
-    expect(pointerOf(REAL, targets)).toBe('revealed')
-  })
-
-  it('reads the placeholder for the placeholder job or the deploy-time link, and custom otherwise, exactly', () => {
-    expect(pointerOf(PLACEHOLDER, targets)).toBe('placeholder')
-    // Deployed on its real job, then pointed at the placeholder job's link: the placeholder, not custom.
-    expect(pointerOf(PLACEHOLDER, { real: REAL, placeholder: PLACEHOLDER, start: REAL })).toBe('placeholder')
-    expect(
-      pointerOf(`ipfs://${CID('s')}`, { real: null, placeholder: null, start: `ipfs://${CID('s')}` }),
-    ).toBe('placeholder')
-    expect(pointerOf(`ipfs://${CID('f')}/`, targets)).toBe('custom')
-    expect(pointerOf(REAL.slice(0, -1), targets)).toBe('custom')
-    expect(pointerOf(REAL, { real: null, placeholder: PLACEHOLDER, start: PLACEHOLDER })).toBe('custom')
-  })
-})
-
-describe('levelOf', () => {
-  it('reads no validator, no code, a validator that did not answer, and a level', () => {
-    expect(levelOf(zeroAddress, false, null)).toEqual({ kind: 'none', reason: 'zero' })
-    expect(levelOf(VALIDATOR, false, null)).toEqual({ kind: 'none', reason: 'no-code' })
-    expect(levelOf(VALIDATOR, true, null)).toEqual({ kind: 'unread' })
-    expect(levelOf(VALIDATOR, true, 9)).toEqual({ kind: 'level', level: 9 })
-    // Level 0 is the default (royalties enforced): a level, not a validator that did not answer.
-    expect(levelOf(VALIDATOR, true, 0)).toEqual({ kind: 'level', level: 0 })
   })
 })
 

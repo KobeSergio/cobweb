@@ -1,3 +1,4 @@
+import type { ChainState } from '@cobweb/shared'
 import type { Address } from 'viem'
 import type { MintGroup } from '@/lib/demo/types'
 import type { ExpectedEvent } from './phase-calls'
@@ -8,31 +9,11 @@ import type { ExpectedEvent } from './phase-calls'
  * server module (phases-core.ts).
  */
 
-/** One group of `collectionState()`, as the screens read it. */
-export type ChainGroup = {
-  id: number
-  priceWei: string
-  maxSupply: number
-  minted: number
-  startTimestamp: number
-  /** The raw open flag. */
-  flag: boolean
-  /** The contract's `mintGroupActive`: the only source of "live". */
-  active: boolean
-}
-
-/** `collectionState()` as the screens read it: counts as numbers, prices as decimal strings. */
-export type ChainState = {
-  /** The block the state was read at. */
-  block: bigint
-  /** The chain's time at that block (Unix seconds). */
-  blockTimestamp: number
-  maxSupply: number
-  totalMinted: number
-  publicMaxMintPerWallet: number
-  mintOnBehalfActive: boolean
-  groups: ChainGroup[]
-}
+/**
+ * `collectionState()` as the screens read it: the shapes live in the shared package with their mapping
+ * (docs/specs/2026-10-16-freshness-server.md, section 5.1), re-exported so the screens keep their imports.
+ */
+export type { ChainGroup, ChainState } from '@cobweb/shared'
 
 /** At the latest block, or at `atLeast` when the node is behind it; null when the chain, its RPC or the contract does not answer. */
 export type StateReader = (chainId: number, address: Address, atLeast?: bigint) => Promise<ChainState | null>

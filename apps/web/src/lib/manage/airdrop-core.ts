@@ -1,4 +1,10 @@
-import { confirmationsFor, hasConfirmations } from '@cobweb/shared'
+import {
+  chainStateOf,
+  confirmationsFor,
+  hasConfirmations,
+  readEach,
+  type CollectionStateResult,
+} from '@cobweb/shared'
 import { collectionAbi } from '@cobweb/shared/collection-abi'
 import { publicClientFor } from '@cobweb/shared/server'
 import {
@@ -13,11 +19,10 @@ import { errorSummary } from '@/lib/art/lock-core'
 import { readAll } from '@/lib/art/read-all'
 import { AIRDROP_NOT_CONFIRMED, CHAIN_NOT_READY, NOT_DEPLOYED, PHASE_REVERTED } from '@/lib/art/result'
 import { proveAirdrop } from '@/lib/chain/airdrop-batch'
-import { readEach } from '@/lib/chain/read-each'
 import type { DeployOutcome } from '@/lib/deploy/deploy-core'
 import type { AirdropReader, AirdropView } from './airdrop-types'
 import { airdropRowsOf, airdropViewOf, type AirdropDbRow } from './airdrop-view'
-import { chainStateOf, phaseBase, type CollectionStateResult, type PhasesContext } from './phases-core'
+import { phaseBase, type PhasesContext } from './phases-core'
 
 /**
  * Airdrop on the server (docs/specs/2026-10-15-airdrop-settings.md, section 6.3): the read of the contract's

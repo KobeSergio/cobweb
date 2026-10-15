@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./server": "./src/server.ts",
+    "./clients": "./src/clients.ts",
     "./render-queue": "./src/render-queue.ts",
     "./collection": "./src/collection.ts",
     "./collection-abi": "./src/collection-abi.ts"

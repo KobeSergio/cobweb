@@ -1,22 +1,13 @@
-import { getAddress, zeroAddress, type Address } from 'viem'
-import type {
-  RevealPointer,
-  RevealTargets,
-  SettingsCopyRow,
-  SettingsState,
-  SettingsView,
-  TransferLevelState,
-} from './settings-types'
+import { pointerOf } from '@cobweb/shared'
+import { getAddress, type Address } from 'viem'
+import type { RevealTargets, SettingsCopyRow, SettingsState, SettingsView } from './settings-types'
 
 /**
  * The Settings view, pure (docs/specs/2026-10-15-airdrop-settings.md, section 6.1), for the browser and the
- * server: the transfer levels Cobweb offers, the IPFS links Reveal takes, token 1's URI by the contract's rule,
- * what the base URI points at, the level from the validator, and the view from a read or the copies.
+ * server: the IPFS links Reveal takes, token 1's URI by the contract's rule, and the view from a read or the
+ * copies. The transfer levels, `levelOf` and `pointerOf` live in the shared package
+ * (docs/specs/2026-10-16-freshness-server.md, section 5.1).
  */
-
-/** The validator's levels Cobweb sends: royalties enforced, royalties not enforced, and locked. */
-export const TRANSFER_LEVELS = { enforced: 0, open: 1, locked: 9 } as const
-export type TransferLevelValue = (typeof TRANSFER_LEVELS)[keyof typeof TRANSFER_LEVELS]
 
 /** The longest base URI Cobweb sends. */
 export const BASE_URI_MAX = 512
@@ -32,27 +23,6 @@ export function ipfsUriValid(value: string): boolean {
 export function tokenUriOf(base: string): string {
   if (!base || !base.endsWith('/')) return base
   return `${base}1`
-}
-
-/**
- * What the base URI points at, compared exactly: the real job's (checked first, so a collection deployed on its
- * real job reads revealed), the placeholder job's or the deploy-time one, else a custom link.
- */
-export function pointerOf(baseUri: string, targets: RevealTargets): RevealPointer {
-  if (targets.real !== null && baseUri === targets.real) return 'revealed'
-  if (baseUri === targets.placeholder || baseUri === targets.start) return 'placeholder'
-  return 'custom'
-}
-
-/** The level a read gives: none for the zero address or a validator without code, unread when it did not answer. */
-export function levelOf(
-  validator: Address,
-  hasCode: boolean,
-  policyLevel: number | null,
-): TransferLevelState {
-  if (validator.toLowerCase() === zeroAddress) return { kind: 'none', reason: 'zero' }
-  if (!hasCode) return { kind: 'none', reason: 'no-code' }
-  return policyLevel === null ? { kind: 'unread' } : { kind: 'level', level: policyLevel }
 }
 
 /**

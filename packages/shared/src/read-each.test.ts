@@ -13,7 +13,7 @@ import {
 } from 'viem'
 import { foundry } from 'viem/chains'
 import { describe, expect, it } from 'vitest'
-import { readEach } from './read-each'
+import { readEach } from './read-each.ts'
 
 const CONTRACT: Address = '0x0409454C375c8a6aB05383bFB6D9FcDe9ebB8F85'
 const MULTICALL3: Address = '0xcA11bde05977b3631167028862bE2a173976CA11'

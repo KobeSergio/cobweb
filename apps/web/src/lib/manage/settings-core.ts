@@ -1,4 +1,13 @@
-import { confirmationsFor, hasConfirmations, validatorAbi } from '@cobweb/shared'
+import {
+  chainStateOf,
+  confirmationsFor,
+  hasConfirmations,
+  levelOf,
+  readEach,
+  revertedRead,
+  validatorAbi,
+  type CollectionStateResult,
+} from '@cobweb/shared'
 import { collectionAbi } from '@cobweb/shared/collection-abi'
 import { publicClientFor } from '@cobweb/shared/server'
 import {
@@ -23,17 +32,10 @@ import {
   WITHDRAWAL_NOT_CONFIRMED,
 } from '@/lib/art/result'
 import { matchPhaseEvent, type PhaseEventMatch } from '@/lib/chain/phase-events'
-import { readEach, revertedRead } from '@/lib/chain/read-each'
 import type { Json } from '@/lib/database.types'
 import { doneJobRow, type DeployOutcome } from '@/lib/deploy/deploy-core'
 import { expectedEvent, type ManageCall } from './phase-calls'
-import {
-  chainStateOf,
-  phaseBase,
-  refreshPhaseCopies,
-  type CollectionStateResult,
-  type PhasesContext,
-} from './phases-core'
+import { phaseBase, refreshPhaseCopies, type PhasesContext } from './phases-core'
 import type {
   RevealTargets,
   SettingsCopyRow,
@@ -42,7 +44,7 @@ import type {
   SettingsView,
   TransferLevelState,
 } from './settings-types'
-import { levelOf, settingsPayload, settingsViewOf } from './settings-view'
+import { settingsPayload, settingsViewOf } from './settings-view'
 
 /**
  * Settings on the server (docs/specs/2026-10-15-airdrop-settings.md, section 6.4): the read of the contract's

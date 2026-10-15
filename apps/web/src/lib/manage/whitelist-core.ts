@@ -1,4 +1,4 @@
-import { confirmationsFor, hasConfirmations } from '@cobweb/shared'
+import { confirmationsFor, hasConfirmations, readEach } from '@cobweb/shared'
 import { collectionAbi } from '@cobweb/shared/collection-abi'
 import { publicClientFor } from '@cobweb/shared/server'
 import {
@@ -20,7 +20,6 @@ import {
   WRONG_GROUP,
 } from '@/lib/art/result'
 import { proveQuotaChunk } from '@/lib/chain/quota-chunk'
-import { readEach } from '@/lib/chain/read-each'
 import type { Json } from '@/lib/database.types'
 import type { DeployOutcome } from '@/lib/deploy/deploy-core'
 import {

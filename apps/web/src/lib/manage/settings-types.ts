@@ -1,3 +1,4 @@
+import type { RevealPointer, RevealTargets, TransferLevelState } from '@cobweb/shared'
 import type { Address } from 'viem'
 import type { PreparedArgs } from '@/lib/deploy/deploy-types'
 import type { FeeSnapshot } from '@/lib/demo/types'
@@ -10,17 +11,11 @@ import type { ChainState } from './phases-types'
  */
 
 /**
- * The collection's transfer level on its validator: none (no validator, or no code at its address), not read
- * (the validator did not answer), or the level the validator holds.
+ * The transfer level and what the base URI points at: the shapes live in the shared package with `levelOf` and
+ * `pointerOf` (docs/specs/2026-10-16-freshness-server.md, section 5.1), re-exported so the screens keep their
+ * imports.
  */
-export type TransferLevelState =
-  { kind: 'none'; reason: 'zero' | 'no-code' } | { kind: 'unread' } | { kind: 'level'; level: number }
-
-/** What the base URI points at: the rendered metadata, the placeholder, or a link set some other way. */
-export type RevealPointer = 'revealed' | 'placeholder' | 'custom'
-
-/** The base URIs Reveal offers: the latest done real job's, the latest done placeholder job's, and the deploy-time one. */
-export type RevealTargets = { real: string | null; placeholder: string | null; start: string }
+export type { RevealPointer, RevealTargets, TransferLevelState } from '@cobweb/shared'
 
 /** What Settings and the Overview show: the contract's settings and balances from one read, or Cobweb's copies. */
 export type SettingsView = {

@@ -4,7 +4,7 @@
  * `settingsServer` (settings-server.ts), and its confirm applies the call as the chain would and a read would show
  * it, so the screens run the same code in both modes.
  */
-import { DEFAULT_TRANSFER_VALIDATOR } from '@cobweb/shared'
+import { DEFAULT_TRANSFER_VALIDATOR, pointerOf, TRANSFER_LEVELS } from '@cobweb/shared'
 import { getAddress, zeroAddress, type Address } from 'viem'
 import type { ActionResult } from '@/lib/art/result'
 import type { PreparedArgs } from '@/lib/deploy/deploy-types'
@@ -20,7 +20,7 @@ import {
 } from '@/lib/demo'
 import type { ManageCall } from '@/lib/manage/phase-calls'
 import type { RevealTargets, SettingsCopyRow, SettingsView } from '@/lib/manage/settings-types'
-import { pointerOf, settingsViewOf, TRANSFER_LEVELS } from '@/lib/manage/settings-view'
+import { settingsViewOf } from '@/lib/manage/settings-view'
 import { samplePhasesView } from './manage-sim'
 import type { SettingsServer } from './settings-server'
 

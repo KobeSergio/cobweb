@@ -1,4 +1,4 @@
-import { availableChains, chainById } from '@cobweb/shared'
+import { availableChains, chainById, readEach, revertedRead } from '@cobweb/shared'
 import { publicClientFor } from '@cobweb/shared/server'
 import { erc721Abi, parseAbi, type Address, type PublicClient } from 'viem'
 import { errorSummary } from '@/lib/art/lock-core'
@@ -11,7 +11,6 @@ import {
   SNAPSHOT_FAILED,
   SNAPSHOT_TOO_LARGE,
 } from '@/lib/art/result'
-import { readEach, revertedRead } from '@/lib/chain/read-each'
 import { holdersOf, SNAPSHOT_MAX_SUPPLY, snapshotIds, type HolderSnapshot } from './holders'
 
 /**

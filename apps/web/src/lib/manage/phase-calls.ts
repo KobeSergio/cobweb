@@ -1,4 +1,4 @@
-import { validatorAbi } from '@cobweb/shared'
+import { TRANSFER_LEVELS, validatorAbi, type TransferLevelValue } from '@cobweb/shared'
 import { collectionAbi } from '@cobweb/shared/collection-abi'
 import {
   getAbiItem,
@@ -12,7 +12,6 @@ import { formatBps, formatNative, formatUtc } from '@/lib/demo/helpers'
 import type { SupportedChain } from '@/lib/demo/types'
 import type { BatchEntry } from './airdrop-types'
 import { BURN_ADDRESS, tokensOf } from './airdrop-view'
-import { TRANSFER_LEVELS, type TransferLevelValue } from './settings-view'
 
 /**
  * The calls Manage drop sends (docs/specs/2026-10-15-phases.md, section 7.1), built in one place for the
