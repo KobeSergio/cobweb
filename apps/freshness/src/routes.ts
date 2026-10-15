@@ -34,6 +34,11 @@ export const STATE_CACHE = 'public, max-age=0, s-maxage=1, stale-while-revalidat
 export const WALLET_CACHE = 'public, max-age=0, s-maxage=5'
 export const REFUSAL_CACHE = 'public, max-age=0, s-maxage=10'
 const JSON_TYPE = 'application/json; charset=utf-8'
+/**
+ * CORS on every answer a page's script may read: any origin, with the tag and the retry delay exposed to the
+ * script, so a page that sends its own `If-None-Match` can read `ETag` and a refused one `Retry-After`.
+ */
+const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'ETag, Retry-After' }
 const METHODS = ['GET', 'HEAD', 'OPTIONS']
 
 /** A positive whole number without leading zeros, within the safe integers. */
@@ -58,13 +63,16 @@ const NOT_FOUND: Route = { kind: 'refused', status: 404, error: 'not-found' }
 /**
  * The route a request names: `GET /v1/state/{chainId}/{address}`, `GET
  * /v1/wallet/{chainId}/{address}/{wallet}` and `GET /health`, HEAD as GET, OPTIONS as the preflight of a
- * known path; a method other than GET, HEAD and OPTIONS is refused first, then any other path. The query
- * string is ignored.
+ * known path; a method other than GET, HEAD and OPTIONS is refused first, then any other path. The route is
+ * read from the raw target, its query string cut off and nothing normalized: a target that does not start
+ * with `/`, an authority after `//`, a dot segment or a backslash names no route.
  */
 export function routeOf(method: string | undefined, url: string | undefined): Route {
   if (!method || !METHODS.includes(method))
     return { kind: 'refused', status: 405, error: 'method-not-allowed' }
-  const path = new URL(url ?? '/', 'http://freshness.invalid').pathname.split('/').slice(1)
+  const target = (url ?? '/').split('?')[0] ?? ''
+  if (!target.startsWith('/')) return NOT_FOUND
+  const path = target.split('/').slice(1)
   const preflight = method === 'OPTIONS'
   if (path.length === 1 && path[0] === 'health') return preflight ? { kind: 'preflight' } : { kind: 'health' }
   const [version, kind, chain, address, wallet] = path
@@ -81,11 +89,11 @@ export function routeOf(method: string | undefined, url: string | undefined): Ro
 }
 
 /**
- * A refusal: `{ "error": "<code>" }` with `Access-Control-Allow-Origin: *`; a 4xx also 10 s at the edge (405
- * with `Allow`), a 503 (or a 500) `Retry-After: 1` and `no-store`.
+ * A refusal: `{ "error": "<code>" }` with CORS; a 4xx also 10 s at the edge (405 with `Allow`), a 503 (or a
+ * 500) `Retry-After: 1` and `no-store`.
  */
 export function refusal(status: 400 | 404 | 405 | 500 | 503, error: RefusalCode): Answer {
-  const headers: Record<string, string> = { 'Access-Control-Allow-Origin': '*', 'Content-Type': JSON_TYPE }
+  const headers: Record<string, string> = { ...CORS, 'Content-Type': JSON_TYPE }
   if (status >= 500) {
     headers['Cache-Control'] = 'no-store'
     headers['Retry-After'] = '1'
@@ -96,7 +104,7 @@ export function refusal(status: 400 | 404 | 405 | 500 | 503, error: RefusalCode)
 
 /** The state: 200 with the body, or 304 without one when `If-None-Match` matched, both with the tag. */
 export function stateAnswer(body: StateBody, etag: string, notModified: boolean): Answer {
-  const headers = { ETag: etag, 'Cache-Control': STATE_CACHE, 'Access-Control-Allow-Origin': '*' }
+  const headers = { ETag: etag, 'Cache-Control': STATE_CACHE, ...CORS }
   if (notModified) return { status: 304, headers, body: null }
   return { status: 200, headers: { ...headers, 'Content-Type': JSON_TYPE }, body: JSON.stringify(body) }
 }
@@ -105,7 +113,7 @@ export function stateAnswer(body: StateBody, etag: string, notModified: boolean)
 export function walletAnswer(body: WalletBody): Answer {
   return {
     status: 200,
-    headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': JSON_TYPE, 'Cache-Control': WALLET_CACHE },
+    headers: { ...CORS, 'Content-Type': JSON_TYPE, 'Cache-Control': WALLET_CACHE },
     body: JSON.stringify(body),
   }
 }
@@ -123,7 +131,7 @@ export function healthAnswer(body: HealthBody): Answer {
 export const PREFLIGHT: Answer = {
   status: 204,
   headers: {
-    'Access-Control-Allow-Origin': '*',
+    ...CORS,
     'Access-Control-Allow-Methods': 'GET, HEAD',
     'Access-Control-Allow-Headers': 'If-None-Match',
     'Access-Control-Max-Age': '86400',

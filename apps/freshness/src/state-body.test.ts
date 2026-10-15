@@ -125,20 +125,44 @@ describe('etagOf', () => {
     expect(tag(stateBody(31337, entry(), false))).toBe(tag(base))
   })
 
-  it('leaves out readAt, block and blockTimestamp', () => {
-    expect(tag({ ...base, readAt: base.readAt + 60, block: 999, blockTimestamp: 1_900_000_000 })).toBe(
-      tag(base),
-    )
+  it('leaves out readAt, block and blockTimestamp, each in turn and together', () => {
+    const untagged: Partial<StateBody>[] = [
+      { readAt: base.readAt + 60 },
+      { block: 999 },
+      { blockTimestamp: 1_900_000_000 },
+      { readAt: base.readAt + 60, block: 999, blockTimestamp: 1_900_000_000 },
+    ]
+    for (const changed of untagged) expect(tag({ ...base, ...changed })).toBe(tag(base))
   })
 
-  it("changes with degraded, a group's active and the base URI", () => {
-    const groups = base.groups.map((group) => (group.id === 0 ? { ...group, active: true } : group))
-    for (const changed of [
-      { ...base, degraded: true },
-      { ...base, groups },
-      { ...base, baseUri: 'ipfs://second/' },
-    ])
-      expect(tag(changed)).not.toBe(tag(base))
+  it('changes with every other key, each in turn', () => {
+    // Omit keeps every other key required, so a key added to the body without a change here fails to compile.
+    const tagged: Omit<StateBody, 'readAt' | 'block' | 'blockTimestamp'> = {
+      chainId: 1,
+      address: OWNER,
+      degraded: true,
+      maxSupply: 6,
+      totalMinted: 2,
+      publicMaxMintPerWallet: 3,
+      mintFeeFlatWei: '11',
+      mintFeeBps: 251,
+      airdropFeePerTokenWei: '1',
+      mintOnBehalfActive: true,
+      groups: base.groups.map((group) => (group.id === 0 ? { ...group, active: true } : group)),
+      owner: A,
+      royalty: { receiver: OWNER, bps: 501 },
+      baseUri: 'ipfs://second/',
+      transferValidator: OWNER,
+      transferLevel: 'unread',
+    }
+    const untagged: string[] = ['readAt', 'block', 'blockTimestamp']
+    expect(Object.keys(tagged).sort()).toEqual(
+      Object.keys(base)
+        .filter((key) => !untagged.includes(key))
+        .sort(),
+    )
+    for (const [key, value] of Object.entries(tagged))
+      expect(tag({ ...base, [key]: value }), key).not.toBe(tag(base))
   })
 })
 

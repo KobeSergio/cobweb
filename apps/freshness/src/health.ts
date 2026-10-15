@@ -10,7 +10,10 @@ export type ChainHealth = {
   chainId: number
   name: string
   hot: number
-  /** Null while the chain has no hot collection. */
+  /**
+   * The tier of the chain's read collections, which `degraded` counts from: one not read yet does not count,
+   * so a chain with none read is idle. Null while the chain has no hot collection.
+   */
   tier: Tier | null
   /** The head the last good tick read; null before one. */
   block: number | null
@@ -57,4 +60,14 @@ export function errorName(error: unknown): string {
 export function errorLine(error: unknown): string {
   const inner = innermost(error)
   return inner instanceof BaseError ? `${inner.name}: ${inner.shortMessage}` : errorName(error)
+}
+
+/**
+ * An unexpected failure as the log writes it: `errorLine`, then the error's code where it has one, as
+ * `TypeError (ERR_INVALID_URL)`. A code is a whole number or capitals, digits and underscores, never a message.
+ */
+export function failureLine(error: unknown): string {
+  const code = error instanceof Error && 'code' in error ? error.code : undefined
+  const named = Number.isInteger(code) || (typeof code === 'string' && /^[A-Z0-9_]+$/.test(code))
+  return named ? `${errorLine(error)} (${String(code)})` : errorLine(error)
 }

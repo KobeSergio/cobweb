@@ -320,11 +320,15 @@ export function chainReader(
     },
     health() {
       const entries = hot.onChain(chain.id)
+      // The tier of the read collections alone, which `degraded` counts from (Decision 6, as amended): an
+      // unread one makes the chain tick at 2 s, but counting it here would shorten every read collection's
+      // threshold until its first read lands.
+      const reads = entries.flatMap((entry) => (entry.read ? [entry.read.state] : []))
       return {
         chainId: chain.id,
         name: chain.name,
         hot: entries.length,
-        tier: tierAmong(entries),
+        tier: entries.length ? chainTier(reads) : null,
         block: block === null ? null : Number(block),
         // With no hot entry there is no read to count the lag from.
         lagSeconds:

@@ -1,7 +1,16 @@
 import type { Address } from 'viem'
 import { describe, expect, it } from 'vitest'
 import type { HealthBody } from './health.ts'
-import { healthAnswer, PREFLIGHT, refusal, routeOf, stateAnswer, walletAnswer, type Route } from './routes.ts'
+import {
+  healthAnswer,
+  PREFLIGHT,
+  refusal,
+  routeOf,
+  stateAnswer,
+  walletAnswer,
+  type Answer,
+  type Route,
+} from './routes.ts'
 import type { StateBody } from './state-body.ts'
 import type { WalletBody } from './wallet.ts'
 
@@ -90,6 +99,28 @@ describe('routeOf (docs/specs/2026-10-16-freshness-server.md, section 6.7)', () 
         error: 'method-not-allowed',
       })
   })
+
+  it('routes the raw target, so an authority, a dot segment, a backslash or no leading slash answers 404', () => {
+    for (const target of [
+      '//',
+      '//[',
+      '//a:99999',
+      '//%',
+      '//@',
+      `//x/v1/state/31337/${lower(A)}`,
+      `/v1/state/../state/31337/${lower(A)}`,
+      `/v1/state/%2e%2e/state/31337/${lower(A)}`,
+      `/v1\\state/31337/${lower(A)}`,
+      `http://freshness.example/v1/state/31337/${lower(A)}`,
+      '*',
+    ])
+      expect(routeOf('GET', target)).toEqual<Route>({ kind: 'refused', status: 404, error: 'not-found' })
+  })
+
+  it('answers the preflight on /health too', () => {
+    expect(routeOf('OPTIONS', '/health')).toEqual<Route>({ kind: 'preflight' })
+    expect(PREFLIGHT.status).toBe(204)
+  })
 })
 
 describe('the answers', () => {
@@ -98,6 +129,7 @@ describe('the answers', () => {
       status: 404,
       headers: {
         'Access-Control-Allow-Origin': '*',
+        'Access-Control-Expose-Headers': 'ETag, Retry-After',
         'Content-Type': 'application/json; charset=utf-8',
         'Cache-Control': 'public, max-age=0, s-maxage=10',
       },
@@ -108,6 +140,7 @@ describe('the answers', () => {
       status: 503,
       headers: {
         'Access-Control-Allow-Origin': '*',
+        'Access-Control-Expose-Headers': 'ETag, Retry-After',
         'Content-Type': 'application/json; charset=utf-8',
         'Cache-Control': 'no-store',
         'Retry-After': '1',
@@ -122,6 +155,7 @@ describe('the answers', () => {
       ETag: 'W/"tag"',
       'Cache-Control': 'public, max-age=0, s-maxage=1, stale-while-revalidate=1, stale-if-error=60',
       'Access-Control-Allow-Origin': '*',
+      'Access-Control-Expose-Headers': 'ETag, Retry-After',
     }
     expect(stateAnswer(body, 'W/"tag"', false)).toEqual({
       status: 200,
@@ -134,6 +168,7 @@ describe('the answers', () => {
   it('give a wallet 5 s at the edge, /health no-store, and the preflight its CORS headers', () => {
     expect(walletAnswer({ chainId: 31337 } as WalletBody).headers).toEqual({
       'Access-Control-Allow-Origin': '*',
+      'Access-Control-Expose-Headers': 'ETag, Retry-After',
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'public, max-age=0, s-maxage=5',
     })
@@ -146,11 +181,58 @@ describe('the answers', () => {
       status: 204,
       headers: {
         'Access-Control-Allow-Origin': '*',
+        'Access-Control-Expose-Headers': 'ETag, Retry-After',
         'Access-Control-Allow-Methods': 'GET, HEAD',
         'Access-Control-Allow-Headers': 'If-None-Match',
         'Access-Control-Max-Age': '86400',
       },
       body: null,
     })
+  })
+
+  it('give the 500 internal no-store and Retry-After 1, with CORS', () => {
+    expect(refusal(500, 'internal')).toEqual({
+      status: 500,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Expose-Headers': 'ETag, Retry-After',
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Retry-After': '1',
+      },
+      body: '{"error":"internal"}',
+    })
+  })
+
+  it('give a 400 the 4xx edge cache and CORS, with no Allow and no Retry-After', () => {
+    expect(refusal(400, 'bad-request')).toEqual({
+      status: 400,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Expose-Headers': 'ETag, Retry-After',
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'public, max-age=0, s-maxage=10',
+      },
+      body: '{"error":"bad-request"}',
+    })
+  })
+
+  it("expose the ETag and Retry-After to a page's script on every answer that allows its origin", () => {
+    const answers: Answer[] = [
+      refusal(400, 'bad-request'),
+      refusal(404, 'not-found'),
+      refusal(405, 'method-not-allowed'),
+      refusal(500, 'internal'),
+      refusal(503, 'busy'),
+      stateAnswer({ chainId: 31337 } as StateBody, 'W/"tag"', false),
+      stateAnswer({ chainId: 31337 } as StateBody, 'W/"tag"', true),
+      walletAnswer({ chainId: 31337 } as WalletBody),
+      PREFLIGHT,
+    ]
+    for (const answer of answers)
+      expect(answer.headers).toMatchObject({
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Expose-Headers': 'ETag, Retry-After',
+      })
   })
 })

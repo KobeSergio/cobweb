@@ -6,7 +6,7 @@ import type { Address } from 'viem'
 import { chainReader } from './chain-reader.ts'
 import { collectionCheck } from './collection-check.ts'
 import { servedChains } from './config.ts'
-import { errorLine, type HealthBody } from './health.ts'
+import { errorLine, failureLine, type HealthBody } from './health.ts'
 import { hotSet, JOIN_WAIT_MS, type HotEntry } from './hot-set.ts'
 import {
   healthAnswer,
@@ -143,15 +143,20 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
     response.end(head || answer.body === null ? undefined : answer.body)
   }
 
-  // Requests are not logged; a failure is, as its name and viem's short message.
+  /** The requests being answered; each leaves once its answer is written, and `close()` waits for them. */
+  const answering = new Set<Promise<void>>()
+
+  // Requests are not logged; a failure is, as its name, viem's short message and its code, never its message.
   const server = createServer((request, response) => {
-    answerOf(request).then(
-      (answer) => send(response, request.method === 'HEAD', answer),
-      (error: unknown) => {
-        console.error(`A request failed: ${errorLine(error)}`)
-        send(response, request.method === 'HEAD', refusal(500, 'internal'))
-      },
-    )
+    const head = request.method === 'HEAD'
+    const answered: Promise<void> = answerOf(request)
+      .catch((error: unknown) => {
+        console.error(`A request failed: ${failureLine(error)}`)
+        return refusal(500, 'internal')
+      })
+      .then((answer) => send(response, head, answer))
+      .finally(() => answering.delete(answered))
+    answering.add(answered)
   })
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
@@ -166,16 +171,35 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
     `The freshness server listens on port ${port}, serving ${names.length ? names.join(', ') : 'no chain'}.`,
   )
 
+  /**
+   * Stops accepting connections, waits for every reader, window and request in flight, then closes the
+   * connections left and waits for any request a kept-alive connection carried meanwhile, so the server makes
+   * no call once it resolves (Decision 3). The first failure is thrown once everything has settled.
+   */
+  async function shutDown(): Promise<void> {
+    const closed = new Promise<Error | undefined>((resolve) => server.close((error) => resolve(error)))
+    const settled = await Promise.allSettled([
+      ...[...served.values()].flatMap(({ reader, windows }) => [reader.stop(), windows.stop()]),
+      ...answering,
+    ])
+    server.closeAllConnections()
+    settled.push(...(await Promise.allSettled([...answering])))
+    const closeError = await closed
+    const failure = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    if (failure) throw failure.reason
+    if (closeError) throw closeError
+  }
+
+  let closing: Promise<void> | null = null
+  const host = options.host ?? 'localhost'
+
   return {
-    url: `http://${options.host ?? 'localhost'}:${port}`,
-    async close() {
-      await Promise.all(
-        [...served.values()].flatMap(({ reader, windows }) => [reader.stop(), windows.stop()]),
-      )
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => (error ? reject(error) : resolve()))
-        server.closeAllConnections()
-      })
+    url: `http://${host.includes(':') ? `[${host}]` : host}:${port}`,
+    close() {
+      // A second call waits for the first and resolves; only the first answers a failure.
+      if (closing) return closing.catch(() => {})
+      closing = shutDown()
+      return closing
     },
   }
 }

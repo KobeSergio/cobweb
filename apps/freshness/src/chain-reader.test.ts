@@ -554,4 +554,29 @@ describe('chainReader (docs/specs/2026-10-16-freshness-server.md, section 6.4)',
     expect(chain.calls).toEqual(['head', 'logs 101-101', `collectionState ${A} @101`])
     await reader.stop()
   })
+
+  it('reports the tier of its read collections only, so a collection joining an idle chain keeps it idle until read (Decision 6)', async () => {
+    const { chain, client } = fakeChain()
+    chain.state = scheduledAt
+    const hot = hotSet()
+    const reader = chainReader(ANVIL, hot, client)
+    hot.join(31337, A, Date.now())
+    reader.wake()
+    await settle()
+    expect(reader.health()).toMatchObject({ hot: 1, tier: 'idle' })
+    let release = () => {}
+    chain.gate = new Promise<void>((resolve) => (release = resolve))
+    const b = hot.join(31337, B, Date.now()).entry
+    reader.wake()
+    await settle()
+    // The wake tick waits at its head read, with B not read yet.
+    expect([b.read, chain.headsInFlight]).toEqual([null, 1])
+    expect(reader.health()).toMatchObject({ hot: 2, tier: 'idle' })
+    chain.gate = null
+    release()
+    await settle()
+    expect(b.read?.state.block).toBe(100n)
+    expect(reader.health()).toMatchObject({ hot: 2, tier: 'idle' })
+    await reader.stop()
+  })
 })
