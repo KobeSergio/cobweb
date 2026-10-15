@@ -1,0 +1,162 @@
+import type { Address } from 'viem'
+import { describe, expect, it } from 'vitest'
+import type { CollectionRead } from './chain-reader.ts'
+import type { HotEntry } from './hot-set.ts'
+import { etagMatches, etagOf, stateBody, type StateBody } from './state-body.ts'
+
+const A: Address = '0x0409454C375c8a6aB05383bFB6D9FcDe9ebB8F85'
+const OWNER: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
+const VALIDATOR: Address = '0x721C008fdff27BF06E7E123956E2Fe03B63342e3'
+
+const read: CollectionRead = {
+  state: {
+    block: 120n,
+    blockTimestamp: 1_800_000_000,
+    maxSupply: 5,
+    totalMinted: 1,
+    publicMaxMintPerWallet: 2,
+    mintOnBehalfActive: false,
+    groups: [
+      {
+        id: 0,
+        priceWei: '0',
+        maxSupply: 3,
+        minted: 0,
+        startTimestamp: 1_800_000_600,
+        flag: false,
+        active: false,
+      },
+      { id: 1, priceWei: '1000', maxSupply: 2, minted: 1, startTimestamp: 0, flag: true, active: true },
+    ],
+  },
+  fees: { mintFeeFlatWei: '10', mintFeeBps: 250, airdropFeePerTokenWei: '100000000000000' },
+  extras: {
+    owner: OWNER,
+    royalty: { receiver: OWNER, bps: 500 },
+    baseUri: 'ipfs://first/',
+    transferValidator: VALIDATOR,
+    transferLevel: { kind: 'none', reason: 'no-code' },
+  },
+}
+
+const entry = (overrides: Partial<CollectionRead> = {}, readAt = 1_800_000_001_500): HotEntry => ({
+  chainId: 31337,
+  address: A,
+  joinedAt: 0,
+  requestedAt: 0,
+  read: { ...read, ...overrides },
+  readAt,
+  extrasReadAt: readAt,
+  marked: false,
+})
+
+describe('stateBody (docs/specs/2026-10-16-freshness-server.md, section 6.7)', () => {
+  it('answers every field from a read, in order, readAt in Unix seconds', () => {
+    const body = stateBody(31337, entry(), false)
+    expect(body).toEqual<StateBody>({
+      chainId: 31337,
+      address: A,
+      block: 120,
+      blockTimestamp: 1_800_000_000,
+      readAt: 1_800_000_001,
+      degraded: false,
+      maxSupply: 5,
+      totalMinted: 1,
+      publicMaxMintPerWallet: 2,
+      mintFeeFlatWei: '10',
+      mintFeeBps: 250,
+      airdropFeePerTokenWei: '100000000000000',
+      mintOnBehalfActive: false,
+      groups: read.state.groups,
+      owner: OWNER,
+      royalty: { receiver: OWNER, bps: 500 },
+      baseUri: 'ipfs://first/',
+      transferValidator: VALIDATOR,
+      transferLevel: 'none',
+    })
+    expect(Object.keys(body)).toEqual([
+      'chainId',
+      'address',
+      'block',
+      'blockTimestamp',
+      'readAt',
+      'degraded',
+      'maxSupply',
+      'totalMinted',
+      'publicMaxMintPerWallet',
+      'mintFeeFlatWei',
+      'mintFeeBps',
+      'airdropFeePerTokenWei',
+      'mintOnBehalfActive',
+      'groups',
+      'owner',
+      'royalty',
+      'baseUri',
+      'transferValidator',
+      'transferLevel',
+    ])
+    expect(Object.keys(body.groups[0]!)).toEqual([
+      'id',
+      'priceWei',
+      'maxSupply',
+      'minted',
+      'startTimestamp',
+      'flag',
+      'active',
+    ])
+  })
+
+  it('answers the transfer level as none, unread or its number', () => {
+    const level = (transferLevel: CollectionRead['extras']['transferLevel']) =>
+      stateBody(31337, entry({ extras: { ...read.extras, transferLevel } }), false).transferLevel
+    expect(level({ kind: 'none', reason: 'zero' })).toBe('none')
+    expect(level({ kind: 'unread' })).toBe('unread')
+    expect(level({ kind: 'level', level: 0 })).toBe(0)
+    expect(level({ kind: 'level', level: 9 })).toBe(9)
+  })
+})
+
+describe('etagOf', () => {
+  const tag = (body: StateBody) => etagOf(body)
+  const base = stateBody(31337, entry(), false)
+
+  it('is weak, 32 hex digits, and equal for equal reads', () => {
+    expect(tag(base)).toMatch(/^W\/"[0-9a-f]{32}"$/)
+    expect(tag(stateBody(31337, entry(), false))).toBe(tag(base))
+  })
+
+  it('leaves out readAt, block and blockTimestamp', () => {
+    expect(tag({ ...base, readAt: base.readAt + 60, block: 999, blockTimestamp: 1_900_000_000 })).toBe(
+      tag(base),
+    )
+  })
+
+  it("changes with degraded, a group's active and the base URI", () => {
+    const groups = base.groups.map((group) => (group.id === 0 ? { ...group, active: true } : group))
+    for (const changed of [
+      { ...base, degraded: true },
+      { ...base, groups },
+      { ...base, baseUri: 'ipfs://second/' },
+    ])
+      expect(tag(changed)).not.toBe(tag(base))
+  })
+})
+
+describe('etagMatches', () => {
+  const etag = 'W/"0123456789abcdef0123456789abcdef"'
+
+  it('matches the tag in weak and strong form, inside a list, and as *', () => {
+    expect(etagMatches(etag, etag)).toBe(true)
+    expect(etagMatches('"0123456789abcdef0123456789abcdef"', etag)).toBe(true)
+    expect(etagMatches(`"other", ${etag}`, etag)).toBe(true)
+    expect(etagMatches('*', etag)).toBe(true)
+  })
+
+  it('matches nothing else', () => {
+    expect(etagMatches(undefined, etag)).toBe(false)
+    expect(etagMatches('', etag)).toBe(false)
+    expect(etagMatches('W/"0123456789abcdef0123456789abcdee"', etag)).toBe(false)
+    expect(etagMatches('0123456789abcdef0123456789abcdef', etag)).toBe(false)
+    expect(etagMatches('"other", W/"another"', etag)).toBe(false)
+  })
+})
