@@ -22,6 +22,7 @@ import type { Address, Hex, MintGroup } from '@/lib/demo'
 import type { ActionResult } from '@/lib/art/result'
 import { phaseCalls, type ManageCall } from '@/lib/manage/phase-calls'
 import type { PhaseAdd, PhasesView } from '@/lib/manage/phases-types'
+import type { SettingsView } from '@/lib/manage/settings-types'
 import type { ManageActions, ManageRequest, TxRequest } from './manage-actions'
 import type { PendingAdd } from './manage-machine'
 import type { PhasesServer } from './phases-server'
@@ -105,10 +106,15 @@ function revert(functionName: string, data: Hex): ContractFunctionRevertedError 
 
 /**
  * How the contract would refuse a call on the sample view, or null when it would pass: the mirror of the
- * collection's group checks (an unknown group, an id taken, below minted, the allocations over the supply) and
- * of `setMintQuota`'s (unequal lengths, the public sale, an unknown group).
+ * collection's group checks (an unknown group, an id taken, below minted, the allocations over the supply), of
+ * `setMintQuota`'s (unequal lengths, the public sale, an unknown group), of `airdropNFTs`' (unequal lengths, more
+ * tokens than are left) and of `withdrawMintFunds`' (nothing to withdraw, on the Settings view when given).
  */
-export function sampleRevert(call: ManageCall, view: PhasesView): ContractFunctionRevertedError | null {
+export function sampleRevert(
+  call: ManageCall,
+  view: PhasesView,
+  settings?: SettingsView,
+): ContractFunctionRevertedError | null {
   const find = (id: bigint) => view.groups.find((group) => BigInt(group.id) === id)
   const missing = (id: bigint) =>
     revert(
@@ -164,6 +170,30 @@ export function sampleRevert(call: ManageCall, view: PhasesView): ContractFuncti
         )
       return find(id) ? null : missing(id)
     }
+    case 'airdropNFTs': {
+      const [recipients, amounts] = call.args
+      if (recipients.length !== amounts.length)
+        return revert(
+          call.functionName,
+          encodeErrorResult({ abi: collectionAbi, errorName: 'ArrayLengthMismatch' }),
+        )
+      const total = amounts.reduce((sum, amount) => sum + amount, 0n)
+      const available = BigInt(Math.max(0, view.maxSupply - view.totalMinted))
+      return total > available
+        ? revert(
+            call.functionName,
+            encodeErrorResult({
+              abi: collectionAbi,
+              errorName: 'ExceedsMaxSupply',
+              args: [total, available],
+            }),
+          )
+        : null
+    }
+    case 'withdrawMintFunds':
+      return settings?.creatorBalanceWei === '0'
+        ? revert(call.functionName, encodeErrorResult({ abi: collectionAbi, errorName: 'NothingToWithdraw' }))
+        : null
     default:
       return null
   }
@@ -228,7 +258,16 @@ export function sampleApply(call: ManageCall, view: PhasesView, add?: PhaseAdd):
       publicMaxPerWallet = Number(call.args[0])
       break
     case 'setMintQuota':
-      // A phases view holds no quotas: the Whitelist's sample server applies them (whitelist-sim.ts).
+    case 'airdropNFTs':
+    case 'withdrawMintFunds':
+    case 'setOwnerPayoutAddress':
+    case 'setDefaultRoyalty':
+    case 'setBaseURI':
+    case 'setMintOnBehalfStatus':
+    case 'setTransferValidator':
+    case 'setTransferSecurityLevelOfCollection':
+      // A phases view holds none of these: the Whitelist's, Airdrop's and Settings' sample servers apply them
+      // (whitelist-sim.ts, airdrop-sim.ts, settings-sim.ts).
       break
   }
   return {
@@ -248,13 +287,15 @@ function userRejected(): Error {
 }
 
 /**
- * The sample actions. `simulate` waits 650 ms and refuses as the contract would on the current view;
- * the send waits for the simulated wallet's `answer`; `wait` takes 1.6 seconds. `sent` remembers each
- * sent call by its hash, so the sample server applies exactly what was signed.
+ * The sample actions. `simulate` waits 650 ms and refuses as the contract would on the current view (and, for a
+ * withdrawal, the current Settings view when `settings` is given); the send waits for the simulated wallet's
+ * `answer`; `wait` takes 1.6 seconds. `sent` remembers each sent call by its hash, so the sample server applies
+ * exactly what was signed.
  */
 export function sampleManageActions(
   current: () => PhasesView,
   sent: Map<Hex, ManageCall> = new Map(),
+  settings?: () => SettingsView,
 ): ManageActions {
   let settle: ((choice: Choice) => void) | null = null
   const reverting = new Set<Hex>()
@@ -274,7 +315,7 @@ export function sampleManageActions(
     switchChain: async () => {},
     simulate: async (call) => {
       await wait(650)
-      const refused = sampleRevert(call, current())
+      const refused = sampleRevert(call, current(), settings?.())
       if (refused) throw refused
       return walletFor(call)
     },

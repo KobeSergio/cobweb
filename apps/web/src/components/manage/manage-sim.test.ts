@@ -2,7 +2,7 @@ import type { Address, Hex } from 'viem'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { classifyError } from '@/components/deploy/tx-errors'
 import { DEMO_COLLECTION, DEMO_MINT_GROUPS, DEMO_NOW, DEMO_TOTAL_MINTED } from '@/lib/demo'
-import { phaseCalls, type ManageCall } from '@/lib/manage/phase-calls'
+import { airdropCalls, phaseCalls, settingsCalls, type ManageCall } from '@/lib/manage/phase-calls'
 import type { PhasesView } from '@/lib/manage/phases-types'
 import {
   sampleApply,
@@ -12,6 +12,7 @@ import {
   sampleRequest,
   sampleRevert,
 } from './manage-sim'
+import { sampleSettingsView } from './settings-sim'
 
 const view: PhasesView = samplePhasesView({ max_supply: DEMO_COLLECTION.maxSupply })
 
@@ -204,5 +205,56 @@ describe('the quota call on the sample (docs/specs/2026-10-15-whitelist.md, sect
 
   it('changes no group of the phases view', () => {
     expect(sampleApply(phaseCalls.quotas(1, [A], [1]), view)).toEqual(view)
+  })
+})
+
+describe('Airdrop and Settings on the sample (docs/specs/2026-10-15-airdrop-settings.md, section 8)', () => {
+  const A: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
+  const settings = sampleSettingsView({ max_supply: DEMO_COLLECTION.maxSupply }, A)
+  const sentence = (call: ManageCall, settingsView?: typeof settings) => {
+    const refused = sampleRevert(call, view, settingsView)
+    return refused ? classifyError(refused, 'simulating', 'manage').message : null
+  }
+
+  it('refuses unequal lengths and more tokens than are left, as the contract would', () => {
+    const left = view.maxSupply - view.totalMinted
+    expect(sentence({ functionName: 'airdropNFTs', args: [[A], [1n, 2n]], value: 0n })).toBe(
+      'The addresses and amounts do not line up. Reload and try again. Nothing was sent.',
+    )
+    expect(sentence(airdropCalls.batch([{ address: A, amount: left + 1 }], '0'))).toBe(
+      `Only ${left.toLocaleString('en-US')} tokens are left to mint, not ${(left + 1).toLocaleString('en-US')}. Nothing was sent.`,
+    )
+    expect(sampleRevert(airdropCalls.batch([{ address: A, amount: left }], '0'), view)).toBeNull()
+  })
+
+  it('refuses a withdrawal at a balance of 0 on the Settings view, and lets it through with a balance', () => {
+    expect(sentence(settingsCalls.withdraw(), { ...settings, creatorBalanceWei: '0' })).toBe(
+      'There is nothing to withdraw: the balance is 0. Nothing was sent.',
+    )
+    expect(sentence(settingsCalls.withdraw(), settings)).toBeNull()
+    expect(sentence(settingsCalls.withdraw())).toBeNull()
+  })
+
+  it('changes no group of the phases view', () => {
+    for (const call of [
+      airdropCalls.burn(1, '0'),
+      settingsCalls.withdraw(),
+      settingsCalls.mintOnBehalf(true),
+    ])
+      expect(sampleApply(call, view)).toEqual(view)
+  })
+
+  it('checks a withdrawal against the Settings view the actions are given', async () => {
+    vi.useFakeTimers()
+    const actions = sampleManageActions(
+      () => view,
+      new Map(),
+      () => ({ ...settings, creatorBalanceWei: '0' }),
+    )
+    const refused = actions.simulate(settingsCalls.withdraw())
+    const expectation = expect(refused).rejects.toMatchObject({ name: 'ContractFunctionRevertedError' })
+    await vi.advanceTimersByTimeAsync(650)
+    await expectation
+    vi.useRealTimers()
   })
 })
