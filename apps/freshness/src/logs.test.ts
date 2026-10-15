@@ -18,7 +18,7 @@ const hot: ScanTarget[] = [
 
 /** A collection's log of `eventName`, its topics as the node answers them. */
 const collectionLog = (address: Address, topics: Hex[]) => ({ address, topics })
-const statusTopics = encodeEventTopics({
+const statusTopics: Hex[] = encodeEventTopics({
   abi: collectionAbi,
   eventName: 'MintGroupStatusChanged',
   args: { mintGroup: 1n },
