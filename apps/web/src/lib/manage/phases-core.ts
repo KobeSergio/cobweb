@@ -70,8 +70,8 @@ export const readCollectionState: StateReader = async (chainId, address, atLeast
 const PHASE_ROW_COLUMNS =
   'onchain_id, name, description, visible, position, price_wei::text, max_supply, start_at'
 
-/** What every Phases step starts from: the deployment and the rows, under the creator's client. */
-type PhaseBase = {
+/** What every Phases and Whitelist step starts from: the deployment and the rows, under the creator's client. */
+export type PhaseBase = {
   chainId: number
   contract: Address
   /** The copy of the public limit. */
@@ -82,7 +82,7 @@ type PhaseBase = {
 }
 
 /** The collection's deployment and its rows, or null before deploy (and for a stranger, under the row policies). */
-async function phaseBase(ctx: PhasesContext): Promise<PhaseBase | null> {
+export async function phaseBase(ctx: PhasesContext): Promise<PhaseBase | null> {
   const { data, error } = await ctx.supabase
     .from('deployments')
     .select('chain_id, contract_address, public_max_per_wallet, deployed_at, state_read_at')

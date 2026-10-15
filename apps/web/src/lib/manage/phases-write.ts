@@ -1,5 +1,5 @@
 import 'server-only'
-import { phasesWriteError } from '@/lib/art/db-error'
+import { phasesWriteError, type DbError } from '@/lib/art/db-error'
 import { errorSummary } from '@/lib/art/lock-core'
 import { ownedCollection } from '@/lib/art/owned'
 import { fail, THROWN, type ActionResult } from '@/lib/art/result'
@@ -14,11 +14,13 @@ import type { PhasesContext } from './phases-core'
  * `mint_group_record` and `mint_groups_refresh`, whose arguments come from a verified receipt or the
  * server's own chain read, called with the verified user's id as `p_owner`. The service client is built
  * on first use, after the ownership check. A refusal is returned as its sentence; a database error becomes
- * the creator's sentence (`phasesWriteError`); anything thrown is logged and reads "Try again".
+ * the creator's sentence (`writeError`: `phasesWriteError` for Phases, `whitelistWriteError` for the Whitelist
+ * actions, docs/specs/2026-10-15-whitelist.md, section 6.5); anything thrown is logged and reads "Try again".
  */
 export async function phasesWrite<T>(
   collectionId: string,
   run: (ctx: PhasesContext) => Promise<DeployOutcome<T>>,
+  writeError: (error: DbError) => string = phasesWriteError,
 ): Promise<ActionResult<T>> {
   try {
     const owned = await ownedCollection(collectionId)
@@ -31,7 +33,7 @@ export async function phasesWrite<T>(
       collection: owned.collection,
     })
     if ('refused' in outcome) return fail(outcome.refused)
-    if ('error' in outcome) return fail(phasesWriteError(outcome.error))
+    if ('error' in outcome) return fail(writeError(outcome.error))
     return { ok: true, data: outcome.data }
   } catch (error) {
     console.error(`A phases step threw. ${errorSummary(error)}`)
