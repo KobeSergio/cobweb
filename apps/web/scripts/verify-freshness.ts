@@ -54,7 +54,8 @@ const PUBLIC = 0
 const HOLDERS = 1
 const STATE_CACHE = 'public, max-age=0, s-maxage=1, stale-while-revalidate=1, stale-if-error=60'
 /** The headers every answer with CORS lets a page's script read. */
-const EXPOSED = 'ETag, Retry-After'
+const EXPOSED_HEADER = 'access-control-expose-headers'
+const EXPOSED = 'ETag, Retry-After, Age'
 /** The time the slowest RPC retry in flight may add to a tick: viem's three, at 150, 300 and 600 ms. */
 const RETRY_SLACK_MS = 1_200
 
@@ -320,9 +321,9 @@ async function main(): Promise<void> {
   })
 
   await check(
-    '6. ETag: an empty block is read under the same ETag; If-None-Match with it answers 304 with no body and the same headers, another tag answers 200; OPTIONS answers 204 with the CORS headers; each exposes ETag and Retry-After',
+    '6. ETag: an empty block is read under the same ETag; If-None-Match with it answers 304 with no body and the same headers, another tag answers 200; HEAD answers as GET with no body; OPTIONS answers 204 with the CORS headers; each exposes ETag, Retry-After and Age',
     async () => {
-      const exposed = (answer: Answer) => answer.headers.get('access-control-expose-headers') === EXPOSED
+      const exposed = (answer: Answer) => answer.headers.get(EXPOSED_HEADER) === EXPOSED
       const block = bodyOf(await stateOf(A)).block
       await chain.mine({ blocks: 1 })
       const after = await poll(
@@ -334,7 +335,7 @@ async function main(): Promise<void> {
       )
       if (!after) return 'the empty block was not read'
       if (after.headers.get('etag') !== etag) return `the tag moved: ${after.headers.get('etag')}`
-      if (!exposed(after)) return `exposed: ${after.headers.get('access-control-expose-headers')}`
+      if (!exposed(after)) return `exposed: ${after.headers.get(EXPOSED_HEADER)}`
       const same = await stateOf(A, { headers: { 'If-None-Match': etag } })
       if (
         same.status !== 304 ||
@@ -347,6 +348,16 @@ async function main(): Promise<void> {
         return `304: ${same.status} ${same.headers.get('etag')} ${same.headers.get('cache-control')}`
       const other = await stateOf(A, { headers: { 'If-None-Match': 'W/"0"' } })
       if (other.status !== 200 || !exposed(other)) return `another tag: ${other.status}`
+      const whole = await stateOf(A)
+      const bare = await stateOf(A, { method: 'HEAD' })
+      const kept = ['etag', 'cache-control', 'content-type', 'access-control-allow-origin', EXPOSED_HEADER]
+      if (
+        bare.status !== whole.status ||
+        bare.text !== '' ||
+        kept.some((name) => bare.headers.get(name) !== whole.headers.get(name)) ||
+        !(Number(bare.headers.get('content-length')) > 0)
+      )
+        return `HEAD: ${bare.status} ${bare.headers.get('etag')} ${bare.headers.get('content-length')}`
       const preflight = await stateOf(A, { method: 'OPTIONS' })
       return preflight.status === 204 &&
         preflight.headers.get('access-control-allow-origin') === '*' &&
@@ -520,25 +531,32 @@ async function main(): Promise<void> {
   )
 
   await check(
-    '13. first read pending: B, known as a collection from a wallet request, answers 503 not-read-yet with Retry-After 1 and no-store while the switch fails, then 200 within two ticks of it passing again',
+    '13. first read pending: while the switch fails, B, known as a collection from a wallet request, answers 503 not-read-yet and an address never checked 503 chain-unreadable, each with Retry-After 1 and no-store; B answers 200 within two ticks of the switch passing again',
     async () => {
       const known = await walletOf(B, holderKey.address)
       if (known.status !== 200) return `the wallet request: ${known.status} ${known.text}`
       if ((await healthOf()).hot !== 1) return 'the wallet request made B hot'
+      const unchecked = privateKeyToAccount(generatePrivateKey()).address
       relay.fail(true)
       let pending: Answer
+      let unreadable: Answer
       try {
         pending = await stateOf(B)
+        unreadable = await stateOf(unchecked)
       } finally {
         relay.fail(false)
       }
-      if (
-        pending.status !== 503 ||
-        pending.text !== '{"error":"not-read-yet"}' ||
-        pending.headers.get('retry-after') !== '1' ||
-        pending.headers.get('cache-control') !== 'no-store'
-      )
-        return `while failing: ${pending.status} ${pending.text} ${pending.headers.get('cache-control')}`
+      for (const [answer, error] of [
+        [pending, 'not-read-yet'],
+        [unreadable, 'chain-unreadable'],
+      ] as const)
+        if (
+          answer.status !== 503 ||
+          answer.text !== JSON.stringify({ error }) ||
+          answer.headers.get('retry-after') !== '1' ||
+          answer.headers.get('cache-control') !== 'no-store'
+        )
+          return `while failing: ${answer.status} ${answer.text} ${answer.headers.get('cache-control')}`
       const bound = 2 * TIER_MS.live + RETRY_SLACK_MS
       const read = await poll(async () => ((await stateOf(B)).status === 200 ? true : null), bound)
       return read ? null : `B was not read within ${bound} ms of the switch passing`
@@ -586,8 +604,17 @@ async function main(): Promise<void> {
   )
 
   await check(
-    "15. health: /health reports chain 31337 with two hot collections, its tier, block, lag and last good tick, and neither the switch's URL nor Anvil's",
+    "15. health: /health reports chain 31337 with two hot collections, its tier, block, lag and last good tick, and neither the switch's URL nor Anvil's; HEAD /health answers 200 with no-store and no body",
     async () => {
+      const bare = await get('/health', { method: 'HEAD' })
+      if (
+        bare.status !== 200 ||
+        bare.text !== '' ||
+        bare.headers.get('cache-control') !== 'no-store' ||
+        bare.headers.get('content-type') !== 'application/json; charset=utf-8' ||
+        !(Number(bare.headers.get('content-length')) > 0)
+      )
+        return `HEAD /health: ${bare.status} ${bare.headers.get('cache-control')}`
       const answer = await get('/health')
       const [anvilHealth] = (JSON.parse(answer.text) as HealthBody).chains
       if (

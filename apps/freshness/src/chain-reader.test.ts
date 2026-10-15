@@ -11,7 +11,7 @@ import {
   type PublicClient,
 } from 'viem'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chainReader } from './chain-reader.ts'
+import { chainReader, NOTE_LOG_EVERY_MS } from './chain-reader.ts'
 import { hotSet, type HotSet } from './hot-set.ts'
 
 const ANVIL: ChainConfig = chainById(31337, false)!
@@ -106,6 +106,8 @@ function fakeChain() {
     validators: new Map<string, Address>(),
     /** Whether VALIDATOR has code; no other address has any. */
     validatorHasCode: false,
+    /** When set, every code read throws it. */
+    codeFailure: null as Error | null,
     /** `collectionState()` at a block. */
     state: stateAt,
     /** When set, every head read waits for it. */
@@ -137,6 +139,7 @@ function fakeChain() {
     },
     async getCode({ address }: { address: Address }) {
       chain.calls.push(`code ${address}`)
+      if (chain.codeFailure) throw chain.codeFailure
       return chain.validatorHasCode && address === VALIDATOR ? '0x6080' : undefined
     },
     async readContract({
@@ -363,6 +366,76 @@ describe('chainReader (docs/specs/2026-10-16-freshness-server.md, section 6.4)',
     await reader.stop()
   })
 
+  it("reads every collection's level as unread when a validator's code cannot be read, without failing the tick", async () => {
+    const { chain, client } = fakeChain()
+    chain.codeFailure = rpcDown(503)
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const hot = hotSet()
+    const reader = chainReader(ANVIL, hot, client)
+    const a = hot.join(31337, A, Date.now()).entry
+    const b = hot.join(31337, B, Date.now()).entry
+    reader.wake()
+    await settle()
+    expect([a.read?.extras.transferLevel, b.read?.extras.transferLevel]).toEqual([
+      { kind: 'unread' },
+      { kind: 'unread' },
+    ])
+    expect([a.read?.state.block, b.read?.state.block]).toEqual([100n, 100n])
+    expect(reader.health()).toMatchObject({ failedTicks: 0, lastError: null, block: 100 })
+    expect(errors.mock.calls.map((call) => String(call[0]))).toEqual([
+      'The transfer levels on Anvil could not be read: HttpRequestError: HTTP request failed.',
+    ])
+    await reader.stop()
+  })
+
+  it("reports the lag as the seconds from the newest block time read to now, and 0 while the chain's clock is ahead", async () => {
+    const { client } = fakeChain()
+    const hot = hotSet()
+    const reader = chainReader(ANVIL, hot, client)
+    // Block 100's time is 1_800_000_100 s: 30 s behind this clock.
+    vi.setSystemTime(1_800_000_130_000)
+    hot.join(31337, A, Date.now())
+    reader.wake()
+    await settle()
+    expect(reader.health().lagSeconds).toBe(30)
+    vi.setSystemTime(1_800_000_095_000)
+    expect(reader.health().lagSeconds).toBe(0)
+    await reader.stop()
+  })
+
+  it('counts a factory read the server could not make as a failed tick, logging its name and short message, never the RPC URL', async () => {
+    const { chain, client } = fakeChain()
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const reader = chainReader(ANVIL, hotSet(), client)
+    reader.noteFailure(rpcDown(429))
+    expect(reader.health()).toMatchObject({ failedTicks: 1, lastError: 'HttpRequestError', hot: 0 })
+    expect(errors.mock.calls.map((call) => String(call[0]))).toEqual([
+      'The factory on Anvil could not be read: HttpRequestError: HTTP request failed.',
+    ])
+    expect(chain.calls).toEqual([])
+    await reader.stop()
+  })
+
+  it('logs the factory reads the server could not make at most once every 10 s, and counts each', async () => {
+    const { client } = fakeChain()
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const reader = chainReader(ANVIL, hotSet(), client)
+    reader.noteFailure(rpcDown(429))
+    reader.noteFailure(rpcDown(429))
+    await vi.advanceTimersByTimeAsync(NOTE_LOG_EVERY_MS - 1)
+    reader.noteFailure(rpcDown(503))
+    expect(reader.health().failedTicks).toBe(3)
+    expect(errors).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    reader.noteFailure(new TypeError('the factory read broke'))
+    expect(reader.health()).toMatchObject({ failedTicks: 4, lastError: 'TypeError' })
+    expect(errors.mock.calls.map((call) => String(call[0]))).toEqual([
+      'The factory on Anvil could not be read: HttpRequestError: HTTP request failed.',
+      'The factory on Anvil could not be read: TypeError',
+    ])
+    await reader.stop()
+  })
+
   it("fails a tick whose head does not answer, keeping every read and logging the error's name, never the RPC URL", async () => {
     const { chain, client } = fakeChain()
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -534,7 +607,7 @@ describe('chainReader (docs/specs/2026-10-16-freshness-server.md, section 6.4)',
     expect(chain.calls.filter((call) => call === 'head')).toHaveLength(1)
   })
 
-  it('never reads back to back while an idle read stays frozen past its start window (Important 1)', async () => {
+  it('never reads back to back while an idle read stays frozen past its start window (the early wake floored at one fast tick after the tick start, and none from a passed window)', async () => {
     const { chain, client } = fakeChain()
     chain.state = scheduledAt
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {})

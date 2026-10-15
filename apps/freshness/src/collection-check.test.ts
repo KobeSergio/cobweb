@@ -1,6 +1,6 @@
 import type { Address } from 'viem'
 import { describe, expect, it } from 'vitest'
-import { collectionCheck, NEGATIVE_MAX, NEGATIVE_TTL_MS } from './collection-check.ts'
+import { CHECK_MAX, collectionCheck, NEGATIVE_MAX, NEGATIVE_TTL_MS } from './collection-check.ts'
 
 const A: Address = '0x0409454C375c8a6aB05383bFB6D9FcDe9ebB8F85'
 
@@ -84,6 +84,33 @@ describe('collectionCheck (docs/specs/2026-10-16-freshness-server.md, section 6.
     settle(true)
     expect(await Promise.all([first, second])).toEqual([true, true])
     expect(asked).toHaveLength(1)
+  })
+
+  it('answers busy without reading once 50 reads are in flight on a chain, and keeps answering what it holds', async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    // A is a collection, read at once; every other address waits at the gate and is not one.
+    const { read, asked } = counted(async (target) => {
+      if (target !== A) await gate
+      return target === A
+    })
+    const check = collectionCheck(read, () => 0)
+    expect(await check(31337, A)).toBe(true)
+    const flying = Array.from({ length: CHECK_MAX }, (_, n) => check(31337, address(n)))
+    expect(check.pending(31337)).toBe(CHECK_MAX)
+    const busy = check(31337, address(CHECK_MAX))
+    expect(asked).toHaveLength(CHECK_MAX + 1)
+    expect(await busy).toBe('busy')
+    // The answer held, an ask that shares a read in flight and another chain go on as before.
+    expect(await check(31337, A)).toBe(true)
+    const shared = check(31337, address(0))
+    const elsewhere = check(1, address(CHECK_MAX))
+    expect([asked.length, check.pending(31337), check.pending(1)]).toEqual([CHECK_MAX + 2, CHECK_MAX, 1])
+    release()
+    expect(await Promise.all([...flying, shared, elsewhere])).toEqual(Array(CHECK_MAX + 2).fill(false))
+    expect([check.pending(31337), check.pending(1)]).toEqual([0, 0])
+    expect(await check(31337, address(CHECK_MAX))).toBe(false)
+    expect(asked).toHaveLength(CHECK_MAX + 3)
   })
 
   it('keeps nothing from a failed read: the ask fails and the next one reads again', async () => {

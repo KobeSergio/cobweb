@@ -52,23 +52,35 @@ export function errorName(error: unknown): string {
   return inner instanceof Error ? inner.name : 'Error'
 }
 
-/**
- * A failure as the log writes it: the innermost viem error's name and short message, or a name alone for
- * anything else. Never a full message: viem's carries the request's URL, and an RPC URL carries the
- * provider's key.
- */
-export function errorLine(error: unknown): string {
-  const inner = innermost(error)
-  return inner instanceof BaseError ? `${inner.name}: ${inner.shortMessage}` : errorName(error)
+/** The first whole-number `code` on the error's chain of causes, outermost first: a JSON-RPC error's. */
+function codeOf(error: unknown): number | undefined {
+  for (let current: unknown = error; current instanceof Error; current = current.cause)
+    if ('code' in current && typeof current.code === 'number' && Number.isInteger(current.code))
+      return current.code
+  return undefined
 }
 
 /**
- * An unexpected failure as the log writes it: `errorLine`, then the error's code where it has one, as
- * `TypeError (ERR_INVALID_URL)`. A code is a whole number or capitals, digits and underscores, never a
+ * A failure as the log writes it: the innermost viem error's name, the first whole-number code on its chain
+ * of causes (a JSON-RPC error's, as `RpcRequestError (-32005)`) and viem's short message, or the name and
+ * code alone for anything else. Never a full message: viem's carries the request's URL, and an RPC URL
+ * carries the provider's key.
+ */
+export function errorLine(error: unknown): string {
+  const inner = innermost(error)
+  const code = codeOf(error)
+  const named = code === undefined ? errorName(error) : `${errorName(error)} (${code})`
+  return inner instanceof BaseError ? `${named}: ${inner.shortMessage}` : named
+}
+
+/**
+ * An unexpected failure as the log writes it: `errorLine`, which carries a whole-number code, then the
+ * error's own code where it is capitals, digits and underscores, as `TypeError (ERR_INVALID_URL)`. Never a
  * message.
  */
 export function failureLine(error: unknown): string {
   const code = error instanceof Error && 'code' in error ? error.code : undefined
-  const named = Number.isInteger(code) || (typeof code === 'string' && /^[A-Z0-9_]+$/.test(code))
-  return named ? `${errorLine(error)} (${String(code)})` : errorLine(error)
+  return typeof code === 'string' && /^[A-Z0-9_]+$/.test(code)
+    ? `${errorLine(error)} (${code})`
+    : errorLine(error)
 }

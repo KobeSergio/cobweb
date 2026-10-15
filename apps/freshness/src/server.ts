@@ -6,7 +6,7 @@ import type { Address } from 'viem'
 import { chainReader } from './chain-reader.ts'
 import { collectionCheck } from './collection-check.ts'
 import { servedChains } from './config.ts'
-import { errorLine, failureLine, type HealthBody } from './health.ts'
+import { failureLine, type HealthBody } from './health.ts'
 import { hotSet, JOIN_WAIT_MS, type HotEntry } from './hot-set.ts'
 import {
   healthAnswer,
@@ -68,15 +68,19 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
   })
 
   /**
-   * The collection check of both routes: 404 for a chain not served or an address not a collection, 503 when
-   * the factory cannot be read.
+   * The collection check of both routes: 404 for a chain not served or an address not a collection, 503 busy
+   * when the chain already has 50 factory reads in flight, and 503 when the factory cannot be read, counted
+   * on the chain's /health and logged by its reader.
    */
   async function refused(chainId: number, address: Address): Promise<Answer | null> {
-    if (!served.has(chainId)) return refusal(404, 'chain-not-served')
+    const chain = served.get(chainId)
+    if (!chain) return refusal(404, 'chain-not-served')
     try {
-      return (await isCollection(chainId, address)) ? null : refusal(404, 'not-a-collection')
+      const answer = await isCollection(chainId, address)
+      if (answer === 'busy') return refusal(503, 'busy')
+      return answer ? null : refusal(404, 'not-a-collection')
     } catch (error) {
-      console.error(`The factory on chain ${chainId} could not be read: ${errorLine(error)}`)
+      chain.reader.noteFailure(error)
       return refusal(503, 'chain-unreadable')
     }
   }
@@ -158,6 +162,9 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
       .finally(() => answering.delete(answered))
     answering.add(answered)
   })
+  // Idle connections outlive the 60 s a proxy may keep one, so a proxy never reuses a socket Node closed.
+  server.keepAliveTimeout = 65_000
+  server.headersTimeout = 66_000
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
     server.listen(options.port, options.host, () => {

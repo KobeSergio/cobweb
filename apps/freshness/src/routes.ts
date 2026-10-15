@@ -35,10 +35,14 @@ export const WALLET_CACHE = 'public, max-age=0, s-maxage=5'
 export const REFUSAL_CACHE = 'public, max-age=0, s-maxage=10'
 const JSON_TYPE = 'application/json; charset=utf-8'
 /**
- * CORS on every answer a page's script may read: any origin, with the tag and the retry delay exposed to the
- * script, so a page that sends its own `If-None-Match` can read `ETag` and a refused one `Retry-After`.
+ * CORS on every answer a page's script may read: any origin, with the tag, the retry delay and the edge's age
+ * exposed to the script, so a page that sends its own `If-None-Match` can read `ETag`, a refused one
+ * `Retry-After`, and any one the `Age` an edge adds.
  */
-const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'ETag, Retry-After' }
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Expose-Headers': 'ETag, Retry-After, Age',
+}
 const METHODS = ['GET', 'HEAD', 'OPTIONS']
 
 /** A positive whole number without leading zeros, within the safe integers. */

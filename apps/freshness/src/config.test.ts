@@ -1,8 +1,19 @@
 import { availableChains } from '@cobweb/shared'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_PORT, servedChains } from './config.ts'
+import { DEFAULT_PORT, portOf, servedChains } from './config.ts'
+import { errorLine } from './health.ts'
 
 const FACTORY = '0x5FbDB2315678afecb367f032d93F642f64180aa3'
+
+/** What `fn` throws, or null when it does not. */
+function thrownBy(fn: () => unknown): unknown {
+  try {
+    fn()
+    return null
+  } catch (error) {
+    return error
+  }
+}
 
 describe('servedChains (docs/specs/2026-10-16-freshness-server.md, section 6.2)', () => {
   beforeEach(() => {
@@ -59,7 +70,23 @@ describe('servedChains (docs/specs/2026-10-16-freshness-server.md, section 6.2)'
     expect(servedChains().map((chain) => chain.name)).toEqual(['Anvil'])
   })
 
-  it('defaults the port to 3100', () => {
+  it('refuses to serve a chain whose factory is not an address, naming the variable and the chain, never the value', () => {
+    vi.stubEnv('RPC_URL_31337', 'http://127.0.0.1:8545')
+    vi.stubEnv('FACTORY_ADDRESS_31337', 'https://not-an-address.example')
+    expect(errorLine(thrownBy(() => servedChains()))).toBe(
+      'ConfigurationError: FACTORY_ADDRESS_31337 is not an address, so Anvil (31337) cannot be served.',
+    )
+    // A chain left out by the ids given is not read, so it is not refused either.
+    expect(servedChains([1])).toEqual([])
+    // A wrong checksum in mixed case is still an address, which the shared reader checksums.
+    vi.stubEnv('FACTORY_ADDRESS_31337', '0x5fbDB2315678afecb367f032d93F642f64180aa3')
+    expect(servedChains().map((chain) => chain.id)).toEqual([31337])
+  })
+})
+
+describe('portOf (docs/specs/2026-10-16-freshness-server.md, section 6.2)', () => {
+  it('defaults the port to 3100 when PORT is unset or blank', () => {
     expect(DEFAULT_PORT).toBe(3100)
+    expect([portOf(undefined), portOf(''), portOf('4000')]).toEqual([3100, 3100, 4000])
   })
 })

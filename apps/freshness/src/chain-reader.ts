@@ -39,6 +39,8 @@ export type CollectionRead = { state: ChainState; fees: FeeWei; extras: Extras }
 
 /** Besides on their logs, the extras are read again once 60 s old. */
 export const EXTRAS_EVERY_MS = 60_000
+/** A failed factory read is logged at most once per 10 s on a chain; each one is counted. */
+export const NOTE_LOG_EVERY_MS = 10_000
 
 /** The four extras calls, in the order the tick reads them. */
 const extrasCalls = (address: Address): ContractFunctionParameters[] => [
@@ -60,13 +62,14 @@ const tierAmong = (entries: readonly HotEntry[]): Tier | null =>
  * other entry's `collectionState()` at the head in one `readEach`, with the extras where they are due, and
  * the levels after it. Ticks never overlap: a wake during a tick runs one more tick after it. The next tick
  * starts one interval after this one started, or at once when it ran longer. A tick that throws outside its
- * own try counts as failed like any other, and the reader goes on.
+ * own try counts as failed like any other, and the reader goes on. A failed factory read the server notes
+ * counts as a failed tick too.
  */
 export function chainReader(
   chain: ChainConfig,
   hot: HotSet,
   client: PublicClient,
-): { wake(): void; stop(): Promise<void>; health(): ChainHealth } {
+): { wake(): void; stop(): Promise<void>; health(): ChainHealth; noteFailure(error: unknown): void } {
   /** The last block the logs were scanned to; null before the chain's first tick. */
   let scanned: bigint | null = null
   /** Validators found with code on this chain, lowercase. */
@@ -81,6 +84,8 @@ export function chainReader(
   let failedTicks = 0
   let lastError: string | null = null
   let logGaps = 0
+  /** When a noted failure was last logged; null before the first. */
+  let notedAt: number | null = null
 
   const getLogs: GetLogs = (filter) =>
     client.request({
@@ -322,9 +327,9 @@ export function chainReader(
     },
     health() {
       const entries = hot.onChain(chain.id)
-      // The tier of the read collections alone, which `degraded` counts from (Decision 6, as amended): an
-      // unread one makes the chain tick at 2 s, but counting it here would shorten every read collection's
-      // threshold until its first read lands.
+      // The reported tier counts the entries with a read, and `degraded` counts from it: an unread one makes
+      // the chain tick at 2 s, but counting it here would shorten every read collection's threshold until its
+      // first read lands.
       const reads = entries.flatMap((entry) => (entry.read ? [entry.read.state] : []))
       return {
         chainId: chain.id,
@@ -342,6 +347,18 @@ export function chainReader(
         lastError,
         logGaps,
       }
+    },
+    /**
+     * A factory read the server's collection check could not make: counted and named as a failed tick is,
+     * so /health shows the chain failing even while no tick runs, and logged at most once per 10 s.
+     */
+    noteFailure(error) {
+      failedTicks++
+      lastError = errorName(error)
+      const now = Date.now()
+      if (notedAt !== null && now - notedAt < NOTE_LOG_EVERY_MS) return
+      notedAt = now
+      console.error(`The factory on ${chain.name} could not be read: ${errorLine(error)}`)
     },
   }
 }

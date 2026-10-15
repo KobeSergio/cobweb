@@ -129,7 +129,7 @@ describe('the answers', () => {
       status: 404,
       headers: {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Expose-Headers': 'ETag, Retry-After',
+        'Access-Control-Expose-Headers': 'ETag, Retry-After, Age',
         'Content-Type': 'application/json; charset=utf-8',
         'Cache-Control': 'public, max-age=0, s-maxage=10',
       },
@@ -140,7 +140,7 @@ describe('the answers', () => {
       status: 503,
       headers: {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Expose-Headers': 'ETag, Retry-After',
+        'Access-Control-Expose-Headers': 'ETag, Retry-After, Age',
         'Content-Type': 'application/json; charset=utf-8',
         'Cache-Control': 'no-store',
         'Retry-After': '1',
@@ -155,7 +155,7 @@ describe('the answers', () => {
       ETag: 'W/"tag"',
       'Cache-Control': 'public, max-age=0, s-maxage=1, stale-while-revalidate=1, stale-if-error=60',
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Expose-Headers': 'ETag, Retry-After',
+      'Access-Control-Expose-Headers': 'ETag, Retry-After, Age',
     }
     expect(stateAnswer(body, 'W/"tag"', false)).toEqual({
       status: 200,
@@ -168,7 +168,7 @@ describe('the answers', () => {
   it('give a wallet 5 s at the edge, /health no-store, and the preflight its CORS headers', () => {
     expect(walletAnswer({ chainId: 31337 } as WalletBody).headers).toEqual({
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Expose-Headers': 'ETag, Retry-After',
+      'Access-Control-Expose-Headers': 'ETag, Retry-After, Age',
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'public, max-age=0, s-maxage=5',
     })
@@ -181,7 +181,7 @@ describe('the answers', () => {
       status: 204,
       headers: {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Expose-Headers': 'ETag, Retry-After',
+        'Access-Control-Expose-Headers': 'ETag, Retry-After, Age',
         'Access-Control-Allow-Methods': 'GET, HEAD',
         'Access-Control-Allow-Headers': 'If-None-Match',
         'Access-Control-Max-Age': '86400',
@@ -195,7 +195,7 @@ describe('the answers', () => {
       status: 500,
       headers: {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Expose-Headers': 'ETag, Retry-After',
+        'Access-Control-Expose-Headers': 'ETag, Retry-After, Age',
         'Content-Type': 'application/json; charset=utf-8',
         'Cache-Control': 'no-store',
         'Retry-After': '1',
@@ -209,7 +209,7 @@ describe('the answers', () => {
       status: 400,
       headers: {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Expose-Headers': 'ETag, Retry-After',
+        'Access-Control-Expose-Headers': 'ETag, Retry-After, Age',
         'Content-Type': 'application/json; charset=utf-8',
         'Cache-Control': 'public, max-age=0, s-maxage=10',
       },
@@ -217,7 +217,7 @@ describe('the answers', () => {
     })
   })
 
-  it("expose the ETag and Retry-After to a page's script on every answer that allows its origin", () => {
+  it("expose the ETag, Retry-After and Age to a page's script on every answer that allows its origin", () => {
     const answers: Answer[] = [
       refusal(400, 'bad-request'),
       refusal(404, 'not-found'),
@@ -232,7 +232,7 @@ describe('the answers', () => {
     for (const answer of answers)
       expect(answer.headers).toMatchObject({
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Expose-Headers': 'ETag, Retry-After',
+        'Access-Control-Expose-Headers': 'ETag, Retry-After, Age',
       })
   })
 })
