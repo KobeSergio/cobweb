@@ -2,7 +2,8 @@
 
 import { LockIcon, LockOpenIcon, ShieldAlertIcon } from 'lucide-react'
 import { useId, useState } from 'react'
-import { getAddress, isAddress } from 'viem'
+import { getAddress, isAddress, zeroAddress, type Hex } from 'viem'
+import { DEFAULT_TRANSFER_VALIDATOR } from '@cobweb/shared'
 import { Alert, AlertDescription } from '@cobweb/ui/components/alert'
 import { Badge } from '@cobweb/ui/components/badge'
 import { Button } from '@cobweb/ui/components/button'
@@ -12,41 +13,50 @@ import { Input } from '@cobweb/ui/components/input'
 import { RadioGroup, RadioGroupItem } from '@cobweb/ui/components/radio-group'
 import { StatusBadge } from '@cobweb/ui/components/status-badge'
 import { ChainName } from '@/components/chains/chain-icon'
-import type { Address, Deployment, SupportedChain } from '@/lib/demo'
+import type { ActionResult } from '@/lib/art/result'
+import type { Address, SupportedChain } from '@/lib/demo'
+import { settingsCalls, type ManageCall } from '@/lib/manage/phase-calls'
+import type { SettingsView, TransferLevelState } from '@/lib/manage/settings-types'
+import { TRANSFER_LEVELS, type TransferLevelValue } from '@/lib/manage/settings-view'
 import { AddressLine } from './bits'
+import { settingsRequest, type SettingsDialogBase } from './settings-dialogs'
 import { Setting } from './settings-parts'
-import { SAMPLE, sampleRequest } from './manage-sim'
 import { TransactionDialog } from './transaction-dialog'
 
-const DEFAULT_VALIDATOR = SAMPLE.transferValidator
-
 /**
- * Tradability, as two rows of Settings, Advanced: the collection's transfer validator and its
- * lock. The validator decides whether and where tokens can be traded, and it is what enforces
- * royalties on secondary sales.
+ * Tradability, as two rows of Settings, Advanced (docs/specs/2026-10-15-airdrop-settings.md, section 7.4): the
+ * collection's transfer validator and the level it holds for the collection. The validator decides whether and
+ * where tokens can be traded, and it is what enforces royalties on secondary sales. `off` is why nothing can be
+ * changed now (the chain unread); `blocked` the owner check, under which the dialogs open with their action off.
  */
 export function TradabilitySettings({
-  deployment,
+  view,
   chain,
+  off,
+  blocked,
+  confirm,
+  onConfirmed,
 }: {
-  deployment: Deployment
+  view: SettingsView
   chain: SupportedChain
+  off: string | null
+  blocked: string | null
+  confirm(hash: Hex, call: ManageCall): Promise<ActionResult<SettingsView>>
+  onConfirmed(view: SettingsView): void
 }) {
-  const [validator, setValidator] = useState<Address>(DEFAULT_VALIDATOR)
-  // Seam: read from the validator (`getCollectionSecurityPolicy` or the V5 ruleset) through the freshness server.
-  const [level, setLevel] = useState<TransferLevel>(deployment.transfersLocked ? 'locked' : 'enforced')
-  const [dialog, setDialog] = useState<{
-    key: 'lock' | 'validator'
-    id: number
-    level: TransferLevel
-  } | null>(null)
+  // One dialog at a time; `at` freezes the view it was opened with, so its text does not flip once it lands.
+  const [dialog, setDialog] = useState<{ key: 'level' | 'validator'; id: number; at: SettingsView } | null>(
+    null,
+  )
   const [open, setOpen] = useState(false)
-  const show = (key: 'lock' | 'validator') => {
-    setDialog({ key, id: Date.now(), level })
+  const show = (key: 'level' | 'validator') => {
+    setDialog({ key, id: Date.now(), at: view })
     setOpen(true)
   }
-  const isDefault = validator.toLowerCase() === DEFAULT_VALIDATOR.toLowerCase()
-  const base = { open, onOpenChange: setOpen, chain }
+  const validator = view.transferValidator
+  const level = view.level
+  const base = { open, onOpenChange: setOpen, chain, blocked, confirm, onConfirmed }
+  const atValidator = dialog?.at.transferValidator ?? null
 
   return (
     <>
@@ -55,13 +65,27 @@ export function TradabilitySettings({
         description="Governs whether and where these tokens can be traded. Royalties are enforced on secondary sales through it."
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <AddressLine address={validator} chain={chain} />
-            <Badge variant={isDefault ? 'secondary' : 'warning'}>
-              {isDefault ? 'Limit Break default' : 'Custom'}
-            </Badge>
-          </div>
-          <Button variant="destructive" size="sm" onClick={() => show('validator')}>
+          {validator === null ? (
+            <p className="text-muted-foreground text-sm">Not read</p>
+          ) : (
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <AddressLine address={validator} chain={chain} />
+              <Badge variant={validator === DEFAULT_TRANSFER_VALIDATOR ? 'secondary' : 'warning'}>
+                {validator === DEFAULT_TRANSFER_VALIDATOR
+                  ? 'Limit Break default'
+                  : validator === zeroAddress
+                    ? 'No validator'
+                    : 'Custom'}
+              </Badge>
+            </div>
+          )}
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => show('validator')}
+            disabled={!!off || validator === null}
+            title={off ?? undefined}
+          >
             <ShieldAlertIcon aria-hidden="true" />
             Change validator
           </Button>
@@ -73,29 +97,18 @@ export function TradabilitySettings({
         description="The validator's level for this collection: royalties enforced (the default), royalties not enforced, or locked. Mints and airdrops work at every level."
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
-          {!chain.transferLock ? (
-            <p className="text-muted-foreground text-sm">
-              <ChainName chain={chain} className="text-foreground" iconClassName="size-3.5" /> has no transfer
-              validator, so transfers cannot be locked there.
-            </p>
-          ) : level === 'locked' ? (
-            <Badge variant="destructive" className="w-fit">
-              <LockIcon aria-hidden="true" />
-              Locked. Nobody can send, sell or list
-            </Badge>
-          ) : level === 'open' ? (
-            <Badge variant="warning" className="w-fit">
-              <LockOpenIcon aria-hidden="true" />
-              Transferable, royalties not enforced
-            </Badge>
-          ) : (
-            <StatusBadge status="draft">Transferable, royalties enforced</StatusBadge>
-          )}
-          {chain.transferLock && (
+          <LevelState level={level} chain={chain} />
+          {(level?.kind === 'unread' || level?.kind === 'level') && (
             <Button
-              variant={level === 'enforced' ? 'destructive' : 'secondary'}
+              variant={
+                level.kind === 'level' && level.level === TRANSFER_LEVELS.enforced
+                  ? 'destructive'
+                  : 'secondary'
+              }
               size="sm"
-              onClick={() => show('lock')}
+              onClick={() => show('level')}
+              disabled={!!off}
+              title={off ?? undefined}
             >
               <ShieldAlertIcon aria-hidden="true" />
               Change level
@@ -104,68 +117,97 @@ export function TradabilitySettings({
         </div>
       </Setting>
 
-      {dialog?.key === 'lock' && (
+      {dialog?.key === 'level' && atValidator && (
         <LevelDialog
           key={dialog.id}
           {...base}
-          collection={deployment.contractAddress}
-          current={dialog.level}
-          onApply={setLevel}
+          validator={atValidator}
+          collection={dialog.at.contract}
+          current={dialog.at.level?.kind === 'level' ? dialog.at.level.level : null}
         />
       )}
-      {dialog?.key === 'validator' && (
-        <ValidatorDialog key={dialog.id} {...base} current={validator} onApply={setValidator} />
+      {dialog?.key === 'validator' && atValidator && (
+        <ValidatorDialog key={dialog.id} {...base} current={atValidator} />
       )}
     </>
   )
 }
 
-type TransferLevel = 'enforced' | 'open' | 'locked'
+/** The level the validator holds for the collection, in the creator's words. */
+function LevelState({ level, chain }: { level: TransferLevelState | null; chain: SupportedChain }) {
+  if (level === null) return <p className="text-muted-foreground text-sm">Not read</p>
+  if (level.kind === 'none')
+    return level.reason === 'no-code' ? (
+      <p className="text-muted-foreground text-sm">
+        <ChainName chain={chain} className="text-foreground" iconClassName="size-3.5" /> has no transfer
+        validator, so transfers cannot be locked there.
+      </p>
+    ) : (
+      <p className="text-muted-foreground text-sm">No validator is set, so transfers are not checked.</p>
+    )
+  if (level.kind === 'unread')
+    return (
+      <p className="text-muted-foreground text-sm">
+        The validator did not answer for this collection, so its level is not shown.
+      </p>
+    )
+  if (level.level === TRANSFER_LEVELS.locked)
+    return (
+      <Badge variant="destructive" className="w-fit">
+        <LockIcon aria-hidden="true" />
+        Locked. Nobody can send, sell or list
+      </Badge>
+    )
+  if (level.level === TRANSFER_LEVELS.open)
+    return (
+      <Badge variant="warning" className="w-fit">
+        <LockOpenIcon aria-hidden="true" />
+        Transferable, royalties not enforced
+      </Badge>
+    )
+  if (level.level === TRANSFER_LEVELS.enforced)
+    return <StatusBadge status="draft">Transferable, royalties enforced</StatusBadge>
+  return <p className="text-sm">Level {level.level}, set outside Cobweb</p>
+}
 
-/** Legacy's three levels (OPEN_TO_ALL, FULLY_OPEN, SOULBOUND), in Cobweb's words. */
-const LEVELS: { value: TransferLevel; title: string; description: string; arg: string }[] = [
+/** Legacy's three levels (OPEN_TO_ALL, FULLY_OPEN, SOULBOUND), in Cobweb's words, with the value the validator takes. */
+const LEVELS: { value: TransferLevelValue; title: string; description: string }[] = [
   {
-    value: 'enforced',
+    value: TRANSFER_LEVELS.enforced,
     title: 'Royalties enforced',
     description: 'Holders can send and sell. Sales go through only where your royalty is paid. The default.',
-    arg: 'Royalties enforced',
   },
   {
-    value: 'open',
+    value: TRANSFER_LEVELS.open,
     title: 'Royalties not enforced',
     description:
       'Holders can send and sell anywhere, like a plain ERC-721. Royalties are up to the marketplace.',
-    arg: 'Open',
   },
   {
-    value: 'locked',
+    value: TRANSFER_LEVELS.locked,
     title: 'Locked',
     description: 'Nobody can send, sell or list until you change it back. Open listings stop working.',
-    arg: 'Non-transferable',
   },
 ]
 
-/** Change the collection's transfer level on the validator. Red for anything but the default. */
+/** Change the collection's transfer level on its validator. Red for anything but the default. */
 function LevelDialog({
+  validator,
   collection,
   current,
-  onApply,
+  confirm,
+  onConfirmed,
   ...base
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  chain: SupportedChain
-  collection: Address
-  current: TransferLevel
-  onApply: (level: TransferLevel) => void
-}) {
+}: SettingsDialogBase & { validator: Address; collection: Address; current: number | null }) {
   const id = useId()
-  const [next, setNext] = useState<TransferLevel>(current)
-  const choice = LEVELS.find((level) => level.value === next)!
+  const [next, setNext] = useState<TransferLevelValue>(
+    LEVELS.find((level) => level.value === current)?.value ?? TRANSFER_LEVELS.enforced,
+  )
+  const choice = LEVELS.find((level) => level.value === next) ?? LEVELS[0]!
   return (
     <TransactionDialog
       {...base}
-      destructive={next !== 'enforced'}
+      destructive={next !== TRANSFER_LEVELS.enforced}
       title="Transfer level"
       description="Applies to every token in the collection as soon as the transaction confirms. Mints and airdrops are not affected."
       actionLabel={`Set ${choice.title.toLowerCase()}`}
@@ -173,28 +215,22 @@ function LevelDialog({
       request={
         next === current
           ? null
-          : sampleRequest({
-              // Seam: legacy called `setRulesetOfCollection(collection, 0 | 1 | 2, 0x0, 0, 0)` on validator
-              // V5 and `setTransferSecurityLevelOfCollection(collection, 0 | 1 | 9, false, false, false)` on
-              // V4. The exact call per chain is confirmed in Phase 5 (MASTER_PLAN, Contracts: lock).
-              contract: 'Transfer validator',
-              functionName: 'setTransferSecurityLevelOfCollection',
-              args: [
-                { name: 'collection', value: collection },
-                { name: 'level', value: choice.arg },
-              ],
-            })
+          : settingsRequest(settingsCalls.level(validator, collection, next), base.chain, confirm)
       }
-      onConfirmed={() => onApply(next)}
+      onConfirmed={onConfirmed}
     >
-      <RadioGroup value={next} onValueChange={(value) => setNext(value as TransferLevel)} className="gap-3">
+      <RadioGroup
+        value={String(next)}
+        onValueChange={(value) => setNext(Number(value) as TransferLevelValue)}
+        className="gap-3"
+      >
         {LEVELS.map((level) => (
           <label
             key={level.value}
             htmlFor={`${id}-${level.value}`}
             className="flex items-start gap-3 text-sm"
           >
-            <RadioGroupItem id={`${id}-${level.value}`} value={level.value} className="mt-0.5" />
+            <RadioGroupItem id={`${id}-${level.value}`} value={String(level.value)} className="mt-0.5" />
             <span>
               <span className="font-medium">
                 {level.title}
@@ -212,15 +248,10 @@ function LevelDialog({
 /** Point the collection at another transfer validator. Red, and confirmed with a tick box. */
 function ValidatorDialog({
   current,
-  onApply,
+  confirm,
+  onConfirmed,
   ...base
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  chain: SupportedChain
-  current: Address
-  onApply: (validator: Address) => void
-}) {
+}: SettingsDialogBase & { current: Address }) {
   const id = useId()
   const [value, setValue] = useState('')
   const [understood, setUnderstood] = useState(false)
@@ -244,14 +275,10 @@ function ValidatorDialog({
       successMessage="Transfer validator changed"
       request={
         address && !error && understood
-          ? sampleRequest({
-              contract: 'Collection',
-              functionName: 'setTransferValidator',
-              args: [{ name: 'validator', value: address }],
-            })
+          ? settingsRequest(settingsCalls.validator(address), base.chain, confirm)
           : null
       }
-      onConfirmed={() => address && onApply(address)}
+      onConfirmed={onConfirmed}
     >
       <div className="grid gap-5">
         <Alert variant="destructive">
@@ -281,13 +308,13 @@ function ValidatorDialog({
               <span>
                 Now <span className="numeric break-all">{current}</span>
               </span>
-              {current.toLowerCase() !== DEFAULT_VALIDATOR.toLowerCase() && (
+              {current !== DEFAULT_TRANSFER_VALIDATOR && (
                 <Button
                   type="button"
                   variant="link"
                   size="xs"
                   className="h-auto px-0"
-                  onClick={() => setValue(DEFAULT_VALIDATOR)}
+                  onClick={() => setValue(DEFAULT_TRANSFER_VALIDATOR)}
                 >
                   Use the Limit Break default
                 </Button>

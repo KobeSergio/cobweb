@@ -3,6 +3,7 @@
 import { ArrowUpRightIcon, EyeIcon } from 'lucide-react'
 import { useId, useState } from 'react'
 import { toast } from 'sonner'
+import type { Address, Hex } from 'viem'
 import { Artwork } from '@cobweb/ui/components/artwork'
 import { Badge } from '@cobweb/ui/components/badge'
 import { Button } from '@cobweb/ui/components/button'
@@ -14,11 +15,22 @@ import {
   MintPageAddressField,
   type AddressCollection,
 } from '@/components/collections/mint-page-address-field'
-import type { Deployment, SupportedChain } from '@/lib/demo'
+import type { ActionResult } from '@/lib/art/result'
+import type { SupportedChain } from '@/lib/demo'
+import type { ManageCall } from '@/lib/manage/phase-calls'
+import type { SettingsView } from '@/lib/manage/settings-types'
 import { AddressLine } from './bits'
 import { count, percent, relativeTo } from './format'
-import { RevealDialog } from './settings-dialogs'
 import { saveOffChain, SAMPLE } from './manage-sim'
+import { UNREADABLE_REASON } from './phase-row'
+import { RevealDialog } from './settings-dialogs'
+
+/** What the pointer's Reveal needs: the owner check, the server's confirm and where its fresh view goes. */
+type RevealProps = {
+  blocked: string | null
+  confirm: (hash: Hex, call: ManageCall) => Promise<ActionResult<SettingsView>>
+  onConfirmed: (view: SettingsView) => void
+}
 
 /**
  * The top of the overview, one compact row: the artwork, minted of supply, the contract, what the
@@ -28,26 +40,27 @@ import { saveOffChain, SAMPLE } from './manage-sim'
 export function OverviewHeader({
   collectionId,
   name,
-  deployment,
+  contract,
+  deployedAt,
   chain,
   totalMinted,
   maxSupply,
   readAt,
   holders,
-  singleAsset,
-  realArtRendered,
+  settings,
+  ...reveal
 }: {
   collectionId: string
   name: string
-  deployment: Deployment
+  contract: Address
+  deployedAt: number
   chain: SupportedChain
   totalMinted: number | null
   maxSupply: number
   readAt: number
   holders: number
-  singleAsset: boolean
-  realArtRendered: boolean
-}) {
+  settings: SettingsView
+} & RevealProps) {
   return (
     <section
       aria-label="The drop at a glance"
@@ -88,18 +101,13 @@ export function OverviewHeader({
         label={
           <>
             <ChainIcon chainId={chain.id} className="size-3.5" />
-            {chain.name}, deployed {relativeTo(deployment.deployedAt, readAt)}
+            {chain.name}, deployed {relativeTo(deployedAt, readAt)}
           </>
         }
       >
-        <AddressLine address={deployment.contractAddress} chain={chain} />
+        <AddressLine address={contract} chain={chain} />
       </Fact>
-      <ContractPointer
-        deployment={deployment}
-        chain={chain}
-        singleAsset={singleAsset}
-        realArtRendered={realArtRendered}
-      />
+      <ContractPointer settings={settings} chain={chain} {...reveal} />
       <Fact label="Holders">
         <p className="numeric text-lg leading-tight">{count(holders)}</p>
       </Fact>
@@ -124,69 +132,72 @@ function Fact({
   )
 }
 
-/** `ipfs://bafy...xyz/` as `bafybe…7xyz`. */
+/** The CID of an `ipfs://` link (before the first "/" after it), shortened: `bafybe…7xyz`. */
 function shortCid(uri: string): string {
-  const cid = uri.replace(/^ipfs:\/\//, '').replace(/\/$/, '')
+  const cid = uri.replace(/^ipfs:\/\//, '').split('/')[0] ?? ''
   return cid.length > 14 ? `${cid.slice(0, 6)}…${cid.slice(-4)}` : cid
 }
 
 /**
- * What the contract's base URI points at: the placeholder until the reveal, then the rendered
- * set. Reveal opens the same dialog as Settings; it is off while the real set is not rendered.
+ * What the contract's base URI points at (docs/specs/2026-10-15-airdrop-settings.md, section 7.5): the rendered
+ * metadata, the placeholder or a custom link, from the settings view. Reveal opens the same dialog as Settings;
+ * it is off while the real set is not rendered or the contract cannot be read.
  */
 function ContractPointer({
-  deployment,
+  settings,
   chain,
-  singleAsset,
-  realArtRendered,
-}: {
-  deployment: Deployment
-  chain: SupportedChain
-  singleAsset: boolean
-  realArtRendered: boolean
-}) {
-  const [state, setState] = useState({ baseUri: deployment.baseUri, revealed: deployment.revealed })
-  const [dialog, setDialog] = useState<number | null>(null)
+  blocked,
+  confirm,
+  onConfirmed,
+}: { settings: SettingsView; chain: SupportedChain } & RevealProps) {
+  // `at` freezes the view the dialog was opened with, so its text does not flip once it lands.
+  const [dialog, setDialog] = useState<{ id: number; at: SettingsView } | null>(null)
   const [open, setOpen] = useState(false)
+  const off = !settings.realArtRendered
+    ? 'The real art is not rendered yet. Reveal opens once it is on IPFS.'
+    : settings.chainReachable
+      ? null
+      : UNREADABLE_REASON
 
   return (
     <Fact label="Points at">
       <div className="flex items-center gap-3">
-        <p className="text-sm" title={state.baseUri}>
-          {state.revealed ? (
-            <>
-              Revealed, <span className="numeric">{shortCid(state.baseUri)}</span>
-            </>
-          ) : (
+        <p className="text-sm" title={settings.baseUri}>
+          {settings.pointer === 'placeholder' ? (
             'Placeholder (unrevealed)'
+          ) : (
+            <>
+              {settings.pointer === 'revealed' ? 'Revealed' : 'Custom'},{' '}
+              <span className="numeric">{shortCid(settings.baseUri)}</span>
+            </>
           )}
         </p>
         <Button
           variant="secondary"
           size="xs"
-          disabled={!realArtRendered}
-          title={
-            realArtRendered ? undefined : 'The real art is not rendered yet. Reveal opens once it is on IPFS.'
-          }
+          disabled={off !== null}
+          title={off ?? undefined}
           onClick={() => {
-            setDialog(Date.now())
+            setDialog({ id: Date.now(), at: settings })
             setOpen(true)
           }}
         >
           <EyeIcon aria-hidden="true" />
-          {state.revealed ? 'Change' : 'Reveal'}
+          {settings.pointer === 'placeholder' ? 'Reveal' : 'Change'}
         </Button>
       </div>
       {dialog !== null && (
         <RevealDialog
-          key={dialog}
+          key={dialog.id}
           open={open}
           onOpenChange={setOpen}
           chain={chain}
-          currentUri={state.baseUri}
-          metadataCid={SAMPLE.metadataCid}
-          singleAsset={singleAsset}
-          onApply={(baseUri) => setState({ baseUri, revealed: true })}
+          blocked={blocked}
+          confirm={confirm}
+          onConfirmed={onConfirmed}
+          current={dialog.at.baseUri}
+          targets={dialog.at.targets}
+          pointer={dialog.at.pointer}
         />
       )}
     </Fact>

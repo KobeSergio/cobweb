@@ -1,15 +1,17 @@
+import { getAddress } from 'viem'
 import { getDeployment } from '@/app/actions/deploy'
 import { getPhases } from '@/app/actions/phases'
+import { getSettings } from '@/app/actions/settings'
 import { ManageUnavailable } from '@/components/manage/manage-unavailable'
 import { OverviewScreen } from '@/components/manage/overview-screen'
+import { sampleSettingsView } from '@/components/manage/settings-sim'
 import { StagePage } from '@/components/shell/stage-page'
 import { NOT_DEPLOYED } from '@/lib/art/result'
-import { requireOwnedCollection } from '@/lib/auth'
+import { requireOwnedCollection, requireUser } from '@/lib/auth'
 import { chainView } from '@/lib/chain/chain-view'
 import {
   DEMO_ACTIVITY,
   DEMO_COLLECTION,
-  DEMO_DEFERRED_RENDER_JOBS,
   DEMO_DEPLOYMENT,
   DEMO_NOW,
   getChain,
@@ -29,11 +31,12 @@ const DESCRIPTION =
   'How the drop is doing: supply minted, the contract, the mint page, live phases and proceeds.'
 
 /**
- * Manage drop, overview (docs/specs/2026-10-15-phases.md, section 7.5). The header's chain, contract and
- * deploy time come from the deployment record; minted and the live phases from the server's read of the
- * chain. The pointer and Reveal, holders, the mint page bar's published state, proceeds and recent mints
- * keep their sample values until their sub-projects. In sample mode `?art=deferred` shows the deferred-art
- * scenario, whose real set is not rendered yet.
+ * Manage drop, overview (docs/specs/2026-10-15-airdrop-settings.md, section 7.5). The header's chain, contract and
+ * deploy time come from the deployment record; minted and the live phases from the server's read of the chain;
+ * what the base URI points at, Reveal and proceeds from the settings read. Holders, the mint page bar's published
+ * state and recent mints keep their sample values until Phase 6, and "Paid by minters" shows in sample mode only.
+ * In sample mode `?art=deferred` shows the deferred-art scenario, whose real set is not rendered yet, and
+ * `?art=revealed` a collection already revealed.
  */
 export default async function Page({
   params,
@@ -44,10 +47,11 @@ export default async function Page({
 }) {
   const { id } = await params
   const collection = await requireOwnedCollection(id)
-  const ctx = stageContext(collection, 'manage', 'manage', { art: await searchParam(searchParams, 'art') })
+  const user = await requireUser()
+  const art = await searchParam(searchParams, 'art')
+  const ctx = stageContext(collection, 'manage', 'manage', { art })
   if (ctx.access === 'locked') return <LockedStagePage collection={collection} stage="manage" />
-  // Seam: the real set is rendered when the collection's finished render job is not the placeholder's (no placeholder image CID).
-  const realArtRendered = !ctx.artDeferred || DEMO_DEFERRED_RENDER_JOBS.done.placeholderImageCid === null
+  const wallet = getAddress(user.walletAddress)
 
   if (ctx.demo) {
     const maxSupply = sampleSupply(collection.max_supply, DEMO_COLLECTION.maxSupply)
@@ -58,7 +62,8 @@ export default async function Page({
           // Manage drop is the deployed collection's home; sample mode opens it before deploy, so the
           // mint page link reads as a deployed one there too (no reservation wording).
           collection={{ ...collection, status: 'deployed' }}
-          deployment={DEMO_DEPLOYMENT}
+          contract={DEMO_DEPLOYMENT.contractAddress}
+          deployedAt={DEMO_DEPLOYMENT.deployedAt}
           chain={getChain(DEMO_DEPLOYMENT.chainId)!}
           groups={sample.groups}
           activity={DEMO_ACTIVITY}
@@ -67,15 +72,28 @@ export default async function Page({
           readAt={DEMO_NOW}
           chainReachable
           slug={collection.slug}
-          realArtRendered={realArtRendered}
+          settings={sampleSettingsView(collection, wallet, { art })}
+          wallet={wallet}
+          sample
+          paidByMintersWei={DEMO_ACTIVITY.proceeds.grossWei}
         />
       </StagePage>
     )
   }
 
-  const [record, phases] = await Promise.all([getDeployment(collection.id), getPhases(collection.id)])
-  if (!record.ok || !record.data || !phases.ok) {
-    const message = !record.ok ? record.error : !phases.ok ? phases.error : NOT_DEPLOYED
+  const [record, phases, settings] = await Promise.all([
+    getDeployment(collection.id),
+    getPhases(collection.id),
+    getSettings(collection.id),
+  ])
+  if (!record.ok || !record.data || !phases.ok || !settings.ok) {
+    const message = !record.ok
+      ? record.error
+      : !phases.ok
+        ? phases.error
+        : !settings.ok
+          ? settings.error
+          : NOT_DEPLOYED
     return (
       <StagePage title={TITLE} description={DESCRIPTION} width="wide">
         <ManageUnavailable title="The drop could not be read" message={message} />
@@ -87,15 +105,8 @@ export default async function Page({
     <StagePage title={TITLE} description={DESCRIPTION} width="wide">
       <OverviewScreen
         collection={collection}
-        // Seam: the pointer (base URI, revealed), fees, royalty and payout stay sample until the settings sub-project.
-        deployment={{
-          ...DEMO_DEPLOYMENT,
-          chainId: record.data.chainId,
-          contractAddress: record.data.contractAddress,
-          txHash: record.data.txHash,
-          deployer: record.data.deployer,
-          deployedAt: record.data.deployedAt,
-        }}
+        contract={record.data.contractAddress}
+        deployedAt={record.data.deployedAt}
         chain={chainView(view.chainId)}
         groups={view.groups}
         activity={DEMO_ACTIVITY}
@@ -104,7 +115,10 @@ export default async function Page({
         readAt={view.readAt}
         chainReachable={view.chainReachable}
         slug={collection.slug}
-        realArtRendered={realArtRendered}
+        settings={settings.data}
+        wallet={wallet}
+        sample={false}
+        paidByMintersWei={null}
       />
     </StagePage>
   )

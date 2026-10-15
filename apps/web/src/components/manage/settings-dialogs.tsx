@@ -2,7 +2,7 @@
 
 import { TriangleAlertIcon } from 'lucide-react'
 import { useId, useState } from 'react'
-import { getAddress, isAddress } from 'viem'
+import { getAddress, isAddress, type Hex } from 'viem'
 import { Alert, AlertDescription, AlertTitle } from '@cobweb/ui/components/alert'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@cobweb/ui/components/field'
 import { Input } from '@cobweb/ui/components/input'
@@ -15,11 +15,45 @@ import {
 import { RadioGroup, RadioGroupItem } from '@cobweb/ui/components/radio-group'
 // Royalty limits are Deploy's: 0 to 10%, in whole basis points, as in legacy.
 import { MAX_ROYALTY_PERCENT, royaltyBps as royaltyPercentToBps } from '@/components/deploy/deploy-form'
-import { formatBps, type Address, type SupportedChain } from '@/lib/demo'
-import { sampleRequest } from './manage-sim'
+import { IPFS_LINK_INVALID, type ActionResult } from '@/lib/art/result'
+import type { Address, SupportedChain } from '@/lib/demo'
+import { reviewOf, settingsCalls, type ManageCall } from '@/lib/manage/phase-calls'
+import type { RevealPointer, RevealTargets, SettingsView } from '@/lib/manage/settings-types'
+import { ipfsUriValid, tokenUriOf } from '@/lib/manage/settings-view'
+import type { ManageRequest } from './manage-actions'
 import { TransactionDialog } from './transaction-dialog'
 
-type Base = { open: boolean; onOpenChange: (open: boolean) => void; chain: SupportedChain }
+/** What every Settings dialog takes: the dialog, the chain, the owner check, and the server's confirm. */
+export type SettingsDialogBase = {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  chain: SupportedChain
+  /** The owner check's sentence: the dialog opens for reading, its action off. */
+  blocked: string | null
+  confirm: (hash: Hex, call: ManageCall) => Promise<ActionResult<SettingsView>>
+  onConfirmed: (view: SettingsView) => void
+}
+
+/**
+ * A Settings change as its dialog sends it (docs/specs/2026-10-15-airdrop-settings.md, section 7.4): the call, its
+ * review from the ABI on its contract (the transfer validator for the level, else the collection), and the
+ * server's confirm of the hash with the call.
+ */
+export function settingsRequest(
+  call: ManageCall,
+  chain: SupportedChain,
+  confirm: SettingsDialogBase['confirm'],
+): ManageRequest<SettingsView> {
+  return {
+    call,
+    review: {
+      contract: call.target ? 'Transfer validator' : 'Collection',
+      functionName: call.functionName,
+      args: reviewOf(call, chain),
+    },
+    confirm: (hash) => confirm(hash, call),
+  }
+}
 
 /** The address a typed value resolves to, or why it does not. */
 function readAddress(value: string): { address: Address | null; error: string | null } {
@@ -41,9 +75,10 @@ function readAddress(value: string): { address: Address | null; error: string | 
 /** Change where withdrawn proceeds are paid. */
 export function PayoutDialog({
   current,
-  onApply,
+  confirm,
+  onConfirmed,
   ...base
-}: Base & { current: Address; onApply: (address: Address) => void }) {
+}: SettingsDialogBase & { current: Address }) {
   const id = useId()
   const [value, setValue] = useState('')
   const { address, error } = readAddress(value)
@@ -55,16 +90,8 @@ export function PayoutDialog({
       description="Every withdrawal from now on is paid here. Use an address you control; a wrong one cannot be reversed once funds are sent."
       actionLabel="Change address"
       successMessage="Payout address changed"
-      request={
-        address && !same
-          ? sampleRequest({
-              contract: 'Collection',
-              functionName: 'setOwnerPayoutAddress',
-              args: [{ name: 'address', value: address }],
-            })
-          : null
-      }
-      onConfirmed={() => address && onApply(address)}
+      request={address && !same ? settingsRequest(settingsCalls.payout(address), base.chain, confirm) : null}
+      onConfirmed={onConfirmed}
     >
       <Field data-invalid={!!error || same}>
         <FieldLabel htmlFor={`${id}-address`}>New payout address</FieldLabel>
@@ -95,9 +122,10 @@ export function PayoutDialog({
 export function RoyaltyDialog({
   receiver,
   bps,
-  onApply,
+  confirm,
+  onConfirmed,
   ...base
-}: Base & { receiver: Address; bps: number; onApply: (receiver: Address, bps: number) => void }) {
+}: SettingsDialogBase & { receiver: Address; bps: number }) {
   const id = useId()
   const [percentValue, setPercent] = useState(String(bps / 100))
   const [receiverValue, setReceiver] = useState<string>(receiver)
@@ -114,17 +142,10 @@ export function RoyaltyDialog({
       successMessage="Royalties updated"
       request={
         nextBps !== null && address && !unchanged
-          ? sampleRequest({
-              contract: 'Collection',
-              functionName: 'setDefaultRoyalty',
-              args: [
-                { name: 'receiver', value: address },
-                { name: 'feeNumerator', value: `${nextBps} (${formatBps(nextBps)})` },
-              ],
-            })
+          ? settingsRequest(settingsCalls.royalty(address, nextBps), base.chain, confirm)
           : null
       }
-      onConfirmed={() => address && nextBps !== null && onApply(address, nextBps)}
+      onConfirmed={onConfirmed}
     >
       <div className="grid gap-5">
         <Field data-invalid={!valid} className="max-w-48">
@@ -169,74 +190,97 @@ export function RoyaltyDialog({
   )
 }
 
+type Source = 'rendered' | 'placeholder' | 'custom'
+
+/** Each source Reveal offers: its label, what it is, the action and the toast. */
+const SOURCES: Record<Source, { label: string; description: string; action: string; success: string }> = {
+  rendered: {
+    label: 'Rendered metadata',
+    description: 'From the art you locked and rendered on Cobweb.',
+    action: 'Reveal',
+    success: 'Metadata updated. The collection is revealed.',
+  },
+  placeholder: {
+    label: 'Placeholder',
+    description: 'The placeholder every token showed before the reveal.',
+    action: 'Use the placeholder',
+    success: 'Metadata updated. Every token shows the placeholder.',
+  },
+  custom: {
+    label: 'Another IPFS link',
+    description:
+      'A metadata link you pinned yourself: a folder ending in / gives each token its own file, and a single file is shown for every token.',
+    action: 'Use this link',
+    success: 'Metadata updated. The collection points at your link.',
+  },
+}
+
 /**
- * Reveal: point the base URI at the rendered metadata. Shows what token 1 resolves to before
- * and after, and allows another CID for a collection whose metadata lives elsewhere.
+ * Reveal and change the metadata (docs/specs/2026-10-15-airdrop-settings.md, section 7.4): the base URI to the
+ * rendered metadata (the real job's, exactly), back to the placeholder, or to another IPFS link, with what token 1
+ * resolves to now and after by the contract's rule. It opens on the first source that would change something.
  */
 export function RevealDialog({
-  currentUri,
-  metadataCid,
-  singleAsset,
-  onApply,
+  current,
+  targets,
+  pointer,
+  confirm,
+  onConfirmed,
   ...base
-}: Base & { currentUri: string; metadataCid: string; singleAsset: boolean; onApply: (uri: string) => void }) {
+}: SettingsDialogBase & { current: string; targets: RevealTargets; pointer: RevealPointer }) {
   const id = useId()
-  const [source, setSource] = useState<'rendered' | 'custom'>('rendered')
-  const [custom, setCustom] = useState('')
-  // Single Asset: no trailing slash, so every token returns the base as-is (MASTER_PLAN, Contracts: single asset tokenURI).
-  const withSlash = (cid: string) => `ipfs://${cid}${singleAsset ? '' : '/'}`
-  const customCid = custom
-    .trim()
-    .replace(/^ipfs:\/\//, '')
-    .replace(/\/$/, '')
-  const customValid = /^(Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z2-7]{58,})$/.test(customCid)
-  const uri = source === 'rendered' ? withSlash(metadataCid) : customValid ? withSlash(customCid) : null
-  const tokenUri = (value: string) => (value.endsWith('/') ? `${value}1` : value)
+  const uriOf = (source: Source) =>
+    source === 'rendered' ? targets.real : source === 'placeholder' ? targets.placeholder : null
+  const offered = (['rendered', 'placeholder', 'custom'] as const).filter(
+    (source) => source === 'custom' || uriOf(source) !== null,
+  )
+  const [source, setSource] = useState<Source>(
+    () => offered.find((candidate) => candidate === 'custom' || uriOf(candidate) !== current) ?? 'custom',
+  )
+  const [link, setLink] = useState('')
+  const typed = link.trim()
+  const linkValid = ipfsUriValid(typed)
+  const target = source === 'custom' ? (linkValid ? typed : null) : uriOf(source)
+  const words = SOURCES[source]
 
   return (
     <TransactionDialog
       {...base}
       className="sm:max-w-xl"
       destructive={source === 'custom'}
-      title="Reveal the art"
-      description="Holders and marketplaces see the real tokens once this confirms. Marketplaces refresh on the metadata update event, which can take a few minutes."
-      actionLabel="Reveal"
-      successMessage="Metadata updated. The collection is revealed."
+      title={pointer === 'placeholder' ? 'Reveal the art' : 'Change the metadata'}
+      description={
+        pointer === 'placeholder'
+          ? 'Holders and marketplaces see the real tokens once this confirms. Marketplaces refresh on the metadata update event, which can take a few minutes.'
+          : 'Holders and marketplaces see the new metadata once this confirms. Marketplaces refresh on the metadata update event, which can take a few minutes.'
+      }
+      actionLabel={words.action}
+      successMessage={words.success}
       request={
-        uri && uri !== currentUri
-          ? sampleRequest({
-              contract: 'Collection',
-              functionName: 'setBaseURI',
-              args: [{ name: 'uri', value: uri }],
-            })
+        target && target !== current
+          ? settingsRequest(settingsCalls.baseUri(target), base.chain, confirm)
           : null
       }
-      onConfirmed={() => uri && onApply(uri)}
+      onConfirmed={onConfirmed}
     >
       <div className="grid gap-5">
-        <RadioGroup
-          value={source}
-          onValueChange={(value) => setSource(value as 'rendered' | 'custom')}
-          className="gap-3"
-        >
-          <label htmlFor={`${id}-rendered`} className="flex items-start gap-3 text-sm">
-            <RadioGroupItem id={`${id}-rendered`} value="rendered" className="mt-0.5" />
-            <span>
-              <span className="font-medium">Rendered metadata</span>
-              <span className="text-muted-foreground block text-[0.8125rem]">
-                From the art you locked and rendered on Cobweb.
+        <RadioGroup value={source} onValueChange={(value) => setSource(value as Source)} className="gap-3">
+          {offered.map((option) => (
+            <label key={option} htmlFor={`${id}-${option}`} className="flex items-start gap-3 text-sm">
+              <RadioGroupItem id={`${id}-${option}`} value={option} className="mt-0.5" />
+              <span>
+                <span className="font-medium">
+                  {SOURCES[option].label}
+                  {uriOf(option) === current && (
+                    <span className="text-muted-foreground font-normal"> (now)</span>
+                  )}
+                </span>
+                <span className="text-muted-foreground block text-[0.8125rem]">
+                  {SOURCES[option].description}
+                </span>
               </span>
-            </span>
-          </label>
-          <label htmlFor={`${id}-custom`} className="flex items-start gap-3 text-sm">
-            <RadioGroupItem id={`${id}-custom`} value="custom" className="mt-0.5" />
-            <span>
-              <span className="font-medium">Another IPFS folder</span>
-              <span className="text-muted-foreground block text-[0.8125rem]">
-                A metadata CID you pinned yourself.
-              </span>
-            </span>
-          </label>
+            </label>
+          ))}
         </RadioGroup>
         {source === 'custom' && (
           <Alert variant="destructive">
@@ -249,28 +293,28 @@ export function RevealDialog({
           </Alert>
         )}
         {source === 'custom' && (
-          <Field data-invalid={!!custom && !customValid}>
-            <FieldLabel htmlFor={`${id}-cid`}>Metadata CID</FieldLabel>
+          <Field data-invalid={!!typed && !linkValid}>
+            <FieldLabel htmlFor={`${id}-link`}>IPFS link</FieldLabel>
             <Input
-              id={`${id}-cid`}
-              value={custom}
-              onChange={(event) => setCustom(event.target.value)}
-              placeholder="bafy..."
+              id={`${id}-link`}
+              value={link}
+              onChange={(event) => setLink(event.target.value)}
+              placeholder="ipfs://bafy.../"
               className="numeric"
               autoComplete="off"
               spellCheck={false}
             />
-            {custom && !customValid && <FieldError>That does not look like an IPFS CID.</FieldError>}
+            {typed && !linkValid && <FieldError>{IPFS_LINK_INVALID}</FieldError>}
           </Field>
         )}
         <dl className="grid gap-3 text-[0.8125rem] sm:grid-cols-2">
           <div className="bg-well shadow-inset grid gap-1 rounded-lg border p-3">
             <dt className="text-muted-foreground">Token 1 now</dt>
-            <dd className="numeric break-all">{tokenUri(currentUri)}</dd>
+            <dd className="numeric break-all">{tokenUriOf(current)}</dd>
           </div>
           <div className="grid gap-1 rounded-lg border border-border-strong p-3">
             <dt className="text-muted-foreground">Token 1 after</dt>
-            <dd className="numeric break-all">{uri ? tokenUri(uri) : 'Enter a CID'}</dd>
+            <dd className="numeric break-all">{target ? tokenUriOf(target) : 'Enter a link'}</dd>
           </div>
         </dl>
       </div>

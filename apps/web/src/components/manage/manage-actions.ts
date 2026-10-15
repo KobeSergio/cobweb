@@ -7,26 +7,19 @@ import { abiOf, type ManageCall } from '@/lib/manage/phase-calls'
 
 /**
  * What a change in Manage drop does in the browser, in one shape for both modes
- * (docs/specs/2026-10-15-phases.md, section 7.3): `realManageActions` runs wagmi on the collection,
+ * (docs/specs/2026-10-15-phases.md, section 7.3): `realManageActions` runs wagmi on the call's contract,
  * `sampleManageActions` (manage-sim.ts) simulates. `TransactionDialog` builds the manage machine's deps
  * from these, the request's confirm and the timers.
  */
 
-/** A contract call as the creator reviews it before signing. */
+/** A contract call as the creator reviews it before signing; a value sent with it is its last row. */
 export type TxRequest = {
   /** The contract the call goes to. */
   contract: 'Collection' | 'Transfer validator'
   /** The function name exactly as in the ABI, e.g. `setMintGroupStatus`. */
   functionName: string
-  /** Arguments in ABI order, already formatted for reading. */
+  /** Arguments in ABI order, already formatted for reading (`reviewOf`). */
   args: { name: string; value: string }[]
-  /** Native amount sent with the call, in wei. */
-  valueWei?: string
-  /**
-   * Tabs still on sample data only: the contract's own check mirrored in the browser, answering the
-   * error's name or null. The sample actions run it at "Checking the change".
-   */
-  check?: () => string | null
 }
 
 export type ManageActions = {
@@ -41,17 +34,14 @@ export type ManageActions = {
   nextGroupId(): Promise<number>
   /** Sample only: the simulated wallet's answer. */
   answer?(choice: 'approve' | 'reject' | 'approve-revert'): void
-  /** Sample only: a tab still on sample data has no call, so its review's `check` stands in for the simulation. */
-  review?(review: TxRequest): Promise<() => Promise<Hex>>
 }
 
 /** One change as a dialog sends it: the call, what the creator reviews, and how the server confirms it. */
 export type ManageRequest<T> = {
-  /** Null on a tab still on sample data. */
-  call: ManageCall | null
+  call: ManageCall
   review: TxRequest
   confirm(hash: Hex): Promise<ActionResult<T>>
-  /** Add phase and the chunk write: keep the sent hash until the server confirms it. */
+  /** Add phase, the chunk write and an airdrop batch: keep the sent hash until the server confirms it. */
   pending?: { remember(hash: Hex): void; forget(): void }
 }
 

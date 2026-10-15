@@ -1,7 +1,12 @@
+import { getAddress } from 'viem'
+import { getSettings } from '@/app/actions/settings'
+import { ManageUnavailable } from '@/components/manage/manage-unavailable'
 import { SettingsScreen } from '@/components/manage/settings-screen'
+import { sampleSettingsView } from '@/components/manage/settings-sim'
 import { StagePage } from '@/components/shell/stage-page'
-import { requireOwnedCollection } from '@/lib/auth'
-import { DEMO_ACTIVITY, DEMO_DEFERRED_RENDER_JOBS, DEMO_DEPLOYMENT, getChain } from '@/lib/demo'
+import { requireOwnedCollection, requireUser } from '@/lib/auth'
+import { DEMO_MINTER } from '@/lib/demo'
+import type { SettingsView } from '@/lib/manage/settings-types'
 import {
   LockedStagePage,
   searchParam,
@@ -10,9 +15,16 @@ import {
   type SearchParams,
 } from '../../_lib/stage'
 
+const TITLE = 'Settings'
+const DESCRIPTION =
+  'Withdraw proceeds, the payout address, royalties and reveal. Advanced holds tradability and mint on behalf.'
+
 /**
- * Manage drop, settings. Sample data until the contract reads and writes are wired. In sample mode
- * `?art=deferred` shows the deferred-art scenario, whose real set is not rendered yet.
+ * Manage drop, Settings (docs/specs/2026-10-15-airdrop-settings.md, section 7.4): the contract's settings and
+ * balances read on the server at one block, with the reveal targets and the withdrawals Cobweb confirmed. Sample
+ * mode only (`NEXT_PUBLIC_DEMO_DATA=1`): the sample on any collection, `?chain=unreachable` shows the copies with
+ * their alert, `?owner=other` the owner check, `?art=deferred` no real set to reveal to, `?art=revealed` a
+ * collection already revealed.
  */
 export default async function Page({
   params,
@@ -23,24 +35,33 @@ export default async function Page({
 }) {
   const { id } = await params
   const collection = await requireOwnedCollection(id)
-  const ctx = stageContext(collection, 'manage', 'manage', { art: await searchParam(searchParams, 'art') })
+  const user = await requireUser()
+  const art = await searchParam(searchParams, 'art')
+  const ctx = stageContext(collection, 'manage', 'manage', { art })
   if (ctx.access === 'locked') return <LockedStagePage collection={collection} stage="manage" />
-  const chain = getChain(DEMO_DEPLOYMENT.chainId)!
+  const wallet = getAddress(user.walletAddress)
+
+  let view: SettingsView
+  if (ctx.demo) {
+    view = sampleSettingsView(collection, wallet, {
+      chainReachable: (await searchParam(searchParams, 'chain')) !== 'unreachable',
+      owner: (await searchParam(searchParams, 'owner')) === 'other' ? getAddress(DEMO_MINTER) : undefined,
+      art,
+    })
+  } else {
+    const result = await getSettings(collection.id)
+    if (!result.ok)
+      return (
+        <StagePage title={TITLE} description={DESCRIPTION} width="default">
+          <ManageUnavailable title="The settings could not be read" message={result.error} />
+        </StagePage>
+      )
+    view = result.data
+  }
 
   return (
-    <StagePage
-      title="Settings"
-      description="Withdraw proceeds, the payout address, royalties and reveal. Advanced holds tradability and mint on behalf."
-      width="default"
-    >
-      <SettingsScreen
-        collection={collection}
-        deployment={DEMO_DEPLOYMENT}
-        chain={chain}
-        activity={DEMO_ACTIVITY}
-        // Seam: the real set is rendered when the collection's finished render job is not the placeholder's (no placeholder image CID).
-        realArtRendered={!ctx.artDeferred || DEMO_DEFERRED_RENDER_JOBS.done.placeholderImageCid === null}
-      />
+    <StagePage title={TITLE} description={DESCRIPTION} width="default">
+      <SettingsScreen collection={collection} view={view} wallet={wallet} sample={ctx.demo} />
     </StagePage>
   )
 }

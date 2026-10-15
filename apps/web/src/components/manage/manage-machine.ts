@@ -45,10 +45,7 @@ import type { SentChunk } from '@/lib/manage/whitelist-types'
  * minutes. `TransactionDialog` wires the actions in.
  */
 export type ManageInput = {
-  /**
-   * The change. Null on a tab still on sample data, whose sample actions check its review instead, and
-   * for "Check again", which never simulates (`sentHash` is set).
-   */
+  /** The change. Null for "Check again", which never simulates (`sentHash` is set). */
   call: ManageCall | null
   /** The connected account, if any. */
   account: string | undefined
@@ -67,7 +64,7 @@ export type ManageInput = {
 
 export type ManageDeps<T> = {
   switchChain(chainId: number): Promise<void>
-  /** Simulates the call on the collection; resolves with the function that sends the simulated request, unchanged. */
+  /** Simulates the call on its contract; resolves with the function that sends the simulated request, unchanged. */
   simulate(call: ManageCall | null): Promise<() => Promise<Hex>>
   wait(hash: Hex): Promise<'success' | 'reverted'>
   confirm(hash: Hex): Promise<ActionResult<T>>

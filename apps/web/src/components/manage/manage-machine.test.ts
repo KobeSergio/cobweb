@@ -338,7 +338,7 @@ describe('runManage', () => {
     expect(calls.forget).toBe(1)
   })
 
-  it('passes a null call to the simulation (a tab still on sample data)', async () => {
+  it('passes the call to the simulation as it is, even a null one', async () => {
     const { deps, calls } = fakeDeps([{ ok: true, data: VIEW }])
     await run(deps, { ...input, call: null })
     expect(calls.simulated).toEqual([null])

@@ -9,7 +9,6 @@ import {
   sampleManageActions,
   samplePhasesServer,
   samplePhasesView,
-  sampleRequest,
   sampleRevert,
 } from './manage-sim'
 import { sampleSettingsView } from './settings-sim'
@@ -138,23 +137,12 @@ describe('the sample actions and server', () => {
     expect(await revertWait).toBe('reverted')
   })
 
-  it('refuses at the check what the contract would refuse, and checks a sample tab by its review', async () => {
+  it('refuses at the check what the contract would refuse', async () => {
     const actions = sampleManageActions(() => view)
     const refused = actions.simulate(phaseCalls.allocation(1, 100))
     const expectation = expect(refused).rejects.toMatchObject({ name: 'ContractFunctionRevertedError' })
     await vi.advanceTimersByTimeAsync(650)
     await expectation
-    const review = actions.review?.({
-      contract: 'Collection',
-      functionName: 'airdropNFTs',
-      args: [],
-      check: () => 'ExceedsMaxSupply',
-    })
-    const reviewExpectation = expect(review).rejects.toMatchObject({
-      shortMessage: 'The contract would reject this with ExceedsMaxSupply.',
-    })
-    await vi.advanceTimersByTimeAsync(650)
-    await reviewExpectation
   })
 
   it('answers the next free id, and records an add with the call the wallet sent', async () => {
@@ -173,13 +161,6 @@ describe('the sample actions and server', () => {
       priceWei: '1000',
       maxSupply: 20,
     })
-  })
-
-  it('answers the hash for a tab still on sample data', async () => {
-    const hash: Hex = `0x${'ef'.repeat(32)}`
-    const request = sampleRequest({ contract: 'Collection', functionName: 'withdrawMintFunds', args: [] })
-    expect(request.call).toBeNull()
-    expect(await request.confirm(hash)).toEqual({ ok: true, data: hash })
   })
 })
 

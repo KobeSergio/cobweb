@@ -1,9 +1,9 @@
 /**
- * Sample mode for Manage drop (docs/specs/2026-10-15-phases.md, section 8), and the sample values the tabs
- * still on sample data read. Nothing here talks to a wallet, an RPC or the database: `sampleManageActions`
- * and `samplePhasesServer` have the shape of `realManageActions` (manage-actions.ts) and `phasesServer`
- * (phases-server.ts), so Phases runs the same code in both modes. Every simulated change goes through
- * the manage machine and the same dialog.
+ * Sample mode for Manage drop (docs/specs/2026-10-15-phases.md, section 8), and the sample values the mint page
+ * parts still read. Nothing here talks to a wallet, an RPC or the database: `sampleManageActions` and
+ * `samplePhasesServer` have the shape of `realManageActions` (manage-actions.ts) and `phasesServer`
+ * (phases-server.ts), so every tab runs the same code in both modes. Every simulated change goes through the
+ * manage machine and the same dialog.
  */
 import { collectionAbi } from '@cobweb/shared/collection-abi'
 import { ContractFunctionRevertedError, encodeErrorResult } from 'viem'
@@ -13,17 +13,16 @@ import {
   DEMO_MINT_PAGE_SETTINGS,
   DEMO_NOW,
   DEMO_PUBLIC_MAX_PER_WALLET,
-  DEMO_RENDER_JOBS,
   sampleSupply,
   sampleTxHash,
   scaleSampleToSupply,
 } from '@/lib/demo'
-import type { Address, Hex, MintGroup } from '@/lib/demo'
+import type { Hex, MintGroup } from '@/lib/demo'
 import type { ActionResult } from '@/lib/art/result'
 import { phaseCalls, type ManageCall } from '@/lib/manage/phase-calls'
 import type { PhaseAdd, PhasesView } from '@/lib/manage/phases-types'
 import type { SettingsView } from '@/lib/manage/settings-types'
-import type { ManageActions, ManageRequest, TxRequest } from './manage-actions'
+import type { ManageActions } from './manage-actions'
 import type { PendingAdd } from './manage-machine'
 import type { PhasesServer } from './phases-server'
 
@@ -46,19 +45,10 @@ export function chainReadGroup(group: Omit<MintGroup, 'active'>, blockTimestamp:
   return { ...group, active: group.flag || scheduledReached }
 }
 
-/** Sample values the tabs still on sample data read beyond their props. Each names the real source. */
+/** Sample values the Overview still reads beyond its props until Phase 6. Each names the real source. */
 export const SAMPLE = {
-  /** SEAM: the freshness server's `readAt` / block timestamp for the collection. */
-  readAt: DEMO_NOW,
   /** SEAM: the mint page settings row (avatar and the public switch on the overview). */
   mintPage: DEMO_MINT_PAGE_SETTINGS,
-  /**
-   * SEAM: the collection's `getTransferValidator()`. Limit Break's default validator, the
-   * `DEFAULT_TRANSFER_VALIDATOR` constant of creator-token-standards, same address on every chain.
-   */
-  transferValidator: '0x721C008fdff27BF06E7E123956E2Fe03B63342e3' as Address,
-  /** SEAM: `render_jobs.metadata_cid` of the finished render job, the reveal target. */
-  metadataCid: DEMO_RENDER_JOBS.done.metadataCid,
 } as const
 
 /**
@@ -300,14 +290,14 @@ export function sampleManageActions(
   let settle: ((choice: Choice) => void) | null = null
   const reverting = new Set<Hex>()
   /** The simulated wallet: a hash on Approve, a rejection on Reject. */
-  const walletFor = (call: ManageCall | null) => () =>
+  const walletFor = (call: ManageCall) => () =>
     new Promise<Hex>((resolve, reject) => {
       settle = (choice) => {
         settle = null
         if (choice === 'reject') return reject(userRejected())
         const hash = simulatedTxHash()
         if (choice === 'approve-revert') reverting.add(hash)
-        if (call) sent.set(hash, call)
+        sent.set(hash, call)
         resolve(hash)
       }
     })
@@ -318,15 +308,6 @@ export function sampleManageActions(
       const refused = sampleRevert(call, current(), settings?.())
       if (refused) throw refused
       return walletFor(call)
-    },
-    review: async (review: TxRequest) => {
-      await wait(650)
-      const reason = review.check?.() ?? null
-      if (reason)
-        throw Object.assign(new Error(reason), {
-          shortMessage: `The contract would reject this with ${reason}.`,
-        })
-      return walletFor(null)
     },
     wait: async (hash) => {
       await wait(1600)
@@ -360,11 +341,6 @@ export function samplePhasesServer(
     setVisibility: () => answer(() => undefined),
     move: () => answer(() => undefined),
   }
-}
-
-/** A tab still on sample data: its review, simulated by the sample actions, and the hash as the answer. */
-export function sampleRequest(review: TxRequest): ManageRequest<Hex> {
-  return { call: null, review, confirm: async (hash) => ({ ok: true, data: hash }) }
 }
 
 /** The add `?pending=add` shows waiting to be recorded. */

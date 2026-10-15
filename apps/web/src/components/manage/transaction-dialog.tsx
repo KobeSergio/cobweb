@@ -58,8 +58,8 @@ export type TransactionDialogProps<T> = {
   /** Shown in the toast and the done state, e.g. "Owl List is open". */
   successMessage: string
   /**
-   * The server's answer once the change is confirmed: the fresh view on Phases, the hash on a tab still on
-   * sample data. Called even when the run ends after the dialog closed or unmounted.
+   * The server's answer once the change is confirmed: the fresh view it read. Called even when the run ends
+   * after the dialog closed or unmounted.
    */
   onConfirmed?: (result: T) => void
   /**
@@ -163,16 +163,15 @@ export function TransactionDialog<T>({
           chainId,
           connectedChainId: sample ? chainId : account.chainId,
           sentHash: checkHash,
-          addId: call?.functionName === 'registerMintGroup' ? Number(call.args[0]) : undefined,
+          addId: call.functionName === 'registerMintGroup' ? Number(call.args[0]) : undefined,
           nativeSymbol: chain.nativeSymbol,
         },
         {
           switchChain: (target) => actions.switchChain(target),
-          simulate: (next) => {
-            if (next) return actions.simulate(next)
-            if (actions.review) return actions.review(current.review)
-            return Promise.reject(new Error('This change runs on sample data only.'))
-          },
+          simulate: (next) =>
+            next
+              ? actions.simulate(next)
+              : Promise.reject(new Error('A change sent is checked, never sent again.')),
           wait: (hash) => actions.wait(hash),
           confirm: (hash) => current.confirm(hash),
           remember: current.pending ? (hash) => current.pending?.remember(hash) : undefined,
@@ -324,13 +323,13 @@ export function TransactionDialog<T>({
  * (an airdrop's fee), that value too.
  */
 function walletDetail(request: ManageRequest<unknown> | null, chain: SupportedChain): string {
-  const value = request?.call?.value
+  const value = request?.call.value
   if (value !== undefined)
     return `Your wallet shows a call to the collection contract, the ${formatNative(value, chain.nativeSymbol, 18)} sent with it, and the gas for it.`
   return `Your wallet shows a call to the ${(request?.review.contract ?? 'Collection').toLowerCase()} contract and the gas for it.`
 }
 
-/** The call as it will be sent: contract, function, arguments, value. */
+/** The call as it will be sent: contract, function, arguments, and the value with it as the last row. */
 export function CallReview({ request, chain }: { request: TxRequest; chain: SupportedChain }) {
   return (
     <div className="bg-well shadow-inset rounded-lg border px-4 py-3">
@@ -346,12 +345,6 @@ export function CallReview({ request, chain }: { request: TxRequest; chain: Supp
             <dd className="numeric min-w-0 text-right break-all">{arg.value}</dd>
           </div>
         ))}
-        {request.valueWei && (
-          <div className="contents">
-            <dt className="text-muted-foreground">Value</dt>
-            <dd className="numeric text-right">{formatNative(request.valueWei, chain.nativeSymbol)}</dd>
-          </div>
-        )}
       </dl>
     </div>
   )
