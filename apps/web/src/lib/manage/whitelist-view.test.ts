@@ -63,15 +63,16 @@ describe('entriesOf and writtenChunksOf', () => {
   })
 
   it('counts each chunk by the rows that name it, in the order they were recorded, to the millisecond', () => {
+    // TX_B was recorded first but sorts after TX_A by hash, so only the recording time puts it first.
     const chunks = writtenChunksOf([
-      row(FIRST, 2, 2, TX_B, '2026-10-15T08:00:00.700Z'),
-      row(SECOND, 1, 1, TX_A, '2026-10-15T08:00:00.200Z'),
-      row(THIRD, 1, 1, TX_A, '2026-10-15T08:00:00.200Z'),
+      row(FIRST, 2, 2, TX_A, '2026-10-15T08:00:00.700Z'),
+      row(SECOND, 1, 1, TX_B, '2026-10-15T08:00:00.200Z'),
+      row(THIRD, 1, 1, TX_B, '2026-10-15T08:00:00.200Z'),
       row(FOURTH, 1),
     ])
     expect(chunks).toEqual<WrittenChunk[]>([
-      { txHash: TX_A, addresses: 2, writtenAt: Date.parse('2026-10-15T08:00:00.200Z') },
-      { txHash: TX_B, addresses: 1, writtenAt: Date.parse('2026-10-15T08:00:00.700Z') },
+      { txHash: TX_B, addresses: 2, writtenAt: Date.parse('2026-10-15T08:00:00.200Z') },
+      { txHash: TX_A, addresses: 1, writtenAt: Date.parse('2026-10-15T08:00:00.700Z') },
     ])
   })
 })

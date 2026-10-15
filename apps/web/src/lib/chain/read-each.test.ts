@@ -2,6 +2,7 @@ import {
   BaseError,
   ContractFunctionExecutionError,
   ContractFunctionRevertedError,
+  ContractFunctionZeroDataError,
   erc721Abi,
   multicall3Abi,
   type Address,
@@ -37,6 +38,14 @@ const reverted = (id: number) =>
       functionName: 'ownerOf',
     },
   )
+/** An empty answer as viem reports it for one call: the address holds no contract, or the call returned no data. */
+const emptyAnswer = (id: number) =>
+  new ContractFunctionExecutionError(new ContractFunctionZeroDataError({ functionName: 'ownerOf' }), {
+    abi: erc721Abi,
+    args: [BigInt(id)],
+    contractAddress: CONTRACT,
+    functionName: 'ownerOf',
+  })
 /** A request that never reached the node: the multicall as a whole, or one call. */
 const unreachable = (whole: boolean) =>
   whole
@@ -119,6 +128,13 @@ describe('readEach', () => {
     expect(await readEach<number>(client, calls(120), { blockNumber: BLOCK })).toEqual(expected(120))
     expect(most()).toBe(50)
     expect(blocks.every((block) => block === BLOCK)).toBe(true)
+  })
+
+  it('answers null for an empty answer on the parallel path', async () => {
+    const { client } = parallelClient((id) => (id === 60 ? emptyAnswer(id) : null))
+    expect(await readEach<number>(client, calls(120))).toEqual(
+      expected(120).map((answer, id) => (id === 60 ? null : answer)),
+    )
   })
 
   it('answers nothing for no calls', async () => {
