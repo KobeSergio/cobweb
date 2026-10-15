@@ -16,10 +16,13 @@ import {
   PHASE_REVERTED,
   PHASE_TIMED_OUT,
   THROWN,
+  WHITELIST_NOT_CONFIRMED,
+  WHITELIST_TIMED_OUT,
   type ActionResult,
 } from '@/lib/art/result'
 import type { ManageCall } from '@/lib/manage/phase-calls'
 import type { PhaseAdd } from '@/lib/manage/phases-types'
+import type { SentChunk } from '@/lib/manage/whitelist-types'
 
 /**
  * Every on-chain change in Manage drop as one pure machine (docs/specs/2026-10-15-phases.md, section 7.2):
@@ -54,7 +57,7 @@ export type ManageDeps<T> = {
   simulate(call: ManageCall | null): Promise<() => Promise<Hex>>
   wait(hash: Hex): Promise<'success' | 'reverted'>
   confirm(hash: Hex): Promise<ActionResult<T>>
-  /** Add phase only: keeps the sent hash until the server records the phase. */
+  /** Add phase and the chunk write: keep the sent hash until the server confirms it. */
   remember?(hash: Hex): void
   forget?(): void
   sleep(ms: number): Promise<void>
@@ -73,6 +76,15 @@ const REVERTED_ON_CHAIN: TxFailure = {
 }
 
 /**
+ * The answers that mean "not confirmed yet", each with what the machine says when the wait runs out: a phase
+ * change's, and a whitelist chunk's (docs/specs/2026-10-15-whitelist.md, section 7.1).
+ */
+const NOT_CONFIRMED_YET = new Map([
+  [PHASE_NOT_CONFIRMED, PHASE_TIMED_OUT],
+  [WHITELIST_NOT_CONFIRMED, WHITELIST_TIMED_OUT],
+])
+
+/**
  * Asks the server to confirm a change every 3 seconds while it answers "not confirmed yet", for up to 2
  * minutes. A confirm that throws is a transient failure.
  */
@@ -89,8 +101,9 @@ export async function verifyManage<T>(
       return { error: THROWN }
     }
     if (answer.ok) return { result: answer.data }
-    if (answer.error !== PHASE_NOT_CONFIRMED) return { error: answer.error }
-    if (deps.now() - started + CONFIRM_INTERVAL_MS > CONFIRM_TIMEOUT_MS) return { error: PHASE_TIMED_OUT }
+    const timedOut = NOT_CONFIRMED_YET.get(answer.error)
+    if (!timedOut) return { error: answer.error }
+    if (deps.now() - started + CONFIRM_INTERVAL_MS > CONFIRM_TIMEOUT_MS) return { error: timedOut }
     await deps.sleep(CONFIRM_INTERVAL_MS)
   }
 }
@@ -261,6 +274,40 @@ export function pendingAdd(store: KeyStore | null, collectionId: string): Pendin
 export function forgetAdd(store: KeyStore | null, collectionId: string): void {
   try {
     store?.removeItem(keyFor(collectionId))
+  } catch {
+    // Storage blocked: nothing was kept.
+  }
+}
+
+const chunkKeyFor = (collectionId: string) => `cobweb-whitelist:${collectionId}`
+
+/** Keeps a chunk this browser sent until the server confirms it: one per collection. */
+export function rememberChunk(store: KeyStore | null, collectionId: string, sent: SentChunk): void {
+  try {
+    store?.setItem(chunkKeyFor(collectionId), JSON.stringify(sent))
+  } catch {
+    // Storage blocked: the chunk is still checked in this visit.
+  }
+}
+
+/** A chunk this browser sent for the collection and the server has not confirmed yet, or null. */
+export function sentChunk(store: KeyStore | null, collectionId: string): SentChunk | null {
+  try {
+    const value = store?.getItem(chunkKeyFor(collectionId)) ?? null
+    if (!value) return null
+    const parsed = JSON.parse(value) as { hash?: unknown; onchainId?: unknown }
+    if (typeof parsed.hash !== 'string' || !HASH_RE.test(parsed.hash)) return null
+    if (typeof parsed.onchainId !== 'number' || !Number.isInteger(parsed.onchainId) || parsed.onchainId < 1)
+      return null
+    return { hash: parsed.hash as Hex, onchainId: parsed.onchainId }
+  } catch {
+    return null
+  }
+}
+
+export function forgetChunk(store: KeyStore | null, collectionId: string): void {
+  try {
+    store?.removeItem(chunkKeyFor(collectionId))
   } catch {
     // Storage blocked: nothing was kept.
   }

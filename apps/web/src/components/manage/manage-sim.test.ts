@@ -1,4 +1,4 @@
-import type { Hex } from 'viem'
+import type { Address, Hex } from 'viem'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { classifyError } from '@/components/deploy/tx-errors'
 import { DEMO_COLLECTION, DEMO_MINT_GROUPS, DEMO_NOW, DEMO_TOTAL_MINTED } from '@/lib/demo'
@@ -179,5 +179,30 @@ describe('the sample actions and server', () => {
     const request = sampleRequest({ contract: 'Collection', functionName: 'withdrawMintFunds', args: [] })
     expect(request.call).toBeNull()
     expect(await request.confirm(hash)).toEqual({ ok: true, data: hash })
+  })
+})
+
+describe('the quota call on the sample (docs/specs/2026-10-15-whitelist.md, section 8)', () => {
+  const A: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
+  const sentence = (call: ManageCall) => {
+    const refused = sampleRevert(call, view)
+    return refused ? classifyError(refused, 'simulating', 'manage').message : null
+  }
+
+  it('refuses unequal lengths, the public sale and an unknown group as the contract would', () => {
+    expect(sentence({ functionName: 'setMintQuota', args: [[A], 1n, [1n, 2n]] })).toBe(
+      'The addresses and quotas do not line up. Reload and try again. Nothing was sent.',
+    )
+    expect(sentence(phaseCalls.quotas(0, [A], [1]))).toBe(
+      'The public sale has no whitelist. Nothing was sent.',
+    )
+    expect(sentence(phaseCalls.quotas(9, [A], [1]))).toBe(
+      'Phase 9 is not on the contract. Read the contract again. Nothing was sent.',
+    )
+    expect(sampleRevert(phaseCalls.quotas(1, [A], [1]), view)).toBeNull()
+  })
+
+  it('changes no group of the phases view', () => {
+    expect(sampleApply(phaseCalls.quotas(1, [A], [1]), view)).toEqual(view)
   })
 })

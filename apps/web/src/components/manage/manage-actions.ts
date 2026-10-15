@@ -48,7 +48,7 @@ export type ManageRequest<T> = {
   call: ManageCall | null
   review: TxRequest
   confirm(hash: Hex): Promise<ActionResult<T>>
-  /** Add phase only: keeps the sent hash until the server records the phase. */
+  /** Add phase and the chunk write: keep the sent hash until the server confirms it. */
   pending?: { remember(hash: Hex): void; forget(): void }
 }
 

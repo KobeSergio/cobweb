@@ -14,7 +14,6 @@ import {
   DEMO_NOW,
   DEMO_PUBLIC_MAX_PER_WALLET,
   DEMO_RENDER_JOBS,
-  DEMO_WHITELISTS,
   sampleSupply,
   sampleTxHash,
   scaleSampleToSupply,
@@ -50,8 +49,6 @@ export function chainReadGroup(group: Omit<MintGroup, 'active'>, blockTimestamp:
 export const SAMPLE = {
   /** SEAM: the freshness server's `readAt` / block timestamp for the collection. */
   readAt: DEMO_NOW,
-  /** SEAM: whitelist entries and the chunk table. */
-  whitelists: DEMO_WHITELISTS,
   /** SEAM: the mint page settings row (avatar and the public switch on the overview). */
   mintPage: DEMO_MINT_PAGE_SETTINGS,
   /**
@@ -108,7 +105,8 @@ function revert(functionName: string, data: Hex): ContractFunctionRevertedError 
 
 /**
  * How the contract would refuse a call on the sample view, or null when it would pass: the mirror of the
- * collection's group checks (an unknown group, an id taken, below minted, the allocations over the supply).
+ * collection's group checks (an unknown group, an id taken, below minted, the allocations over the supply) and
+ * of `setMintQuota`'s (unequal lengths, the public sale, an unknown group).
  */
 export function sampleRevert(call: ManageCall, view: PhasesView): ContractFunctionRevertedError | null {
   const find = (id: bigint) => view.groups.find((group) => BigInt(group.id) === id)
@@ -152,6 +150,20 @@ export function sampleRevert(call: ManageCall, view: PhasesView): ContractFuncti
       return find(call.args[0]) ? null : missing(call.args[0])
     case 'changeSalePrice':
       return find(call.args[1]) ? null : missing(call.args[1])
+    case 'setMintQuota': {
+      const [addresses, id, quotas] = call.args
+      if (addresses.length !== quotas.length)
+        return revert(
+          call.functionName,
+          encodeErrorResult({ abi: collectionAbi, errorName: 'ArrayLengthMismatch' }),
+        )
+      if (id === 0n)
+        return revert(
+          call.functionName,
+          encodeErrorResult({ abi: collectionAbi, errorName: 'PublicGroupHasNoQuota' }),
+        )
+      return find(id) ? null : missing(id)
+    }
     default:
       return null
   }
@@ -214,6 +226,9 @@ export function sampleApply(call: ManageCall, view: PhasesView, add?: PhaseAdd):
     }
     case 'setPublicMaxMintPerWallet':
       publicMaxPerWallet = Number(call.args[0])
+      break
+    case 'setMintQuota':
+      // A phases view holds no quotas: the Whitelist's sample server applies them (whitelist-sim.ts).
       break
   }
   return {

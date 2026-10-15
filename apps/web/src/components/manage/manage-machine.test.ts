@@ -16,14 +16,20 @@ import {
   SIGNED_OUT,
   THROWN,
   UNSAVED,
+  WHITELIST_NOT_CONFIRMED,
+  WHITELIST_TIMED_OUT,
   type ActionResult,
 } from '@/lib/art/result'
 import { phaseCalls, type ManageCall } from '@/lib/manage/phase-calls'
+import type { SentChunk } from '@/lib/manage/whitelist-types'
 import {
   forgetAdd,
+  forgetChunk,
   pendingAdd,
   rememberAdd,
+  rememberChunk,
   runManage,
+  sentChunk,
   type ManageDeps,
   type ManageInput,
   type PendingAdd,
@@ -386,5 +392,91 @@ describe('the pending add kept in the browser', () => {
     expect(pendingAdd(blocked, 'col-1')).toBeNull()
     expect(pendingAdd(null, 'col-1')).toBeNull()
     expect(() => forgetAdd(null, 'col-1')).not.toThrow()
+  })
+})
+
+describe('a whitelist chunk (docs/specs/2026-10-15-whitelist.md, section 7.1)', () => {
+  const CHUNK_NOT_YET: ActionResult<string> = { ok: false, error: WHITELIST_NOT_CONFIRMED }
+  const chunk: ManageInput = { ...input, call: phaseCalls.quotas(1, [WALLET], [2]) }
+
+  it('polls every 3 seconds while the chunk is not confirmed yet, then answers the view and forgets the hash', async () => {
+    const { deps, calls } = fakeDeps([CHUNK_NOT_YET, CHUNK_NOT_YET, { ok: true, data: VIEW }])
+    const { result } = await run(deps, chunk)
+    expect(calls.confirm).toBe(3)
+    expect(calls.sleeps).toEqual([3_000, 3_000])
+    expect(calls.remember).toEqual([HASH])
+    expect(calls.forget).toBe(1)
+    expect(result).toBe(VIEW)
+  })
+
+  it('stops after 2 minutes with the chunk sentence and keeps the hash to check again', async () => {
+    const { deps, calls } = fakeDeps(Array<ActionResult<string>>(50).fill(CHUNK_NOT_YET))
+    const { last, phase } = await run(deps, chunk)
+    expect(calls.confirm).toBe(41)
+    expect(last).toEqual({
+      type: 'failed',
+      failure: { kind: 'unconfirmed', title: 'Change not confirmed yet', message: WHITELIST_TIMED_OUT },
+    })
+    expect(calls.forget).toBe(0)
+    expect(retryHash(phase)).toBe(HASH)
+  })
+})
+
+describe('the sent chunk kept in the browser', () => {
+  const memory = (): KeyStore => {
+    const map = new Map<string, string>()
+    return {
+      getItem: (key) => map.get(key) ?? null,
+      setItem: (key, value) => {
+        map.set(key, value)
+      },
+      removeItem: (key) => {
+        map.delete(key)
+      },
+    }
+  }
+  const failing: KeyStore = {
+    getItem: () => {
+      throw new Error('blocked')
+    },
+    setItem: () => {
+      throw new Error('blocked')
+    },
+    removeItem: () => {
+      throw new Error('blocked')
+    },
+  }
+  const sent: SentChunk = { hash: HASH, onchainId: 2 }
+
+  it('remembers the hash and the group per collection, apart from a pending add, until they are forgotten', () => {
+    const store = memory()
+    rememberChunk(store, 'col-1', sent)
+    expect(sentChunk(store, 'col-1')).toEqual(sent)
+    expect(sentChunk(store, 'col-2')).toBeNull()
+    expect(store.getItem('cobweb-whitelist:col-1')).toContain(HASH)
+    expect(pendingAdd(store, 'col-1')).toBeNull()
+    forgetChunk(store, 'col-1')
+    expect(sentChunk(store, 'col-1')).toBeNull()
+  })
+
+  it('reads as none a value without a 32-byte hash and a group of 1 or more, and a store that throws', () => {
+    const store = memory()
+    for (const value of [
+      'nonsense',
+      'null',
+      JSON.stringify({ hash: 'not-a-hash', onchainId: 2 }),
+      JSON.stringify({ hash: `0x${'ab'.repeat(31)}`, onchainId: 2 }),
+      JSON.stringify({ hash: HASH }),
+      JSON.stringify({ hash: HASH, onchainId: 0 }),
+      JSON.stringify({ hash: HASH, onchainId: 1.5 }),
+      JSON.stringify({ hash: HASH, onchainId: '2' }),
+    ]) {
+      store.setItem('cobweb-whitelist:col-1', value)
+      expect(sentChunk(store, 'col-1')).toBeNull()
+    }
+    expect(() => rememberChunk(failing, 'col-1', sent)).not.toThrow()
+    expect(sentChunk(failing, 'col-1')).toBeNull()
+    expect(sentChunk(null, 'col-1')).toBeNull()
+    expect(() => forgetChunk(null, 'col-1')).not.toThrow()
   })
 })
