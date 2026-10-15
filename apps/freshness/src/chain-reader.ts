@@ -212,7 +212,9 @@ export function chainReader(
       entry.readAt = doneAt
       if (extras) {
         entry.extrasReadAt = doneAt
-        entry.marked = false
+        // Extras read at a head below the scanned block can miss a change in the blocks between, which the
+        // scan has already passed: the entry stays marked, so the next tick reads it in full again.
+        entry.marked = scanned !== null && head < scanned
       }
     }
   }

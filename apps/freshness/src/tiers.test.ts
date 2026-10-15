@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { chainTier, degradedAfterMs, isDegraded, nextDelayMs, tierOf } from './tiers.ts'
 
 /** The chain's time at the read. */
-const NOW_S = 1_800_000_000
+const NOW_S: number = 1_800_000_000
 
 const group = (overrides: Partial<ChainGroup>): ChainGroup => ({
   id: 0,
@@ -101,10 +101,22 @@ describe('nextDelayMs', () => {
     expect(nextDelayMs('fast', [{ state: scheduled(15.5), readAt: 10_000 }], 10_000, 10_000)).toBe(1_000)
   })
 
-  it('never wakes sooner than one fast tick after the tick starts while a stale read says the window has opened', () => {
+  it('does not shorten a live tick for a window that opens within it', () => {
+    expect(nextDelayMs('live', [{ state: scheduled(16), readAt: 10_000 }], 10_000, 10_000)).toBe(2_000)
+  })
+
+  it("answers the idle interval while a frozen read's window opened at or before the tick's start", () => {
     // Read at 0 s, 23 s before a start: its window opened at 8 s, before this tick began at 10 s.
-    expect(nextDelayMs('idle', [{ state: scheduled(23), readAt: 0 }], 10_000, 10_000)).toBe(1_000)
+    expect(nextDelayMs('idle', [{ state: scheduled(23), readAt: 0 }], 10_000, 10_000)).toBe(20_000)
+    expect(nextDelayMs('idle', [{ state: scheduled(23), readAt: 0 }], 10_000, 10_400)).toBe(19_600)
+    // Read at 2 s: its window opened at 10 s, as this tick began.
+    expect(nextDelayMs('idle', [{ state: scheduled(23), readAt: 2_000 }], 10_000, 10_000)).toBe(20_000)
+  })
+
+  it('never wakes sooner than one fast tick after the tick starts for a stale read whose window opens just after it', () => {
+    // Read at 2.5 s, 23 s before a start: its window opens at 10.5 s, half a second into this tick.
+    expect(nextDelayMs('idle', [{ state: scheduled(23), readAt: 2_500 }], 10_000, 10_000)).toBe(1_000)
     // The floor counts from the tick's start, not from when the tick ended.
-    expect(nextDelayMs('idle', [{ state: scheduled(23), readAt: 0 }], 10_000, 10_400)).toBe(600)
+    expect(nextDelayMs('idle', [{ state: scheduled(23), readAt: 2_500 }], 10_000, 10_400)).toBe(600)
   })
 })

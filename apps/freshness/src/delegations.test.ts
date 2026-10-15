@@ -78,8 +78,12 @@ describe('vaultsOf (docs/specs/2026-10-16-freshness-server.md, section 6.8)', ()
     ).toEqual([vault(2), vault(1), vault(0)])
   })
 
-  it('stops at 10 vaults', () => {
-    const many = Array.from({ length: 12 }, (_, n) => delegation(vault(n)))
+  it('stops at 10 vaults, counting only the delegations it keeps', () => {
+    // The first carries rights and is dropped, so the tenth vault is the eleventh delegation.
+    const many = [
+      delegation(vault(99), { rights: RIGHTS }),
+      ...Array.from({ length: 12 }, (_, n) => delegation(vault(n))),
+    ]
     expect(MAX_VAULTS).toBe(10)
     expect(vaultsOf(many, COLLECTION, WALLET)).toEqual(Array.from({ length: 10 }, (_, n) => vault(n)))
   })

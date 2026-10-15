@@ -1,6 +1,6 @@
 import { DELEGATE_REGISTRY, delegateRegistryAbi, readEach, type ChainConfig } from '@cobweb/shared'
 import { collectionAbi } from '@cobweb/shared/collection-abi'
-import type { Address, ContractFunctionParameters, PublicClient } from 'viem'
+import { getAddress, type Address, type ContractFunctionParameters, type PublicClient } from 'viem'
 import { vaultsOf, type Delegation } from './delegations.ts'
 import { errorLine } from './health.ts'
 
@@ -72,10 +72,12 @@ export function walletWindows(
   let waiting = 0
   let stopped = false
 
+  /** Answers a pair's waiters and lets them go, so a pair answered again finds none left to count. */
   function answer(pair: Pair, value: Answer): void {
-    for (const resolve of pair.waiters) resolve(value)
-    waiting -= pair.waiters.length
-    answered += pair.waiters.length
+    const waiters = pair.waiters.splice(0)
+    waiting -= waiters.length
+    answered += waiters.length
+    for (const resolve of waiters) resolve(value)
   }
 
   /**
@@ -109,12 +111,16 @@ export function walletWindows(
             args: [wallet],
           })
       const answers = await readEach<unknown>(client, calls, { blockNumber: head })
-      // A null listing reads as no vaults.
-      const listings = new Map(
-        wallets.map((wallet, index) => [
-          wallet.toLowerCase(),
-          (answers[pairs.length + index] ?? []) as readonly Delegation[],
-        ]),
+      // A null listing reads as no vaults, and is logged.
+      const listings = new Map<string, readonly Delegation[]>(
+        wallets.map((wallet, index) => {
+          const listing = withRegistry ? (answers[pairs.length + index] as readonly Delegation[] | null) : []
+          if (listing === null)
+            console.error(
+              `The registry listing for ${wallet} on ${chain.name} answered nothing; it reads as no vaults.`,
+            )
+          return [wallet.toLowerCase(), listing ?? []]
+        }),
       )
       const vaults = pairs.map((pair) =>
         vaultsOf(listings.get(pair.wallet.toLowerCase()) ?? [], pair.address, pair.wallet),
@@ -168,9 +174,12 @@ export function walletWindows(
   }
 
   return {
-    ask(address, wallet) {
+    ask(collection, holder) {
       if (stopped) return Promise.resolve('unreadable')
       if (waiting >= QUEUE_MAX) return Promise.resolve('busy')
+      // Checksummed whatever the spelling, so a bad one cannot fail every pair in its window.
+      const address = getAddress(collection.toLowerCase())
+      const wallet = getAddress(holder.toLowerCase())
       waiting++
       return new Promise<Answer>((resolve) => {
         const key = `${address.toLowerCase()}:${wallet.toLowerCase()}`

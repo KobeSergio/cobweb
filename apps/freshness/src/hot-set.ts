@@ -25,7 +25,10 @@ export type HotEntry = {
   readAt: number | null
   /** When the extras were last read; null before the first. */
   extrasReadAt: number | null
-  /** To read in full (the state and the extras) at the next tick: a new entry, or one a log named. */
+  /**
+   * To read in full (the state and the extras) at the next tick: a new entry, one a log named, or one read in
+   * full at a head below the scanned block.
+   */
   marked: boolean
 }
 

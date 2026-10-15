@@ -1,5 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "types": ["node"], "allowImportingTsExtensions": true, "erasableSyntaxOnly": true },
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true
+  },
   "include": ["src"]
 }

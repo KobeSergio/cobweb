@@ -60,6 +60,21 @@ describe('collectionCheck (docs/specs/2026-10-16-freshness-server.md, section 6.
     expect(asked).toHaveLength(NEGATIVE_MAX + 2)
   })
 
+  it('keeps a false answer read again as the newest, so the next one past the limit forgets another', async () => {
+    const { read, asked } = counted(async () => false)
+    let now = 0
+    const check = collectionCheck(read, () => now)
+    await check(31337, address(0))
+    now = 1
+    for (let n = 1; n < NEGATIVE_MAX; n++) await check(31337, address(n))
+    now = NEGATIVE_TTL_MS
+    await check(31337, address(0))
+    await check(31337, address(NEGATIVE_MAX))
+    expect(asked).toHaveLength(NEGATIVE_MAX + 2)
+    expect(await check(31337, address(0))).toBe(false)
+    expect(asked).toHaveLength(NEGATIVE_MAX + 2)
+  })
+
   it('shares one read between two asks of one address in flight', async () => {
     let settle: (answer: boolean) => void = () => {}
     const { read, asked } = counted(() => new Promise<boolean>((resolve) => (settle = resolve)))

@@ -64,7 +64,8 @@ export function errorLine(error: unknown): string {
 
 /**
  * An unexpected failure as the log writes it: `errorLine`, then the error's code where it has one, as
- * `TypeError (ERR_INVALID_URL)`. A code is a whole number or capitals, digits and underscores, never a message.
+ * `TypeError (ERR_INVALID_URL)`. A code is a whole number or capitals, digits and underscores, never a
+ * message.
  */
 export function failureLine(error: unknown): string {
   const code = error instanceof Error && 'code' in error ? error.code : undefined

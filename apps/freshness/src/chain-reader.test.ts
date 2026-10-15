@@ -1,4 +1,4 @@
-import { chainById, type CollectionStateResult } from '@cobweb/shared'
+import { chainById, type ChainConfig, type CollectionStateResult } from '@cobweb/shared'
 import { collectionAbi } from '@cobweb/shared/collection-abi'
 import {
   ContractFunctionExecutionError,
@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { chainReader } from './chain-reader.ts'
 import { hotSet, type HotSet } from './hot-set.ts'
 
-const ANVIL = chainById(31337, false)!
+const ANVIL: ChainConfig = chainById(31337, false)!
 const A: Address = '0x0409454C375c8a6aB05383bFB6D9FcDe9ebB8F85'
 const B: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
 const OWNER: Address = '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
@@ -267,6 +267,41 @@ describe('chainReader (docs/specs/2026-10-16-freshness-server.md, section 6.4)',
     await reader.stop()
   })
 
+  it('keeps a collection read in full at a head below the scanned block marked, and reads it in full again at the next tick', async () => {
+    const { chain, client } = fakeChain()
+    const hot = hotSet()
+    const reader = chainReader(ANVIL, hot, client)
+    hot.join(31337, A, Date.now())
+    reader.wake()
+    await settle()
+    chain.head = 102n
+    await vi.advanceTimersByTimeAsync(2_000)
+    // An older head (a load-balanced RPC) as B joins: B is read in full at 101, below the scanned 102.
+    chain.head = 101n
+    const b = hot.join(31337, B, Date.now()).entry
+    reader.wake()
+    await settle()
+    expect([b.read?.state.block, b.read?.extras.baseUri, b.marked]).toEqual([101n, 'ipfs://first/', true])
+    // B's base URI changed in block 102, which the scan passed before B joined.
+    chain.baseUris.set(B, 'ipfs://second/')
+    chain.head = 103n
+    chain.calls.length = 0
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(chain.calls).toEqual([
+      'head',
+      'logs 103-103',
+      `collectionState ${A} @103`,
+      `collectionState ${B} @103`,
+      `owner ${B} @103`,
+      `royaltyInfo ${B} @103`,
+      `baseURI ${B} @103`,
+      `getTransferValidator ${B} @103`,
+      `code ${VALIDATOR}`,
+    ])
+    expect([b.read?.state.block, b.read?.extras.baseUri, b.marked]).toEqual([103n, 'ipfs://second/', false])
+    await reader.stop()
+  })
+
   it('runs one more tick after a wake during a tick, never beside it (Review Focus 5)', async () => {
     const { chain, client } = fakeChain()
     const hot = hotSet()
@@ -512,9 +547,10 @@ describe('chainReader (docs/specs/2026-10-16-freshness-server.md, section 6.4)',
     chain.failure = rpcDown(503)
     chain.calls.length = 0
     await vi.advanceTimersByTimeAsync(60_000)
+    // A tick when the window opens, 8 s after the read, then the idle tier's 20 s: 3 head reads in 60 s.
     const heads = chain.calls.filter((call) => call === 'head').length
     expect(heads).toBeGreaterThan(0)
-    expect(heads).toBeLessThanOrEqual(61)
+    expect(heads).toBeLessThanOrEqual(5)
     expect(reader.health().failedTicks).toBe(heads)
     const lines = errors.mock.calls.map((call) => String(call[0]))
     expect(lines).toHaveLength(heads)
@@ -550,7 +586,10 @@ describe('chainReader (docs/specs/2026-10-16-freshness-server.md, section 6.4)',
     expect(reader.health()).toMatchObject({ failedTicks: 1, lastError: 'TypeError' })
     expect(errors.mock.calls.map((call) => String(call[0]))).toEqual(['A tick on Anvil failed: TypeError'])
     chain.head = 101n
-    await vi.advanceTimersByTimeAsync(2_000)
+    // The next tick comes one interval of the chain's tier (live, 2 s) after the throw.
+    await vi.advanceTimersByTimeAsync(1_999)
+    expect(chain.calls).toEqual([])
+    await vi.advanceTimersByTimeAsync(1)
     expect(chain.calls).toEqual(['head', 'logs 101-101', `collectionState ${A} @101`])
     await reader.stop()
   })

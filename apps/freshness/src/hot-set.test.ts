@@ -44,6 +44,14 @@ describe('hotSet (docs/specs/2026-10-16-freshness-server.md, section 6.3)', () =
     expect(hot.onChain(31337).map((entry) => entry.address)).toEqual([B])
   })
 
+  it('counts the 10 minutes from the last request, not from the join', () => {
+    const hot = hotSet()
+    hot.join(31337, A, 0)
+    hot.join(31337, A, 500_000)
+    expect(hot.expire(HOT_TTL_MS)).toEqual([])
+    expect(hot.expire(500_000 + HOT_TTL_MS).map((entry) => entry.address)).toEqual([A])
+  })
+
   it("empties a chain's list when its last entry leaves, and leaves the other chains", () => {
     const hot = hotSet()
     hot.join(31337, A, 0)
