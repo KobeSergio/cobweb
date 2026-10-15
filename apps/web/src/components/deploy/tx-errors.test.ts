@@ -154,7 +154,11 @@ describe('classifyError for a change in Manage drop (docs/specs/2026-10-15-phase
     })
     expect(
       classifyError(new Error('insufficient funds for gas * price + value'), 'simulating', 'manage'),
-    ).toMatchObject({ kind: 'balance', title: 'Not enough funds for gas' })
+    ).toEqual({
+      kind: 'balance',
+      title: 'Not enough funds',
+      message: 'This wallet cannot cover this change and its gas on this network. Add funds, then try again.',
+    })
     expect(classifyError(new Error('Timed out.'), 'wallet', 'manage')).toEqual({
       kind: 'rejected',
       title: 'The wallet did not send the change',

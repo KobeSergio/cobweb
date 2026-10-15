@@ -68,10 +68,11 @@ const WORDS: Record<TxSubject, Words> = {
       title: 'Cancelled in your wallet',
       message: 'Nothing was sent and no gas was spent. Try again when you are ready.',
     },
+    // A change can carry a value (an airdrop's fee): the shortfall is the change and its gas, not gas alone.
     balance: {
       kind: 'balance',
-      title: 'Not enough funds for gas',
-      message: 'This wallet cannot cover the gas for this change on this network. Add funds, then try again.',
+      title: 'Not enough funds',
+      message: 'This wallet cannot cover this change and its gas on this network. Add funds, then try again.',
     },
     switchRejected:
       'Your wallet stayed on its current network, so nothing was sent. Try again and approve the switch.',

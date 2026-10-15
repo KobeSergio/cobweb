@@ -459,7 +459,8 @@ export function AirdropScreen({
             ) : sending ? (
               <div className="grid gap-2 text-sm">
                 <p>
-                  Sending to <span className="numeric">{count(rows.length)}</span> wallets in{' '}
+                  Sending to <span className="numeric">{count(rows.length)}</span>{' '}
+                  {rows.length === 1 ? 'wallet' : 'wallets'} in{' '}
                   <span className="numeric">{count(sending.batches.length)}</span>{' '}
                   {sending.batches.length === 1 ? 'transaction' : 'transactions'}. The list is locked until
                   every batch is sent.
