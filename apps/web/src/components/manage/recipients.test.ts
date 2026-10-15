@@ -54,6 +54,23 @@ describe('parseRecipients', () => {
     expect(airdrop.duplicates).toBe(1)
   })
 
+  it('leaves out the repeat that takes an address past 1,000 tokens, with its line, keeping the earlier sum (Review Focus 1)', () => {
+    const result = parseRecipients(`${A},2\n${B},1\n${A},999\n${A},998`, AIRDROP)
+    expect(result.rows.map((row) => [row.address, row.amount])).toEqual([
+      [getAddress(A), 1000],
+      [getAddress(B), 1],
+    ])
+    expect(result.invalid).toEqual<InvalidRow[]>([
+      {
+        line: 3,
+        text: `${A},999`,
+        reason: 'With its earlier lines, the quantity for this address passes 1,000.',
+      },
+    ])
+    expect(result.duplicates).toBe(1)
+    expect(parseRecipients(`${A},10000\n${A},10000`, WHITELIST).invalid).toEqual([])
+  })
+
   it('refuses the zero address with its line number, for a whitelist and an airdrop alike', () => {
     const zero = '0x0000000000000000000000000000000000000000'
     for (const options of [WHITELIST, AIRDROP]) {

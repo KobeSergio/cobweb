@@ -34,6 +34,7 @@ import {
   NOT_FOUND,
   NOT_LOCKED,
   NOT_RENDERED,
+  NOT_THIS_CHANGE,
   NOT_THIS_JOB,
   NOTHING_TO_LOCK,
   OTHER_WALLET,
@@ -201,5 +202,20 @@ export function whitelistWriteError(error: DbError): string {
   if (!error) return UNSAVED
   if (error.code === '42501') return error.message === 'phase not found' ? NAME_FIRST : NOT_FOUND
   if (error.code === '23514' && WHITELIST_SENTENCES.has(error.message)) return error.message
+  return UNSAVED
+}
+
+/** Sentences the Airdrop and Settings functions raise (supabase/migrations/20261016000000_airdrop_settings.sql). */
+const RECORD_SENTENCES = new Set([NOT_DEPLOYED, NOT_THIS_CHANGE])
+
+/**
+ * A failed Airdrop or Settings write, by SQLSTATE, in the creator's words
+ * (docs/specs/2026-10-15-airdrop-settings.md, section 6.6): a refused owner check reads as not found, the
+ * functions' own sentences pass through, and anything else says "reload".
+ */
+export function manageRecordError(error: DbError): string {
+  if (!error) return UNSAVED
+  if (error.code === '42501') return NOT_FOUND
+  if (error.code === '23514' && RECORD_SENTENCES.has(error.message)) return error.message
   return UNSAVED
 }

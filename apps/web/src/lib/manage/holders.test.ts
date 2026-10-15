@@ -1,11 +1,11 @@
 import { getAddress, zeroAddress, type Address } from 'viem'
 import { describe, expect, it } from 'vitest'
+import { BURN_ADDRESS } from './airdrop-view'
 import { holdersOf, snapshotIds, type Holder } from './holders'
 
 const A: Address = '0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65'
 const B: Address = '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
 const C: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
-const DEAD: Address = '0x000000000000000000000000000000000000dEaD'
 
 describe('holdersOf', () => {
   it('sums a balance per owner whatever the case, most tokens first, then by lowercase address', () => {
@@ -23,9 +23,8 @@ describe('holdersOf', () => {
   })
 
   it('leaves out failed reads, the zero address and the dead address', () => {
-    expect(holdersOf([null, zeroAddress, DEAD, DEAD.toLowerCase(), A, null])).toEqual<Holder[]>([
-      { address: getAddress(A), balance: 1 },
-    ])
+    const owners = [null, zeroAddress, BURN_ADDRESS, BURN_ADDRESS.toLowerCase(), A, null]
+    expect(holdersOf(owners)).toEqual<Holder[]>([{ address: getAddress(A), balance: 1 }])
     expect(holdersOf([null, zeroAddress])).toEqual([])
   })
 })

@@ -90,6 +90,16 @@ export function parseRecipients(text: string, options: ParseOptions): ParseResul
     const key = address.toLowerCase()
     const existing = byAddress.get(key)
     if (existing) {
+      // A summed repeat is checked against the most an address may get: the line that passes it is left out, and
+      // the earlier sum stays (docs/specs/2026-10-15-airdrop-settings.md, section 7.3).
+      if (options.onDuplicate === 'sum' && existing.amount + amount > options.maxAmount) {
+        invalid.push({
+          line,
+          text: trimmed,
+          reason: `With its earlier lines, the ${options.amountName} for this address passes ${options.maxAmount.toLocaleString('en-US')}.`,
+        })
+        return
+      }
       duplicates++
       existing.amount = options.onDuplicate === 'sum' ? existing.amount + amount : amount
       return

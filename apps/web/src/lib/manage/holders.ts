@@ -1,4 +1,5 @@
 import { getAddress, zeroAddress, type Address } from 'viem'
+import { BURN_ADDRESS } from './airdrop-view'
 
 /**
  * The holder snapshot's pure parts (docs/specs/2026-10-15-whitelist.md, section 6.4): which token ids to
@@ -15,7 +16,7 @@ export type HolderSnapshot = { holders: Holder[]; block: number; supply: number 
 /** The largest `totalSupply()` a snapshot reads (one `ownerOf` per id, within a server action's 300 seconds). */
 export const SNAPSHOT_MAX_SUPPLY = 20_000
 
-const DEAD = '0x000000000000000000000000000000000000dead'
+const BURN = BURN_ADDRESS.toLowerCase()
 
 /**
  * The ids to read: 0 to the supply, both ends included, so a collection numbered from 0 and one numbered
@@ -34,7 +35,7 @@ export function holdersOf(owners: readonly (string | null)[]): Holder[] {
   for (const owner of owners) {
     if (!owner) continue
     const key = owner.toLowerCase()
-    if (key === zeroAddress || key === DEAD) continue
+    if (key === zeroAddress || key === BURN) continue
     balances.set(key, (balances.get(key) ?? 0) + 1)
   }
   return [...balances]

@@ -130,3 +130,15 @@ export const SNAPSHOT_TOO_LARGE = 'Snapshots cover collections up to 20,000 toke
 export const NO_HOLDERS = 'No holders found. Check the address and the chain.'
 export const SNAPSHOT_CHAIN = 'Cobweb cannot read this chain yet. Choose another chain.'
 export const SNAPSHOT_FAILED = 'The snapshot could not be taken. Try again in a moment.'
+
+// Airdrop and Settings (docs/specs/2026-10-15-airdrop-settings.md, section 6.6). Said by the server or the screen
+// (the database raises none of these).
+export const AIRDROP_NOT_CONFIRMED = 'The tokens have not been confirmed on chain yet.'
+export const AIRDROP_TIMED_OUT =
+  'The tokens are not confirmed yet. Check again in a minute, and do not send the batch again: it would mint its tokens twice.'
+export const SETTINGS_NOT_CONFIRMED = 'The setting has not been confirmed on chain yet.'
+export const SETTINGS_TIMED_OUT =
+  'The setting is not confirmed yet. Read the contract again in a minute to see it.'
+export const NOT_OWNER = (owner: string) =>
+  `This wallet is not the contract's owner. Changes on chain need ${owner}.`
+export const IPFS_LINK_INVALID = 'Enter a full ipfs:// link with its CID.'

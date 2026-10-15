@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { artWriteError, lockWriteError, phasesWriteError, whitelistWriteError } from './db-error'
+import {
+  artWriteError,
+  lockWriteError,
+  manageRecordError,
+  phasesWriteError,
+  whitelistWriteError,
+} from './db-error'
 import {
   ALREADY_LOCKED,
   ART_CHANGED,
@@ -53,6 +59,7 @@ import {
   QUOTA_RANGE,
   WHITELIST_FULL,
   WRONG_GROUP,
+  NOT_THIS_CHANGE,
 } from './result'
 
 describe('artWriteError', () => {
@@ -257,5 +264,30 @@ describe('whitelistWriteError', () => {
       UNSAVED,
     )
     expect(whitelistWriteError(null)).toBe(UNSAVED)
+  })
+})
+
+describe('manageRecordError', () => {
+  it('reads a refused owner check or a refused execute as not found', () => {
+    expect(manageRecordError({ code: '42501', message: 'collection not found' })).toBe(NOT_FOUND)
+    expect(
+      manageRecordError({ code: '42501', message: 'permission denied for function airdrop_record' }),
+    ).toBe(NOT_FOUND)
+  })
+
+  it("passes the record functions' sentences through", () => {
+    for (const sentence of [NOT_DEPLOYED, NOT_THIS_CHANGE])
+      expect(manageRecordError({ code: '23514', message: sentence })).toBe(sentence)
+  })
+
+  it('says "reload" for anything else', () => {
+    expect(
+      manageRecordError({
+        code: '23514',
+        message: 'new row for relation "airdrops" violates check constraint "airdrops_token_range"',
+      }),
+    ).toBe(UNSAVED)
+    expect(manageRecordError({ code: '23502', message: 'Every setting is required.' })).toBe(UNSAVED)
+    expect(manageRecordError(null)).toBe(UNSAVED)
   })
 })
