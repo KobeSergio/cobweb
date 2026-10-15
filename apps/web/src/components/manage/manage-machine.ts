@@ -1,4 +1,4 @@
-import type { Address, Hex } from 'viem'
+import { getAddress, isAddress, type Address, type Hex } from 'viem'
 import {
   CONFIRM_INTERVAL_MS,
   CONFIRM_TIMEOUT_MS,
@@ -8,6 +8,8 @@ import {
 import { classifyError } from '@/components/deploy/tx-errors'
 import type { TxFailure } from '@/components/deploy/tx-progress'
 import {
+  AIRDROP_NOT_CONFIRMED,
+  AIRDROP_TIMED_OUT,
   NOT_FROM_WALLET,
   NOT_THIS_CHANGE,
   NOT_THIS_CONTRACT,
@@ -15,11 +17,21 @@ import {
   PHASE_NOT_CONFIRMED,
   PHASE_REVERTED,
   PHASE_TIMED_OUT,
+  SETTINGS_NOT_CONFIRMED,
+  SETTINGS_TIMED_OUT,
   THROWN,
   WHITELIST_NOT_CONFIRMED,
   WHITELIST_TIMED_OUT,
   type ActionResult,
 } from '@/lib/art/result'
+import type { AirdropJob, BatchEntry } from '@/lib/manage/airdrop-types'
+import {
+  AIRDROP_MAX_PER_ADDRESS,
+  AIRDROP_MAX_RECIPIENTS,
+  AIRDROP_MAX_TOKENS,
+  BURN_ADDRESS,
+  tokensOf,
+} from '@/lib/manage/airdrop-view'
 import type { ManageCall } from '@/lib/manage/phase-calls'
 import type { PhaseAdd } from '@/lib/manage/phases-types'
 import type { SentChunk } from '@/lib/manage/whitelist-types'
@@ -49,6 +61,8 @@ export type ManageInput = {
   sentHash?: Hex
   /** The id an add registers, named in the sentence when its name turns out to be taken. */
   addId?: number
+  /** The chain's native symbol, so a refused change names its amounts in it (an airdrop's fee). */
+  nativeSymbol?: string
 }
 
 export type ManageDeps<T> = {
@@ -77,11 +91,14 @@ const REVERTED_ON_CHAIN: TxFailure = {
 
 /**
  * The answers that mean "not confirmed yet", each with what the machine says when the wait runs out: a phase
- * change's, and a whitelist chunk's (docs/specs/2026-10-15-whitelist.md, section 7.1).
+ * change's, a whitelist chunk's (docs/specs/2026-10-15-whitelist.md, section 7.1), an airdrop batch's and a
+ * Settings change's (docs/specs/2026-10-15-airdrop-settings.md, section 7.1).
  */
 const NOT_CONFIRMED_YET = new Map([
   [PHASE_NOT_CONFIRMED, PHASE_TIMED_OUT],
   [WHITELIST_NOT_CONFIRMED, WHITELIST_TIMED_OUT],
+  [AIRDROP_NOT_CONFIRMED, AIRDROP_TIMED_OUT],
+  [SETTINGS_NOT_CONFIRMED, SETTINGS_TIMED_OUT],
 ])
 
 /**
@@ -160,7 +177,7 @@ export async function runManage<T>(
       try {
         await deps.switchChain(input.chainId)
       } catch (error) {
-        dispatch({ type: 'failed', failure: classifyError(error, 'switching', 'manage') })
+        dispatch({ type: 'failed', failure: classifyError(error, 'switching', 'manage', input.nativeSymbol) })
         return null
       }
     }
@@ -169,14 +186,14 @@ export async function runManage<T>(
     try {
       send = await deps.simulate(input.call)
     } catch (error) {
-      dispatch({ type: 'failed', failure: classifyError(error, 'simulating', 'manage') })
+      dispatch({ type: 'failed', failure: classifyError(error, 'simulating', 'manage', input.nativeSymbol) })
       return null
     }
     dispatch({ type: 'wallet' })
     try {
       hash = await send()
     } catch (error) {
-      dispatch({ type: 'failed', failure: classifyError(error, 'wallet', 'manage') })
+      dispatch({ type: 'failed', failure: classifyError(error, 'wallet', 'manage', input.nativeSymbol) })
       return null
     }
     deps.remember?.(hash)
@@ -188,7 +205,7 @@ export async function runManage<T>(
       // The receipt could not be read: the transaction may still land, so keep the hash and offer a check.
       dispatch({
         type: 'failed',
-        failure: { ...classifyError(error, 'confirming', 'manage'), kind: 'unconfirmed' },
+        failure: { ...classifyError(error, 'confirming', 'manage', input.nativeSymbol), kind: 'unconfirmed' },
       })
       return null
     }
@@ -308,6 +325,86 @@ export function sentChunk(store: KeyStore | null, collectionId: string): SentChu
 export function forgetChunk(store: KeyStore | null, collectionId: string): void {
   try {
     store?.removeItem(chunkKeyFor(collectionId))
+  } catch {
+    // Storage blocked: nothing was kept.
+  }
+}
+
+const airdropKeyFor = (collectionId: string) => `cobweb-airdrop:${collectionId}`
+
+/**
+ * Keeps the airdrop or burn in progress for the collection, one job per collection
+ * (docs/specs/2026-10-15-airdrop-settings.md, section 7.1): the frozen batches, how many landed, and the hash of
+ * the one sent but not confirmed.
+ */
+export function rememberAirdropJob(store: KeyStore | null, collectionId: string, job: AirdropJob): void {
+  try {
+    store?.setItem(airdropKeyFor(collectionId), JSON.stringify(job))
+  } catch {
+    // Storage blocked or full: the job is kept for this visit only.
+  }
+}
+
+/** A stored recipient: a checksummed address with 1 to 1,000 tokens, or null. */
+function batchEntryOf(value: unknown): BatchEntry | null {
+  const entry = value as { address?: unknown; amount?: unknown } | null
+  if (typeof entry?.address !== 'string' || !isAddress(entry.address)) return null
+  if (entry.address !== getAddress(entry.address)) return null
+  const amount = entry.amount
+  if (
+    typeof amount !== 'number' ||
+    !Number.isInteger(amount) ||
+    amount < 1 ||
+    amount > AIRDROP_MAX_PER_ADDRESS
+  )
+    return null
+  return { address: entry.address, amount }
+}
+
+/**
+ * The airdrop or burn this browser has in progress for the collection, or null. A stored value reads as none
+ * unless every batch holds 1 to 500 recipients and at most 1,000 tokens, `sent` names a batch, the pending hash
+ * is 32 bytes, and a burn is one batch of one entry to the dead address with its hash.
+ */
+export function airdropJob(store: KeyStore | null, collectionId: string): AirdropJob | null {
+  try {
+    const value = store?.getItem(airdropKeyFor(collectionId)) ?? null
+    if (!value) return null
+    const parsed = JSON.parse(value) as {
+      kind?: unknown
+      batches?: unknown
+      sent?: unknown
+      pending?: unknown
+    }
+    if (parsed.kind !== 'airdrop' && parsed.kind !== 'burn') return null
+    if (!Array.isArray(parsed.batches) || parsed.batches.length === 0) return null
+    const batches: BatchEntry[][] = []
+    for (const stored of parsed.batches as unknown[]) {
+      if (!Array.isArray(stored) || stored.length === 0 || stored.length > AIRDROP_MAX_RECIPIENTS) return null
+      const entries = stored.map(batchEntryOf)
+      if (entries.some((entry) => entry === null)) return null
+      const batch = entries as BatchEntry[]
+      if (tokensOf(batch) > AIRDROP_MAX_TOKENS) return null
+      batches.push(batch)
+    }
+    const { sent, pending } = parsed
+    if (typeof sent !== 'number' || !Number.isInteger(sent) || sent < 0 || sent >= batches.length) return null
+    if (pending !== null && (typeof pending !== 'string' || !HASH_RE.test(pending))) return null
+    const [first] = batches
+    if (
+      parsed.kind === 'burn' &&
+      (batches.length !== 1 || first?.length !== 1 || first[0]?.address !== BURN_ADDRESS || pending === null)
+    )
+      return null
+    return { kind: parsed.kind, batches, sent, pending: pending as Hex | null }
+  } catch {
+    return null
+  }
+}
+
+export function forgetAirdropJob(store: KeyStore | null, collectionId: string): void {
+  try {
+    store?.removeItem(airdropKeyFor(collectionId))
   } catch {
     // Storage blocked: nothing was kept.
   }

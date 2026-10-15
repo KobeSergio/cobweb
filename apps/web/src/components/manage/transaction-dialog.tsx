@@ -43,6 +43,11 @@ export type TransactionDialogProps<T> = {
   actionLabel: string
   /** Red action button, for irreversible or risky calls. */
   destructive?: boolean
+  /**
+   * Why nothing can be sent from this wallet (the owner check, docs/specs/2026-10-15-airdrop-settings.md, section
+   * 7.1): shown under the review, with the action off. The dialog still opens, so the change can be read.
+   */
+  blocked?: string | null
   chain: SupportedChain
   /** Shown in the toast and the done state, e.g. "Owl List is open". */
   successMessage: string
@@ -75,6 +80,7 @@ export function TransactionDialog<T>({
   request,
   actionLabel,
   destructive,
+  blocked = null,
   chain,
   successMessage,
   onConfirmed,
@@ -148,6 +154,7 @@ export function TransactionDialog<T>({
           connectedChainId: sample ? chainId : account.chainId,
           sentHash: checkHash,
           addId: call?.functionName === 'registerMintGroup' ? Number(call.args[0]) : undefined,
+          nativeSymbol: chain.nativeSymbol,
         },
         {
           switchChain: (target) => actions.switchChain(target),
@@ -180,7 +187,7 @@ export function TransactionDialog<T>({
 
   function submit(event: React.FormEvent) {
     event.preventDefault()
-    if (request && phase.step === 'idle') void start()
+    if (request && !blocked && phase.step === 'idle') void start()
   }
 
   const steps: StepView[] = [
@@ -201,9 +208,7 @@ export function TransactionDialog<T>({
     {
       step: 'wallet',
       label: 'Confirm in your wallet',
-      detail: sample
-        ? 'Answer for your wallet below.'
-        : 'Your wallet shows a call to the collection contract and the gas for it.',
+      detail: sample ? 'Answer for your wallet below.' : walletDetail(request, chain),
     },
     {
       step: 'confirming',
@@ -232,6 +237,7 @@ export function TransactionDialog<T>({
             <>
               {children}
               {request && <CallReview request={request.review} chain={chain} />}
+              {blocked && <p className="text-muted-foreground text-[0.8125rem]">{blocked}</p>}
             </>
           ) : (
             <div className="grid gap-3">
@@ -258,7 +264,11 @@ export function TransactionDialog<T>({
                 <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" variant={destructive ? 'destructive' : 'default'} disabled={!request}>
+                <Button
+                  type="submit"
+                  variant={destructive ? 'destructive' : 'default'}
+                  disabled={!request || !!blocked}
+                >
                   {actionLabel}
                 </Button>
               </>
@@ -295,6 +305,17 @@ export function TransactionDialog<T>({
       </DialogContent>
     </Dialog>
   )
+}
+
+/**
+ * What the wallet shows at its step: a call to the review's contract and the gas, or, for a call that sends a value
+ * (an airdrop's fee), that value too.
+ */
+function walletDetail(request: ManageRequest<unknown> | null, chain: SupportedChain): string {
+  const value = request?.call?.value
+  if (value !== undefined)
+    return `Your wallet shows a call to the collection contract, the ${formatNative(value, chain.nativeSymbol, 18)} sent with it, and the gas for it.`
+  return `Your wallet shows a call to the ${(request?.review.contract ?? 'Collection').toLowerCase()} contract and the gas for it.`
 }
 
 /** The call as it will be sent: contract, function, arguments, value. */

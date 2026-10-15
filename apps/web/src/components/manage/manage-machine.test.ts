@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest'
 import { deployReducer, retryHash, type DeployEvent, type KeyStore } from '@/components/deploy/deploy-machine'
 import type { TxPhase } from '@/components/deploy/tx-progress'
 import {
+  AIRDROP_NOT_CONFIRMED,
+  AIRDROP_TIMED_OUT,
   CHAIN_NOT_READY,
   NOT_FOUND,
   NOT_FROM_WALLET,
@@ -13,6 +15,8 @@ import {
   PHASE_NOT_CONFIRMED,
   PHASE_REVERTED,
   PHASE_TIMED_OUT,
+  SETTINGS_NOT_CONFIRMED,
+  SETTINGS_TIMED_OUT,
   SIGNED_OUT,
   THROWN,
   UNSAVED,
@@ -20,13 +24,18 @@ import {
   WHITELIST_TIMED_OUT,
   type ActionResult,
 } from '@/lib/art/result'
-import { phaseCalls, type ManageCall } from '@/lib/manage/phase-calls'
+import type { AirdropJob } from '@/lib/manage/airdrop-types'
+import { BURN_ADDRESS } from '@/lib/manage/airdrop-view'
+import { airdropCalls, phaseCalls, settingsCalls, type ManageCall } from '@/lib/manage/phase-calls'
 import type { SentChunk } from '@/lib/manage/whitelist-types'
 import {
+  airdropJob,
   forgetAdd,
+  forgetAirdropJob,
   forgetChunk,
   pendingAdd,
   rememberAdd,
+  rememberAirdropJob,
   rememberChunk,
   runManage,
   sentChunk,
@@ -478,5 +487,146 @@ describe('the sent chunk kept in the browser', () => {
     expect(sentChunk(failing, 'col-1')).toBeNull()
     expect(sentChunk(null, 'col-1')).toBeNull()
     expect(() => forgetChunk(null, 'col-1')).not.toThrow()
+  })
+})
+
+describe('an airdrop batch and a Settings change (docs/specs/2026-10-15-airdrop-settings.md, section 7.1)', () => {
+  const batch: ManageInput = {
+    ...input,
+    call: airdropCalls.batch([{ address: STRANGER, amount: 1 }], '100'),
+    nativeSymbol: 'ETH',
+  }
+
+  it('polls while the batch is not confirmed yet, then stops after 2 minutes with the batch sentence and keeps the hash', async () => {
+    const BATCH_NOT_YET: ActionResult<string> = { ok: false, error: AIRDROP_NOT_CONFIRMED }
+    const { deps, calls } = fakeDeps(Array<ActionResult<string>>(50).fill(BATCH_NOT_YET))
+    const { last, phase } = await run(deps, batch)
+    expect(calls.confirm).toBe(41)
+    expect(last).toEqual({
+      type: 'failed',
+      failure: { kind: 'unconfirmed', title: 'Change not confirmed yet', message: AIRDROP_TIMED_OUT },
+    })
+    expect(retryHash(phase)).toBe(HASH)
+  })
+
+  it('polls while the setting is not confirmed yet, then answers the view', async () => {
+    const SETTING_NOT_YET: ActionResult<string> = { ok: false, error: SETTINGS_NOT_CONFIRMED }
+    const { deps, calls } = fakeDeps([SETTING_NOT_YET, { ok: true, data: VIEW }])
+    const { result } = await run(deps, { ...input, call: settingsCalls.withdraw() })
+    expect(calls.sleeps).toEqual([3_000])
+    expect(result).toBe(VIEW)
+    const late = fakeDeps(Array<ActionResult<string>>(50).fill(SETTING_NOT_YET))
+    const { last } = await run(late.deps, { ...input, call: settingsCalls.withdraw() })
+    expect(last).toMatchObject({ failure: { message: SETTINGS_TIMED_OUT } })
+  })
+
+  it("names a refused fee in the chain's native unit", async () => {
+    const { deps } = fakeDeps([], {
+      simulate: async () => {
+        throw new ContractFunctionRevertedError({
+          abi: collectionAbi,
+          data: encodeErrorResult({
+            abi: collectionAbi,
+            errorName: 'InsufficientEther',
+            args: [100_000_000_000_000n, 0n],
+          }),
+          functionName: 'airdropNFTs',
+        })
+      },
+    })
+    const { last } = await run(deps, batch)
+    expect(last).toMatchObject({
+      failure: {
+        message:
+          'The airdrop fee is 0.0001 ETH and 0 ETH was sent. Read again for the current fee. Nothing was sent.',
+      },
+    })
+  })
+})
+
+describe('the airdrop job kept in the browser', () => {
+  const memory = (): KeyStore => {
+    const map = new Map<string, string>()
+    return {
+      getItem: (key) => map.get(key) ?? null,
+      setItem: (key, value) => {
+        map.set(key, value)
+      },
+      removeItem: (key) => {
+        map.delete(key)
+      },
+    }
+  }
+  const failing: KeyStore = {
+    getItem: () => {
+      throw new Error('blocked')
+    },
+    setItem: () => {
+      throw new Error('blocked')
+    },
+    removeItem: () => {
+      throw new Error('blocked')
+    },
+  }
+  const job: AirdropJob = {
+    kind: 'airdrop',
+    batches: [[{ address: WALLET, amount: 3 }], [{ address: STRANGER, amount: 1 }]],
+    sent: 1,
+    pending: HASH,
+  }
+  const burn: AirdropJob = {
+    kind: 'burn',
+    batches: [[{ address: BURN_ADDRESS, amount: 2 }]],
+    sent: 0,
+    pending: HASH,
+  }
+
+  it('remembers the job per collection, apart from a chunk and an add, until it is forgotten', () => {
+    const store = memory()
+    rememberAirdropJob(store, 'col-1', job)
+    expect(airdropJob(store, 'col-1')).toEqual(job)
+    expect(airdropJob(store, 'col-2')).toBeNull()
+    expect(store.getItem('cobweb-airdrop:col-1')).toContain(HASH)
+    expect(sentChunk(store, 'col-1')).toBeNull()
+    rememberAirdropJob(store, 'col-1', burn)
+    expect(airdropJob(store, 'col-1')).toEqual(burn)
+    forgetAirdropJob(store, 'col-1')
+    expect(airdropJob(store, 'col-1')).toBeNull()
+  })
+
+  it('reads as none a value that is not a job it could send, and a store that throws', () => {
+    const store = memory()
+    const entries = (count: number, amount: number) =>
+      Array.from({ length: count }, () => ({ address: WALLET, amount }))
+    for (const value of [
+      'nonsense',
+      'null',
+      JSON.stringify({ ...job, kind: 'mint' }),
+      JSON.stringify({ ...job, batches: [] }),
+      JSON.stringify({ ...job, batches: [[], [{ address: WALLET, amount: 1 }]] }),
+      JSON.stringify({ ...job, batches: [[{ address: WALLET.toLowerCase(), amount: 1 }]], sent: 0 }),
+      JSON.stringify({ ...job, batches: [entries(1, 0)], sent: 0 }),
+      JSON.stringify({ ...job, batches: [entries(1, 1_001)], sent: 0 }),
+      JSON.stringify({ ...job, batches: [entries(1, 1.5)], sent: 0 }),
+      JSON.stringify({ ...job, batches: [entries(501, 1)], sent: 0 }),
+      JSON.stringify({ ...job, batches: [entries(2, 600)], sent: 0 }),
+      JSON.stringify({ ...job, sent: 2 }),
+      JSON.stringify({ ...job, sent: -1 }),
+      JSON.stringify({ ...job, pending: 'not-a-hash' }),
+      JSON.stringify({ kind: 'airdrop', batches: job.batches, sent: 0 }),
+      JSON.stringify({ ...burn, pending: null }),
+      JSON.stringify({ ...burn, batches: [[{ address: WALLET, amount: 2 }]] }),
+      JSON.stringify({
+        ...burn,
+        batches: [[{ address: BURN_ADDRESS, amount: 1 }], [{ address: BURN_ADDRESS, amount: 1 }]],
+      }),
+    ]) {
+      store.setItem('cobweb-airdrop:col-1', value)
+      expect(airdropJob(store, 'col-1')).toBeNull()
+    }
+    expect(() => rememberAirdropJob(failing, 'col-1', job)).not.toThrow()
+    expect(airdropJob(failing, 'col-1')).toBeNull()
+    expect(airdropJob(null, 'col-1')).toBeNull()
+    expect(() => forgetAirdropJob(null, 'col-1')).not.toThrow()
   })
 })
