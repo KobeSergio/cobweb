@@ -1,8 +1,9 @@
 import { getAddress, isAddress } from 'viem'
-import { sampleAddress, type Address } from '@/lib/demo'
+import type { ActionResult } from '@/lib/art/result'
+import { sampleAddress } from '@/lib/demo'
+import type { Holder, HolderSnapshot } from '@/lib/manage/holders'
 
-/** One holder of the snapshotted collection and how many of its tokens they hold. */
-export type Holder = { address: Address; balance: number }
+export type { Holder } from '@/lib/manage/holders'
 
 /** Each holder's amount: the tokens they hold (legacy's default), or one number for everyone. */
 export type SnapshotAmount = { kind: 'balance' } | { kind: 'fixed'; amount: number }
@@ -35,14 +36,18 @@ export function snapshotAddressError(value: string): string | null {
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
+/** The block sample mode's snapshot reads at. */
+export const SAMPLE_SNAPSHOT_BLOCK = 21_500_000
+
 /**
- * The holders of an ERC-721 collection on a chain.
- * Seam: a serverless function (MASTER_PLAN, Holder snapshot import) that checks the session, reads
- * `totalSupply()` and loops `ownerOf(id)` in batches over a private RPC endpoint, then sums the
- * balance per owner. No indexer. It reports a contract that is not an ERC-721 or has no tokens.
- * Here it returns a stable sample list for the address.
+ * Sample mode's holder snapshot (docs/specs/2026-10-15-whitelist.md, section 8): after 900 ms, a stable list of
+ * 24 holders for the address and chain, the most tokens first, at block 21,500,000, their tokens together as the
+ * supply. The real one is the `fetchHolders` action (app/actions/snapshot.ts), which reads the chain at one block.
  */
-export async function fetchHolders(chainId: number, contract: string): Promise<Holder[]> {
+export async function sampleFetchHolders(
+  chainId: number,
+  contract: string,
+): Promise<ActionResult<HolderSnapshot>> {
   await wait(900)
   const seed = Number.parseInt(getAddress(contract).slice(2, 10), 16) + chainId
   const holders: Holder[] = []
@@ -50,5 +55,15 @@ export async function fetchHolders(chainId: number, contract: string): Promise<H
     const balance = 1 + ((seed + index * 7) % 5 === 0 ? 4 : (seed + index) % 3)
     holders.push({ address: getAddress(sampleAddress(seed + index)), balance })
   }
-  return holders
+  holders.sort(
+    (a, b) => b.balance - a.balance || a.address.toLowerCase().localeCompare(b.address.toLowerCase()),
+  )
+  return {
+    ok: true,
+    data: {
+      holders,
+      block: SAMPLE_SNAPSHOT_BLOCK,
+      supply: holders.reduce((sum, holder) => sum + holder.balance, 0),
+    },
+  }
 }

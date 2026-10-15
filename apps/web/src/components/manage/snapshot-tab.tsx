@@ -9,11 +9,21 @@ import { RadioGroup, RadioGroupItem } from '@cobweb/ui/components/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@cobweb/ui/components/select'
 import { Spinner } from '@cobweb/ui/components/spinner'
 import { ChainName } from '@/components/chains/chain-icon'
+import { NO_HOLDERS, SNAPSHOT_FAILED, type ActionResult } from '@/lib/art/result'
 import { shortAddress, type SupportedChain } from '@/lib/demo'
+import type { HolderSnapshot } from '@/lib/manage/holders'
 import { count } from './format'
-import { fetchHolders, holdersToText, snapshotAddressError, type SnapshotAmount } from './snapshot'
+import { holdersToText, snapshotAddressError, type SnapshotAmount } from './snapshot'
 
-export type SnapshotSource = { chains: SupportedChain[]; chainId: number }
+/**
+ * Where a snapshot reads (docs/specs/2026-10-15-whitelist.md, section 7.2): the chains offered, the one selected
+ * first, and the read itself, the `fetchHolders` action or the sample's.
+ */
+export type SnapshotSource = {
+  chains: SupportedChain[]
+  chainId: number
+  fetch(chainId: number, contract: string): Promise<ActionResult<HolderSnapshot>>
+}
 
 /**
  * "Snapshot holders of a contract": every current holder of another collection becomes a line,
@@ -54,19 +64,24 @@ export function SnapshotTab({
     setLoading(true)
     setFailure(null)
     try {
-      const holders = await fetchHolders(chain.id, contract.trim())
+      const result = await source.fetch(chain.id, contract.trim())
+      if (!result.ok) {
+        setFailure(result.error)
+        return
+      }
+      const { holders, block } = result.data
       if (holders.length === 0) {
-        setFailure('No holders found. Check the address and the chain.')
+        setFailure(NO_HOLDERS)
         return
       }
       const amount: SnapshotAmount =
         mode === 'fixed' ? { kind: 'fixed', amount: fixedValue } : { kind: 'balance' }
       onLoaded(
         holdersToText(holders, amount, maxAmount),
-        `${count(holders.length)} holders of ${shortAddress(contract.trim(), 4)} on ${chain.name}`,
+        `${count(holders.length)} holders of ${shortAddress(contract.trim(), 4)} on ${chain.name} at block ${block}`,
       )
     } catch {
-      setFailure('The snapshot could not be taken. Try again in a moment.')
+      setFailure(SNAPSHOT_FAILED)
     } finally {
       setLoading(false)
     }

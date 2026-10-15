@@ -8,10 +8,18 @@ import {
   getChain,
   sampleSupply,
   scaleSampleToSupply,
+  SUPPORTED_CHAINS,
 } from '@/lib/demo'
+import { snapshotChains } from '@/lib/manage/snapshot-core'
 import { LockedStagePage, stageContext, type CollectionParams } from '../../_lib/stage'
 
-/** Manage drop, airdrop. Sample data until the contract reads and writes are wired. */
+/** The holder snapshot runs as a server action from this page: up to 20,000 `ownerOf` reads. */
+export const maxDuration = 300
+
+/**
+ * Manage drop, airdrop. Sample data until the contract reads and writes are wired (the fourth sub-project); the
+ * holder snapshot reads the chain (docs/specs/2026-10-15-whitelist.md, section 7.2), or the sample in sample mode.
+ */
 export default async function Page({ params }: { params: CollectionParams }) {
   const { id } = await params
   const collection = await requireOwnedCollection(id)
@@ -34,6 +42,8 @@ export default async function Page({ params }: { params: CollectionParams }) {
         totalMinted={
           scaleSampleToSupply(sampleSupply(collection.max_supply, DEMO_COLLECTION.maxSupply)).totalMinted
         }
+        snapshotChainIds={ctx.demo ? SUPPORTED_CHAINS.map((entry) => entry.id) : snapshotChains()}
+        sample={ctx.demo}
       />
     </StagePage>
   )

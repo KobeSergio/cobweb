@@ -29,6 +29,7 @@ import {
 import { manageTabHref } from '@/lib/steps'
 import { count, downloadText } from './format'
 import { toCsv } from './recipients'
+import { sampleFetchHolders } from './snapshot'
 import { AddAddressesDialog, QuotaForAllDialog, WriteChunkDialog } from './whitelist-dialogs'
 import { WhitelistChunks } from './whitelist-chunks'
 import {
@@ -248,7 +249,7 @@ function GroupWhitelistView({
         onOpenChange={setAdding}
         group={group}
         existing={new Set(list.entries.map((entry) => entry.address.toLowerCase()))}
-        snapshot={{ chains: SUPPORTED_CHAINS, chainId: chain.id }}
+        snapshot={{ chains: SUPPORTED_CHAINS, chainId: chain.id, fetch: sampleFetchHolders }}
         onAdd={(rows) => {
           // SEAM: the rows are saved to `whitelist_entries` by a server action before the chunk write.
           const result = addEntries(list, rows)

@@ -18,8 +18,6 @@ import {
   type SupportedChain,
   sampleSupply,
   DEMO_COLLECTION,
-  // Seam: the launch chains come from `packages/shared` chain config in Phase 5.
-  SUPPORTED_CHAINS,
 } from '@/lib/demo'
 import {
   AirdropHistory,
@@ -34,6 +32,7 @@ import { count, downloadText } from './format'
 import { parseRecipients, type ParseOptions, type Recipient } from './recipients'
 import { ParsePreview, RecipientsInput } from './recipients-input'
 import { SAMPLE, sampleRequest } from './manage-sim'
+import { snapshotSource } from './snapshot-source'
 import { TransactionDialog } from './transaction-dialog'
 
 export type AirdropScreenProps = {
@@ -43,6 +42,10 @@ export type AirdropScreenProps = {
   /** Past airdrops; `burn` marks one to the dead address (MASTER_PLAN, Contracts: burn). */
   airdrops: AirdropRecord[]
   totalMinted: number
+  /** The chains the holder snapshot can read (the server's `snapshotChains()`, every sample chain in sample mode). */
+  snapshotChainIds: number[]
+  /** Sample mode: the snapshot answers the sample's holders. */
+  sample: boolean
 }
 
 /** Recipients per `airdropNFTs` transaction. The contract loops over them, so lists are split. */
@@ -67,6 +70,8 @@ export function AirdropScreen({
   totalMinted,
   collection,
   chain,
+  snapshotChainIds,
+  sample,
 }: AirdropScreenProps) {
   const [text, setText] = useState('')
   const deferred = useDeferredValue(text)
@@ -85,6 +90,16 @@ export function AirdropScreen({
   const [burnQuantity, setBurnQuantity] = useState('1')
   const [burnDialog, setBurnDialog] = useState<{ key: number; amount: number } | null>(null)
   const [burnOpen, setBurnOpen] = useState(false)
+  const snapshot = useMemo(
+    () =>
+      snapshotSource({
+        collectionId: collection.id,
+        sample,
+        chainIds: snapshotChainIds,
+        preferred: chain.id,
+      }),
+    [collection.id, sample, snapshotChainIds, chain.id],
+  )
 
   const symbol = chain.nativeSymbol
   const feePerToken = deployment.fees.airdropFeePerTokenWei
@@ -212,7 +227,7 @@ export function AirdropScreen({
                 onTextChange={setText}
                 options={PARSE}
                 template={TEMPLATE}
-                snapshot={{ chains: SUPPORTED_CHAINS, chainId: chain.id }}
+                snapshot={snapshot}
               />
               <ParsePreview result={result} amountName="tokens" />
             </>

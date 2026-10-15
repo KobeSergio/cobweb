@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { holdersToText, snapshotAddressError } from './snapshot'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { holdersToText, sampleFetchHolders, snapshotAddressError } from './snapshot'
 
 const A = '0x5e1f0c9b8a7d6e5f4c3b2a1908f7e6d5c4b3a291' as const
 const B = '0x3b9d2c1a0f8e7d6c5b4a39281706f5e4d3c2b1a0' as const
@@ -31,5 +31,26 @@ describe('snapshotAddressError', () => {
     expect(snapshotAddressError('')).toMatch(/Enter the address/)
     expect(snapshotAddressError('0x123')).toMatch(/42 characters/)
     expect(snapshotAddressError('0x5E1F0c9b8a7d6e5f4c3b2a1908f7e6d5c4b3a291')).toMatch(/checksum/)
+  })
+})
+
+describe('sampleFetchHolders', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('answers 24 holders after 900 ms, the most tokens first, at block 21,500,000, their tokens as the supply', async () => {
+    const pending = sampleFetchHolders(8453, A)
+    await vi.advanceTimersByTimeAsync(900)
+    const result = await pending
+    if (!result.ok) throw new Error(result.error)
+    expect(result.data.holders).toHaveLength(24)
+    expect(result.data.block).toBe(21_500_000)
+    expect(result.data.supply).toBe(result.data.holders.reduce((sum, holder) => sum + holder.balance, 0))
+    const balances = result.data.holders.map((holder) => holder.balance)
+    expect(balances).toEqual([...balances].sort((a, b) => b - a))
   })
 })
