@@ -1,7 +1,7 @@
 // The local render dependencies that verify:render and render:local share
 // (docs/specs/2026-10-14-render-screen-wiring.md, section 12), so the two cannot drift: the local Supabase,
 // storage and Anvil settings (from the environment, `supabase status -o env` and apps/web/.env.local, the
-// chain's through chain-fixture.ts), the refusal of any endpoint that is not local, the service and storage
+// chain's through chain-settings.ts), the refusal of any endpoint that is not local, the service and storage
 // clients, and the worker's ports on the production adapters for the database, storage and the chain, around
 // a pinner and a queue the caller picks. Never prints a key.
 
@@ -15,7 +15,7 @@ import type { MemoryQueue } from '@cobweb/worker/local'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import type { Address } from 'viem'
 import type { Database } from '../src/lib/database.types.ts'
-import { localChainConfig, refuseRemote } from './chain-fixture.ts'
+import { localChainConfig, refuseRemote } from './chain-settings.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 export const repoRoot = resolve(here, '../../..')
@@ -70,7 +70,7 @@ export type LocalConfig = {
 
 /**
  * Every local setting, or an explanation on stderr and exit code 2. Refuses any endpoint that is not
- * local. The chain's come from chain-fixture.ts's `localChainConfig()`, which fills the environment the
+ * local. The chain's come from chain-settings.ts's `localChainConfig()`, which fills the environment the
  * worker's chain adapter reads (RPC_URL_31337, FACTORY_ADDRESS_31337); this also fills the one the web app's
  * storage module reads (ART_S3_*, RENDER_S3_BUCKET) when it is not set already.
  */

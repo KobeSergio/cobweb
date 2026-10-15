@@ -18,7 +18,7 @@ import { adminClient, clientOptions, localConfig, type LocalClient } from './ren
 export * from './chain-fixture.ts'
 
 // Every local setting, with non-local endpoints refused (scripts/render-deps.ts, whose chain part is
-// chain-fixture.ts's).
+// chain-settings.ts's).
 export const settings = localConfig()
 
 // Imported after the environment is set, so the cores read the local settings.

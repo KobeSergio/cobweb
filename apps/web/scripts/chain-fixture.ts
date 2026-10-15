@@ -1,73 +1,37 @@
 // The chain half of the local fixture (docs/specs/2026-10-16-freshness-server.md, section 7.3), so the
-// scripts that send to Anvil cannot drift: the local chain settings with a non-local endpoint refused, the
-// Anvil client, the PASS and FAIL lines, the payment and the factory call, and a manage call simulated and
-// sent as the manage machine does. deploy-fixture.ts re-exports it with the Supabase half; verify:freshness
-// imports it alone, so it needs Anvil and nothing else. Never prints a key.
+// scripts that send to Anvil cannot drift: the local chain settings with a non-local endpoint refused (from
+// chain-settings.ts, re-exported), the Anvil client, the PASS and FAIL lines, the payment and the factory
+// call, a simulated request sent as it is, and a manage call simulated and sent as the manage machine does.
+// deploy-fixture.ts re-exports it with the Supabase half; verify:freshness imports it alone, so it needs
+// Anvil and nothing else. Never prints a key.
 
-import { existsSync, readFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import {
   createTestClient,
   createWalletClient,
-  getAddress,
   http,
   parseAbi,
   publicActions,
   type Abi,
   type Address,
+  type Chain,
+  type ContractFunctionArgs,
+  type ContractFunctionName,
   type Hex,
+  type WriteContractParameters,
 } from 'viem'
 import type { PrivateKeyAccount } from 'viem/accounts'
 import { anvil } from 'viem/chains'
-import { isLocalUrl } from '@cobweb/shared'
 import { collectionAbi } from '@cobweb/shared/collection-abi'
+import { localChainConfig } from './chain-settings.ts'
 
-/**
- * Exits with code 2 unless `url` points at this machine, naming its host only: a hosted RPC URL carries its
- * key.
- */
-export function refuseRemote(url: string): void {
-  if (isLocalUrl(url)) return
-  let host = 'an unreadable address'
-  try {
-    host = new URL(url).host
-  } catch {
-    // Keep the placeholder.
-  }
-  console.error(`Refusing to run: ${host} is not local (expected localhost or 127.0.0.1).`)
-  process.exit(2)
-}
-
-/**
- * The local chain's settings: RPC_URL_31337 and FACTORY_ADDRESS_31337 from the environment, or from
- * apps/web/.env.local when the environment does not set them (filling the environment the shared clients
- * read), or an explanation on stderr and exit code 2. Refuses an RPC URL that is not local.
- */
-export function localChainConfig(): { rpc: string; factory: Address } {
-  const envFile = resolve(dirname(fileURLToPath(import.meta.url)), '../.env.local')
-  if (existsSync(envFile))
-    for (const line of readFileSync(envFile, 'utf8').split('\n')) {
-      const [, name, value] = line.match(/^(RPC_URL_31337|FACTORY_ADDRESS_31337)=(.*)$/) ?? []
-      if (name && value && process.env[name] === undefined) process.env[name] = value.trim()
-    }
-  const rpc = process.env.RPC_URL_31337
-  const factory = process.env.FACTORY_ADDRESS_31337
-  if (!rpc || !factory) {
-    console.error(
-      'Set RPC_URL_31337 and FACTORY_ADDRESS_31337: run `pnpm --filter @cobweb/web chain:local` and copy its two lines into apps/web/.env.local.',
-    )
-    process.exit(2)
-  }
-  refuseRemote(rpc)
-  return { rpc, factory: getAddress(factory) }
-}
+export { localChainConfig, refuseRemote } from './chain-settings.ts'
 
 const chainSettings = localChainConfig()
 export const rpc: string = chainSettings.rpc
 export const factory: Address = chainSettings.factory
 
-// Imported after the environment is set, so the shared clients read the local chain settings.
+// These imports only bind names: `@cobweb/shared` is already loaded (chain-settings.ts imports it
+// statically), and neither it nor the two app modules read the environment as they load, only when called.
 export const { collectionSalt, encodeCollectionArgs, factoryAbi, predictCollectionAddress } =
   await import('@cobweb/shared')
 export const { COLLECTION_CODE_HASH, COLLECTION_CREATION_CODE } = await import('@cobweb/shared/collection')
@@ -131,6 +95,26 @@ export async function pay(account: PrivateKeyAccount, jobId: Hex, value: bigint)
   })
   const receipt = await chain.waitForTransactionReceipt({ hash })
   if (receipt.status !== 'success') throw new Error(`payForArt reverted: ${hash}`)
+  return hash
+}
+
+/**
+ * Sends a simulated request as it is from the account, waits for its receipt, and throws on a revert. Typed
+ * as an Anvil wallet's `writeContract`, so any request `simulateContract` answers on Anvil fits.
+ */
+export async function sendRequest<
+  const abi extends Abi | readonly unknown[],
+  functionName extends ContractFunctionName<abi, 'nonpayable' | 'payable'>,
+  args extends ContractFunctionArgs<abi, 'nonpayable' | 'payable', functionName>,
+  chainOverride extends Chain | undefined = undefined,
+>(
+  account: PrivateKeyAccount,
+  request: WriteContractParameters<abi, functionName, args, typeof anvil, PrivateKeyAccount, chainOverride>,
+): Promise<Hex> {
+  const wallet = createWalletClient({ account, chain: anvil, transport: http(rpc) })
+  const hash = await wallet.writeContract(request)
+  const receipt = await chain.waitForTransactionReceipt({ hash })
+  if (receipt.status !== 'success') throw new Error(`${request.functionName} reverted: ${hash}`)
   return hash
 }
 

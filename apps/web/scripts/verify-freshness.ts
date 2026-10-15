@@ -1,11 +1,11 @@
 // Checks the freshness server against a LOCAL Anvil chain (docs/specs/2026-10-16-freshness-server.md, section
 // 10): the server runs in process from @cobweb/freshness/server, reading the chain through an RPC switch (an
 // HTTP server on 127.0.0.1 that forwards each request to Anvil, answers 503 while failing and counts what it
-// carries), and two collections deployed straight through the factory, recording nothing, are polled every
-// 100 ms: the refusals, the first read, the tier, the ETag, a phase scheduled at T read inactive at T-1 and
-// active within one tick of the first block at T, the wallet endpoint and its windows, the extras on their
-// logs, a first read pending, degraded, /health and the stop. Sixteen PASS lines. Needs Anvil with the
-// factory and nothing else.
+// carries), and two collections deployed straight through the factory (each deploy simulated, then the
+// simulated request sent), recording nothing, are polled every 100 ms: the refusals, the first read, the
+// tier, the ETag, a phase scheduled at T read inactive at T-1 and active within one tick of the first block
+// at T, the wallet endpoint and its windows, the extras on their logs, a first read pending, degraded,
+// /health and the stop. Sixteen PASS lines. Needs Anvil with the factory and nothing else.
 //
 //   pnpm --filter @cobweb/web chain:local    (then copy its two lines into apps/web/.env.local)
 //   pnpm --filter @cobweb/web verify:freshness
@@ -18,18 +18,8 @@
 import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import {
-  createWalletClient,
-  getAddress,
-  http,
-  keccak256,
-  parseEther,
-  toHex,
-  zeroAddress,
-  type Address,
-} from 'viem'
+import { getAddress, isAddressEqual, keccak256, parseEther, toHex, zeroAddress, type Address } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
-import { anvil } from 'viem/chains'
 import { chainStateOf, DEFAULT_TRANSFER_VALIDATOR } from '@cobweb/shared'
 import { collectionAbi } from '@cobweb/shared/collection-abi'
 import {
@@ -47,13 +37,14 @@ import {
   CID,
   collectionSalt,
   COLLECTION_CREATION_CODE,
-  deploy,
   encodeCollectionArgs,
   factory,
+  factoryAbi,
   predictCollectionAddress,
   rpc,
   runChecks,
   sendCall,
+  sendRequest,
 } from './chain-fixture.ts'
 
 const { phaseCalls, settingsCalls } = await import('../src/lib/manage/phase-calls.ts')
@@ -62,6 +53,8 @@ const { phaseCalls, settingsCalls } = await import('../src/lib/manage/phase-call
 const PUBLIC = 0
 const HOLDERS = 1
 const STATE_CACHE = 'public, max-age=0, s-maxage=1, stale-while-revalidate=1, stale-if-error=60'
+/** The headers every answer with CORS lets a page's script read. */
+const EXPOSED = 'ETag, Retry-After'
 /** The time the slowest RPC retry in flight may add to a tick: viem's three, at 150, 300 and 600 ms. */
 const RETRY_SLACK_MS = 1_200
 
@@ -118,9 +111,10 @@ async function rpcSwitch(target: string) {
 let rpcSwitchOn: Awaited<ReturnType<typeof rpcSwitch>> | null = null
 let freshness: Freshness | null = null
 
+/** A request to the server, failed after 5 s so a hung answer fails its check instead of stalling it. */
 async function get(path: string, init?: RequestInit): Promise<Answer> {
   if (!freshness) throw new Error('the server is not running')
-  const response = await fetch(`${freshness.url}${path}`, init)
+  const response = await fetch(`${freshness.url}${path}`, { ...init, signal: AbortSignal.timeout(5_000) })
   return { status: response.status, headers: response.headers, text: await response.text() }
 }
 const stateOf = (address: Address, init?: RequestInit) =>
@@ -147,7 +141,10 @@ async function oneTick(): Promise<number> {
   return TIER_MS[tier] + 500
 }
 
-/** A collection deployed straight through the factory from the creator, recording nothing. */
+/**
+ * A collection deployed straight through the factory from the creator, recording nothing: the deploy is
+ * simulated, the factory's answer must be the predicted address, and the simulated request is sent as it is.
+ */
 async function deployCollection(name: string): Promise<Address> {
   const args = encodeCollectionArgs({
     name,
@@ -170,7 +167,15 @@ async function deployCollection(name: string): Promise<Address> {
     creationCode: COLLECTION_CREATION_CODE,
     args,
   })
-  await deploy(creatorKey, args, salt)
+  const { request, result } = await chain.simulateContract({
+    account: creatorKey,
+    address: factory,
+    abi: factoryAbi,
+    functionName: 'deployCollection',
+    args: [COLLECTION_CREATION_CODE, args, salt],
+  })
+  if (!isAddressEqual(result, address)) throw new Error(`${name} would deploy at ${result}, not ${address}`)
+  await sendRequest(creatorKey, request)
   return address
 }
 
@@ -187,6 +192,9 @@ async function main(): Promise<void> {
 
   rpcSwitchOn = await rpcSwitch(rpc)
   const relay = rpcSwitchOn
+  // The server reads through the switch only because startFreshness creates this process's first
+  // publicClientFor(31337), which reads RPC_URL_31337 then and keeps its client: nothing before it may ask
+  // for one (the fixture's Anvil client is its own).
   process.env.RPC_URL_31337 = relay.url
   freshness = await startFreshness({ port: 0, host: '127.0.0.1', chainIds: [31337] })
 
@@ -206,7 +214,7 @@ async function main(): Promise<void> {
   )
 
   await check(
-    "3. refusals: the stranger's wallet and the factory answer 404 not-a-collection, chain 999 answers 404 chain-not-served, a malformed address 400 and an unknown path 404, each with s-maxage=10; a POST answers 405",
+    "3. refusals: the stranger's wallet and the factory answer 404 not-a-collection, chain 999 answers 404 chain-not-served, a malformed address 400 and an unknown path 404, each with s-maxage=10; a POST answers 405 with Allow: GET, HEAD, OPTIONS",
     async () => {
       const cases: [Answer, number, string][] = [
         [await stateOf(strangerKey.address), 404, 'not-a-collection'],
@@ -225,9 +233,11 @@ async function main(): Promise<void> {
           return `${error}: ${answer.status} ${answer.text} ${cache}`
       }
       const post = await stateOf(A, { method: 'POST' })
-      return post.status === 405 && post.text === '{"error":"method-not-allowed"}'
+      return post.status === 405 &&
+        post.text === '{"error":"method-not-allowed"}' &&
+        post.headers.get('allow') === 'GET, HEAD, OPTIONS'
         ? null
-        : `POST: ${post.status} ${post.text}`
+        : `POST: ${post.status} ${post.text} ${post.headers.get('allow')}`
     },
   )
 
@@ -310,8 +320,9 @@ async function main(): Promise<void> {
   })
 
   await check(
-    '6. ETag: an empty block is read under the same ETag; If-None-Match with it answers 304 with no body and the same headers, another tag answers 200; OPTIONS answers 204 with the CORS headers',
+    '6. ETag: an empty block is read under the same ETag; If-None-Match with it answers 304 with no body and the same headers, another tag answers 200; OPTIONS answers 204 with the CORS headers; each exposes ETag and Retry-After',
     async () => {
+      const exposed = (answer: Answer) => answer.headers.get('access-control-expose-headers') === EXPOSED
       const block = bodyOf(await stateOf(A)).block
       await chain.mine({ blocks: 1 })
       const after = await poll(
@@ -323,23 +334,26 @@ async function main(): Promise<void> {
       )
       if (!after) return 'the empty block was not read'
       if (after.headers.get('etag') !== etag) return `the tag moved: ${after.headers.get('etag')}`
+      if (!exposed(after)) return `exposed: ${after.headers.get('access-control-expose-headers')}`
       const same = await stateOf(A, { headers: { 'If-None-Match': etag } })
       if (
         same.status !== 304 ||
         same.text !== '' ||
         same.headers.get('etag') !== etag ||
         same.headers.get('cache-control') !== STATE_CACHE ||
-        same.headers.get('access-control-allow-origin') !== '*'
+        same.headers.get('access-control-allow-origin') !== '*' ||
+        !exposed(same)
       )
         return `304: ${same.status} ${same.headers.get('etag')} ${same.headers.get('cache-control')}`
       const other = await stateOf(A, { headers: { 'If-None-Match': 'W/"0"' } })
-      if (other.status !== 200) return `another tag: ${other.status}`
+      if (other.status !== 200 || !exposed(other)) return `another tag: ${other.status}`
       const preflight = await stateOf(A, { method: 'OPTIONS' })
       return preflight.status === 204 &&
         preflight.headers.get('access-control-allow-origin') === '*' &&
         preflight.headers.get('access-control-allow-methods') === 'GET, HEAD' &&
         preflight.headers.get('access-control-allow-headers') === 'If-None-Match' &&
-        preflight.headers.get('access-control-max-age') === '86400'
+        preflight.headers.get('access-control-max-age') === '86400' &&
+        exposed(preflight)
         ? null
         : `OPTIONS: ${preflight.status}`
     },
@@ -436,25 +450,24 @@ async function main(): Promise<void> {
         args: [1n, BigInt(HOLDERS)],
         value: totalCost,
       })
-      const hash = await createWalletClient({
-        account: holderKey,
-        chain: anvil,
-        transport: http(rpc),
-      }).writeContract(request)
-      if ((await chain.waitForTransactionReceipt({ hash })).status !== 'success')
-        return `the mint reverted: ${hash}`
+      await sendRequest(holderKey, request)
+      // One tick counted from the receipt, so the wallet read's own window comes out of it.
+      const receiptAt = Date.now()
       const bound = await oneTick()
       const answer = JSON.parse((await walletOf(A, holderKey.address)).text) as WalletBody
       if (answer.groups.find((group) => group.id === HOLDERS)?.claimed !== 1)
         return `wallet ${JSON.stringify(answer)}`
-      const minted = await poll(async () => {
-        const state = await stateOf(A)
-        const body = bodyOf(state)
-        return body.totalMinted === 1 && body.groups.find((group) => group.id === HOLDERS)?.minted === 1
-          ? state
-          : null
-      }, bound)
-      if (!minted) return `the mint was not read within ${bound} ms`
+      const minted = await poll(
+        async () => {
+          const state = await stateOf(A)
+          const body = bodyOf(state)
+          return body.totalMinted === 1 && body.groups.find((group) => group.id === HOLDERS)?.minted === 1
+            ? state
+            : null
+        },
+        bound - (Date.now() - receiptAt),
+      )
+      if (!minted) return `the mint was not read within ${bound} ms of its receipt`
       return minted.headers.get('etag') !== before ? null : 'the tag did not change'
     },
   )
@@ -513,8 +526,12 @@ async function main(): Promise<void> {
       if (known.status !== 200) return `the wallet request: ${known.status} ${known.text}`
       if ((await healthOf()).hot !== 1) return 'the wallet request made B hot'
       relay.fail(true)
-      const pending = await stateOf(B)
-      relay.fail(false)
+      let pending: Answer
+      try {
+        pending = await stateOf(B)
+      } finally {
+        relay.fail(false)
+      }
       if (
         pending.status !== 503 ||
         pending.text !== '{"error":"not-read-yet"}' ||
@@ -531,17 +548,31 @@ async function main(): Promise<void> {
   await check(
     '14. degraded: with the switch failing, A answers its last state with degraded true under a new ETag once its last read is more than 10 s old, readAt unchanged, and /health names the failure; with the switch passing, degraded is false again within one tick',
     async () => {
-      const fresh = await stateOf(A)
-      const readAt = bodyOf(fresh).readAt
+      const failedBefore = (await healthOf()).chains[0]?.failedTicks ?? 0
+      const firstFailure = (await oneTick()) + RETRY_SLACK_MS
+      let fresh: Answer
+      let stale: { answer: Answer; body: StateBody; at: number } | null
+      let failing: HealthBody['chains'][number] | undefined
       relay.fail(true)
-      const stale = await poll(async () => {
-        const answer = await stateOf(A)
-        const body = bodyOf(answer)
-        if (!body.degraded) return null
-        return { answer, body, at: Date.now() }
-      }, 15_000)
-      const failing = (await healthOf()).chains[0]
-      relay.fail(false)
+      try {
+        // A tick in flight as the switch flips can still land, so the last read is taken once a tick failed.
+        const failed = await poll(async () => {
+          const failedTicks = (await healthOf()).chains[0]?.failedTicks ?? 0
+          return failedTicks > failedBefore ? true : null
+        }, firstFailure)
+        if (!failed) return `no tick failed within ${firstFailure} ms of the switch failing`
+        fresh = await stateOf(A)
+        stale = await poll(async () => {
+          const answer = await stateOf(A)
+          const body = bodyOf(answer)
+          if (!body.degraded) return null
+          return { answer, body, at: Date.now() }
+        }, 15_000)
+        failing = (await healthOf()).chains[0]
+      } finally {
+        relay.fail(false)
+      }
+      const readAt = bodyOf(fresh).readAt
       if (!stale) return 'A never read degraded'
       if (stale.body.readAt !== readAt) return `readAt moved from ${readAt} to ${stale.body.readAt}`
       if (stale.at - readAt * 1_000 <= 10_000)
@@ -568,7 +599,9 @@ async function main(): Promise<void> {
       )
         return JSON.stringify(anvilHealth)
       const hosts = [new URL(relay.url).host, new URL(rpc).host]
-      return hosts.some((host) => answer.text.includes(host)) ? `a URL is in ${answer.text}` : null
+      return hosts.some((host) => answer.text.includes(host)) || /:\/\//.test(answer.text)
+        ? `a URL is in ${answer.text}`
+        : null
     },
   )
 
