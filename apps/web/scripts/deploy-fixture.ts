@@ -1,5 +1,5 @@
-// The local deploy fixture verify:deploy and verify:phases share (docs/specs/2026-10-15-phases.md, section
-// 10), so the two cannot drift: the local settings with non-local endpoints refused, the service client
+// The local deploy fixture verify:deploy, verify:phases and verify:whitelist share (docs/specs/2026-10-15-phases.md,
+// section 10), so they cannot drift: the local settings with non-local endpoints refused, the service client
 // and the Anvil client, the PASS and FAIL lines, the SIWE sign-in, a seeded generative collection, the
 // lock and deploy contexts the write helpers build, the payment, the render functions, the factory call,
 // and `deployedCollection`, which locks, pays, renders, links, prepares, deploys and confirms through the
@@ -385,7 +385,10 @@ export async function deployedCollection(
   return { cid, ctx, prepared: prepared.data, record: confirmed.data, hash }
 }
 
-/** Deletes every job, collection (its deployment and phases cascade) and user the run created, or says what is left. */
+/**
+ * Deletes every job, collection (its deployment, phases and whitelist entries cascade) and user the run created,
+ * or says what is left.
+ */
 export async function removeFixtures(): Promise<string | null> {
   if (collectionIds.length) {
     const jobs = await admin.from('render_jobs').delete().in('collection_id', collectionIds)
@@ -398,6 +401,12 @@ export async function removeFixtures(): Promise<string | null> {
     const groups = await admin.from('mint_groups').select('id').in('collection_id', collectionIds)
     if (groups.error) return `mint_groups: ${groups.error.message}`
     if (groups.data.length) return `${groups.data.length} mint group(s) left`
+    const entries = await admin
+      .from('whitelist_entries')
+      .select('wallet_address')
+      .in('collection_id', collectionIds)
+    if (entries.error) return `whitelist_entries: ${entries.error.message}`
+    if (entries.data.length) return `${entries.data.length} whitelist entries left`
   }
   for (const id of userIds) {
     const { error } = await admin.auth.admin.deleteUser(id)
