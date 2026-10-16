@@ -16,6 +16,16 @@ import { tokenArtOf, type TokenArt } from './token-art'
 /** Minted tokens' ranks at the revealed base URI, with the set's size. */
 export type Tiers = { total: number; ranks: Record<number, number> }
 
+/**
+ * How long after the last body, on the wall clock, a state poll asks past the browser's stored copy again.
+ * `performance.now()`, which runs the chain clock from its anchor, stands still while a laptop sleeps, and the
+ * polls pause while the tab is hidden; a page woken over an unchanged state would get 304s that hand back the block
+ * it already has, keep the old anchor, and count down late by the sleep. `Date.now()` keeps running, so a gap this
+ * long sends one `reload`, whose body from the server carries the chain's current block and re-anchors the clock.
+ * Polls at 1 s or 3 s never leave such a gap while the page is awake and shown.
+ */
+export const FRESH_AFTER_MS = 60_000
+
 export type MintSource = {
   pollState(): Promise<StatePoll>
   pollWallet(wallet: Address): Promise<WalletPoll>
@@ -52,14 +62,19 @@ export function liveMintSource(
   const fetchImpl = deps.fetchImpl ?? fetch
   // Until the first body lands, each state poll asks past the browser's stored copy: on a page load a 304 would
   // hand back the copy of the last change, and the chain clock would anchor on its block time. Later polls stay
-  // conditional; a 304 then hands back a block the page already has, which moves nothing.
+  // conditional; a 304 then hands back a block the page already has, which moves nothing. A poll more than
+  // FRESH_AFTER_MS after the last body (a sleep, a hidden tab) asks past it again.
   let answered = false
+  let lastBodyAt = 0
   return {
     async pollState() {
       const poll = await pollState(deps.freshnessUrl, page.chain.id, page.contract, fetchImpl, {
-        fresh: !answered,
+        fresh: !answered || Date.now() - lastBodyAt > FRESH_AFTER_MS,
       })
-      if (poll.kind === 'body') answered = true
+      if (poll.kind === 'body') {
+        answered = true
+        lastBodyAt = Date.now()
+      }
       return poll
     },
     pollWallet: (wallet) => pollWallet(deps.freshnessUrl, page.chain.id, page.contract, wallet, fetchImpl),

@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Address } from 'viem'
 import { describe, expect, it, vi } from 'vitest'
 import type { Database } from '@/lib/database.types'
-import { liveMintSource, type Tiers } from './live-source'
+import { FRESH_AFTER_MS, liveMintSource, type Tiers } from './live-source'
 import type { MintChain } from './mint-run'
 import type { MintPageStatic } from './page-doc'
 
@@ -133,5 +133,47 @@ describe('liveMintSource pollState (fix round 1, item 1)', () => {
     expect((await source.pollState()).kind).toBe('body')
     expect((await source.pollState()).kind).toBe('body')
     expect(caches).toEqual(['reload', 'reload', 'no-cache'])
+  })
+
+  it('asks past the stored copy again once more than 60 s passed since the last body, as after a sleep (final fix wave M3)', async () => {
+    let now = 1_791_039_600_000
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    try {
+      const answers = [
+        json(body),
+        json(body),
+        json({ error: 'busy' }, 503),
+        json(body),
+        json(body),
+        json(body),
+      ]
+      const caches: (RequestCache | undefined)[] = []
+      const fetchImpl = (async (_url: string, init?: RequestInit) => {
+        caches.push(init?.cache)
+        return answers.shift() ?? json({}, 502)
+      }) as unknown as typeof fetch
+      const source = liveMintSource(page, {
+        freshnessUrl: 'https://fresh.example',
+        chain,
+        supabase: fakeSupabase(null).supabase,
+        fetchImpl,
+      })
+      expect((await source.pollState()).kind).toBe('body')
+      now += 3_000
+      expect((await source.pollState()).kind).toBe('body')
+      // 61 s with no body: the wall clock ran while the page slept, so the next poll skips the stored copy.
+      now += FRESH_AFTER_MS + 1_000
+      expect((await source.pollState()).kind).toBe('retry')
+      now += 1_000
+      expect((await source.pollState()).kind).toBe('body')
+      now += 3_000
+      expect((await source.pollState()).kind).toBe('body')
+      now += FRESH_AFTER_MS
+      expect((await source.pollState()).kind).toBe('body')
+      // A failed poll is no body: the one after it still asks past the stored copy.
+      expect(caches).toEqual(['reload', 'no-cache', 'reload', 'reload', 'no-cache', 'no-cache'])
+    } finally {
+      clock.mockRestore()
+    }
   })
 })
