@@ -69,6 +69,27 @@ describe('liveMintSource tiers (docs/specs/2026-10-16-mint-page-live-data.md, se
     }
     expect(await source(throwing as unknown as SupabaseClient<Database>).tiers(REAL, [1])).toBeNull()
   })
+
+  it('keeps the ranks that are numbers on whole-number ids and drops the rest', async () => {
+    const { supabase } = fakeSupabase({
+      total: 500,
+      ranks: { '1': 12, '2': 'high', '3': null, '4': 480, abc: 5, '1.5': 7 },
+    })
+    const source = liveMintSource(page, { freshnessUrl: undefined, chain, supabase })
+    await expect(source.tiers(REAL, [1, 2, 3, 4])).resolves.toEqual<Tiers>({
+      total: 500,
+      ranks: { 1: 12, 4: 480 },
+    })
+  })
+
+  it('answers null when the set size is not a number or the ranks are not an object', async () => {
+    const source = (supabase: SupabaseClient<Database>) =>
+      liveMintSource(page, { freshnessUrl: undefined, chain, supabase })
+    const sized = fakeSupabase({ total: '500', ranks: { '1': 12 } }).supabase
+    expect(await source(sized).tiers(REAL, [1])).toBeNull()
+    expect(await source(fakeSupabase({ total: 500, ranks: 'none' }).supabase).tiers(REAL, [1])).toBeNull()
+    expect(await source(fakeSupabase({ total: 500, ranks: null }).supabase).tiers(REAL, [1])).toBeNull()
+  })
 })
 
 describe('liveMintSource pollState (fix round 1, item 1)', () => {

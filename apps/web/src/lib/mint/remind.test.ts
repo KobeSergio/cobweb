@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { calendarTime, googleCalendarUrl, icsFileName, icsOf, type Reminder } from './remind'
+import {
+  calendarTime,
+  googleCalendarUrl,
+  icsFileName,
+  icsOf,
+  REMINDER_MAX_SECONDS,
+  reminderAllowed,
+  type Reminder,
+} from './remind'
 
 const reminder: Reminder = {
   collection: 'Night Owls, Vol. 1; the "first" run',
@@ -41,6 +49,24 @@ describe('icsOf (docs/specs/2026-10-16-mint-page-live-data.md, section 7.8)', ()
     expect(long.join('\r\n').replace(/\r\n /g, '')).toContain(`SUMMARY:${'Ö'.repeat(60)}: Public opens`)
   })
 
+  it('escapes a backslash before the other characters, so the backslash it adds is not doubled', () => {
+    const unfolded = icsOf({ ...reminder, collection: 'Owls\\Co;1' }, 0).replace(/\r\n /g, '')
+    expect(unfolded).toContain('SUMMARY:Owls\\\\Co\\;1: Public opens')
+  })
+
+  it('never folds inside a code point above the BMP, which is two UTF-16 units and four octets', () => {
+    const owl = '\u{1F989}'
+    const lines = icsOf({ ...reminder, collection: owl.repeat(40) }, 0).split('\r\n')
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+    for (const line of lines) {
+      expect(new TextEncoder().encode(line).length).toBeLessThanOrEqual(75)
+      expect(lone.test(line)).toBe(false)
+    }
+    // "SUMMARY:" is 8 octets and 16 owls make 72; a 17th would make 76, so the line ends after the 16th.
+    expect(lines.find((line) => line.startsWith('SUMMARY:'))).toBe(`SUMMARY:${owl.repeat(16)}`)
+    expect(lines.join('\r\n').replace(/\r\n /g, '')).toContain(`SUMMARY:${owl.repeat(40)}: Public opens`)
+  })
+
   it('names the file after the link and the phase', () => {
     expect(icsFileName('night-owls', 2)).toBe('night-owls-phase-2.ics')
   })
@@ -58,5 +84,30 @@ describe('googleCalendarUrl', () => {
     )
     expect(googleCalendarUrl(reminder)).not.toContain(' ')
     expect(calendarTime(0)).toBe('19700101T000000Z')
+  })
+})
+
+describe('a start the chain can set that no calendar can name (fix round 1)', () => {
+  it('formats the last second of the year 9999 and offers a reminder up to it, never past it', () => {
+    expect(REMINDER_MAX_SECONDS).toBe(253_402_300_799)
+    expect(calendarTime(REMINDER_MAX_SECONDS)).toBe('99991231T235959Z')
+    expect(reminderAllowed(REMINDER_MAX_SECONDS)).toBe(true)
+    expect(reminderAllowed(REMINDER_MAX_SECONDS + 1)).toBe(false)
+  })
+
+  it('offers none for a start that is not set, not a number, or far past what a Date can hold', () => {
+    // The chain's start is a uint256 read through Number(): 0 is unset, and a creator can type microseconds
+    // or the maximum.
+    const starts = [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 8.64e12 + 1, 1_791_212_400_000_000]
+    for (const start of [...starts, Number(2n ** 256n - 1n)]) expect(reminderAllowed(start)).toBe(false)
+    expect(reminderAllowed(1_791_212_400)).toBe(true)
+  })
+
+  it('ends an event close to the bound at the bound, so no stamp has a five-digit year', () => {
+    const near = icsOf({ ...reminder, start: REMINDER_MAX_SECONDS - 600 }, 0).split('\r\n')
+    expect(near).toContain('DTSTART:99991231T234959Z')
+    expect(near).toContain('DTEND:99991231T235959Z')
+    const last = new URL(googleCalendarUrl({ ...reminder, start: REMINDER_MAX_SECONDS }))
+    expect(last.searchParams.get('dates')).toBe('99991231T235959Z/99991231T235959Z')
   })
 })

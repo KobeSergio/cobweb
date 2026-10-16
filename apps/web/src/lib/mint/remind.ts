@@ -21,7 +21,20 @@ export type Reminder = {
 export const REMINDER_SECONDS = 30 * 60
 export const REMINDER_SENTENCE = 'Minting opens when the chain reaches this time.'
 
-/** A time as iCalendar and Google write it in UTC: `YYYYMMDDTHHMMSSZ`. */
+/**
+ * The last second a calendar can name: the end of the year 9999. The chain's start is a `uint256`, so a group
+ * can carry a start past it (the maximum as "never", microseconds): above 8.64e12 seconds `toISOString`
+ * throws, and from the year 10000 it writes a five-digit year that RFC 5545 refuses. No reminder is offered
+ * for such a start, and none ends past this second.
+ */
+export const REMINDER_MAX_SECONDS = 253_402_300_799
+
+/** Whether a start is a time a reminder can name: set (above 0) and no later than `REMINDER_MAX_SECONDS`. */
+export function reminderAllowed(start: number): boolean {
+  return start > 0 && start <= REMINDER_MAX_SECONDS
+}
+
+/** A time as iCalendar and Google write it in UTC: `YYYYMMDDTHHMMSSZ`, for 0 up to `REMINDER_MAX_SECONDS`. */
 export function calendarTime(seconds: number): string {
   return new Date(seconds * 1_000)
     .toISOString()
@@ -30,6 +43,9 @@ export function calendarTime(seconds: number): string {
 }
 
 const titleOf = (reminder: Reminder) => `${reminder.collection}: ${reminder.phase} opens`
+
+/** The event's end: 30 minutes after the start, and never past the last second a calendar can name. */
+const endOf = (reminder: Reminder) => Math.min(reminder.start + REMINDER_SECONDS, REMINDER_MAX_SECONDS)
 
 /** Text as iCalendar escapes it: backslashes, semicolons, commas and line breaks. */
 function escapeText(text: string): string {
@@ -69,7 +85,7 @@ export function icsOf(reminder: Reminder, stampSeconds: number): string {
     `UID:${reminder.chainId}-${reminder.contract.toLowerCase()}-${reminder.groupId}-${reminder.start}@cobweb`,
     `DTSTAMP:${calendarTime(stampSeconds)}`,
     `DTSTART:${calendarTime(reminder.start)}`,
-    `DTEND:${calendarTime(reminder.start + REMINDER_SECONDS)}`,
+    `DTEND:${calendarTime(endOf(reminder))}`,
     `SUMMARY:${escapeText(titleOf(reminder))}`,
     `DESCRIPTION:${escapeText(`${REMINDER_SENTENCE}\n${reminder.url}`)}`,
     `URL:${reminder.url}`,
@@ -84,7 +100,7 @@ export function googleCalendarUrl(reminder: Reminder): string {
   const params = new URLSearchParams({
     action: 'TEMPLATE',
     text: titleOf(reminder),
-    dates: `${calendarTime(reminder.start)}/${calendarTime(reminder.start + REMINDER_SECONDS)}`,
+    dates: `${calendarTime(reminder.start)}/${calendarTime(endOf(reminder))}`,
     details: `${REMINDER_SENTENCE}\n${reminder.url}`,
   })
   return `https://calendar.google.com/calendar/render?${params.toString()}`

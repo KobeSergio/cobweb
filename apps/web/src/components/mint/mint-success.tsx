@@ -5,23 +5,29 @@ import { ExternalLinkIcon, Share2Icon } from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
 import type { Hex } from 'viem'
+import { rarityTier } from '@cobweb/dna'
 import { Button } from '@cobweb/ui/components/button'
 import { EASE_OUT } from '@cobweb/ui/lib/motion'
 import { cn } from '@cobweb/ui/lib/utils'
-import { TierDot } from '@/components/art/generate/rarity'
-import { rarityTier, TIER_RANGES } from '@/components/art/state/token-logic'
+import { TIER_CHIP, TierDot, tierTitle } from '@/components/art/generate/tier-colors'
 import { explorerTxUrl } from '@/lib/demo/helpers'
 import { useMint } from './mint-context'
 import { TokenArtFrame } from './token-image'
 import { useTokenArt } from './use-token-art'
 
-/** A minted token's rarity tier, its range as the title (docs/specs/2026-10-16-mint-page-live-data.md, section 7.7). */
+/**
+ * A minted token's rarity tier in Generate's colours, with the title its rank badge carries
+ * (docs/specs/2026-10-16-mint-page-live-data.md, section 7.7).
+ */
 function TierChip({ rank, total }: { rank: number; total: number }) {
   const tier = rarityTier(rank, total)
   return (
     <span
-      title={`${TIER_RANGES[tier.key]} by rarity`}
-      className="inline-flex h-6 items-center gap-1.5 rounded-full border bg-surface-2 px-2 text-xs font-medium"
+      title={tierTitle(tier)}
+      className={cn(
+        'inline-flex h-6 items-center gap-1.5 rounded-full border bg-surface-2 px-2 text-xs font-medium whitespace-nowrap',
+        TIER_CHIP[tier.key],
+      )}
     >
       <TierDot tier={tier.key} />
       {tier.label}
@@ -30,9 +36,9 @@ function TierChip({ rank, total }: { rank: number; total: number }) {
 }
 
 /**
- * The peak of the page: the minted tokens are revealed one after another, a curtain lifting off each, with their
- * rarity tier once the collection is revealed (or their number of the supply where every token shares its art).
- * Ids, the transaction, a share action, and "Mint more" when the wallet still has room.
+ * The peak of the page: the minted tokens are revealed one after another, a curtain lifting off each, with
+ * their rarity tier once a generative collection is revealed, or their number of the supply for a single
+ * asset and a 1/1. Ids, the transaction, a share action, and "Mint more" when the wallet still has room.
  */
 export function MintSuccess() {
   const { flow, page, live, source, action, closeFlow } = useMint()

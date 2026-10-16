@@ -40,7 +40,6 @@ export function MusicButton({
             variant="ghost"
             size="icon"
             aria-label={playing ? 'Pause music' : 'Play music'}
-            aria-pressed={playing}
             onClick={toggle}
           >
             {playing ? <PauseIcon /> : <MusicIcon />}
