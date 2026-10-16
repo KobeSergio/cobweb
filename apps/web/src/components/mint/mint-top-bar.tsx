@@ -4,9 +4,10 @@ import { TriangleAlertIcon } from 'lucide-react'
 import { Artwork } from '@cobweb/ui/components/artwork'
 import type { MintPageStatic } from '@/lib/mint/page-doc'
 import { useMint } from './mint-context'
+import { MusicButton } from './music-button'
 import { WalletButton } from './wallet-button'
 
-/** The slim bar: the collection's identity on the left, the wallet on the right. No app chrome. */
+/** The slim bar: the collection's identity on the left, the music and the wallet on the right. No app chrome. */
 export function MintTopBar({ page }: { page: MintPageStatic }) {
   return (
     <header className="relative z-10 mx-auto flex h-16 max-w-[90rem] items-center justify-between gap-4 px-4 sm:h-[4.5rem] sm:px-8">
@@ -23,7 +24,12 @@ export function MintTopBar({ page }: { page: MintPageStatic }) {
         <span className="truncate text-[0.9375rem] font-semibold tracking-[-0.01em]">{page.name}</span>
         <span className="numeric hidden text-xs text-muted-foreground sm:inline">{page.symbol}</span>
       </a>
-      <WalletButton />
+      <div className="flex shrink-0 items-center gap-2">
+        {page.sections.music && (
+          <MusicButton music={page.sections.music} artwork={page.avatarUrl} title={page.name} />
+        )}
+        <WalletButton />
+      </div>
     </header>
   )
 }

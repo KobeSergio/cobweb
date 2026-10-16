@@ -10,6 +10,7 @@ import { ChainName } from '@/components/chains/chain-icon'
 import { Countdown } from './countdown'
 import { MintButton, MintHint } from './mint-action'
 import { useMint } from './mint-context'
+import { RemindMe } from './remind-me'
 import { Eligibility, PhasePicker, PriceBreakdown, QuantityStepper, VaultPicker } from './panel-controls'
 import { useHydrated, useLocalTime } from './use-chain-clock'
 
@@ -276,6 +277,7 @@ function Upcoming() {
         <span className="numeric">{when}</span>
         {hydrated && ', your time'}
       </p>
+      <RemindMe phase={phase} className="mt-3" />
       <p className="sr-only" role="status">
         {phase.group.name} opens {when}.
       </p>

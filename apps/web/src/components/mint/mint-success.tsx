@@ -1,19 +1,37 @@
 'use client'
 
+import { useQuery } from '@tanstack/react-query'
 import { ExternalLinkIcon, Share2Icon } from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
 import { Button } from '@cobweb/ui/components/button'
 import { EASE_OUT } from '@cobweb/ui/lib/motion'
 import { cn } from '@cobweb/ui/lib/utils'
+import { TierDot } from '@/components/art/generate/rarity'
+import { rarityTier, TIER_RANGES } from '@/components/art/state/token-logic'
 import { explorerTxUrl } from '@/lib/demo/helpers'
 import { useMint } from './mint-context'
 import { TokenArtFrame } from './token-image'
 import { useTokenArt } from './use-token-art'
 
+/** A minted token's rarity tier, its range as the title (docs/specs/2026-10-16-mint-page-live-data.md, section 7.7). */
+function TierChip({ rank, total }: { rank: number; total: number }) {
+  const tier = rarityTier(rank, total)
+  return (
+    <span
+      title={`${TIER_RANGES[tier.key]} by rarity`}
+      className="inline-flex h-6 items-center gap-1.5 rounded-full border bg-surface-2 px-2 text-xs font-medium"
+    >
+      <TierDot tier={tier.key} />
+      {tier.label}
+    </span>
+  )
+}
+
 /**
- * The peak of the page: the minted tokens are revealed one after another, a curtain lifting off
- * each. Ids, the transaction, a share action, and "Mint more" when the wallet still has room.
+ * The peak of the page: the minted tokens are revealed one after another, a curtain lifting off each, with their
+ * rarity tier once the collection is revealed (or their number of the supply where every token shares its art).
+ * Ids, the transaction, a share action, and "Mint more" when the wallet still has room.
  */
 export function MintSuccess() {
   const { flow, page, live, source, action, closeFlow } = useMint()
@@ -21,7 +39,19 @@ export function MintSuccess() {
   const ids = flow.step === 'success' ? flow.tokenIds : []
   // Each minted token's art at the state's base URI: the placeholder's image before the reveal.
   const art = useTokenArt(source, live?.baseUri ?? null, ids)
+  const generative = page.projectType === 'generative'
+  const revealed = !!live?.revealed
+  // Asked once per mint, for the first 20 ids; a failure shows nothing.
+  const tiers = useQuery({
+    queryKey: ['mint-tiers', flow.step === 'success' ? flow.hash : null],
+    queryFn: () => source.tiers(live?.baseUri ?? '', ids.slice(0, 20)),
+    enabled: flow.step === 'success' && generative && revealed && ids.length > 0,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    retry: false,
+  })
   if (flow.step !== 'success') return null
+  const supply = live?.supply.max ?? 0
   const chain = page.chain
   const name = page.name
   const canMintMore = action.kind === 'mint'
@@ -81,9 +111,24 @@ export function MintSuccess() {
                 <span className="text-muted-foreground">{name} </span>
                 <span className="numeric font-medium">#{id}</span>
               </p>
+              {generative && tiers.data?.ranks[id] !== undefined && (
+                <p className="mt-1.5 flex justify-center">
+                  <TierChip rank={tiers.data.ranks[id]} total={tiers.data.total} />
+                </p>
+              )}
+              {!generative && supply > 0 && (
+                <p className="numeric mt-1 text-center text-xs text-muted-foreground">
+                  #{id} of {supply.toLocaleString('en-US')}
+                </p>
+              )}
             </motion.li>
           ))}
         </ul>
+        {generative && !revealed && (
+          <p className="mt-4 text-center text-[0.8125rem] text-muted-foreground">
+            Rarity shows after the reveal
+          </p>
+        )}
       </div>
 
       <motion.div

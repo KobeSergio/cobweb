@@ -1,6 +1,7 @@
 import 'server-only'
 import { createClient } from '@supabase/supabase-js'
 import { unstable_cache } from 'next/cache'
+import { getSessionUser } from '@/lib/auth'
 import type { Database } from '@/lib/database.types'
 import { createClient as createSessionClient } from '@/lib/supabase/server'
 import { pageDocSchema, pageStaticOf, type MintPageStatic } from './page-doc'
@@ -49,14 +50,23 @@ export async function readMintPage(slug: string): Promise<MintPageStatic | null>
   return raw === null ? null : pageOf(raw)
 }
 
-/** The page at a link for its signed-in owner, published or not, or null for anyone else. Uncached. */
+/**
+ * The page at a link for its signed-in owner, published or not, with the collection's id for the way back to the
+ * Mint page tab; null for anyone else. Uncached.
+ */
 export async function readMintPagePreview(
   slug: string,
-): Promise<(MintPageStatic & { published: boolean }) | null> {
+): Promise<(MintPageStatic & { published: boolean; collectionId: string }) | null> {
+  // A signed-out visitor gets the not-found page: the function is granted to signed-in callers only.
+  if (!(await getSessionUser())) return null
   const supabase = await createSessionClient()
-  const { data, error } = await supabase.rpc('mint_page_preview', { p_slug: linkOf(slug) })
+  const link = linkOf(slug)
+  const { data, error } = await supabase.rpc('mint_page_preview', { p_slug: link })
   if (error) throw new Error(`The mint page preview could not be read: ${error.code} ${error.message}`)
   if (data === null) return null
   const page = pageOf(data)
-  return page && { ...page, published: pageDocSchema.parse(data).published }
+  const owned = await supabase.from('collections').select('id').eq('slug', link).maybeSingle()
+  if (owned.error) throw new Error(`The collection could not be read: ${owned.error.message}`)
+  if (!page || !owned.data) return null
+  return { ...page, published: pageDocSchema.parse(data).published, collectionId: owned.data.id }
 }

@@ -8,6 +8,7 @@ import { formatNative } from '@/lib/demo/helpers'
 import { formatCountdown } from './format'
 import { useMint } from './mint-context'
 import { sortPhases, type Phase, type PhaseStatus } from './model'
+import { RemindMe } from './remind-me'
 import { useHydrated, useLocalTime } from './use-chain-clock'
 
 const BADGE: Record<PhaseStatus, { status: Status; label: string }> = {
@@ -145,6 +146,7 @@ function PhaseRow({ phase, selected }: { phase: Phase; selected: boolean }) {
           )}
         </p>
       )}
+      {status === 'scheduled' && <RemindMe phase={phase} className="mt-2.5" />}
       {status === 'unscheduled' && (
         <p className="mt-2 text-[0.8125rem] text-muted-foreground">The creator has not set a start yet.</p>
       )}

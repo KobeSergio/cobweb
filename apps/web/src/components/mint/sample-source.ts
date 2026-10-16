@@ -304,6 +304,16 @@ export function sampleMintSource(
 
     chain,
 
+    async tiers(baseUri, ids) {
+      if (baseUri !== SAMPLE_REVEALED_URI) return null
+      const ranks: Record<number, number> = {}
+      for (const id of ids.slice(0, 20)) {
+        const token = DEMO_TOKENS[id - 1]
+        if (token) ranks[id] = token.rank
+      }
+      return { total: DEMO_TOKENS.length, ranks }
+    },
+
     async tokenArt(baseUri, id) {
       if (baseUri === SAMPLE_PLACEHOLDER_URI) return { layers: [DEMO_PLACEHOLDER.imageUrl], video: false }
       const token = DEMO_TOKENS[id - 1]

@@ -12,6 +12,7 @@ import type { MintParams } from '@/lib/mint/mint-call'
 import type { MintResult } from '@/lib/mint/mint-run'
 import type { MintPageStatic } from '@/lib/mint/page-doc'
 import { wagmiMintChain } from '@/lib/mint/wagmi-chain'
+import { createClient } from '@/lib/supabase/client'
 import {
   defaultPhaseId,
   deriveAction,
@@ -86,6 +87,7 @@ export function MintProvider({ page, sample, children }: MintPageProps & { child
         : liveMintSource(page, {
             freshnessUrl: process.env.NEXT_PUBLIC_FRESHNESS_URL,
             chain: wagmiMintChain(config),
+            supabase: createClient(),
           }),
     [page, sample, config],
   )

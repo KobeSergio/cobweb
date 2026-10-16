@@ -4,6 +4,7 @@ import { MintProvider } from './mint-context'
 import { MintFlowDialog } from './mint-flow-dialog'
 import { MintPanel } from './mint-panel'
 import { DegradedBanner, MintTopBar } from './mint-top-bar'
+import { PageSections } from './page-sections'
 import { PhaseList } from './phase-list'
 import { StickyMintBar } from './sticky-mint-bar'
 import type { MintPageProps } from './types'
@@ -61,6 +62,8 @@ export function MintPage(props: MintPageProps) {
             <Details />
           </div>
         </div>
+
+        <PageSections page={page} />
 
         <MintFooter />
         <StickyMintBar />
