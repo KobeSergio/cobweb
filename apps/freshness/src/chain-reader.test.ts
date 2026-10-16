@@ -270,6 +270,35 @@ describe('chainReader (docs/specs/2026-10-16-freshness-server.md, section 6.4)',
     await reader.stop()
   })
 
+  it('keeps a collection a log marked, read in full at a head below the scanned block, marked for the next tick', async () => {
+    const { chain, client } = fakeChain()
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const hot = hotSet()
+    const reader = chainReader(ANVIL, hot, client)
+    const a = hot.join(31337, A, Date.now()).entry
+    reader.wake()
+    await settle()
+    // A log in block 102 marks A, whose base URI then answers null: A stays as it was, marked.
+    chain.head = 102n
+    chain.logs = [metadataLog(A)]
+    chain.reverts.add(`baseURI ${A}`)
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect([a.read?.state.block, a.marked]).toEqual([100n, true])
+    // An older head (a load-balanced RPC): A is read in full at 101, below the scanned 102, and stays marked.
+    chain.head = 101n
+    chain.logs = []
+    chain.reverts.clear()
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect([a.read?.state.block, a.marked]).toEqual([101n, true])
+    chain.head = 103n
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect([a.read?.state.block, a.marked]).toEqual([103n, false])
+    expect(errors.mock.calls.map((call) => String(call[0]))).toEqual([
+      `The call baseURI on ${A} (Anvil) answered nothing; the collection stays as it was.`,
+    ])
+    await reader.stop()
+  })
+
   it('keeps a collection read in full at a head below the scanned block marked, and reads it in full again at the next tick', async () => {
     const { chain, client } = fakeChain()
     const hot = hotSet()
@@ -607,7 +636,7 @@ describe('chainReader (docs/specs/2026-10-16-freshness-server.md, section 6.4)',
     expect(chain.calls.filter((call) => call === 'head')).toHaveLength(1)
   })
 
-  it('never reads back to back while an idle read stays frozen past its start window (the early wake floored at one fast tick after the tick start, and none from a passed window)', async () => {
+  it("tries a failed tick again within one fast tick once a read estimates its start's window has opened, never back to back", async () => {
     const { chain, client } = fakeChain()
     chain.state = scheduledAt
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -620,16 +649,38 @@ describe('chainReader (docs/specs/2026-10-16-freshness-server.md, section 6.4)',
     chain.failure = rpcDown(503)
     chain.calls.length = 0
     await vi.advanceTimersByTimeAsync(60_000)
-    // A tick when the window opens, 8 s after the read, then the idle tier's 20 s: 3 head reads in 60 s.
+    // A failed tick when the window opens, 8 s after the read, then one a second until the head answers.
     const heads = chain.calls.filter((call) => call === 'head').length
-    expect(heads).toBeGreaterThan(0)
-    expect(heads).toBeLessThanOrEqual(5)
+    expect(heads).toBeGreaterThanOrEqual(30)
+    expect(heads).toBeLessThanOrEqual(61)
     expect(reader.health().failedTicks).toBe(heads)
     const lines = errors.mock.calls.map((call) => String(call[0]))
     expect(lines).toHaveLength(heads)
     expect(new Set(lines)).toEqual(
       new Set(['A tick on Anvil failed: HttpRequestError: HTTP request failed.']),
     )
+    await reader.stop()
+  })
+
+  it("keeps the idle cadence after good ticks while a frozen read's start window has opened by its estimate", async () => {
+    const { chain, client } = fakeChain()
+    chain.state = scheduledAt
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const hot = hotSet()
+    const reader = chainReader(ANVIL, hot, client)
+    hot.join(31337, A, Date.now())
+    reader.wake()
+    await settle()
+    // From here A's state call answers null at each newer head, so its read stays frozen at block 100.
+    chain.head = 101n
+    chain.reverts.add(`collectionState ${A}`)
+    chain.calls.length = 0
+    await vi.advanceTimersByTimeAsync(60_000)
+    const heads = chain.calls.filter((call) => call === 'head').length
+    expect(heads).toBeGreaterThan(0)
+    expect(heads).toBeLessThanOrEqual(5)
+    expect(reader.health()).toMatchObject({ failedTicks: 0, tier: 'idle' })
+    expect(errors).toHaveBeenCalledTimes(heads)
     await reader.stop()
   })
 

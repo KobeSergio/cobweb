@@ -15,6 +15,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Delegation } from './delegations.ts'
 import {
+  NULL_LISTING_LOG_EVERY_MS,
   QUEUE_MAX,
   REGISTRY_RECHECK_MS,
   WINDOW_MAX,
@@ -275,7 +276,7 @@ describe('walletWindows (docs/specs/2026-10-16-freshness-server.md, section 6.8)
     await windows.stop()
   })
 
-  it('reads a listing that answers null as no vaults, and logs the wallet and the chain', async () => {
+  it('reads a listing that answers null as no vaults, and logs the wallet and the chain at most once every 10 s', async () => {
     const { reader, client } = fakeReader()
     reader.listings.set(WALLET, [delegation(V1)])
     reader.failedListings.add(WALLET)
@@ -291,9 +292,18 @@ describe('walletWindows (docs/specs/2026-10-16-freshness-server.md, section 6.8)
       ...quotas,
       vaults: [],
     })
-    expect(linesOf(errors)).toEqual([
-      `The registry listing for ${WALLET} on Anvil answered nothing; it reads as no vaults.`,
-    ])
+    const line = `The registry listing for ${WALLET} on Anvil answered nothing; it reads as no vaults.`
+    expect(linesOf(errors)).toEqual([line])
+    // The next window, 200 ms later, reads the same, unlogged; one 10 s after the first is logged again.
+    const again = windows.ask(A, WALLET)
+    await vi.advanceTimersByTimeAsync(WINDOW_MS)
+    expect(await again).toMatchObject({ vaults: [] })
+    expect(linesOf(errors)).toEqual([line])
+    await vi.advanceTimersByTimeAsync(NULL_LISTING_LOG_EVERY_MS - 2 * WINDOW_MS)
+    const later = windows.ask(A, WALLET)
+    await vi.advanceTimersByTimeAsync(WINDOW_MS)
+    expect(await later).toMatchObject({ vaults: [] })
+    expect(linesOf(errors)).toEqual([line, line])
     await windows.stop()
   })
 

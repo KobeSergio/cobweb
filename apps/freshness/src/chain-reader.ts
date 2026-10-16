@@ -20,7 +20,7 @@ import {
 import { errorLine, errorName, type ChainHealth } from './health.ts'
 import type { HotEntry, HotSet } from './hot-set.ts'
 import { scanLogs, type GetLogs } from './logs.ts'
-import { chainTier, nextDelayMs, TIER_MS, type Tier } from './tiers.ts'
+import { chainTier, nextDelayMs, TIER_MS, windowOpen, type Tier } from './tiers.ts'
 
 /** The fees `collectionState()` carries, wei as decimal strings. */
 export type FeeWei = { mintFeeFlatWei: string; mintFeeBps: number; airdropFeePerTokenWei: string }
@@ -61,9 +61,10 @@ const tierAmong = (entries: readonly HotEntry[]): Tier | null =>
  * entry read at the head or later as read now, scans the logs since the last scanned block, then reads every
  * other entry's `collectionState()` at the head in one `readEach`, with the extras where they are due, and
  * the levels after it. Ticks never overlap: a wake during a tick runs one more tick after it. The next tick
- * starts one interval after this one started, or at once when it ran longer. A tick that throws outside its
- * own try counts as failed like any other, and the reader goes on. A failed factory read the server notes
- * counts as a failed tick too.
+ * starts one interval after this one started, or at once when it ran longer; after a failed tick, within one
+ * fast interval while a read estimates a start's window has opened. A tick that throws outside its own try
+ * counts as failed like any other, and the reader goes on. A failed factory read the server notes counts as
+ * a failed tick too.
  */
 export function chainReader(
   chain: ChainConfig,
@@ -227,6 +228,7 @@ export function chainReader(
   /** One tick; answers the delay to the next, or null when the chain has no hot entry left. */
   async function tick(): Promise<number | null> {
     const startedAt = Date.now()
+    let failure = false
     hot.expire(startedAt)
     const entries = hot.onChain(chain.id)
     if (!entries.length) {
@@ -274,13 +276,19 @@ export function chainReader(
       lastGoodTickAt = Date.now()
     } catch (error) {
       failed(error)
+      failure = true
     }
     const current = hot.onChain(chain.id)
     const reads = current.flatMap((entry) =>
       entry.read && entry.readAt !== null ? [{ state: entry.read.state, readAt: entry.readAt }] : [],
     )
     const tier = chainTier(current.map((entry) => entry.read?.state ?? null))
-    return nextDelayMs(tier, reads, startedAt, Date.now())
+    const now = Date.now()
+    const delay = nextDelayMs(tier, reads, startedAt, now)
+    // A failed tick is tried again within one fast interval while a read estimates a start's window has
+    // opened, so a failure at the wake tick cannot leave the start unread for an idle interval. After a good
+    // tick a passed moment does not shorten the delay, so a frozen read keeps the idle cadence.
+    return failure && windowOpen(reads, now) ? Math.min(delay, TIER_MS.fast) : delay
   }
 
   /**

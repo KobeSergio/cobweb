@@ -39,10 +39,16 @@ export type HealthBody = {
   wallet: { windows: number; answered: number; waiting: number }
 }
 
+/** How many causes deep the log line looks, so a cause that refers back to itself cannot loop. */
+const CAUSE_DEPTH = 10
+
 /** The innermost viem error, where viem wraps one in another. */
 function innermost(error: unknown): unknown {
   let current = error
-  while (current instanceof BaseError && current.cause instanceof BaseError) current = current.cause
+  for (let depth = 0; depth < CAUSE_DEPTH; depth++) {
+    if (!(current instanceof BaseError && current.cause instanceof BaseError)) break
+    current = current.cause
+  }
   return current
 }
 
@@ -54,9 +60,12 @@ export function errorName(error: unknown): string {
 
 /** The first whole-number `code` on the error's chain of causes, outermost first: a JSON-RPC error's. */
 function codeOf(error: unknown): number | undefined {
-  for (let current: unknown = error; current instanceof Error; current = current.cause)
+  let current: unknown = error
+  for (let depth = 0; depth < CAUSE_DEPTH && current instanceof Error; depth++) {
     if ('code' in current && typeof current.code === 'number' && Number.isInteger(current.code))
       return current.code
+    current = current.cause
+  }
   return undefined
 }
 

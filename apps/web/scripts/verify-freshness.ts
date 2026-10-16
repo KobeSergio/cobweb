@@ -53,8 +53,9 @@ const { phaseCalls, settingsCalls } = await import('../src/lib/manage/phase-call
 const PUBLIC = 0
 const HOLDERS = 1
 const STATE_CACHE = 'public, max-age=0, s-maxage=1, stale-while-revalidate=1, stale-if-error=60'
-/** The headers every answer with CORS lets a page's script read. */
+/** The response header that names what a page's script may read. */
 const EXPOSED_HEADER = 'access-control-expose-headers'
+/** The headers every answer with CORS lets a page's script read. */
 const EXPOSED = 'ETag, Retry-After, Age'
 /** The time the slowest RPC retry in flight may add to a tick: viem's three, at 150, 300 and 600 ms. */
 const RETRY_SLACK_MS = 1_200

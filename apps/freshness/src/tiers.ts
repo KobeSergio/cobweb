@@ -1,4 +1,4 @@
-import type { ChainState } from '@cobweb/shared'
+import type { ChainGroup, ChainState } from '@cobweb/shared'
 
 /**
  * The tiers and `degraded` (docs/specs/2026-10-16-freshness-server.md, section 6.6), pure. The tiers only
@@ -51,13 +51,22 @@ export function chainTier(states: readonly (ChainState | null)[]): Tier {
 }
 
 /**
+ * When a read estimates a group's start window opens: its `readAt` plus the seconds from its block time to
+ * the start less 15. Null for a group never scheduled, or one whose window the read saw open or passed.
+ */
+function opensAt(state: ChainState, readAt: number, group: ChainGroup): number | null {
+  if (group.startTimestamp === 0) return null
+  const opensIn = group.startTimestamp - FAST_BEFORE_S - state.blockTimestamp
+  return opensIn > 0 ? readAt + opensIn * 1_000 : null
+}
+
+/**
  * The delay to the next tick: the tier's interval counted from this tick's start (0 when the tick ran
- * longer), shortened on an idle chain to the moment the nearest start's window opens, estimated as that
- * read's `readAt` plus the seconds from its block time to the start less 15. A moment at or before the
- * tick's start comes from a stale read and does not shorten the delay: a fresh read's moment always lies
- * after it, since its `readAt` is no earlier than the tick's start and the window opens at least 1 s after
- * its block. The early wake is never sooner than one fast interval after the tick's start either, so a read
- * that stays frozen cannot make the chain read back to back.
+ * longer), shortened on an idle chain to the moment the nearest start's window opens (`opensAt`). A moment
+ * at or before the tick's start comes from a stale read and does not shorten the delay: a fresh read's
+ * moment always lies after it, since its `readAt` is no earlier than the tick's start and the window opens
+ * at least 1 s after its block. The early wake is never sooner than one fast interval after the tick's start
+ * either, so a read that stays frozen cannot make the chain read back to back.
  */
 export function nextDelayMs(
   tier: Tier,
@@ -69,13 +78,24 @@ export function nextDelayMs(
   if (tier === 'idle')
     for (const { state, readAt } of reads)
       for (const group of state.groups) {
-        if (group.startTimestamp === 0) continue
-        const opensIn = group.startTimestamp - FAST_BEFORE_S - state.blockTimestamp
-        const opensAt = readAt + opensIn * 1_000
-        if (opensIn > 0 && opensAt > startedAt)
-          next = Math.min(next, Math.max(startedAt + TIER_MS.fast, opensAt))
+        const at = opensAt(state, readAt, group)
+        if (at !== null && at > startedAt) next = Math.min(next, Math.max(startedAt + TIER_MS.fast, at))
       }
   return Math.max(0, next - now)
+}
+
+/**
+ * Whether a read estimates that a start's window has opened by `now`: its moment (as `nextDelayMs` computes
+ * it) is at or before `now`. After a failed tick the reader then tries again within one fast interval, so a
+ * failure at the wake tick cannot leave a start unread for an idle interval.
+ */
+export function windowOpen(reads: readonly { state: ChainState; readAt: number }[], now: number): boolean {
+  return reads.some(({ state, readAt }) =>
+    state.groups.some((group) => {
+      const at = opensAt(state, readAt, group)
+      return at !== null && at <= now
+    }),
+  )
 }
 
 /** How old a last read may be before it reads degraded: the larger of three ticks of the tier and 10 s. */

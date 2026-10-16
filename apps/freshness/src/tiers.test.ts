@@ -1,6 +1,6 @@
 import type { ChainGroup, ChainState } from '@cobweb/shared'
 import { describe, expect, it } from 'vitest'
-import { chainTier, degradedAfterMs, isDegraded, nextDelayMs, tierOf } from './tiers.ts'
+import { chainTier, degradedAfterMs, isDegraded, nextDelayMs, tierOf, windowOpen } from './tiers.ts'
 
 /** The chain's time at the read. */
 const NOW_S: number = 1_800_000_000
@@ -118,5 +118,23 @@ describe('nextDelayMs', () => {
     expect(nextDelayMs('idle', [{ state: scheduled(23), readAt: 2_500 }], 10_000, 10_000)).toBe(1_000)
     // The floor counts from the tick's start, not from when the tick ended.
     expect(nextDelayMs('idle', [{ state: scheduled(23), readAt: 2_500 }], 10_000, 10_400)).toBe(600)
+  })
+})
+
+describe('windowOpen', () => {
+  it("is true once a read estimates its start's window has opened, and false before", () => {
+    // Read at 0 s, 23 s before a start: its window opens at 8 s.
+    const reads = [
+      { state: scheduled(40), readAt: 0 },
+      { state: scheduled(23), readAt: 0 },
+    ]
+    expect(windowOpen(reads, 7_999)).toBe(false)
+    expect(windowOpen(reads, 8_000)).toBe(true)
+  })
+
+  it('counts no group never scheduled, and no start the read already saw within or past its window', () => {
+    expect(windowOpen([{ state: state([group({ startTimestamp: 0 })]), readAt: 0 }], 60_000)).toBe(false)
+    expect(windowOpen([{ state: scheduled(10), readAt: 0 }], 60_000)).toBe(false)
+    expect(windowOpen([{ state: scheduled(-600), readAt: 0 }], 60_000)).toBe(false)
   })
 })

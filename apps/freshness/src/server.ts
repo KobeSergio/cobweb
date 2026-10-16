@@ -78,7 +78,7 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
     try {
       const answer = await isCollection(chainId, address)
       if (answer === 'busy') return refusal(503, 'busy')
-      return answer ? null : refusal(404, 'not-a-collection')
+      return answer === true ? null : refusal(404, 'not-a-collection')
     } catch (error) {
       chain.reader.noteFailure(error)
       return refusal(503, 'chain-unreadable')

@@ -20,6 +20,8 @@ export const WINDOW_MAX = 200
 export const QUEUE_MAX = 5_000
 /** Where the registry has no code, it is asked again after an hour. */
 export const REGISTRY_RECHECK_MS = 3_600_000
+/** A listing that answers null is logged at most once per 10 s on a chain. */
+export const NULL_LISTING_LOG_EVERY_MS = 10_000
 
 /** One registered group of `walletState`: the quota issued and claimed, both 0 for the public group. */
 export type QuotaBody = { id: number; quota: number; claimed: number }
@@ -71,6 +73,8 @@ export function walletWindows(
   let answered = 0
   let waiting = 0
   let stopped = false
+  /** When a null listing was last logged; null before the first. */
+  let nullListingLoggedAt: number | null = null
 
   /** Answers a pair's waiters and lets them go, so a pair answered again finds none left to count. */
   function answer(pair: Pair, value: Answer): void {
@@ -78,6 +82,16 @@ export function walletWindows(
     waiting -= waiters.length
     answered += waiters.length
     for (const resolve of waiters) resolve(value)
+  }
+
+  /** Logs a listing that answered null, at most once per 10 s; it reads as no vaults either way. */
+  function nullListing(wallet: Address): void {
+    const now = Date.now()
+    if (nullListingLoggedAt !== null && now - nullListingLoggedAt < NULL_LISTING_LOG_EVERY_MS) return
+    nullListingLoggedAt = now
+    console.error(
+      `The registry listing for ${wallet} on ${chain.name} answered nothing; it reads as no vaults.`,
+    )
   }
 
   /**
@@ -115,10 +129,7 @@ export function walletWindows(
       const listings = new Map<string, readonly Delegation[]>(
         wallets.map((wallet, index) => {
           const listing = withRegistry ? (answers[pairs.length + index] as readonly Delegation[] | null) : []
-          if (listing === null)
-            console.error(
-              `The registry listing for ${wallet} on ${chain.name} answered nothing; it reads as no vaults.`,
-            )
+          if (listing === null) nullListing(wallet)
           return [wallet.toLowerCase(), listing ?? []]
         }),
       )

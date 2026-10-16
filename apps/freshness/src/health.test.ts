@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { errorLine, errorName, failureLine } from './health.ts'
 
 /** An RPC URL as a provider issues it, its key in the path. */
-const KEYED_URL = 'https://rpc.example/v2/secret-key'
+const KEYED_URL: string = 'https://rpc.example/v2/secret-key'
 
 /** A JSON-RPC rate limit (-32005) as the node answers it, its message and viem's both carrying the URL. */
 const rateLimit = (): RpcRequestError =>
@@ -45,5 +45,16 @@ describe('the log lines (docs/specs/2026-10-16-freshness-server.md, section 6.1)
     expect(failureLine(new LimitExceededRpcError(rateLimit()))).toBe(
       'RpcRequestError (-32005): RPC Request failed.',
     )
+  })
+
+  it('stop walking a chain of causes that refers back to itself', () => {
+    const reset = Object.assign(new Error(`fetch ${KEYED_URL} failed`), { code: 'ECONNRESET' })
+    reset.cause = reset
+    expect(errorLine(reset)).toBe('Error')
+    expect(failureLine(reset)).toBe('Error (ECONNRESET)')
+    const call = new BaseError('The call failed.')
+    call.cause = call
+    expect(errorLine(call)).toBe('BaseError: The call failed.')
+    expect(errorName(call)).toBe('BaseError')
   })
 })
