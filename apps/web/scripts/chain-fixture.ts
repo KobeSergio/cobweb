@@ -52,13 +52,24 @@ const approvalAbi = parseAbi(['function isCreationCodeApproved(bytes32 codeHash)
 let passed = 0
 const failed: string[] = []
 
+/**
+ * A thrown error as one line for a FAIL: viem's `shortMessage` when it has one, else the message's first
+ * line. A viem request error's full message goes on to `URL: <rpc>`, which names the endpoint (and a
+ * provider's key when it carries one), so no FAIL line prints it.
+ */
+export function failureLine(error: unknown): string {
+  if (!(error instanceof Error)) return String(error).split('\n')[0] ?? ''
+  const short = (error as { shortMessage?: unknown }).shortMessage
+  return typeof short === 'string' && short ? short : (error.message.split('\n')[0] ?? '')
+}
+
 /** A check returns null on success, or a description of what happened instead. */
 export async function check(name: string, fn: () => Promise<string | null>): Promise<void> {
   let problem: string | null
   try {
     problem = await fn()
   } catch (e) {
-    problem = `threw ${e instanceof Error ? e.message : String(e)}`
+    problem = `threw ${failureLine(e)}`
   }
   if (problem === null) {
     passed++
@@ -77,7 +88,7 @@ export async function runChecks(main: () => Promise<void>, cleanup: () => Promis
     await main()
   } catch (e) {
     failed.push('run')
-    console.log(`FAIL run: ${e instanceof Error ? e.message : String(e)}`)
+    console.log(`FAIL run: ${failureLine(e)}`)
   } finally {
     await cleanup()
   }

@@ -12,12 +12,13 @@
 //   pnpm --filter @cobweb/web verify:mint-page
 //
 // The fixture (scripts/deploy-fixture.ts) reads the settings from the environment, `supabase status -o env` and
-// apps/web/.env.local, and refuses non-local endpoints. Never prints a key or a URL: the first line names the
-// chain and the two hosts. The cleanup runs every step whatever failed before it: it stops the page's polls
-// and the server, releases both wallets (each disconnected and no longer impersonated) and deletes every row
-// and object the run created. What stays is on Anvil: the collection with its one mint, the three fresh
-// accounts with their balances, and the chain's clock about 600 s ahead of where it was. Runs under `node
-// --conditions=react-server --import ./scripts/resolve-ts.mjs`.
+// apps/web/.env.local, and refuses non-local endpoints. The script's own lines print no key and no URL: the
+// first line names the chain and the two hosts, a failure names fields, hosts and keys, and a thrown error
+// prints viem's short message or its first line (chain-fixture.ts). The cleanup runs every step whatever
+// failed before it: it stops the page's polls and the server, releases both wallets (each disconnected and no
+// longer impersonated) and deletes every row and object the run created. What stays is on Anvil: the
+// collection with its one mint, the three fresh accounts with their balances, and the chain's clock about
+// 600 s ahead of where it was. Runs under `node --conditions=react-server --import ./scripts/resolve-ts.mjs`.
 
 import { createHash } from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
@@ -35,6 +36,7 @@ import {
   CID,
   deployedCollection,
   factory,
+  failureLine,
   HEX64,
   readLockCollection,
   refusal,
@@ -775,6 +777,17 @@ async function main(): Promise<void> {
         starting.label !== 'Starting, waiting for the chain'
       )
         return `with the clock at ${clockAtT} on the block at T-1 the action reads ${starting.kind} ${starting.label}`
+      // A second later the clock is past T: a page that opened the phase once its clock passed the start
+      // would offer the mint here, and the page still waits for the chain.
+      const clockPastT = chainNowOf(track, track.anchor.at + 2_000)
+      const waiting = actionOf(built, liveOf(built, track.body), holderBefore, clockPastT).action
+      if (
+        clockPastT === null ||
+        clockPastT <= T ||
+        waiting.kind !== 'blocked' ||
+        waiting.label !== 'Starting, waiting for the chain'
+      )
+        return `a second later, the clock at ${clockPastT}, the action reads ${waiting.kind} ${waiting.label}`
       await chain.setNextBlockTimestamp({ timestamp: BigInt(T) })
       await chain.mine({ blocks: 1 })
       const minedAt = performance.now()
@@ -971,16 +984,14 @@ async function unpublished(run: NonNullable<typeof subject>): Promise<string | n
   if (read.error || read.data !== null) return `anon: ${read.error?.message ?? 'the document'}`
   const preview = await run.creator.client.rpc('mint_page_preview', { p_slug: run.slug })
   const doc = pageDocSchema.safeParse(preview.data)
-  return doc.success && !doc.data.published && doc.data.description === DESCRIPTION
-    ? null
-    : `preview ${preview.error?.message ?? JSON.stringify(preview.data)}`
-}
-
-/** A thrown error in one line: viem's short message, since its full message names the request's URL. */
-function messageOf(error: unknown): string {
-  if (!(error instanceof Error)) return String(error)
-  const short = (error as { shortMessage?: unknown }).shortMessage
-  return typeof short === 'string' ? short : error.message
+  if (doc.success && !doc.data.published && doc.data.description === DESCRIPTION) return null
+  // The document's fields by name only: its values carry the saved links and media keys.
+  if (preview.error) return `preview ${preview.error.message}`
+  const fields =
+    preview.data && typeof preview.data === 'object' ? Object.keys(preview.data).sort().join(' ') : ''
+  return doc.success
+    ? `preview published ${doc.data.published}, fields ${fields}`
+    : `preview of another shape, fields ${fields}`
 }
 
 /** Runs a cleanup step whatever failed before it: its problem (a string it answers or a throw), or null. */
@@ -989,7 +1000,7 @@ async function attempt(label: string, fn: () => Promise<unknown>): Promise<strin
     const problem = await fn()
     return typeof problem === 'string' ? problem : null
   } catch (error) {
-    return `${label} threw ${messageOf(error)}`
+    return `${label} threw ${failureLine(error)}`
   }
 }
 
