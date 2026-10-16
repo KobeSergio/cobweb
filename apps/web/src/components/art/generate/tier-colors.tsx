@@ -1,4 +1,4 @@
-import { TIER_RANGES, type RarityTier } from '@cobweb/dna'
+import { TIER_RANGES, type RarityTier } from '@cobweb/dna/rank'
 import { cn } from '@cobweb/ui/lib/utils'
 
 /**
