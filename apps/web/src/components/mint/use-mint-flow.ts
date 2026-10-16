@@ -1,10 +1,12 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import type { Hex } from 'viem'
+import type { Address, Hex } from 'viem'
+import { sameAddress } from '@/lib/mint/fresh-client'
 import type { MintParams } from '@/lib/mint/mint-call'
 import { MintFailure, mintFailureOf, type MintStep } from '@/lib/mint/mint-failure'
 import { runMint, type MintChain, type MintResult } from '@/lib/mint/mint-run'
+import type { MintAction } from './model'
 
 export type FlowStep = MintStep
 
@@ -39,6 +41,23 @@ export function flowRuns() {
       current += 1
     },
   }
+}
+
+/**
+ * Whether Try again sends the failed mint again: only while the panel offers a mint on the phase and with the
+ * vault of the one that failed. The panel can move on while a mint waits (its phase sold out or closed), and
+ * a retry would then send another phase's mint at its price, so the flow closes instead and the panel shows
+ * where it moved.
+ */
+export function retryOffered(
+  next: Pick<MintAction, 'kind'>,
+  phaseId: number | null,
+  vault: Address | null,
+  failed: Pick<MintParams, 'groupId' | 'vault'>,
+): boolean {
+  const sameVault =
+    vault === null || failed.vault === null ? vault === failed.vault : sameAddress(vault, failed.vault)
+  return next.kind === 'mint' && phaseId === failed.groupId && sameVault
 }
 
 /**

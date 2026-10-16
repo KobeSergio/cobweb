@@ -14,7 +14,7 @@ import { explorerTxUrl, formatNative, shortAddress } from '@/lib/demo/helpers'
 import { failureActions, failureCopy, type FailureAction } from '@/lib/mint/mint-failure'
 import { useMint } from './mint-context'
 import { MintSuccess } from './mint-success'
-import type { FlowState, FlowStep } from './use-mint-flow'
+import { retryOffered, type FlowState, type FlowStep } from './use-mint-flow'
 
 const STEPS: { step: FlowStep; title: string }[] = [
   { step: 'checking', title: 'Check the mint' },
@@ -123,7 +123,7 @@ function actionLabel(action: FailureAction, hasExplorer: boolean): string | null
 }
 
 function FlowBody() {
-  const { flow, act, action: next, closeFlow, page, live, setQuantity, setVault } = useMint()
+  const { flow, act, action: next, closeFlow, page, live, phase, vault, setQuantity, setVault } = useMint()
   const reduce = useReducedMotion()
   if (flow.step === 'idle') return null
   if (flow.step === 'success') return <MintSuccess />
@@ -140,9 +140,11 @@ function FlowBody() {
         })
       : []
   const run = (action: FailureAction) => {
-    // Try again starts the mint the panel offers now; when it offers something else (a switch, a limit, a closed
-    // phase), the flow closes so the panel shows why.
-    if (action.kind === 'retry') return next.kind === 'mint' ? act() : closeFlow()
+    // Try again starts the mint the panel offers now while it is the one that failed, on its phase and with
+    // its vault (retryOffered). When the panel moved to another phase or vault, or offers something else (a
+    // switch, a limit, a closed phase), the flow closes so the panel shows why.
+    if (action.kind === 'retry')
+      return retryOffered(next, phase?.group.id ?? null, vault, params) ? act() : closeFlow()
     if (action.kind === 'mint-count' || action.kind === 'mint-fewer') setQuantity(action.count)
     if (action.kind === 'use-wallet') setVault(null)
     if (action.kind === 'view-transaction' && flow.hash) {
