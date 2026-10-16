@@ -33,7 +33,7 @@ import {
 } from './mint-page-draft'
 import { ImageSlot, MAX_FEATURED, PICKER_TOKENS, TokenPicker } from './mint-page-fields'
 import { MintPagePreview, type PreviewData } from './mint-page-preview'
-import { putTimeoutMs, runSave, type SaveSteps } from './mint-page-save'
+import { focusAfterSave, putTimeoutMs, runSave, type SaveSteps } from './mint-page-save'
 import { MintPageSections } from './mint-page-sections'
 
 export type MintPageScreenProps = {
@@ -87,6 +87,16 @@ export function MintPageScreen({ collection, view, preview, gateway, sample }: M
   const [saved, setSaved] = useState<MintPageDraft>(initial)
   const [draft, setDraft] = useState<MintPageDraft>(initial)
   const [saving, setSaving] = useState(false)
+  // The element focused when a save began, which the fieldset disables while it runs: it takes the focus back
+  // once the save answers (focusAfterSave), so a link sent with Enter keeps the keyboard where it was.
+  const focusedAtSave = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    if (saving) return
+    const previous = focusedAtSave.current
+    focusedAtSave.current = null
+    const active = document.activeElement === document.body ? null : document.activeElement
+    if (previous && focusAfterSave(previous, active)) previous.focus({ preventScroll: true })
+  }, [saving])
   // A save was refused because the row changed elsewhere after this tab read it.
   const [stale, setStale] = useState(false)
   const origin = useSyncExternalStore(
@@ -152,6 +162,7 @@ export function MintPageScreen({ collection, view, preview, gateway, sample }: M
     event.preventDefault()
     if (invalid || !dirty || saving) return
     const sent = draft
+    focusedAtSave.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setSaving(true)
     try {
       if (sample) await saveOffChain()

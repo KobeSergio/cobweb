@@ -2,7 +2,7 @@ import { describe, expect, it, vi, type Mock } from 'vitest'
 import { PAGE_UPLOAD_FAILED } from '@/lib/art/result'
 import type { MintPageSettingsView } from '@/lib/mint/settings-core'
 import { draftOf, type DraftFile, type MintPageDraft } from './mint-page-draft'
-import { putTimeoutMs, runSave, type SaveSteps } from './mint-page-save'
+import { focusAfterSave, putTimeoutMs, runSave, type FocusTarget, type SaveSteps } from './mint-page-save'
 
 const COLLECTION = '0a977c0b-7e53-476b-8c08-6c685315c3af'
 const key = (n: number) => `${COLLECTION}/${n.toString(16).padStart(64, '0')}.png`
@@ -183,5 +183,27 @@ describe('putTimeoutMs (final fix wave M8)', () => {
     expect(putTimeoutMs(MB + 1)).toBe(80_000)
     expect(putTimeoutMs(5 * MB)).toBe(110_000)
     expect(putTimeoutMs(20 * MB)).toBe(260_000)
+  })
+})
+
+describe('focusAfterSave (fix wave 2 T1)', () => {
+  /** An element as focusAfterSave reads it: on the page and enabled unless told otherwise. */
+  const element = ({ connected = true, disabled = false } = {}): FocusTarget => ({
+    isConnected: connected,
+    matches: (selector: string) => selector === ':disabled' && disabled,
+  })
+
+  it('gives the focus back to the field that sent the save, with the focus on the page or on it', () => {
+    const field = element()
+    expect(focusAfterSave(field, null)).toBe(true)
+    expect(focusAfterSave(field, field)).toBe(true)
+  })
+
+  it('leaves it alone for an element gone or disabled, without one, or once the visitor moved it', () => {
+    expect(focusAfterSave(element({ connected: false }), null)).toBe(false)
+    // Such as Save itself, which stays disabled once nothing is left to save.
+    expect(focusAfterSave(element({ disabled: true }), null)).toBe(false)
+    expect(focusAfterSave(null, null)).toBe(false)
+    expect(focusAfterSave(element(), element())).toBe(false)
   })
 })

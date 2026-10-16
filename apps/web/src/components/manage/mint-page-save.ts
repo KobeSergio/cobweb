@@ -69,3 +69,21 @@ export async function runSave(
   if (!result.ok) return { ok: false, error: result.error }
   return { ok: true, draft: draftOf(result.data) }
 }
+
+/**
+ * What focusAfterSave reads of an element, as any DOM element has it: whether the page still has it, and
+ * whether it matches `:disabled`.
+ */
+export type FocusTarget = { readonly isConnected: boolean; matches(selector: string): boolean }
+
+/**
+ * Whether the element that had the focus when a save began takes it back once the save answers. The fieldset
+ * disables every control while a save runs, so a field that sent the save with Enter leaves the focus order,
+ * and a browser that applies the focus fixup rule moves the focus to the page. It goes back when the page
+ * still has the element and it is enabled again, and only while the focus is nowhere (`active` null, the
+ * page's body) or still on it: a focus the visitor moved during the save stays where they put it.
+ */
+export function focusAfterSave(previous: FocusTarget | null, active: FocusTarget | null): boolean {
+  if (!previous?.isConnected || previous.matches(':disabled')) return false
+  return active === null || active === previous
+}
