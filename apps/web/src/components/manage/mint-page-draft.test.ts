@@ -180,7 +180,14 @@ describe('socialError', () => {
     expect(socialError('https://example.com/owls', 'telegram')).toBe('Use a link on t.me.')
     expect(socialError('https://x.com/', 'x')).toBe('Use a link on x.com with its path.')
     // The host as the patterns take it, lowercase and without a port (fix wave 2 T3), one fix at a time.
-    expect(socialError('https://X.com/owls', 'x')).toBe('Write the link in lowercase.')
+    expect(socialError('https://X.com/owls', 'x')).toBe('Write x.com in lowercase.')
+    expect(socialError('https://Discord.gg/AbCdEf', 'discord')).toBe('Write discord.gg in lowercase.')
+    expect(socialError('https://T.me/owls', 'telegram')).toBe('Write t.me in lowercase.')
+    // The host is named as typed, on the field's other host or with www., so only it is lowercased.
+    expect(socialError('https://Discord.com/invite/AbCdEf', 'discord')).toBe(
+      'Write discord.com in lowercase.',
+    )
+    expect(socialError('https://WWW.x.com/owls', 'x')).toBe('Write www.x.com in lowercase.')
     expect(socialError('https://x.com:443/owls', 'x')).toBe('Remove the port from the link.')
     expect(socialError('https://X.com:443/owls', 'x')).toBe('Remove the port from the link.')
     // A host that is not the field's in any case or with any port keeps its sentence.

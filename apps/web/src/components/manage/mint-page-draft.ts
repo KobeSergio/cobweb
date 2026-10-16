@@ -286,10 +286,13 @@ function linkHint(text: string, hosts: readonly string[]): string {
   if (hosts.length === 0 || !host) return 'Enter a full link, starting with https://.'
   if (hosts.includes(host)) return `Use a link on ${hosts[0]} with its path.`
   // The patterns take the host in lowercase and without a port, so a host that is one of `hosts` but for
-  // those is told that fix, one at a time: the port first, then the case.
+  // those is told that fix, one at a time: the port first, then the case. The case hint names the host as
+  // typed, `www.` included, so only it is lowercased: a path, such as a Discord invite code, can be
+  // case-sensitive.
   const portless = authority.replace(/:\d*$/, '')
-  if (!hosts.includes(portless.toLowerCase().replace(/^www\./, ''))) return `Use a link on ${hosts[0]}.`
-  return portless === authority ? 'Write the link in lowercase.' : 'Remove the port from the link.'
+  const lower = portless.toLowerCase()
+  if (!hosts.includes(lower.replace(/^www\./, ''))) return `Use a link on ${hosts[0]}.`
+  return portless === authority ? `Write ${lower} in lowercase.` : 'Remove the port from the link.'
 }
 
 /** Why a page link is not usable, or null. Empty is fine: the icon is left off the page. The save checks the same. */
