@@ -29,6 +29,7 @@ import {
   pickedUrls,
   SOCIAL_FIELDS,
   socialError,
+  tokenArtSource,
   type MintPageDraft,
 } from './mint-page-draft'
 import { ImageSlot, MAX_FEATURED, PICKER_TOKENS, TokenPicker } from './mint-page-fields'
@@ -144,8 +145,10 @@ export function MintPageScreen({ collection, view, preview, gateway, sample }: M
     item.kind === 'token' ? [item.tokenId] : [],
   )
   const artIds = [...new Set([...pickerIds, ...draft.featuredTokenIds, ...tokenSlides])]
-  // A single asset features no tokens, so the tab reads no token's metadata.
-  const art = useTokenArt(artSource, realBaseUri, realBaseUri && projectType !== 'single_asset' ? artIds : [])
+  // Metadata is read only where the tab draws from it (tokenArtSource): with a base, and not for a single
+  // asset, which features no tokens. Without it the slides and the miniature draw the pattern.
+  const tokenArt = tokenArtSource(realBaseUri, projectType)
+  const art = useTokenArt(artSource, realBaseUri, tokenArt === 'metadata' ? artIds : [])
 
   const errors = Object.fromEntries(
     SOCIAL_FIELDS.map((social) => [social.key, socialError(draft.socials[social.key], social.key)]),
@@ -357,6 +360,7 @@ export function MintPageScreen({ collection, view, preview, gateway, sample }: M
         <MintPagePreview
           data={preview}
           url={displayUrl}
+          tokenArt={tokenArt}
           overrides={{
             description: draft.description,
             bannerUrl: draft.media.banner?.url ?? null,

@@ -315,3 +315,15 @@ export function draftInvalid(draft: MintPageDraft): boolean {
     faq.items.some((item) => blank(item.question) || blank(item.answer))
   )
 }
+
+/**
+ * Where the tab draws a token's art from: its metadata once the real job has a base URI, as the pickers'
+ * thumbnails do, else the artwork pattern. The tab reads no metadata without a base, nor for a single asset
+ * whose tokens share one image, so a token drawn from its metadata then would show an empty well for good.
+ */
+export function tokenArtSource(
+  realBaseUri: string | null,
+  projectType: MintPageSettingsView['art']['projectType'],
+): 'pattern' | 'metadata' {
+  return realBaseUri && projectType !== 'single_asset' ? 'metadata' : 'pattern'
+}

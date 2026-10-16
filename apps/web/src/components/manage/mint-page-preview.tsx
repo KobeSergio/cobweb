@@ -37,10 +37,13 @@ export function MintPagePreview({
   data,
   overrides,
   url,
+  tokenArt,
 }: {
   data: PreviewData
   overrides: PreviewOverrides
   url: string
+  /** Where the featured tokens are drawn from (tokenArtSource): the pattern while no metadata is read. */
+  tokenArt: 'pattern' | 'metadata'
 }) {
   const collection = data
   const supply = { minted: data.minted, max: data.max }
@@ -154,9 +157,27 @@ export function MintPagePreview({
 
           {overrides.featured.length > 0 && (
             <div className="grid grid-cols-6 gap-1.5">
-              {overrides.featured.slice(0, 6).map((token) => (
-                <TokenArtFrame key={token.id} art={token.art} id={token.id} alt="" className="rounded-sm" />
-              ))}
+              {overrides.featured
+                .slice(0, 6)
+                .map((token) =>
+                  tokenArt === 'metadata' ? (
+                    <TokenArtFrame
+                      key={token.id}
+                      art={token.art}
+                      id={token.id}
+                      alt=""
+                      className="rounded-sm"
+                    />
+                  ) : (
+                    <Artwork
+                      key={token.id}
+                      src={null}
+                      alt=""
+                      seed={`token-${token.id}`}
+                      className="rounded-sm"
+                    />
+                  ),
+                )}
             </div>
           )}
         </div>

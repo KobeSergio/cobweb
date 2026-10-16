@@ -14,6 +14,7 @@ import {
   pickedFiles,
   pickedUrls,
   socialError,
+  tokenArtSource,
   type DraftFile,
   type DraftSections,
   type MintPageDraft,
@@ -333,5 +334,17 @@ describe('pickedFileProblem', () => {
     expect(pickedFileProblem('avatar', { mime: 'image/png', bytes: 10, width: 200, height: 200 })).toBe(
       'The avatar must be at least 400 by 400.',
     )
+  })
+})
+
+describe('tokenArtSource (fix wave 2 T2)', () => {
+  it('draws a token from its metadata only once the real job has a base, never for a single asset', () => {
+    const base = 'ipfs://bafybeiexample/'
+    expect(tokenArtSource(base, 'generative')).toBe('metadata')
+    expect(tokenArtSource(base, 'one_of_one')).toBe('metadata')
+    // Finish the art later leaves no base: no metadata is read, so the pattern stands in for the art.
+    expect(tokenArtSource(null, 'generative')).toBe('pattern')
+    expect(tokenArtSource(null, 'one_of_one')).toBe('pattern')
+    expect(tokenArtSource(base, 'single_asset')).toBe('pattern')
   })
 })

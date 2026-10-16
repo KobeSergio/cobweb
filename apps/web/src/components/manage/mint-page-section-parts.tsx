@@ -10,7 +10,7 @@ import { Textarea } from '@cobweb/ui/components/textarea'
 import { TokenArtFrame } from '@/components/mint/token-image'
 import { MEDIA_SLOTS, type MediaSlot } from '@/lib/mint/media'
 import type { TokenArt } from '@/lib/mint/token-art'
-import { LIMITS, memberLinkError, type DraftFile, type DraftSlide } from './mint-page-draft'
+import { LIMITS, memberLinkError, tokenArtSource, type DraftFile, type DraftSlide } from './mint-page-draft'
 import { pickFile, TokenPicker } from './mint-page-fields'
 
 type WithId = { id: string }
@@ -253,6 +253,7 @@ export function Carousel({
   const full = items.length >= LIMITS.slides
   const uploads = items.filter((item) => item.kind === 'upload').length
   const tokenIds = items.flatMap((item) => (item.kind === 'token' ? [item.tokenId] : []))
+  const tokenArt = tokenArtSource(realBaseUri, projectType)
   /** Keeps the uploads where they are, drops the tokens unpicked and adds the tokens picked, at the end. */
   const pickTokens = (picked: number[]) => {
     const kept = items.filter((item) => item.kind === 'upload' || picked.includes(item.tokenId))
@@ -267,12 +268,17 @@ export function Carousel({
         {items.map((item) => (
           <li key={item.id} className="relative">
             {item.kind === 'token' ? (
-              <TokenArtFrame
-                art={art.get(item.tokenId)}
-                id={item.tokenId}
-                alt=""
-                className="overflow-hidden rounded-lg border"
-              />
+              // Without a base no metadata is read: the pattern, not a well that never fills.
+              tokenArt === 'metadata' ? (
+                <TokenArtFrame
+                  art={art.get(item.tokenId)}
+                  id={item.tokenId}
+                  alt=""
+                  className="overflow-hidden rounded-lg border"
+                />
+              ) : (
+                <Artwork src={null} alt="" seed={item.id} className="rounded-lg border" />
+              )
             ) : (
               <Artwork
                 src={item.mediaType === 'image' ? item.media.url : null}
