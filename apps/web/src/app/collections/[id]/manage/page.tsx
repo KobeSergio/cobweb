@@ -91,16 +91,14 @@ export default async function Page({
     getSettings(collection.id),
     getMintPageSettings(collection.id),
   ])
-  if (!record.ok || !record.data || !phases.ok || !settings.ok || !mintPage.ok) {
+  if (!record.ok || !record.data || !phases.ok || !settings.ok) {
     const message = !record.ok
       ? record.error
       : !phases.ok
         ? phases.error
         : !settings.ok
           ? settings.error
-          : !mintPage.ok
-            ? mintPage.error
-            : NOT_DEPLOYED
+          : NOT_DEPLOYED
     return (
       <StagePage title={TITLE} description={DESCRIPTION} width="wide">
         <ManageUnavailable title="The drop could not be read" message={message} />
@@ -126,7 +124,12 @@ export default async function Page({
         wallet={wallet}
         sample={false}
         paidByMintersWei={null}
-        mintPage={{ avatarUrl: mintPage.data.media.avatar?.url ?? null, published: mintPage.data.published }}
+        // The row only dresses the header and the switch: unread, they show the pattern and wait for a reload.
+        mintPage={
+          mintPage.ok
+            ? { avatarUrl: mintPage.data.media.avatar?.url ?? null, published: mintPage.data.published }
+            : null
+        }
       />
     </StagePage>
   )

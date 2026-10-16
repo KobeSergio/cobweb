@@ -1,9 +1,11 @@
 'use server'
 
+import { updateTag } from 'next/cache'
 import { cache } from 'react'
 import { txHash as txHashSchema } from '@/lib/art/lock-schemas'
 import type { ActionResult } from '@/lib/art/result'
 import { parse } from '@/lib/art/schemas'
+import type { DeployOutcome } from '@/lib/deploy/deploy-core'
 import { callOf, expectedEvent, PHASE_FUNCTIONS, type SentCall } from '@/lib/manage/phase-calls'
 import {
   directionShape,
@@ -20,9 +22,11 @@ import {
   readCollectionState,
   renamePhaseCore,
   setPhaseVisibilityCore,
+  type PhasesContext,
 } from '@/lib/manage/phases-core'
 import type { PhaseAdd, PhasesView } from '@/lib/manage/phases-types'
 import { phasesWrite } from '@/lib/manage/phases-write'
+import { mintPageTag } from '@/lib/mint/page-urls'
 
 /**
  * Phases' server actions (docs/specs/2026-10-15-phases.md, section 6.4). Each checks its input first, then
@@ -32,6 +36,28 @@ import { phasesWrite } from '@/lib/manage/phases-write'
 
 /** One chain read per request, however many times a page asks (React's cache). */
 const readOnce = cache(readCollectionState)
+
+/**
+ * Runs a step that writes a phase's row, then expires the mint page's cached document once it lands: the
+ * document carries each phase's name, description, visibility and order (docs/specs/2026-10-16-mint-page-live-data.md,
+ * section 4.3), so the page shows the change on its next visit rather than up to 60 s later.
+ */
+async function pageWrite<T>(
+  collectionId: string,
+  run: (ctx: PhasesContext) => Promise<DeployOutcome<T>>,
+): Promise<ActionResult<T>> {
+  let slug: string | null = null
+  const result = await phasesWrite(collectionId, (ctx) => {
+    slug = ctx.collection.slug
+    return run(ctx)
+  })
+  if (result.ok) expirePage(slug)
+  return result
+}
+
+const expirePage = (slug: string | null) => {
+  if (slug) updateTag(mintPageTag(slug))
+}
 
 /** The contract's groups joined with their rows, read on the server. */
 export async function getPhases(collectionId: string): Promise<ActionResult<PhasesView>> {
@@ -63,7 +89,8 @@ export async function recordPhase(
   if (!hash.ok) return hash
   const input = parse(phaseAddShape, add)
   if (!input.ok) return input
-  return phasesWrite(collectionId, (ctx) =>
+  // The new group's row gives the page its name and description in place of "Group N".
+  return pageWrite(collectionId, (ctx) =>
     confirmPhaseTxCore(ctx, hash.data, {
       event: { eventName: 'MintGroupRegistered', args: { mintGroup: BigInt(input.data.onchainId) } },
       add: input.data,
@@ -81,7 +108,7 @@ export async function renamePhase(
   if (!id.ok) return id
   const input = parse(phaseDetailsShape, details)
   if (!input.ok) return input
-  return phasesWrite(collectionId, (ctx) => renamePhaseCore(ctx, id.data, input.data, readOnce))
+  return pageWrite(collectionId, (ctx) => renamePhaseCore(ctx, id.data, input.data, readOnce))
 }
 
 /** Hide from or show on the mint page. */
@@ -94,7 +121,7 @@ export async function setPhaseVisibility(
   if (!id.ok) return id
   const shown = parse(visibleShape, visible)
   if (!shown.ok) return shown
-  return phasesWrite(collectionId, (ctx) => setPhaseVisibilityCore(ctx, id.data, shown.data))
+  return pageWrite(collectionId, (ctx) => setPhaseVisibilityCore(ctx, id.data, shown.data))
 }
 
 /** Move up or Move down in the creator's order, which the mint page follows. */
@@ -107,5 +134,5 @@ export async function movePhase(
   if (!id.ok) return id
   const towards = parse(directionShape, direction)
   if (!towards.ok) return towards
-  return phasesWrite(collectionId, (ctx) => movePhaseCore(ctx, id.data, towards.data))
+  return pageWrite(collectionId, (ctx) => movePhaseCore(ctx, id.data, towards.data))
 }

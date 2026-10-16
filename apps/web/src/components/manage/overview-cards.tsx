@@ -221,8 +221,9 @@ function ContractPointer({
 
 /**
  * The mint page link as a plain input with a check/save button, the public/private switch beside
- * it, and a way to open the page. With no link yet the switch is off and disabled. The switch writes the mint
- * page's row (sample mode only waits).
+ * it, and a way to open the page. With no link yet the switch is off and disabled; with the row unread
+ * (`initialPublished` null) it is off and disabled with a sentence, since its state is not known. The switch
+ * writes the mint page's row (sample mode only waits).
  */
 export function MintPageLinkBar({
   collection,
@@ -230,12 +231,13 @@ export function MintPageLinkBar({
   sample,
 }: {
   collection: AddressCollection
-  initialPublished: boolean
+  initialPublished: boolean | null
   sample: boolean
 }) {
   const id = useId()
   const [slug, setSlug] = useState(collection.slug)
-  const [published, setPublished] = useState(initialPublished)
+  const unread = initialPublished === null
+  const [published, setPublished] = useState(initialPublished ?? false)
   const [saving, setSaving] = useState(false)
 
   async function toggle(next: boolean) {
@@ -273,21 +275,23 @@ export function MintPageLinkBar({
         <div className="flex items-center gap-2.5">
           <Switch
             id={`${id}-public`}
-            checked={!!slug && published}
+            checked={!!slug && !unread && published}
             onCheckedChange={toggle}
-            disabled={!slug || saving}
+            disabled={!slug || unread || saving}
             aria-describedby={`${id}-public-help`}
           />
           <div className="grid">
             <label htmlFor={`${id}-public`} className="text-sm font-medium">
-              {slug && published ? 'Public' : 'Private'}
+              {unread ? 'Public or private' : slug && published ? 'Public' : 'Private'}
             </label>
             <span id={`${id}-public-help`} className="text-muted-foreground text-xs">
-              {!slug
-                ? 'Save a link first.'
-                : published
-                  ? 'Anyone with the link can mint.'
-                  : 'Visitors see it is not available.'}
+              {unread
+                ? 'The mint page could not be read. Reload to change it.'
+                : !slug
+                  ? 'Save a link first.'
+                  : published
+                    ? 'Anyone with the link can mint.'
+                    : 'Visitors see it is not available.'}
             </span>
           </div>
         </div>

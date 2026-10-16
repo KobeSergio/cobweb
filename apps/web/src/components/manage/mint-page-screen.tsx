@@ -33,7 +33,7 @@ import {
 } from './mint-page-draft'
 import { ImageSlot, MAX_FEATURED, PICKER_TOKENS, TokenPicker } from './mint-page-fields'
 import { MintPagePreview, type PreviewData } from './mint-page-preview'
-import { runSave, type SaveSteps } from './mint-page-save'
+import { putTimeoutMs, runSave, type SaveSteps } from './mint-page-save'
 import { MintPageSections } from './mint-page-sections'
 
 export type MintPageScreenProps = {
@@ -50,13 +50,23 @@ export type MintPageScreenProps = {
 
 const noopSubscribe = () => () => {}
 
-/** A save's steps on live data: the browser's hash, the signing and saving actions, and a PUT bound to the file's type. */
+/**
+ * A save's steps on live data: the browser's hash, the signing and saving actions, and a PUT bound to the file's
+ * type, given up after its time limit (runSave reads that as a failed upload).
+ */
 function liveSteps(collectionId: string): SaveSteps {
   return {
     hash: (file) => sha256Hex(file),
     presign: (asks) => presignMintPageMedia(collectionId, asks),
     put: async (url, file) =>
-      (await fetch(url, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } })).ok,
+      (
+        await fetch(url, {
+          method: 'PUT',
+          body: file,
+          headers: { 'Content-Type': file.type },
+          signal: AbortSignal.timeout(putTimeoutMs(file.size)),
+        })
+      ).ok,
     save: (input) => saveMintPage(collectionId, input),
   }
 }

@@ -8,13 +8,23 @@ import { draftOf, inputOf, mediaAskOf, pickedFiles, type MintPageDraft } from '.
  * the draft with every file as its key. A failed step stops it before the write, so nothing is written for it.
  */
 
+const MB = 1024 * 1024
+
+/**
+ * How long one PUT may take before it is given up: a minute, and 10 s more for each started MB, so a 20 MB track
+ * has 260 s. A PUT that stalls would otherwise hold the save, and the fieldset it disables, with no end.
+ */
+export function putTimeoutMs(bytes: number): number {
+  return 60_000 + 10_000 * Math.ceil(bytes / MB)
+}
+
 /** The steps a save runs: the screen passes the browser's hash, the two actions and `fetch`; tests pass fakes. */
 export type SaveSteps = {
   /** The file's SHA-256, as 64 lowercase hex characters. */
   hash: (file: File) => Promise<string>
   /** Each file's key and PUT URL, in the order asked; a null URL when the bucket already holds the file. */
   presign: (asks: MediaAsk[]) => Promise<ActionResult<{ key: string; putUrl: string | null }[]>>
-  /** Whether the PUT of a file to its signed URL succeeded. */
+  /** Whether the PUT of a file to its signed URL succeeded; one that throws or times out is a failed upload. */
   put: (url: string, file: File) => Promise<boolean>
   /** Writes the draft and answers the saved view. */
   save: (input: MintPageInput) => Promise<ActionResult<MintPageSettingsView>>

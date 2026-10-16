@@ -48,8 +48,11 @@ export type OverviewScreenProps = {
   sample: boolean
   /** "Paid by minters": the sample's in sample mode, null on real data until the indexer. */
   paidByMintersWei: string | null
-  /** The mint page's row: its avatar and whether it is public. */
-  mintPage: { avatarUrl: string | null; published: boolean }
+  /**
+   * The mint page's row: its avatar and whether it is public; null when it could not be read, so the header shows
+   * the artwork pattern and the switch waits for a reload.
+   */
+  mintPage: { avatarUrl: string | null; published: boolean } | null
 }
 
 /**
@@ -112,7 +115,7 @@ export function OverviewScreen({
       <div className="grid gap-5">
         <OverviewHeader
           collectionId={collection.id}
-          avatarUrl={mintPage.avatarUrl}
+          avatarUrl={mintPage?.avatarUrl ?? null}
           name={collection.name}
           contract={contract}
           deployedAt={deployedAt}
@@ -128,7 +131,7 @@ export function OverviewScreen({
         />
         <MintPageLinkBar
           collection={{ ...collection, slug }}
-          initialPublished={mintPage.published}
+          initialPublished={mintPage?.published ?? null}
           sample={sample}
         />
 

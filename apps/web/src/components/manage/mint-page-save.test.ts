@@ -2,7 +2,7 @@ import { describe, expect, it, vi, type Mock } from 'vitest'
 import { PAGE_UPLOAD_FAILED } from '@/lib/art/result'
 import type { MintPageSettingsView } from '@/lib/mint/settings-core'
 import { draftOf, type DraftFile, type MintPageDraft } from './mint-page-draft'
-import { runSave, type SaveSteps } from './mint-page-save'
+import { putTimeoutMs, runSave, type SaveSteps } from './mint-page-save'
 
 const COLLECTION = '0a977c0b-7e53-476b-8c08-6c685315c3af'
 const key = (n: number) => `${COLLECTION}/${n.toString(16).padStart(64, '0')}.png`
@@ -101,10 +101,13 @@ describe('runSave (docs/specs/2026-10-16-mint-page-live-data.md, section 7.9)', 
     expect(steps.save.mock.calls[0]![0].media.avatar).toBe(key(10))
   })
 
-  it('never reaches the save when a PUT fails or throws', async () => {
+  it('never reaches the save when a PUT fails, throws or times out', async () => {
     for (const put of [
       vi.fn<SaveSteps['put']>(async () => false),
       vi.fn<SaveSteps['put']>(() => Promise.reject(new TypeError('Failed to fetch'))),
+      vi.fn<SaveSteps['put']>(() =>
+        Promise.reject(new DOMException('The operation timed out.', 'TimeoutError')),
+      ),
     ]) {
       const steps = stepsOf({ put })
       expect(await runSave(twoFiles(), steps, live)).toEqual({ ok: false, error: PAGE_UPLOAD_FAILED })
@@ -169,5 +172,16 @@ describe('runSave (docs/specs/2026-10-16-mint-page-live-data.md, section 7.9)', 
     const outcome = await runSave(draft, steps, { sample: true })
     expect(outcome.ok && outcome.draft).toBe(draft)
     for (const step of Object.values(steps)) expect(step).not.toHaveBeenCalled()
+  })
+})
+
+describe('putTimeoutMs (final fix wave M8)', () => {
+  it('gives a PUT a minute and 10 s more for each started MB', () => {
+    const MB = 1024 * 1024
+    expect(putTimeoutMs(1)).toBe(70_000)
+    expect(putTimeoutMs(MB)).toBe(70_000)
+    expect(putTimeoutMs(MB + 1)).toBe(80_000)
+    expect(putTimeoutMs(5 * MB)).toBe(110_000)
+    expect(putTimeoutMs(20 * MB)).toBe(260_000)
   })
 })
