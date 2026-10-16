@@ -30,6 +30,9 @@ import {
   SOCIAL_FIELDS,
   socialError,
   tokenArtSource,
+  updateSections,
+  urlsToRevoke,
+  type DraftFile,
   type MintPageDraft,
 } from './mint-page-draft'
 import { ImageSlot, MAX_FEATURED, PICKER_TOKENS, TokenPicker } from './mint-page-fields'
@@ -109,20 +112,34 @@ export function MintPageScreen({ collection, view, preview, gateway, sample }: M
   // Shown as cobweb.app/<link>, as on Deploy and the Overview; copy and open use the real origin.
   const displayUrl = `cobweb.app/${slug ?? 'your-link'}`
 
-  // A picked file's object URL lives while the draft or the saved draft shows it; the rest go when the tab closes.
+  // A picked file's object URL is tracked from the moment its pick lands (`land`), whether the draft takes it
+  // or not: it lives while the draft or the saved draft shows it and is revoked once neither does
+  // (urlsToRevoke), so a photo that lands for a member removed meanwhile goes too; the rest go when the tab
+  // closes. A landing is kept in state beside the draft's own update, so this effect never sees its URL
+  // before the draft that takes it.
   const objectUrls = useRef(new Set<string>())
+  const [landed, setLanded] = useState<readonly string[]>([])
+  // False once the tab has closed: a pick that lands after it has no draft to go to and is revoked at once.
+  const open = useRef(true)
+  const land = (file: DraftFile | null | undefined) => {
+    if (file?.kind !== 'picked') return
+    if (open.current) setLanded((urls) => [...urls, file.url])
+    else URL.revokeObjectURL(file.url)
+  }
   useEffect(() => {
-    const shown = new Set([...pickedUrls(draft), ...pickedUrls(saved)])
-    for (const url of shown) objectUrls.current.add(url)
-    for (const url of objectUrls.current) {
-      if (shown.has(url)) continue
+    for (const url of [...landed, ...pickedUrls(draft), ...pickedUrls(saved)]) objectUrls.current.add(url)
+    for (const url of urlsToRevoke(objectUrls.current, draft, saved)) {
       URL.revokeObjectURL(url)
       objectUrls.current.delete(url)
     }
-  }, [draft, saved])
+    // Those landings are tracked now: the list keeps only the ones that landed since.
+    if (landed.length > 0) setLanded((urls) => urls.slice(landed.length))
+  }, [draft, saved, landed])
   useEffect(() => {
     const urls = objectUrls.current
+    open.current = true
     return () => {
+      open.current = false
       for (const url of urls) URL.revokeObjectURL(url)
       urls.clear()
     }
@@ -157,8 +174,10 @@ export function MintPageScreen({ collection, view, preview, gateway, sample }: M
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved)
   const set = <K extends keyof MintPageDraft>(key: K, value: MintPageDraft[K]) =>
     setDraft((current) => ({ ...current, [key]: value }))
-  const setMedia = (slot: keyof MintPageDraft['media'], value: MintPageDraft['media'][typeof slot]) =>
+  const setMedia = (slot: keyof MintPageDraft['media'], value: MintPageDraft['media'][typeof slot]) => {
+    land(value)
     setDraft((current) => ({ ...current, media: { ...current.media, [slot]: value } }))
+  }
 
   /** Uploads the picked files, then writes the whole draft (runSave); sample mode waits and writes nothing. */
   async function save(event: React.FormEvent) {
@@ -346,7 +365,10 @@ export function MintPageScreen({ collection, view, preview, gateway, sample }: M
 
           <MintPageSections
             value={draft.sections}
-            onChange={(update) => setDraft((current) => ({ ...current, sections: update(current.sections) }))}
+            onChange={(update, file) => {
+              land(file)
+              setDraft((current) => updateSections(current, update))
+            }}
             art={art}
             ids={pickerIds}
             realBaseUri={realBaseUri}

@@ -9,6 +9,7 @@ import {
   LIMITS,
   withMemberImage,
   withUploadSlide,
+  type DraftFile,
   type DraftMember,
   type DraftSections,
 } from './mint-page-draft'
@@ -21,7 +22,8 @@ type Section = keyof DraftSections
  * Team, Roadmap, FAQ, music and a carousel (docs/specs/2026-10-16-mint-page-live-data.md, section 4.1): the mint
  * page's own sections, each with its switch, saved with the rest of the draft. Files stay in the browser until
  * Save, which uploads them first. Every change is an update of the sections as they are when it applies, so a
- * file that lands after its read keeps the edits made meanwhile.
+ * file that lands after its read keeps the edits made meanwhile; a landing passes its file too, so the tab
+ * tracks its object URL even when the update drops it.
  */
 export function MintPageSections({
   value,
@@ -33,15 +35,15 @@ export function MintPageSections({
   projectType,
 }: {
   value: DraftSections
-  onChange: (update: (current: DraftSections) => DraftSections) => void
+  onChange: (update: (current: DraftSections) => DraftSections, landed?: DraftFile | null) => void
   art: Map<number, TokenArt | null | undefined>
   ids: number[]
   realBaseUri: string | null
   supply: number
   projectType: 'generative' | 'one_of_one' | 'single_asset'
 }) {
-  const set = <K extends Section>(key: K, next: Partial<DraftSections[K]>) =>
-    onChange((current) => ({ ...current, [key]: { ...current[key], ...next } }))
+  const set = <K extends Section>(key: K, next: Partial<DraftSections[K]>, landed?: DraftFile | null) =>
+    onChange((current) => ({ ...current, [key]: { ...current[key], ...next } }), landed)
   const toggle = (key: Section) => (
     <Switch
       checked={value[key].enabled}
@@ -77,7 +79,9 @@ export function MintPageSections({
                   label="Photo"
                   hint="Square. PNG, JPG, WebP or GIF, up to 2 MB."
                   value={member.image}
-                  onChange={(image) => onChange((current) => withMemberImage(current, member.id, image))}
+                  onChange={(image) =>
+                    onChange((current) => withMemberImage(current, member.id, image), image)
+                  }
                   seed={member.id}
                   slot="team"
                   shape="square"
@@ -208,7 +212,7 @@ export function MintPageSections({
             slot="music"
             hint="One MP3, up to 20 MB. It plays with the collection's avatar as its cover."
             onFile={(track, file) =>
-              set('music', { track, fileName: file.name.slice(0, 100) || 'track.mp3' })
+              set('music', { track, fileName: file.name.slice(0, 100) || 'track.mp3' }, track)
             }
             onRemove={value.music.track ? () => set('music', { track: null, fileName: null }) : undefined}
             icon={<MusicIcon aria-hidden="true" />}
@@ -225,7 +229,7 @@ export function MintPageSections({
           <Carousel
             items={value.carousel.items}
             onChange={(items) => set('carousel', { items })}
-            onUpload={(slide) => onChange((current) => withUploadSlide(current, slide))}
+            onUpload={(slide) => onChange((current) => withUploadSlide(current, slide), slide.media)}
             art={art}
             ids={ids}
             realBaseUri={realBaseUri}

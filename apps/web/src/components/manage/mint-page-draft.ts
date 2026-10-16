@@ -146,6 +146,18 @@ export function withUploadSlide(sections: DraftSections, slide: DraftUploadSlide
   return { ...sections, carousel: { ...carousel, items: [...carousel.items, slide] } }
 }
 
+/**
+ * The draft with its sections updated, or the same draft when the update changes nothing, such as a photo
+ * that lands for a member removed meanwhile: a save in flight then still finds the draft it sent.
+ */
+export function updateSections(
+  draft: MintPageDraft,
+  update: (current: DraftSections) => DraftSections,
+): MintPageDraft {
+  const sections = update(draft.sections)
+  return sections === draft.sections ? draft : { ...draft, sections }
+}
+
 /** Every file of the draft with its slot, in the page's order: the three page images, the team, the slides, the track. */
 function filesOf(draft: MintPageDraft): { slot: MediaSlot; media: DraftFile }[] {
   const { team, carousel, music } = draft.sections
@@ -174,6 +186,20 @@ export function pickedFiles(draft: MintPageDraft): PickedEntry[] {
 /** The object URLs of the draft's picked files: the tab keeps each while a draft shows it, then revokes it. */
 export function pickedUrls(draft: MintPageDraft): string[] {
   return filesOf(draft).flatMap(({ media }) => (media.kind === 'picked' ? [media.url] : []))
+}
+
+/**
+ * The tracked object URLs to revoke: those neither the draft nor the saved draft shows. The tab tracks each
+ * picked file's URL from the moment its pick lands, so one the draft never took, such as a photo for a member
+ * removed while it was read, is revoked as well.
+ */
+export function urlsToRevoke(
+  tracked: Iterable<string>,
+  draft: MintPageDraft,
+  saved: MintPageDraft,
+): string[] {
+  const shown = new Set([...pickedUrls(draft), ...pickedUrls(saved)])
+  return [...tracked].filter((url) => !shown.has(url))
 }
 
 /** What the browser asks the server to sign for a picked file, with its content hash. */

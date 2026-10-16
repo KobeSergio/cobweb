@@ -15,6 +15,8 @@ import {
   pickedUrls,
   socialError,
   tokenArtSource,
+  updateSections,
+  urlsToRevoke,
   withMemberImage,
   withUploadSlide,
   type DraftFile,
@@ -385,6 +387,32 @@ describe('a file picked in a section, applied once the browser has read it (fix 
     const kept = draft.sections.carousel.items.filter((item) => item.id !== 'slide-2')
     const current: DraftSections = { ...draft.sections, carousel: { enabled: true, items: kept } }
     expect(withUploadSlide(current, slide).carousel.items).toEqual([...kept, slide])
+  })
+
+  it('keeps the same draft when an update changes nothing, so a running save finds the draft it sent', () => {
+    const draft = draftOf(view)
+    const photo = picked('ola.png', 'image/png')
+    // A photo that lands for a member removed meanwhile changes nothing: the same draft object.
+    expect(updateSections(draft, (current) => withMemberImage(current, 'team-gone', photo))).toBe(draft)
+    const next = updateSections(draft, (current) => withMemberImage(current, 'team-1', photo))
+    expect(next).not.toBe(draft)
+    expect(next.sections.team.members[0]?.image).toBe(photo)
+  })
+
+  it("revokes a dropped photo's URL, and keeps those the draft or the saved draft shows", () => {
+    const saved = draftOf(view)
+    const avatar = picked('avatar.png', 'image/png')
+    const theme = picked('theme.mp3', 'audio/mpeg')
+    const draft: MintPageDraft = { ...saved, media: { ...saved.media, avatar } }
+    const savedTheme: MintPageDraft = {
+      ...saved,
+      sections: { ...saved.sections, music: { ...saved.sections.music, track: theme } },
+    }
+    // Ola's photo lands after Ola was removed: the draft stays as it was, and the landing tracked its URL.
+    const dropped = picked('ola.png', 'image/png')
+    const after = updateSections(draft, (current) => withMemberImage(current, 'team-gone', dropped))
+    expect(after).toBe(draft)
+    expect(urlsToRevoke([avatar.url, theme.url, dropped.url], after, savedTheme)).toEqual([dropped.url])
   })
 })
 
