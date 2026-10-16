@@ -1,45 +1,22 @@
 import 'server-only'
+import { getAddress } from 'viem'
+import { SAMPLE_PLACEHOLDER_URI } from '@/components/mint/sample-source'
+import { RESERVED_SLUGS } from '@/lib/collections'
 import {
   DEMO_COLLECTION,
-  DEMO_CREATOR,
   DEMO_DEPLOYMENT,
-  DEMO_TOKENS,
-  MINT_PAGE_VARIANTS,
-  getMintPageData,
-  tokenLayerUrls,
-  type MintPageData,
-  type MintPageVariant,
-  type WalletState,
+  DEMO_MINT_GROUPS,
+  DEMO_MINT_PAGE_SECTIONS,
+  DEMO_MINT_PAGE_SETTINGS,
+  getChain,
 } from '@/lib/demo'
-import { RESERVED_SLUGS } from '@/lib/collections'
-import type { MintFailureKind, MintPageProps } from '@/components/mint/types'
+import type { MintPageSections, MintPageStatic } from '@/lib/mint/page-doc'
 
 /*
- * The sample-mode data source for the mint page. Phase 6 replaces it with the freshness server's
- * collection endpoint. Query parameters pick what to show, so every state can be reviewed:
- *
- *   ?state=upcoming | allowlist-live | public-live | sold-out | closed   (default allowlist-live)
- *   ?wallet=connected     a sample wallet, connected without a real wallet
- *   ?wallet=not-listed    connected, but on no whitelist and with no vaults
- *   ?wallet=limit         connected, every allowance used
- *   ?wallet=wrong-chain   connected on another network
- *   ?fail=rejected | phase-closed | quota-exceeded | insufficient-balance | reverted
- *                         the first mint attempt fails this way; "Try again" then succeeds
- *   ?degraded=1           the freshness server could not read the chain recently
- *   ?start=<seconds>      move the next scheduled start this close, to watch a countdown reach zero
+ * The sample-mode page's content (docs/specs/2026-10-16-mint-page-live-data.md, section 8), built from the
+ * sample collection at any link. The query switches are the browser's: components/mint/sample-source.ts reads
+ * them, so the route stays cached by link in sample mode too.
  */
-
-type Query = Record<string, string | string[] | undefined>
-
-const FAILURES: MintFailureKind[] = [
-  'rejected',
-  'phase-closed',
-  'quota-exceeded',
-  'insufficient-balance',
-  'reverted',
-]
-
-const one = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value)
 
 /**
  * In sample mode every creator's mint page link shows the sample collection, so "View mint page"
@@ -52,75 +29,45 @@ export function hasSampleCollection(slug: string): boolean {
   )
 }
 
-export function sampleVariant(query: Query): MintPageVariant {
-  const state = one(query.state)
-  return MINT_PAGE_VARIANTS.find((variant) => variant === state) ?? 'allowlist-live'
+/** The sample's sections as the page shows them: those that are on and have content. */
+function sampleSections(): MintPageSections {
+  const { team, roadmap, faq, music, carousel } = DEMO_MINT_PAGE_SECTIONS
+  const sections: MintPageSections = {}
+  if (team.enabled && team.members.length)
+    sections.team = team.members.map(({ imageUrl, ...member }) => ({ ...member, imageUrl: imageUrl || null }))
+  if (roadmap.enabled && roadmap.items.length) sections.roadmap = roadmap.items
+  if (faq.enabled && faq.items.length) sections.faq = faq.items
+  if (music.enabled && music.url && music.fileName)
+    sections.music = { url: music.url, fileName: music.fileName }
+  if (carousel.enabled && carousel.items.length) sections.carousel = carousel.items
+  return sections
 }
 
-function notListed(wallet: WalletState): WalletState {
+/** The sample collection's page at any link. */
+export function samplePageStatic(slug: string): MintPageStatic {
+  const settings = DEMO_MINT_PAGE_SETTINGS
   return {
-    ...wallet,
-    groups: wallet.groups.map((entry) =>
-      entry.groupId === 0 ? entry : { ...entry, quota: 0, used: 0, eligible: false },
-    ),
-    delegatedVaults: [],
-  }
-}
-
-function limitReached(wallet: WalletState, data: MintPageData): WalletState {
-  return {
-    ...wallet,
-    publicMinted: data.publicMaxMintPerWallet,
-    groups: wallet.groups.map((entry) => ({ ...entry, used: entry.quota })),
-    delegatedVaults: wallet.delegatedVaults.map((vault) => ({
-      ...vault,
-      groups: vault.groups.map((entry) => ({ ...entry, used: entry.quota })),
+    slug,
+    name: DEMO_COLLECTION.name,
+    symbol: DEMO_COLLECTION.symbol,
+    projectType: 'generative',
+    chain: getChain(DEMO_DEPLOYMENT.chainId)!,
+    contract: getAddress(DEMO_DEPLOYMENT.contractAddress),
+    description: settings.description,
+    bannerUrl: settings.bannerUrl,
+    avatarUrl: settings.avatarUrl,
+    aboutBannerUrl: null,
+    socials: settings.socials,
+    featuredTokenIds: settings.featuredTokenIds,
+    sections: sampleSections(),
+    phases: DEMO_MINT_GROUPS.map((group, position) => ({
+      onchain_id: group.id,
+      name: group.name,
+      description: group.description ?? '',
+      visible: group.visible !== false,
+      position,
     })),
-  }
-}
-
-export function sampleMintPage(slug: string, query: Query): MintPageProps {
-  const variant = sampleVariant(query)
-  const data = getMintPageData(slug, variant)
-  const mode = one(query.wallet)
-
-  const start = Number(one(query.start))
-  if (Number.isFinite(start) && start > 0) {
-    const next = data.groups
-      .filter((group) => !group.active && group.scheduledStart > data.blockTimestamp)
-      .sort((a, b) => a.scheduledStart - b.scheduledStart)[0]
-    if (next) {
-      data.groups = data.groups.map((group) =>
-        group.id === next.id ? { ...group, scheduledStart: data.blockTimestamp + Math.floor(start) } : group,
-      )
-    }
-  }
-
-  let wallet = data.wallet!
-  if (mode === 'not-listed') wallet = notListed(wallet)
-  if (mode === 'limit') wallet = limitReached(wallet, data)
-  const forced = mode === 'connected' || mode === 'not-listed' || mode === 'limit' || mode === 'wrong-chain'
-
-  const failure = one(query.fail)
-  const firstNext = data.supply.minted + 1
-  const tokenPreviews = DEMO_TOKENS.filter((token) => token.id >= firstNext && token.id < firstNext + 12).map(
-    (token) => ({ id: token.id, layers: tokenLayerUrls(token.dna) }),
-  )
-
-  return {
-    // The page decides what is connected; the data carries no wallet of its own.
-    data: { ...data, wallet: null },
-    extras: {
-      creator: DEMO_CREATOR,
-      royaltyBps: DEMO_DEPLOYMENT.royaltyBps,
-      degraded: one(query.degraded) === '1',
-      tokenPreviews,
-    },
-    sampleWallet: wallet,
-    sample: {
-      forcedWallet: forced ? wallet : null,
-      wrongChain: mode === 'wrong-chain',
-      failure: FAILURES.find((kind) => kind === failure) ?? null,
-    },
+    placeholders: [SAMPLE_PLACEHOLDER_URI],
+    gateway: 'https://ipfs.io/ipfs',
   }
 }

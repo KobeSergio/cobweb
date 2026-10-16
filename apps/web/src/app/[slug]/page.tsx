@@ -1,43 +1,52 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { MintPage } from '@/components/mint/mint-page'
+import { SampleMintPage } from '@/components/mint/sample-page'
 import { RESERVED_SLUGS } from '@/lib/collections'
+import type { MintPageStatic } from '@/lib/mint/page-doc'
+import { readMintPage } from '@/lib/mint/page-read'
 import { isDemoMode } from '@/lib/steps'
-import { hasSampleCollection, sampleMintPage, sampleVariant } from './sample-data'
-import { getMintPageData } from '@/lib/demo'
+import { hasSampleCollection, samplePageStatic } from './sample-data'
 
 /*
- * A collection's public mint page, at /<slug>. Public: no session is needed. Until the freshness
- * server exists, only sample mode has a data source; otherwise every slug is not found.
+ * A collection's public mint page, at /<slug> (docs/specs/2026-10-16-mint-page-live-data.md, section 6.4). Public:
+ * no session is needed. The content is the published page's document, read on the server and cached under the
+ * link's tag; the chain's state comes from the browser's polls of the freshness server, never from the HTML. A
+ * link renders on its first visit and is cached for 60 s, and the Mint page tab's actions expire it. The route
+ * reads no query, which would make it dynamic: sample mode's switches are read by the browser.
  */
+export const revalidate = 60
 
-function available(slug: string): boolean {
-  return isDemoMode() && !RESERVED_SLUGS.includes(slug) && hasSampleCollection(slug)
+/** No link is rendered at build time: each renders on its first visit. */
+export function generateStaticParams(): { slug: string }[] {
+  return []
+}
+
+/** The page's content at a link, or null: a reserved word, an unknown or unpublished page, a chain not listed. */
+async function pageAt(slug: string): Promise<MintPageStatic | null> {
+  if (RESERVED_SLUGS.includes(slug)) return null
+  if (isDemoMode()) return hasSampleCollection(slug) ? samplePageStatic(slug) : null
+  return readMintPage(slug)
 }
 
 export async function generateMetadata(props: PageProps<'/[slug]'>): Promise<Metadata> {
   const { slug } = await props.params
-  if (!available(slug)) return {}
-  const data = getMintPageData(slug, sampleVariant(await props.searchParams), { connected: false })
-  const { collection } = data
-  const title = `Mint ${collection.name}`
-  const description = collection.description
-  const image = collection.featured[0]?.imageUrl ?? collection.bannerUrl
+  const page = await pageAt(slug)
+  if (!page) return {}
+  const title = `Mint ${page.name}`
+  const description = page.description.slice(0, 200)
+  const images = page.bannerUrl ? [{ url: page.bannerUrl, alt: page.name }] : undefined
   return {
     title,
     description,
-    openGraph: {
-      title,
-      description,
-      type: 'website',
-      images: [{ url: collection.bannerUrl, width: 1500, height: 500, alt: collection.name }],
-    },
-    twitter: { card: 'summary_large_image', title, description, images: [image] },
+    openGraph: { title, description, type: 'website', images },
+    twitter: { card: page.bannerUrl ? 'summary_large_image' : 'summary', title, description, images },
   }
 }
 
 export default async function Page(props: PageProps<'/[slug]'>) {
   const { slug } = await props.params
-  if (!available(slug)) notFound()
-  return <MintPage {...sampleMintPage(slug, await props.searchParams)} />
+  const page = await pageAt(slug)
+  if (!page) notFound()
+  return isDemoMode() ? <SampleMintPage page={page} /> : <MintPage page={page} sample={null} />
 }

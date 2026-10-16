@@ -8,19 +8,22 @@ import { EASE_OUT } from '@cobweb/ui/lib/motion'
 import { cn } from '@cobweb/ui/lib/utils'
 import { explorerTxUrl } from '@/lib/demo/helpers'
 import { useMint } from './mint-context'
-import { TokenImage } from './token-image'
+import { TokenArtFrame } from './token-image'
+import { useTokenArt } from './use-token-art'
 
 /**
  * The peak of the page: the minted tokens are revealed one after another, a curtain lifting off
  * each. Ids, the transaction, a share action, and "Mint more" when the wallet still has room.
  */
 export function MintSuccess() {
-  const { flow, data, previewFor, action, closeFlow } = useMint()
+  const { flow, page, live, source, action, closeFlow } = useMint()
   const reduce = useReducedMotion()
+  const ids = flow.step === 'success' ? flow.tokenIds : []
+  // Each minted token's art at the state's base URI: the placeholder's image before the reveal.
+  const art = useTokenArt(source, live?.baseUri ?? null, ids)
   if (flow.step !== 'success') return null
-  const chain = data.collection.chain
-  const name = data.collection.name
-  const ids = flow.tokenIds
+  const chain = page.chain
+  const name = page.name
   const canMintMore = action.kind === 'mint'
 
   const share = async () => {
@@ -62,7 +65,7 @@ export function MintSuccess() {
                   animate={{ scale: 1 }}
                   transition={{ duration: 1.4, ease: EASE_OUT, delay: reduce ? 0 : 0.35 + index * 0.18 }}
                 >
-                  <TokenImage layers={previewFor(id).layers} alt={`${name} #${id}`} eager />
+                  <TokenArtFrame art={art.get(id)} id={id} alt={`${name} #${id}`} eager />
                 </motion.div>
                 {!reduce && (
                   <motion.span
@@ -89,15 +92,17 @@ export function MintSuccess() {
         transition={{ duration: 0.5, ease: EASE_OUT, delay: reduce ? 0 : 0.5 + ids.length * 0.18 }}
       >
         <div className="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[0.8125rem]">
-          <a
-            href={explorerTxUrl(chain, flow.hash)}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-          >
-            View transaction
-            <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
-          </a>
+          {chain.explorerUrl && (
+            <a
+              href={explorerTxUrl(chain, flow.hash)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            >
+              View transaction
+              <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
+            </a>
+          )}
           <button
             type="button"
             onClick={share}

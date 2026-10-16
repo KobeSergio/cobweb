@@ -11,9 +11,9 @@ import { transition } from '@cobweb/ui/lib/motion'
 import { cn } from '@cobweb/ui/lib/utils'
 import { ChainName } from '@/components/chains/chain-icon'
 import { explorerTxUrl, formatNative, shortAddress } from '@/lib/demo/helpers'
+import { failureActions, failureCopy, type FailureAction } from '@/lib/mint/mint-failure'
 import { useMint } from './mint-context'
 import { MintSuccess } from './mint-success'
-import type { MintFailureKind } from './types'
 import type { FlowState, FlowStep } from './use-mint-flow'
 
 const STEPS: { step: FlowStep; title: string }[] = [
@@ -28,14 +28,14 @@ const STEPS: { step: FlowStep; title: string }[] = [
  * always sees how it ended.
  */
 export function MintFlowDialog() {
-  const { flow, closeFlow, data } = useMint()
+  const { flow, closeFlow, page } = useMint()
   const mobile = useIsMobile()
   const open = flow.step !== 'idle'
   const locked = flow.step === 'wallet' || flow.step === 'confirming'
   const onOpenChange = (next: boolean) => {
     if (!next && !locked) closeFlow()
   }
-  const { title, description } = heading(flow, data.collection.name)
+  const { title, description } = heading(flow, page.name, page.chain.name)
 
   if (mobile) {
     return (
@@ -66,7 +66,7 @@ export function MintFlowDialog() {
   )
 }
 
-function heading(flow: FlowState, name: string): { title: string; description: string } {
+function heading(flow: FlowState, name: string, chainName: string): { title: string; description: string } {
   if (flow.step === 'success') {
     const count = flow.tokenIds.length
     return {
@@ -74,7 +74,10 @@ function heading(flow: FlowState, name: string): { title: string; description: s
       description: `${count === 1 ? 'Your new token is' : `Your ${count} new tokens are`} in your wallet.`,
     }
   }
-  if (flow.step === 'error') return FAILURE[flow.kind]
+  if (flow.step === 'error') {
+    const copy = failureCopy(flow.failure, chainName)
+    return { title: copy.title, description: copy.sentence }
+  }
   if (flow.step === 'wallet')
     return {
       title: 'Confirm in your wallet',
@@ -88,42 +91,53 @@ function heading(flow: FlowState, name: string): { title: string; description: s
   }
 }
 
-const FAILURE: Record<MintFailureKind, { title: string; description: string }> = {
-  rejected: {
-    title: 'You cancelled in your wallet',
-    description: 'Nothing was sent and nothing was charged. You can try again whenever you are ready.',
-  },
-  'phase-closed': {
-    title: 'This phase is no longer open',
-    description:
-      'The check found the phase closed before your mint. Nothing was sent. The page now shows which phases are open.',
-  },
-  'quota-exceeded': {
-    title: 'That is more than this wallet can mint',
-    description:
-      'The contract allows fewer tokens than you asked for, often because another mint from this wallet landed first. Nothing was sent.',
-  },
-  'insufficient-balance': {
-    title: 'Not enough funds in this wallet',
-    description: 'The wallet cannot cover the total plus gas. Nothing was sent.',
-  },
-  reverted: {
-    title: 'The transaction failed on-chain',
-    description:
-      'The network rejected it, usually because the phase closed or sold out while it waited. No tokens were minted; only gas was spent.',
-  },
+/** The label of a way forward; null for one this flow cannot offer. */
+function actionLabel(action: FailureAction, hasExplorer: boolean): string | null {
+  switch (action.kind) {
+    case 'retry':
+      return 'Try again'
+    case 'close':
+      return 'Close'
+    case 'see-phases':
+      return 'See open phases'
+    case 'mint-count':
+      return `Mint ${action.count}`
+    case 'mint-fewer':
+      return 'Mint fewer'
+    case 'use-wallet':
+      return 'Use this wallet'
+    case 'view-transaction':
+      return hasExplorer ? 'View transaction' : null
+  }
 }
 
 function FlowBody() {
-  const { flow, act, closeFlow, data, setQuantity } = useMint()
+  const { flow, act, closeFlow, page, live, setQuantity, setVault } = useMint()
   const reduce = useReducedMotion()
   if (flow.step === 'idle') return null
   if (flow.step === 'success') return <MintSuccess />
 
   const { params } = flow
-  const chain = data.collection.chain
+  const chain = page.chain
   const total = formatNative(params.valueWei, chain.nativeSymbol)
-  const group = data.groups.find((entry) => entry.id === params.groupId)
+  const group = live?.groups.find((entry) => entry.id === params.groupId)
+  const actions =
+    flow.step === 'error'
+      ? failureActions(flow.failure).flatMap((action) => {
+          const label = actionLabel(action, !!chain.explorerUrl && !!flow.hash)
+          return label ? [{ action, label }] : []
+        })
+      : []
+  const run = (action: FailureAction) => {
+    if (action.kind === 'retry') return act()
+    if (action.kind === 'mint-count' || action.kind === 'mint-fewer') setQuantity(action.count)
+    if (action.kind === 'use-wallet') setVault(null)
+    if (action.kind === 'view-transaction' && flow.hash) {
+      window.open(explorerTxUrl(chain, flow.hash), '_blank', 'noreferrer')
+      return
+    }
+    closeFlow()
+  }
   const current = flow.step === 'error' ? flow.failedAt : flow.step
   const currentIndex = STEPS.findIndex((entry) => entry.step === current)
 
@@ -142,7 +156,7 @@ function FlowBody() {
             Using the allowance of vault <span className="numeric">{shortAddress(params.vault)}</span>
           </p>
         )}
-        {flow.step === 'error' && flow.kind === 'insufficient-balance' && (
+        {flow.step === 'error' && flow.failure.kind === 'insufficient-balance' && (
           <p className="mt-1 text-[0.8125rem] text-muted-foreground">
             Add {chain.nativeSymbol} on <ChainName chain={chain} iconClassName="size-3.5" /> to{' '}
             <span className="numeric">{shortAddress(params.account)}</span>, or mint fewer.
@@ -188,7 +202,7 @@ function FlowBody() {
         })}
       </ol>
 
-      {flow.hash && (
+      {flow.hash && chain.explorerUrl && (
         <a
           href={explorerTxUrl(chain, flow.hash)}
           target="_blank"
@@ -208,32 +222,16 @@ function FlowBody() {
             transition={transition.base}
             className="mt-6 grid gap-2.5 sm:grid-cols-2"
           >
-            {flow.kind === 'phase-closed' ? (
-              <Button className="sm:col-span-2" onClick={closeFlow}>
-                See open phases
+            {actions.map(({ action, label }, index) => (
+              <Button
+                key={action.kind}
+                variant={index === 0 ? 'default' : 'secondary'}
+                className={actions.length === 1 ? 'sm:col-span-2' : undefined}
+                onClick={() => run(action)}
+              >
+                {label}
               </Button>
-            ) : flow.kind === 'quota-exceeded' || flow.kind === 'insufficient-balance' ? (
-              <>
-                <Button
-                  onClick={() => {
-                    setQuantity(1)
-                    closeFlow()
-                  }}
-                >
-                  Mint fewer
-                </Button>
-                <Button variant="secondary" onClick={act}>
-                  Try again
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button onClick={act}>Try again</Button>
-                <Button variant="secondary" onClick={closeFlow}>
-                  Close
-                </Button>
-              </>
-            )}
+            ))}
           </motion.div>
         )}
       </AnimatePresence>

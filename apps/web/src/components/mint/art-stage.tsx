@@ -2,13 +2,17 @@
 
 import { ChevronLeftIcon, ChevronRightIcon, PauseIcon, PlayIcon } from 'lucide-react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@cobweb/ui/components/button'
 import { EASE_OUT } from '@cobweb/ui/lib/motion'
 import { cn } from '@cobweb/ui/lib/utils'
-import { TokenImage } from './token-image'
+import type { TokenArt } from '@/lib/mint/token-art'
+import { useMint } from './mint-context'
+import { TokenArtFrame } from './token-image'
+import { useTokenArt } from './use-token-art'
 
-type Featured = { id: number; name: string; imageUrl: string }
+/** One card of the stage: a token by its id, or an uploaded slide. */
+type Card = { key: string; label: string; tokenId: number | null; art: TokenArt | null | undefined }
 
 /** Where each card sits: the front one, two leaning behind it, the rest tucked away. */
 const SLOTS = [
@@ -47,12 +51,64 @@ async function ambientOf(src: string): Promise<string | null> {
 }
 
 /**
- * The hero artwork: a featured token held up front with two more leaning behind it. The stack
- * turns over slowly so a visitor sees a few owls without doing anything; it pauses on hover or
- * focus, has its own pause control, and stays still with reduced motion. A faint light in the
- * front token's own colour sits behind the stack.
+ * What the stage shows (docs/specs/2026-10-16-mint-page-live-data.md, section 7.7): the carousel's slides when it
+ * is on (uploads always, token slides once revealed), else the featured tokens once revealed, else one card with
+ * token 1's art at the state's base URI (the placeholder's image before the reveal, the one image of a single
+ * asset), else the avatar until the state answers.
  */
-export function ArtStage({ featured, collectionName }: { featured: Featured[]; collectionName: string }) {
+function useCards(): Card[] {
+  const { page, live, source } = useMint()
+  const revealed = live?.revealed ?? false
+  const carousel = page.sections.carousel
+  const slides = useMemo(
+    () => (carousel ?? []).filter((slide) => slide.kind === 'upload' || revealed),
+    [carousel, revealed],
+  )
+  const tokenIds = useMemo(() => {
+    if (!live) return []
+    if (slides.length) return slides.flatMap((slide) => (slide.kind === 'token' ? [slide.tokenId] : []))
+    if (revealed && page.featuredTokenIds.length) return page.featuredTokenIds
+    return [1]
+  }, [live, slides, revealed, page.featuredTokenIds])
+  const art = useTokenArt(source, live?.baseUri ?? null, tokenIds)
+  const tokenCard = (id: number): Card => ({
+    key: `token-${id}`,
+    label: `#${id}`,
+    tokenId: id,
+    art: art.get(id),
+  })
+  if (!live)
+    return [
+      {
+        key: 'avatar',
+        label: page.name,
+        tokenId: null,
+        art: page.avatarUrl ? { layers: [page.avatarUrl], video: false } : null,
+      },
+    ]
+  if (slides.length)
+    return slides.map((slide) =>
+      slide.kind === 'token'
+        ? tokenCard(slide.tokenId)
+        : {
+            key: slide.id,
+            label: slide.fileName,
+            tokenId: null,
+            art: { layers: [slide.url], video: slide.mediaType === 'video' },
+          },
+    )
+  return tokenIds.map(tokenCard)
+}
+
+/**
+ * The hero artwork: the front card held up with two more leaning behind it. The stack turns over slowly so a
+ * visitor sees a few tokens without doing anything; it pauses on hover or focus, has its own pause control, and
+ * stays still with reduced motion. A faint light in the front image's own colour sits behind the stack.
+ */
+export function ArtStage() {
+  const { page } = useMint()
+  const featured = useCards()
+  const collectionName = page.name
   const reduce = useReducedMotion()
   const [front, setFront] = useState(0)
   const [paused, setPaused] = useState(false)
@@ -70,25 +126,26 @@ export function ArtStage({ featured, collectionName }: { featured: Featured[]; c
     return () => window.clearInterval(id)
   }, [autoplay, count])
 
+  const frontImage = current?.art && !current.art.video ? (current.art.layers.at(-1) ?? null) : null
   useEffect(() => {
-    if (!current || ambient[current.imageUrl]) return
+    if (!frontImage || ambient[frontImage]) return
     let cancelled = false
-    void ambientOf(current.imageUrl).then((rgb) => {
-      if (!cancelled && rgb) setAmbient((map) => ({ ...map, [current.imageUrl]: rgb }))
+    void ambientOf(frontImage).then((rgb) => {
+      if (!cancelled && rgb) setAmbient((map) => ({ ...map, [frontImage]: rgb }))
     })
     return () => {
       cancelled = true
     }
-  }, [current, ambient])
+  }, [frontImage, ambient])
 
   if (!current) return null
-  const glow = ambient[current.imageUrl]
+  const glow = frontImage ? ambient[frontImage] : undefined
   const move = (step: number) => setFront((value) => (value + step + count) % count)
 
   return (
     <section
       aria-roledescription="carousel"
-      aria-label={`Featured ${collectionName} tokens`}
+      aria-label={`${collectionName} art`}
       className="relative"
       onPointerEnter={() => setHovering(true)}
       onPointerLeave={() => setHovering(false)}
@@ -119,7 +176,7 @@ export function ArtStage({ featured, collectionName }: { featured: Featured[]; c
           const slot = SLOTS[position] ?? HIDDEN
           return (
             <motion.div
-              key={token.id}
+              key={token.key}
               aria-hidden={position !== 0}
               className="absolute inset-0 origin-bottom overflow-hidden rounded-xl border border-border-strong bg-well shadow-overlay"
               style={{ zIndex: SLOTS.length - Math.min(position, SLOTS.length) }}
@@ -133,9 +190,10 @@ export function ArtStage({ featured, collectionName }: { featured: Featured[]; c
               }}
               transition={{ duration: reduce ? 0 : 0.9, ease: EASE_OUT }}
             >
-              <TokenImage
-                layers={[token.imageUrl]}
-                alt={token.name}
+              <TokenArtFrame
+                art={token.art}
+                id={token.tokenId ?? 0}
+                alt={`${collectionName} ${token.label}`}
                 eager={index < 3}
                 className="size-full"
               />
@@ -154,9 +212,9 @@ export function ArtStage({ featured, collectionName }: { featured: Featured[]; c
       <div className="mx-auto mt-6 flex w-[84%] max-w-[34rem] items-center justify-between gap-4 sm:w-[76%] lg:w-[82%]">
         <p className="min-w-0 truncate text-sm text-muted-foreground" aria-live="polite">
           <span className="font-medium text-foreground">{collectionName}</span>{' '}
-          <span className="numeric">#{current.id}</span>
+          <span className="numeric">{current.label}</span>
         </p>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className={cn('flex shrink-0 items-center gap-1', count < 2 && 'invisible')}>
           <Button variant="ghost" size="icon-sm" aria-label="Previous token" onClick={() => move(-1)}>
             <ChevronLeftIcon />
           </Button>
@@ -178,15 +236,15 @@ export function ArtStage({ featured, collectionName }: { featured: Featured[]; c
       </div>
 
       <div
-        className="mx-auto mt-4 hidden w-[82%] max-w-[34rem] gap-2 lg:flex"
+        className={cn('mx-auto mt-4 hidden w-[82%] max-w-[34rem] gap-2', count > 1 && 'lg:flex')}
         role="group"
         aria-label="Choose a token"
       >
         {featured.map((token, index) => (
           <button
-            key={token.id}
+            key={token.key}
             type="button"
-            aria-label={`Show ${token.name}`}
+            aria-label={`Show ${collectionName} ${token.label}`}
             aria-current={index === front}
             onClick={() => setFront(index)}
             className={cn(
@@ -194,7 +252,7 @@ export function ArtStage({ featured, collectionName }: { featured: Featured[]; c
               index === front ? 'border-foreground/60' : 'border-border opacity-55 hover:opacity-90',
             )}
           >
-            <TokenImage layers={[token.imageUrl]} alt="" className="size-full" />
+            <TokenArtFrame art={token.art} id={token.tokenId ?? 0} alt="" className="size-full" />
           </button>
         ))}
       </div>

@@ -1,11 +1,15 @@
 import { formatNative } from '@/lib/demo/helpers'
-import type { Address, MintGroup, MintPageData, WalletState } from '@/lib/demo'
+import type { Address, MintGroup } from '@/lib/demo/types'
+import type { LocalMint, MintLive, WalletView } from '@/lib/mint/live-data'
+import { quoteOf, type Quote } from '@/lib/mint/mint-call'
+import type { MintPageStatic } from '@/lib/mint/page-doc'
 import { formatCountdown } from './format'
 
 /*
- * The mint page's rules, as pure functions of the data. Liveness is read from each group's
- * `active` field (the contract's `mintGroupActive` view, through the freshness server) and from
- * nothing else. The chain clock passed in here only labels countdowns; it never makes a phase live.
+ * The mint page's rules, as pure functions of the chain's state (docs/specs/2026-10-16-mint-page-live-data.md,
+ * section 7.4). Liveness is read from each group's `active` field (the contract's `mintGroupActive` view,
+ * through the freshness server) and from nothing else. The chain clock passed in here only labels countdowns; it
+ * never makes a phase live.
  */
 
 export type PhaseStatus =
@@ -28,74 +32,91 @@ export type Phase = {
   group: MintGroup
   status: PhaseStatus
   remainingSupply: number
-  /** Seconds until the scheduled start, by the chain clock estimate. Null when nothing is scheduled. */
+  /** Seconds until the scheduled start, by the chain clock. Null when nothing is scheduled or the clock is not set. */
   startsIn: number | null
-  /** The connected wallet's own allowance in this phase; null when no wallet is connected. */
+  /** The connected wallet's own allowance in this phase; null until its answer arrives. */
   wallet: (Allowance & { eligible: boolean }) | null
   /** Allowances of vaults that delegated to this wallet, for this phase. */
   vaults: (Allowance & { vault: Address })[]
 }
 
-/** Tokens minted in this session, per phase and minter, so the page stays right until the next read. */
-export type LocalMints = Record<string, number>
-export const localKey = (groupId: number, minter: Address) => `${groupId}:${minter.toLowerCase()}`
+export type { Quote }
+
+const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
 
 function allowance(quota: number, used: number, extra = 0): Allowance {
   const total = used + extra
   return { quota, used: total, remaining: Math.max(0, quota - total) }
 }
 
-export function totalMinted(data: MintPageData, local: LocalMints): number {
-  const extra = Object.values(local).reduce((sum, count) => sum + count, 0)
-  return Math.min(data.supply.max, data.supply.minted + extra)
+/** Local mints the state has not read yet: those above its block. */
+const unreadByState = (live: MintLive, local: readonly LocalMint[]) =>
+  local.filter((mint) => mint.block > live.block)
+
+/** Minted so far: the state's count and this page's mints it has not read yet. */
+export function totalMinted(live: MintLive, local: readonly LocalMint[] = []): number {
+  const extra = unreadByState(live, local).reduce((sum, mint) => sum + mint.count, 0)
+  return Math.min(live.supply.max, live.supply.minted + extra)
 }
 
+/**
+ * The phases the page shows, in the join's order: each visible group with its status, what is left, the
+ * countdown and, once the wallet answered, what this wallet and its vaults can mint. A mint this page saw land
+ * counts toward supply while the state is older than its receipt, and toward an allowance while the wallet
+ * answer is, so it never counts twice.
+ */
 export function derivePhases(
-  data: MintPageData,
-  wallet: WalletState | null,
-  chainNow: number,
-  local: LocalMints = {},
+  live: MintLive,
+  wallet: WalletView | null,
+  chainNow: number | null,
+  local: readonly LocalMint[] = [],
 ): Phase[] {
-  const collectionLeft = data.supply.max - totalMinted(data, local)
+  const collectionLeft = live.supply.max - totalMinted(live, local)
+  const forState = unreadByState(live, local)
+  const forWallet = wallet ? local.filter((mint) => mint.block > wallet.block) : []
+  const usedBy = (groupId: number, holder: Address) =>
+    forWallet
+      .filter((mint) => mint.groupId === groupId && same(mint.holder, holder))
+      .reduce((sum, mint) => sum + mint.count, 0)
   // A phase the creator hid (Phases, Edit details) is left off the page, as in legacy.
-  return data.groups
+  return live.groups
     .filter((group) => group.visible !== false)
     .map((group) => {
-      const localForGroup = Object.entries(local)
-        .filter(([key]) => key.startsWith(`${group.id}:`))
-        .reduce((sum, [, count]) => sum + count, 0)
+      const localForGroup = forState
+        .filter((mint) => mint.groupId === group.id)
+        .reduce((sum, mint) => sum + mint.count, 0)
       const minted = group.minted + localForGroup
       const remainingSupply = Math.max(0, Math.min(group.maxSupply - minted, collectionLeft))
-      const startsIn = group.scheduledStart > 0 ? group.scheduledStart - chainNow : null
+      const startsIn = group.scheduledStart > 0 && chainNow !== null ? group.scheduledStart - chainNow : null
 
       let status: PhaseStatus
       if (remainingSupply === 0 && (group.active || minted >= group.maxSupply || collectionLeft === 0)) {
         status = 'soldout'
       } else if (group.active) status = 'live'
-      else if (startsIn !== null) status = startsIn > 0 ? 'scheduled' : 'starting'
+      else if (group.scheduledStart > 0) status = startsIn === null || startsIn > 0 ? 'scheduled' : 'starting'
       else status = minted > 0 ? 'closed' : 'unscheduled'
 
       let walletAllowance: Phase['wallet'] = null
       const vaults: Phase['vaults'] = []
       if (wallet) {
-        const own = localKey(group.id, wallet.address)
+        const own = usedBy(group.id, wallet.address)
         if (group.kind === 'public') {
           walletAllowance = {
             eligible: true,
-            ...allowance(data.publicMaxMintPerWallet, wallet.publicMinted, local[own]),
+            ...allowance(live.publicMaxMintPerWallet, wallet.publicMinted, own),
           }
         } else {
           const entry = wallet.groups.find((candidate) => candidate.groupId === group.id)
           const eligible = !!entry && entry.eligible && entry.quota > 0
-          walletAllowance = { eligible, ...allowance(entry?.quota ?? 0, entry?.used ?? 0, local[own]) }
-        }
-        for (const delegated of wallet.delegatedVaults) {
-          const entry = delegated.groups.find((candidate) => candidate.groupId === group.id)
-          if (entry && entry.quota > 0) {
-            vaults.push({
-              vault: delegated.vault,
-              ...allowance(entry.quota, entry.used, local[localKey(group.id, delegated.vault)]),
-            })
+          walletAllowance = { eligible, ...allowance(entry?.quota ?? 0, entry?.used ?? 0, own) }
+          for (const delegated of wallet.delegatedVaults) {
+            const vaultEntry = delegated.groups.find((candidate) => candidate.groupId === group.id)
+            if (vaultEntry && vaultEntry.quota > 0) {
+              vaults.push({
+                vault: delegated.vault,
+                ...allowance(vaultEntry.quota, vaultEntry.used, usedBy(group.id, delegated.vault)),
+              })
+            }
           }
         }
       }
@@ -104,26 +125,22 @@ export function derivePhases(
     })
 }
 
-const ORDER: Record<PhaseStatus, number> = {
+/** Open now, Coming up and Finished, each in the join's order. */
+const SECTION: Record<PhaseStatus, number> = {
   live: 0,
   starting: 1,
-  scheduled: 2,
-  unscheduled: 3,
-  closed: 4,
-  soldout: 5,
+  scheduled: 1,
+  unscheduled: 1,
+  closed: 2,
+  soldout: 2,
 }
 
-/** Live first, then what is coming (soonest first), then what has finished. */
+/** Live first, then what is coming, then what has finished, each section in the creator's order. */
 export function sortPhases(phases: Phase[]): Phase[] {
-  return [...phases].sort(
-    (a, b) =>
-      ORDER[a.status] - ORDER[b.status] ||
-      (a.startsIn ?? Infinity) - (b.startsIn ?? Infinity) ||
-      a.group.id - b.group.id,
-  )
+  return [...phases].sort((a, b) => SECTION[a.status] - SECTION[b.status])
 }
 
-/** The phase the panel opens on: the cheapest live phase this wallet can mint from, else the next one. */
+/** The phase the panel opens on: the cheapest live phase this wallet can mint from, else the next one to start. */
 export function defaultPhaseId(phases: Phase[]): number | null {
   const live = phases.filter((phase) => phase.status === 'live')
   const mintable = live
@@ -133,21 +150,15 @@ export function defaultPhaseId(phases: Phase[]): number | null {
   const eligibleLive = live.find((phase) => phase.wallet?.eligible)
   if (eligibleLive) return eligibleLive.group.id
   if (live[0]) return live[0].group.id
-  const next = sortPhases(phases).find((phase) => phase.status === 'starting' || phase.status === 'scheduled')
+  const next = phases
+    .filter((phase) => phase.status === 'starting' || phase.status === 'scheduled')
+    .sort((a, b) => (a.startsIn ?? Infinity) - (b.startsIn ?? Infinity))[0]
   return next?.group.id ?? null
 }
 
-/** Platform fee for one token: the flat fee plus basis points of the price (contracts/README, Fees). */
-export function feePerTokenWei(data: MintPageData, priceWei: string): bigint {
-  return BigInt(data.fees.mintFeeFlatWei) + (BigInt(priceWei) * BigInt(data.fees.mintFeeBps)) / 10_000n
-}
-
-export type Quote = { priceWei: bigint; feeWei: bigint; totalWei: bigint; quantity: number }
-
-export function quote(data: MintPageData, priceWei: string, quantity: number): Quote {
-  const price = BigInt(priceWei) * BigInt(quantity)
-  const fee = feePerTokenWei(data, priceWei) * BigInt(quantity)
-  return { priceWei: price, feeWei: fee, totalWei: price + fee, quantity }
+/** Price and fee for a quantity: the contract's `quoteBatchMint` at the state's fees. */
+export function quote(live: Pick<MintLive, 'fees'>, priceWei: string, quantity: number): Quote {
+  return quoteOf(live.fees, priceWei, quantity)
 }
 
 /** Who the tokens are minted against: the wallet itself or one of its delegated vaults. */
@@ -168,16 +179,20 @@ export type MintAction =
   | { kind: 'blocked'; label: string }
 
 export function deriveAction(input: {
-  data: MintPageData
+  page: Pick<MintPageStatic, 'chain'>
+  /** Null until the first state answer. */
+  live: MintLive | null
   phase: Phase | null
   connected: boolean
+  /** The connected wallet's answer has arrived. */
+  walletRead: boolean
   wrongChain: boolean
   quantity: number
   vault: Address | null
   soldOut: boolean
 }): MintAction {
-  const { data, phase, connected, wrongChain, quantity, vault, soldOut } = input
-  const symbol = data.collection.chain.nativeSymbol
+  const { page, live, phase, connected, walletRead, wrongChain, quantity, vault, soldOut } = input
+  if (!live) return { kind: 'blocked', label: 'Reading the chain' }
   if (soldOut) return { kind: 'blocked', label: 'Sold out' }
   if (!phase) return { kind: 'blocked', label: 'Minting is paused' }
   if (!connected) return { kind: 'connect', label: 'Connect wallet' }
@@ -187,13 +202,18 @@ export function deriveAction(input: {
   if (phase.status === 'starting') return { kind: 'blocked', label: 'Starting, waiting for the chain' }
   if (phase.status === 'soldout') return { kind: 'blocked', label: 'Phase sold out' }
   if (phase.status !== 'live') return { kind: 'blocked', label: 'Phase closed' }
+  if (!walletRead) return { kind: 'blocked', label: 'Checking this wallet' }
   if (!vault && phase.group.kind === 'whitelist' && !phase.wallet?.eligible) {
     return { kind: 'blocked', label: 'Not on the whitelist for this phase' }
   }
   if (maxQuantity(phase, vault) === 0) {
     return { kind: 'blocked', label: vault ? 'Vault limit reached' : 'Wallet limit reached' }
   }
-  if (wrongChain) return { kind: 'switch', label: `Switch to ${data.collection.chain.name}` }
-  const q = quote(data, phase.group.priceWei, quantity)
-  return { kind: 'mint', label: `Mint ${quantity} for ${formatNative(q.totalWei, symbol)}`, quote: q }
+  if (wrongChain) return { kind: 'switch', label: `Switch to ${page.chain.name}` }
+  const q = quote(live, phase.group.priceWei, quantity)
+  return {
+    kind: 'mint',
+    label: `Mint ${quantity} for ${formatNative(q.totalWei, page.chain.nativeSymbol)}`,
+    quote: q,
+  }
 }

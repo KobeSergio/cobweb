@@ -1,6 +1,7 @@
 'use client'
 
 import { CircleCheckIcon, CircleMinusIcon } from 'lucide-react'
+import { Skeleton } from '@cobweb/ui/components/skeleton'
 import { StatusBadge, type Status } from '@cobweb/ui/components/status-badge'
 import { cn } from '@cobweb/ui/lib/utils'
 import { formatNative } from '@/lib/demo/helpers'
@@ -24,9 +25,19 @@ const GROUPS = [
   { title: 'Finished', match: ['closed', 'soldout'] },
 ] as const
 
-/** Every phase, grouped by now, next and done, with what it means for the connected wallet. */
+/** Every phase, grouped by now, next and done, each group in the creator's order, with what it means for the wallet. */
 export function PhaseList() {
-  const { phases, phase: selected } = useMint()
+  const { live, track, phases, phase: selected } = useMint()
+  if (track.final) return null
+  if (!live) {
+    return (
+      <section aria-label="Phases" aria-busy="true" className="mt-10">
+        <Skeleton className="h-5 w-20" />
+        <Skeleton className="mt-4 h-24 w-full rounded-xl" />
+        <Skeleton className="mt-2.5 h-24 w-full rounded-xl" />
+      </section>
+    )
+  }
   const sorted = sortPhases(phases)
   const liveCount = phases.filter((entry) => entry.status === 'live').length
 
@@ -65,14 +76,14 @@ export function PhaseList() {
 }
 
 function PhaseRow({ phase, selected }: { phase: Phase; selected: boolean }) {
-  const { data, wallet } = useMint()
+  const { page, walletAddress } = useMint()
   const { group, status } = phase
   const when = useLocalTime(group.scheduledStart)
   const hydrated = useHydrated()
   const minted = group.maxSupply - phase.remainingSupply
-  const fill = Math.min(100, (minted / group.maxSupply) * 100)
+  const fill = group.maxSupply > 0 ? Math.min(100, (minted / group.maxSupply) * 100) : 0
   const badge = BADGE[status]
-  const symbol = data.collection.chain.nativeSymbol
+  const symbol = page.chain.nativeSymbol
 
   return (
     <li
@@ -92,6 +103,12 @@ function PhaseRow({ phase, selected }: { phase: Phase; selected: boolean }) {
         </p>
         <StatusBadge status={badge.status}>{badge.label}</StatusBadge>
       </div>
+
+      {group.description && (
+        <p className="mt-1.5 text-[0.8125rem] leading-snug whitespace-pre-line text-muted-foreground">
+          {group.description}
+        </p>
+      )}
 
       <dl className="mt-2.5 grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-1 text-[0.8125rem]">
         <dt className="sr-only">Price</dt>
@@ -132,7 +149,7 @@ function PhaseRow({ phase, selected }: { phase: Phase; selected: boolean }) {
         <p className="mt-2 text-[0.8125rem] text-muted-foreground">The creator has not set a start yet.</p>
       )}
 
-      {wallet && group.kind === 'whitelist' && phase.wallet && (
+      {walletAddress && group.kind === 'whitelist' && phase.wallet && (
         <p
           className={cn(
             'mt-2 flex items-center gap-1.5 text-[0.8125rem]',
@@ -157,7 +174,7 @@ function PhaseRow({ phase, selected }: { phase: Phase; selected: boolean }) {
           )}
         </p>
       )}
-      {wallet &&
+      {walletAddress &&
         group.kind === 'public' &&
         phase.wallet &&
         (status === 'live' || status === 'scheduled' || status === 'starting') && (

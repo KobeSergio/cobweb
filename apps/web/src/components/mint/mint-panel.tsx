@@ -1,8 +1,9 @@
 'use client'
 
-import { ArrowDownIcon, ExternalLinkIcon } from 'lucide-react'
+import { ArrowDownIcon, ExternalLinkIcon, RotateCwIcon } from 'lucide-react'
 import { Button } from '@cobweb/ui/components/button'
 import { Progress } from '@cobweb/ui/components/progress'
+import { Skeleton } from '@cobweb/ui/components/skeleton'
 import { StatusBadge } from '@cobweb/ui/components/status-badge'
 import { explorerAddressUrl, formatNative, shortAddress } from '@/lib/demo/helpers'
 import { ChainName } from '@/components/chains/chain-icon'
@@ -12,13 +13,33 @@ import { useMint } from './mint-context'
 import { Eligibility, PhasePicker, PriceBreakdown, QuantityStepper, VaultPicker } from './panel-controls'
 import { useHydrated, useLocalTime } from './use-chain-clock'
 
+/** What the panel says in place of the button once the server refused the collection for this page load. */
+const REFUSALS = {
+  'not-a-collection': 'This contract could not be confirmed on its chain yet. Reload the page in a minute.',
+  unavailable: 'Live status is not available for this collection right now.',
+} as const
+
 /** The mint menu: who and what, how much is left, the phase, what this wallet can do, one button. */
 export function MintPanel() {
-  const { data, extras, phases, phase, minted, soldOut, wallet, quantity, maxQuantity } = useMint()
+  const {
+    page,
+    live: state,
+    track,
+    waitingLong,
+    phases,
+    phase,
+    minted,
+    soldOut,
+    walletAddress,
+    quantity,
+    maxQuantity,
+  } = useMint()
+  const chain = page.chain
+  if (track.final) return <Refused reason={track.final} />
+  if (!state) return <Reading slow={waitingLong} />
   const live = phases.filter((entry) => entry.status === 'live')
-  const max = data.supply.max
-  const percent = Math.floor((minted / max) * 100)
-  const chain = data.collection.chain
+  const max = state.supply.max
+  const percent = max > 0 ? Math.floor((minted / max) * 100) : 0
   const picking = live.length > 1 && phase?.status === 'live'
 
   const overall = soldOut
@@ -50,18 +71,22 @@ export function MintPanel() {
         id="collection-name"
         className="mt-4 text-[2.25rem] leading-[1.05] font-semibold tracking-[-0.035em] sm:text-[2.75rem]"
       >
-        {data.collection.name}
+        {page.name}
       </h1>
       <p className="mt-2 text-sm text-muted-foreground">
         by{' '}
-        <a
-          href={explorerAddressUrl(chain, extras.creator)}
-          target="_blank"
-          rel="noreferrer"
-          className="numeric text-foreground underline-offset-4 hover:underline"
-        >
-          {shortAddress(extras.creator)}
-        </a>
+        {chain.explorerUrl ? (
+          <a
+            href={explorerAddressUrl(chain, state.creator)}
+            target="_blank"
+            rel="noreferrer"
+            className="numeric text-foreground underline-offset-4 hover:underline"
+          >
+            {shortAddress(state.creator)}
+          </a>
+        ) : (
+          <span className="numeric text-foreground">{shortAddress(state.creator)}</span>
+        )}
       </p>
 
       <div className="mt-5">
@@ -75,7 +100,7 @@ export function MintPanel() {
           <p className="numeric text-[0.8125rem] text-muted-foreground">{percent}%</p>
         </div>
         <Progress
-          value={(minted / max) * 100}
+          value={max > 0 ? (minted / max) * 100 : 0}
           size="sm"
           className="mt-2.5"
           aria-label={`${minted} of ${max} minted`}
@@ -93,12 +118,12 @@ export function MintPanel() {
             {(phase.status === 'scheduled' || phase.status === 'starting') && <Upcoming />}
             <PhasePrice />
             {/* The picker's cards already say where this wallet stands in each open phase. */}
-            {wallet && !picking && <Eligibility phase={phase} />}
-            {wallet && <VaultPicker phase={phase} />}
-            {phase.status === 'live' && wallet && maxQuantity > 0 && <QuantityStepper />}
-            {((phase.status === 'live' && (!wallet || maxQuantity > 0)) ||
-              (!wallet && phase.status !== 'live')) && (
-              <PriceBreakdown phase={phase} quantity={wallet && maxQuantity > 0 ? quantity : 1} />
+            {walletAddress && !picking && <Eligibility phase={phase} />}
+            {walletAddress && <VaultPicker phase={phase} />}
+            {phase.status === 'live' && walletAddress && maxQuantity > 0 && <QuantityStepper />}
+            {((phase.status === 'live' && (!walletAddress || maxQuantity > 0)) ||
+              (!walletAddress && phase.status !== 'live')) && (
+              <PriceBreakdown phase={phase} quantity={walletAddress && maxQuantity > 0 ? quantity : 1} />
             )}
           </>
         )}
@@ -112,8 +137,87 @@ export function MintPanel() {
   )
 }
 
+/** Before the first answer: the panel's shape, and the button reading "Reading the chain". */
+function Reading({ slow }: { slow: boolean }) {
+  const { page } = useMint()
+  return (
+    <section
+      id="mint"
+      aria-labelledby="collection-name"
+      aria-busy="true"
+      className="relative rounded-xl border border-border-strong bg-card p-5 shadow-lifted sm:p-6 xl:p-7"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <Skeleton className="h-6 w-28 rounded-full" />
+        <ChainName
+          chain={page.chain}
+          className="text-[0.8125rem] text-muted-foreground"
+          iconClassName="size-3.5"
+        />
+      </div>
+      <h1
+        id="collection-name"
+        className="mt-4 text-[2.25rem] leading-[1.05] font-semibold tracking-[-0.035em] sm:text-[2.75rem]"
+      >
+        {page.name}
+      </h1>
+      <Skeleton className="mt-3 h-4 w-32" />
+      <Skeleton className="mt-6 h-4 w-full" />
+      <Skeleton className="mt-3 h-1 w-full rounded-full" />
+      <div className="mt-5 space-y-4 border-t pt-5">
+        <div className="flex justify-between">
+          <Skeleton className="h-5 w-32" />
+          <Skeleton className="h-8 w-28" />
+        </div>
+        <Skeleton className="h-12 w-full rounded-lg" />
+      </div>
+      <div className="mt-5 space-y-3" data-mint-action>
+        <MintButton />
+        <p aria-live="polite" className="text-center text-[0.8125rem] leading-snug text-muted-foreground">
+          {slow ? 'Live status is taking longer than usual. This page keeps trying.' : 'Reading the chain.'}
+        </p>
+      </div>
+    </section>
+  )
+}
+
+/** The server refused the collection for this page load: what it means, and no mint button. */
+function Refused({ reason }: { reason: keyof typeof REFUSALS }) {
+  const { page } = useMint()
+  return (
+    <section
+      id="mint"
+      aria-labelledby="collection-name"
+      className="relative rounded-xl border border-border-strong bg-card p-5 shadow-lifted sm:p-6 xl:p-7"
+    >
+      <div className="flex items-center justify-end gap-3">
+        <ChainName
+          chain={page.chain}
+          className="text-[0.8125rem] text-muted-foreground"
+          iconClassName="size-3.5"
+        />
+      </div>
+      <h1
+        id="collection-name"
+        className="mt-4 text-[2.25rem] leading-[1.05] font-semibold tracking-[-0.035em] sm:text-[2.75rem]"
+      >
+        {page.name}
+      </h1>
+      <p role="status" className="mt-5 border-t pt-5 text-sm leading-relaxed text-muted-foreground">
+        {REFUSALS[reason]}
+      </p>
+      {reason === 'not-a-collection' && (
+        <Button variant="secondary" className="mt-5 w-full" onClick={() => window.location.reload()}>
+          <RotateCwIcon />
+          Reload
+        </Button>
+      )}
+    </section>
+  )
+}
+
 function PhasePrice() {
-  const { phase, data } = useMint()
+  const { phase, page } = useMint()
   if (!phase) return null
   const free = phase.group.priceWei === '0'
   return (
@@ -132,7 +236,7 @@ function PhasePrice() {
       </div>
       <p className="text-right">
         <span className="numeric block text-[1.75rem] leading-none font-medium">
-          {free ? 'Free' : formatNative(phase.group.priceWei, data.collection.chain.nativeSymbol)}
+          {free ? 'Free' : formatNative(phase.group.priceWei, page.chain.nativeSymbol)}
         </span>
         <span className="mt-1 block text-xs text-muted-foreground">per token</span>
       </p>
@@ -180,26 +284,25 @@ function Upcoming() {
 }
 
 function SoldOut() {
-  const { data } = useMint()
-  const chain = data.collection.chain
+  const { page, live } = useMint()
+  const chain = page.chain
   return (
     <div>
-      <p className="text-title">Every one of the {data.supply.max.toLocaleString('en-US')} is minted.</p>
+      <p className="text-title">
+        Every one of the {(live?.supply.max ?? 0).toLocaleString('en-US')} is minted.
+      </p>
       <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-        {data.collection.name} sold out. Thank you to everyone who minted. Tokens now change hands between
-        holders.
+        {page.name} sold out. Thank you to everyone who minted. Tokens now change hands between holders.
       </p>
       <div className="mt-5 grid gap-2.5 sm:grid-cols-2">
-        <Button asChild variant="secondary">
-          <a
-            href={`${chain.explorerUrl}/token/${data.collection.contractAddress}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Holders on the explorer
-            <ExternalLinkIcon />
-          </a>
-        </Button>
+        {chain.explorerUrl && (
+          <Button asChild variant="secondary">
+            <a href={`${chain.explorerUrl}/token/${page.contract}`} target="_blank" rel="noreferrer">
+              Holders on the explorer
+              <ExternalLinkIcon />
+            </a>
+          </Button>
+        )}
         <Button asChild variant="outline">
           <a href="#gallery">
             See the collection

@@ -14,7 +14,7 @@ import { useMint } from './mint-context'
  * out of view, this bar holds the same button at the bottom of the screen.
  */
 export function StickyMintBar() {
-  const { phase, action, data, soldOut, minted, quantity, setQuantity, maxQuantity } = useMint()
+  const { phase, action, page, live, track, soldOut, minted, quantity, setQuantity, maxQuantity } = useMint()
   const reduce = useReducedMotion()
   const [panelVisible, setPanelVisible] = useState(true)
 
@@ -28,10 +28,10 @@ export function StickyMintBar() {
     return () => observer.disconnect()
   }, [])
 
-  const show = !panelVisible && !soldOut
+  const show = !panelVisible && !soldOut && !track.final
   // The stepper lives in the bar too, so a collector never scrolls back up to change the quantity.
   const canPickQuantity = action.kind === 'mint' && maxQuantity > 1
-  const symbol = data.collection.chain.nativeSymbol
+  const symbol = page.chain.nativeSymbol
   const amount =
     action.kind === 'mint'
       ? formatNative(action.quote.totalWei, symbol)
@@ -54,10 +54,13 @@ export function StickyMintBar() {
           <div className="mx-auto flex max-w-xl items-center gap-4">
             <div className={canPickQuantity ? 'hidden min-w-0 shrink-0 sm:block' : 'min-w-0 shrink-0'}>
               <p className="truncate text-[0.8125rem] text-muted-foreground">
-                {phase ? phase.group.name : data.collection.name}
+                {phase ? phase.group.name : page.name}
               </p>
               <p className="numeric text-base font-medium">
-                {amount ?? `${minted.toLocaleString('en-US')} / ${data.supply.max.toLocaleString('en-US')}`}
+                {amount ??
+                  (live
+                    ? `${minted.toLocaleString('en-US')} / ${live.supply.max.toLocaleString('en-US')}`
+                    : 'Reading the chain')}
               </p>
             </div>
             {canPickQuantity && (

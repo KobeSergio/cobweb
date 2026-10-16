@@ -1,29 +1,40 @@
+'use client'
+
 import { ExternalLinkIcon, GlobeIcon, MessageCircleIcon, AtSignIcon, SendIcon } from 'lucide-react'
 import { Button } from '@cobweb/ui/components/button'
+import { Skeleton } from '@cobweb/ui/components/skeleton'
 import { cn } from '@cobweb/ui/lib/utils'
-import type { MintPageData } from '@/lib/demo'
 import { explorerAddressUrl, formatBps, shortAddress } from '@/lib/demo/helpers'
+import type { MintLive } from '@/lib/mint/live-data'
+import type { MintPageStatic } from '@/lib/mint/page-doc'
 import { ChainName } from '@/components/chains/chain-icon'
 import { LogoMark } from '@/components/shell/logo'
 import { CopyButton } from './copy-button'
-import { TokenImage } from './token-image'
-import type { MintPageExtras } from './types'
+import { useMint } from './mint-context'
+import { TokenArtFrame } from './token-image'
+import { useTokenArt } from './use-token-art'
 
 /*
  * A salon hang: the featured tokens at different sizes and heights, like a wall in a small
- * gallery, rather than a row of equal cards. On phones the wall becomes a strip you swipe.
+ * gallery, rather than a row of equal cards. On phones the wall becomes a strip you swipe. On wide
+ * screens each card takes its share of a wall of six (24, 14, 19, 13, 20 and 15 parts of the row,
+ * less the five gaps), so a page that features fewer keeps the same sizes instead of stretching them.
  */
 const HANG = [
-  { size: 'w-[64vw] sm:w-[40vw] lg:w-auto lg:flex-24', align: 'self-start' },
-  { size: 'w-[46vw] sm:w-[28vw] lg:w-auto lg:flex-14', align: 'self-end' },
-  { size: 'w-[56vw] sm:w-[34vw] lg:w-auto lg:flex-19', align: 'self-center' },
-  { size: 'w-[42vw] sm:w-[26vw] lg:w-auto lg:flex-13', align: 'self-start lg:mt-10' },
-  { size: 'w-[60vw] sm:w-[36vw] lg:w-auto lg:flex-20', align: 'self-end' },
-  { size: 'w-[46vw] sm:w-[28vw] lg:w-auto lg:flex-15', align: 'self-center lg:-mt-6' },
+  { size: 'w-[64vw] sm:w-[40vw] lg:w-[calc((100%_-_6.25rem)*24/105)]', align: 'self-start' },
+  { size: 'w-[46vw] sm:w-[28vw] lg:w-[calc((100%_-_6.25rem)*14/105)]', align: 'self-end' },
+  { size: 'w-[56vw] sm:w-[34vw] lg:w-[calc((100%_-_6.25rem)*19/105)]', align: 'self-center' },
+  { size: 'w-[42vw] sm:w-[26vw] lg:w-[calc((100%_-_6.25rem)*13/105)]', align: 'self-start lg:mt-10' },
+  { size: 'w-[60vw] sm:w-[36vw] lg:w-[calc((100%_-_6.25rem)*20/105)]', align: 'self-end' },
+  { size: 'w-[46vw] sm:w-[28vw] lg:w-[calc((100%_-_6.25rem)*15/105)]', align: 'self-center lg:-mt-6' },
 ]
 
-export function Gallery({ data }: { data: MintPageData }) {
-  const featured = data.collection.featured
+/** "From the collection": the featured tokens once revealed; hidden before the reveal and for a single asset. */
+export function Gallery() {
+  const { page, live, source } = useMint()
+  const shown = !!live?.revealed && page.projectType !== 'single_asset'
+  const featured = shown ? page.featuredTokenIds : []
+  const art = useTokenArt(source, live?.baseUri ?? null, featured)
   if (featured.length === 0) return null
   return (
     <section id="gallery" aria-labelledby="gallery-title" className="scroll-mt-8">
@@ -31,21 +42,22 @@ export function Gallery({ data }: { data: MintPageData }) {
         From the collection
       </h2>
       <ul className="scrollbar-hide mt-8 flex snap-x snap-mandatory scroll-px-4 items-start sm:scroll-px-8 gap-4 overflow-x-auto px-4 pb-4 sm:gap-5 sm:px-8 lg:min-h-[26rem] lg:snap-none lg:overflow-visible">
-        {featured.map((token, index) => {
+        {featured.map((id, index) => {
           const hang = HANG[index % HANG.length]!
           return (
-            <li key={token.id} className={cn('shrink-0 snap-start', hang.size, hang.align)}>
+            <li key={id} className={cn('shrink-0 snap-start', hang.size, hang.align)}>
               <figure className="group">
                 <div className="overflow-hidden rounded-xl border border-border-strong shadow-raised transition-[transform,box-shadow] duration-300 ease-out-expo group-hover:-translate-y-1 group-hover:shadow-lifted">
-                  <TokenImage
-                    layers={[token.imageUrl]}
-                    alt={token.name}
+                  <TokenArtFrame
+                    art={art.get(id)}
+                    id={id}
+                    alt={`${page.name} #${id}`}
                     className="transition-transform duration-500 ease-out-expo group-hover:scale-[1.03]"
                   />
                 </div>
                 <figcaption className="mt-2.5 flex items-baseline justify-between gap-2 text-[0.8125rem]">
-                  <span className="truncate text-muted-foreground">{data.collection.name}</span>
-                  <span className="numeric text-foreground">#{token.id}</span>
+                  <span className="truncate text-muted-foreground">{page.name}</span>
+                  <span className="numeric text-foreground">#{id}</span>
                 </figcaption>
               </figure>
             </li>
@@ -63,25 +75,30 @@ const SOCIALS = [
   { key: 'telegram', label: 'Telegram', Icon: SendIcon },
 ] as const
 
-export function About({ data }: { data: MintPageData }) {
-  const { collection } = data
-  const socials = SOCIALS.filter((entry) => collection.socials[entry.key])
+/** The collection's story: the About banner (else the banner), the description as plain text, and its links. */
+export function About({ page }: { page: MintPageStatic }) {
+  const socials = SOCIALS.filter((entry) => page.socials[entry.key]?.startsWith('https://'))
+  const banner = page.aboutBannerUrl ?? page.bannerUrl
   return (
     <section aria-labelledby="about-title">
-      <div className="overflow-hidden rounded-xl border border-border-strong bg-well">
-        <img src={collection.bannerUrl} alt="" className="aspect-[3/1] w-full object-cover" loading="lazy" />
-      </div>
-      <h2 id="about-title" className="text-title mt-8">
-        About {collection.name}
+      {banner && (
+        <div className="mb-8 overflow-hidden rounded-xl border border-border-strong bg-well">
+          <img src={banner} alt="" className="aspect-[3/1] w-full object-cover" loading="lazy" />
+        </div>
+      )}
+      <h2 id="about-title" className="text-title">
+        About {page.name}
       </h2>
-      <p className="mt-3 max-w-[62ch] text-base leading-relaxed text-foreground/85">
-        {collection.description}
-      </p>
+      {page.description && (
+        <p className="mt-3 max-w-[62ch] text-base leading-relaxed whitespace-pre-line text-foreground/85">
+          {page.description}
+        </p>
+      )}
       {socials.length > 0 && (
         <div className="mt-6 flex flex-wrap gap-2.5">
           {socials.map(({ key, label, Icon }) => (
             <Button key={key} asChild variant="outline" size="sm">
-              <a href={collection.socials[key]} target="_blank" rel="noreferrer">
+              <a href={page.socials[key]} target="_blank" rel="noreferrer">
                 <Icon />
                 {label}
               </a>
@@ -93,24 +110,38 @@ export function About({ data }: { data: MintPageData }) {
   )
 }
 
-export function Details({ data, extras }: { data: MintPageData; extras: MintPageExtras }) {
-  const { collection } = data
-  const chain = collection.chain
+/** The Transfers row's words, by the collection's level on its validator. */
+const TRANSFERS: Record<NonNullable<MintLive['transfers']>, string> = {
+  open: 'Open',
+  locked: 'Locked by the creator',
+  restricted: 'Restricted by the creator',
+}
+
+/** The contract and its facts: supply, royalties, transfers and the art, from the chain's state. */
+export function Details() {
+  const { page, live } = useMint()
+  const chain = page.chain
+  const pending = <Skeleton className="h-4 w-20" />
   const rows: { label: string; value: React.ReactNode }[] = [
     { label: 'Chain', value: <ChainName chain={chain} /> },
     { label: 'Token standard', value: 'ERC-721C' },
-    { label: 'Supply', value: <span className="numeric">{data.supply.max.toLocaleString('en-US')}</span> },
+    {
+      label: 'Supply',
+      value: live ? <span className="numeric">{live.supply.max.toLocaleString('en-US')}</span> : pending,
+    },
     {
       label: 'Royalties',
-      value: (
+      value: live ? (
         <>
-          <span className="numeric">{formatBps(extras.royaltyBps)}</span>, enforced on secondary sales through
-          the transfer validator
+          <span className="numeric">{formatBps(live.royaltyBps)}</span>
+          {live.royaltyEnforced && ', enforced on secondary sales through the transfer validator'}
         </>
+      ) : (
+        pending
       ),
     },
-    { label: 'Transfers', value: collection.transfersLocked ? 'Locked by the creator' : 'Open' },
-    { label: 'Art', value: collection.revealed ? 'Revealed' : 'Reveals after the mint' },
+    ...(live?.transfers ? [{ label: 'Transfers', value: TRANSFERS[live.transfers] }] : []),
+    { label: 'Art', value: live ? (live.revealed ? 'Revealed' : 'Not revealed yet') : pending },
   ]
   return (
     <section aria-labelledby="details-title">
@@ -120,17 +151,23 @@ export function Details({ data, extras }: { data: MintPageData; extras: MintPage
       <div className="mt-5 rounded-xl border bg-card p-5 shadow-raised sm:p-6">
         <p className="text-[0.8125rem] text-muted-foreground">Contract</p>
         <div className="mt-1.5 flex items-center gap-1">
-          <a
-            href={explorerAddressUrl(chain, collection.contractAddress)}
-            target="_blank"
-            rel="noreferrer"
-            className="numeric inline-flex min-w-0 items-center gap-1.5 text-[0.9375rem] underline-offset-4 hover:underline"
-          >
-            <span className="truncate">{shortAddress(collection.contractAddress, 6)}</span>
-            <ExternalLinkIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="sr-only">(opens the explorer)</span>
-          </a>
-          <CopyButton value={collection.contractAddress} label="Copy contract address" />
+          {chain.explorerUrl ? (
+            <a
+              href={explorerAddressUrl(chain, page.contract)}
+              target="_blank"
+              rel="noreferrer"
+              className="numeric inline-flex min-w-0 items-center gap-1.5 text-[0.9375rem] underline-offset-4 hover:underline"
+            >
+              <span className="truncate">{shortAddress(page.contract, 6)}</span>
+              <ExternalLinkIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="sr-only">(opens the explorer)</span>
+            </a>
+          ) : (
+            <span className="numeric min-w-0 truncate text-[0.9375rem]">
+              {shortAddress(page.contract, 6)}
+            </span>
+          )}
+          <CopyButton value={page.contract} label="Copy contract address" />
         </div>
         <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-4 border-t pt-5">
           {rows.map((row) => (

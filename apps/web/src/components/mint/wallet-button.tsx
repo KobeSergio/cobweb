@@ -15,16 +15,14 @@ const pill =
  * wallet shows as the same pill, without a menu. The chain's mark sits beside the address.
  */
 export function WalletButton() {
-  const { wallet, sampleWallet, wrongChain, data } = useMint()
+  const { walletAddress, sampleWallet, wrongChain, page } = useMint()
 
-  if (sampleWallet && wallet) {
+  if (sampleWallet && walletAddress) {
     return (
       <div className={pill + ' cursor-default hover:bg-surface-2'}>
-        <ChainIcon chainId={data.collection.chain.id} className="size-4 text-muted-foreground" />
-        <span className="sr-only">
-          {wrongChain ? 'On another network, ' : `On ${data.collection.chain.name}, `}
-        </span>
-        <span className="numeric text-[0.8125rem]">{shortAddress(wallet.address)}</span>
+        <ChainIcon chainId={page.chain.id} className="size-4 text-muted-foreground" />
+        <span className="sr-only">{wrongChain ? 'On another network, ' : `On ${page.chain.name}, `}</span>
+        <span className="numeric text-[0.8125rem]">{shortAddress(walletAddress)}</span>
       </div>
     )
   }
@@ -40,7 +38,7 @@ export function WalletButton() {
             </Button>
           )
         }
-        if (chain?.unsupported || chain?.id !== data.collection.chain.id) {
+        if (chain?.unsupported || chain?.id !== page.chain.id) {
           return (
             <button type="button" onClick={openChainModal} className={pill}>
               <TriangleAlertIcon aria-hidden="true" className="size-4 text-warning-foreground" />
@@ -51,8 +49,8 @@ export function WalletButton() {
         }
         return (
           <button type="button" onClick={openAccountModal} className={pill}>
-            <ChainIcon chainId={data.collection.chain.id} className="size-4 text-muted-foreground" />
-            <span className="sr-only">On {data.collection.chain.name}, </span>
+            <ChainIcon chainId={page.chain.id} className="size-4 text-muted-foreground" />
+            <span className="sr-only">On {page.chain.name}, </span>
             <span className="numeric text-[0.8125rem]">{shortAddress(account.address)}</span>
             <ChevronDownIcon aria-hidden="true" className="size-4 text-muted-foreground" />
           </button>

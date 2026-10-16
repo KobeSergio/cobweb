@@ -54,7 +54,7 @@ function ActionLabel({ label }: { label: string }) {
 
 /** The line under the button: what the visitor's status means and what happens next. */
 export function MintHint({ className }: { className?: string }) {
-  const { action, phase, phases, data, vault, wallet } = useMint()
+  const { action, phase, phases, page, vault, walletAddress } = useMint()
   const nextPublic = phases.find((entry) => entry.group.kind === 'public')
   const publicTime = useLocalTime(nextPublic?.group.scheduledStart ?? 0)
   const phaseTime = useLocalTime(phase?.group.scheduledStart ?? 0)
@@ -65,8 +65,8 @@ export function MintHint({ className }: { className?: string }) {
     return (
       <p aria-live="polite" className={lineClass}>
         This collection is on{' '}
-        <ChainName chain={data.collection.chain} className="text-foreground" iconClassName="size-3.5" />. Your
-        wallet will ask you to switch.
+        <ChainName chain={page.chain} className="text-foreground" iconClassName="size-3.5" />. Your wallet
+        will ask you to switch.
       </p>
     )
   }
@@ -98,11 +98,13 @@ export function MintHint({ className }: { className?: string }) {
     )
     text = `${vault ? 'The vault has' : 'You have'} minted ${own?.used ?? 0} of ${own?.quota ?? 0} in ${phase.group.name}.`
     if (other) text += ` ${other.group.name} still has ${other.wallet!.remaining} for you.`
-    else if (nextPublic && nextPublic !== phase && nextPublic.status === 'scheduled' && wallet) {
+    else if (nextPublic && nextPublic !== phase && nextPublic.status === 'scheduled' && walletAddress) {
       text += ` Public opens ${publicTime}.`
     }
   } else if (action.label === 'Phase sold out') {
     text = 'Every token in this phase is minted.'
+  } else if (action.label === 'Checking this wallet') {
+    text = 'Reading what this wallet can mint in each phase.'
   }
 
   if (!text) return null

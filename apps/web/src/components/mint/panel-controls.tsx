@@ -1,6 +1,6 @@
 'use client'
 
-import { CircleCheckIcon, CircleMinusIcon, MinusIcon, PlusIcon, UsersIcon } from 'lucide-react'
+import { CircleCheckIcon, CircleMinusIcon, MinusIcon, PlusIcon, RotateCwIcon, UsersIcon } from 'lucide-react'
 import { Button } from '@cobweb/ui/components/button'
 import { ChoiceCard, ChoiceCards } from '@cobweb/ui/components/choice-cards'
 import { cn } from '@cobweb/ui/lib/utils'
@@ -41,8 +41,8 @@ export function phaseStanding(phase: Phase, publicLimit: number): { text: string
  * with the reason. The panel opens on the cheapest phase the wallet can use (`defaultPhaseId`).
  */
 export function PhasePicker({ live }: { live: Phase[] }) {
-  const { phase, selectPhase, data } = useMint()
-  const symbol = data.collection.chain.nativeSymbol
+  const { phase, selectPhase, page, live: state } = useMint()
+  const symbol = page.chain.nativeSymbol
   return (
     <fieldset>
       <legend className="text-sm font-semibold">Choose your phase</legend>
@@ -56,7 +56,7 @@ export function PhasePicker({ live }: { live: Phase[] }) {
         className="gap-2"
       >
         {live.map((entry) => {
-          const standing = phaseStanding(entry, data.publicMaxMintPerWallet)
+          const standing = phaseStanding(entry, state?.publicMaxMintPerWallet ?? 0)
           const Icon = standing.usable === false ? CircleMinusIcon : CircleCheckIcon
           const kind = entry.group.kind === 'public' ? 'Public sale' : 'Whitelist'
           return (
@@ -98,8 +98,12 @@ export function PhasePicker({ live }: { live: Phase[] }) {
   )
 }
 
-/** The connected wallet's standing in the chosen phase, in one plain sentence and a count. */
+/**
+ * The connected wallet's standing in the chosen phase, in one plain sentence and a count. A wallet the list does
+ * not name can ask again: its quota may have just been written on chain.
+ */
 export function Eligibility({ phase }: { phase: Phase }) {
+  const { checkWallet } = useMint()
   const own = phase.wallet
   if (!own) return null
   const isPublic = phase.group.kind === 'public'
@@ -121,6 +125,12 @@ export function Eligibility({ phase }: { phase: Phase }) {
         <p className="numeric shrink-0 text-[0.8125rem] text-muted-foreground">
           <span className="text-foreground">{own.remaining}</span> of {own.quota} left
         </p>
+      )}
+      {!isPublic && !own.eligible && (
+        <Button variant="ghost" size="sm" className="shrink-0" onClick={checkWallet}>
+          <RotateCwIcon />
+          Check again
+        </Button>
       )}
     </div>
   )
@@ -231,10 +241,11 @@ export function QuantityStepper() {
 
 /** Price and platform fee, itemised, so the total in the wallet is never a surprise. */
 export function PriceBreakdown({ phase, quantity }: { phase: Phase; quantity: number }) {
-  const { data } = useMint()
-  const symbol = data.collection.chain.nativeSymbol
-  const q = quote(data, phase.group.priceWei, quantity)
-  const each = quote(data, phase.group.priceWei, 1)
+  const { page, live } = useMint()
+  if (!live) return null
+  const symbol = page.chain.nativeSymbol
+  const q = quote(live, phase.group.priceWei, quantity)
+  const each = quote(live, phase.group.priceWei, 1)
   const rows = [
     {
       label: `${quantity} × ${formatNative(each.priceWei, symbol)}`,
