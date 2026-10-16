@@ -40,7 +40,10 @@ export type StateBody = {
 /** One registered group of `walletState`: the quota issued and claimed, both 0 for the public group. */
 export type QuotaBody = { id: number; quota: number; claimed: number }
 
-/** The wallet endpoint's body: a wallet's quotas in a collection, and those of up to 10 vaults that delegate to it. */
+/**
+ * The wallet endpoint's body: a wallet's quotas in a collection, and those of up to 10 vaults that delegate
+ * to it.
+ */
 export type WalletBody = {
   chainId: number
   /** The collection, checksummed. */

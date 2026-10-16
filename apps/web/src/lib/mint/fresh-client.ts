@@ -1,5 +1,5 @@
 import { statePath, walletPath, type StateBody, type WalletBody } from '@cobweb/shared'
-import type { Address } from 'viem'
+import { isAddress, type Address } from 'viem'
 import { z } from 'zod'
 import type { Phase } from '@/components/mint/model'
 
@@ -35,8 +35,9 @@ export type StatePoll =
 export type WalletPoll =
   { kind: 'body'; body: WalletBody } | { kind: 'retry'; afterMs: number } | { kind: 'final' }
 
+/** An address in any case: the server lowercases what it is asked, so no checksum is required. */
 const addressShape = z.custom<Address>(
-  (value) => typeof value === 'string' && /^0x[0-9a-fA-F]{40}$/.test(value),
+  (value) => typeof value === 'string' && isAddress(value, { strict: false }),
 )
 const count = z.number().int().min(0)
 const wei = z.string().regex(/^[0-9]+$/)
@@ -84,7 +85,8 @@ const walletBodySchema: z.ZodType<WalletBody> = z.object({
   vaults: z.array(z.object({ vault: addressShape, publicMinted: count, groups: z.array(quotaSchema) })),
 })
 
-const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
+/** Whether two addresses are the same whatever their case: the server's are lowercase, wagmi's checksummed. */
+export const sameAddress = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
 /** `Retry-After` in milliseconds: its seconds, or 1 s without one. */
 const retryAfterMs = (response: Response) => {
   const seconds = Number(response.headers.get('retry-after'))
@@ -155,7 +157,7 @@ export async function pollState(
     } catch {
       return { kind: 'retry', afterMs: 1_000, reason: 'network' }
     }
-    if (!parsed.success || parsed.data.chainId !== chainId || !same(parsed.data.address, address))
+    if (!parsed.success || parsed.data.chainId !== chainId || !sameAddress(parsed.data.address, address))
       return { kind: 'retry', afterMs: 1_000, reason: 'network' }
     const ageSeconds = ageOf(response)
     if (ageSeconds > UNREACHABLE_AGE_S) return { kind: 'retry', afterMs: 1_000, reason: 'stale' }
@@ -197,8 +199,8 @@ export async function pollWallet(
     if (
       !parsed.success ||
       parsed.data.chainId !== chainId ||
-      !same(parsed.data.address, address) ||
-      !same(parsed.data.wallet, wallet) ||
+      !sameAddress(parsed.data.address, address) ||
+      !sameAddress(parsed.data.wallet, wallet) ||
       ageOf(response) > UNREACHABLE_AGE_S
     )
       return { kind: 'retry', afterMs: 1_000 }

@@ -7,7 +7,9 @@ import type { HealthBody } from './health.ts'
  * request names, the refusals as `{ "error": "<code>" }`, and every answer's headers.
  */
 
-/** The refusals' codes live in the shared package with the bodies, so the mint page reads what this writes. */
+/**
+ * The refusals' codes live in the shared package with the bodies, so the mint page reads what this writes.
+ */
 export type { RefusalCode }
 
 export type Route =

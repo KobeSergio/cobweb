@@ -1,5 +1,6 @@
 import { formatNative } from '@/lib/demo/helpers'
 import type { Address, MintGroup } from '@/lib/demo/types'
+import { sameAddress } from '@/lib/mint/fresh-client'
 import type { LocalMint, MintLive, WalletView } from '@/lib/mint/live-data'
 import { quoteOf, type MintParams, type Quote } from '@/lib/mint/mint-call'
 import type { MintResult } from '@/lib/mint/mint-run'
@@ -45,8 +46,6 @@ export type Phase = {
 }
 
 export type { Quote }
-
-const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
 
 function allowance(quota: number, used: number, extra = 0): Allowance {
   const total = used + extra
@@ -95,7 +94,7 @@ export function derivePhases(
   const forWallet = wallet ? local.filter((mint) => mint.block > wallet.block) : []
   const usedBy = (groupId: number, holder: Address) =>
     forWallet
-      .filter((mint) => mint.groupId === groupId && same(mint.holder, holder))
+      .filter((mint) => mint.groupId === groupId && sameAddress(mint.holder, holder))
       .reduce((sum, mint) => sum + mint.count, 0)
   // A phase the creator hid (Phases, Edit details) is left off the page, as in legacy.
   return live.groups

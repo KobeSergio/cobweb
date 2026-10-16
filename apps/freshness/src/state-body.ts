@@ -4,8 +4,8 @@ import type { HotEntry } from './hot-set.ts'
 
 /**
  * The state endpoint's body and its tag (docs/specs/2026-10-16-freshness-server.md, sections 6.7 and 6.10),
- * pure. Liveness is each group's `active`, the contract's own; the times only label countdowns. The body's type
- * lives in the shared package with the paths, so the mint page reads what this writes.
+ * pure. Liveness is each group's `active`, the contract's own; the times only label countdowns. The body's
+ * type lives in the shared package with the paths, so the mint page reads what this writes.
  */
 export type { StateBody }
 

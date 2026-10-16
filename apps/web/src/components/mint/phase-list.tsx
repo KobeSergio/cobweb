@@ -56,7 +56,8 @@ export function PhaseList() {
               <h3 className="mb-2.5 text-[0.8125rem] font-medium text-muted-foreground">{group.title}</h3>
               {group.title === 'Open now' && liveCount > 1 && (
                 <p className="mb-3 text-[0.8125rem] leading-snug text-muted-foreground">
-                  These phases overlap: both are open at the same time, each with its own price and limit.
+                  These phases overlap: {liveCount === 2 ? 'both are' : 'more than one is'} open at the same
+                  time, each with its own price and limit.
                 </p>
               )}
               <ol className="relative space-y-2.5">
