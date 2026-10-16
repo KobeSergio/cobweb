@@ -49,7 +49,18 @@ describe('mintFailureOf (docs/specs/2026-10-16-mint-page-live-data.md, section 7
       ['MintGroupInactive', [0n], 'phase-closed', 'The check found the phase closed, so nothing was sent.'],
       ['ExceedsMintGroupMaxSupply', [3n, 2n], 'sold-out', 'Only 2 are left, so nothing was sent.'],
       ['ExceedsMaxSupply', [3n, 1n], 'sold-out', 'Only 1 is left, so nothing was sent.'],
-      ['ExceedsMaxSupply', [3n, 0n], 'sold-out', 'Every token of this phase is minted. Nothing was sent.'],
+      [
+        'ExceedsMaxSupply',
+        [3n, 0n],
+        'sold-out',
+        'Every token of this collection is minted. Nothing was sent.',
+      ],
+      [
+        'ExceedsMintGroupMaxSupply',
+        [3n, 0n],
+        'sold-out',
+        'Every token of this phase is minted. Nothing was sent.',
+      ],
       ['ExceedsPublicMaxPerWallet', [2n, 1n], 'quota-exceeded', 'This wallet can mint 1 more in this phase'],
       ['ExceedsMintQuota', [3n, 2n], 'quota-exceeded', 'This wallet can mint 2 more in this phase'],
       [
@@ -180,5 +191,46 @@ describe('failureActions', () => {
       { kind: 'close' },
     ])
     expect(failureActions(new MintFailure('price-changed'))).toEqual([{ kind: 'retry' }])
+  })
+})
+
+describe('the copy at none left and for a vault (final fix wave O4)', () => {
+  it('reads a cap with none left as no tokens left, naming the phase or the collection', () => {
+    const phase = mintFailureOf(reverted('ExceedsMintGroupMaxSupply', [1n, 0n]), 'checking')
+    expect(failureCopy(phase, 'Base')).toEqual({
+      title: 'No tokens are left',
+      sentence: 'Every token of this phase is minted. Nothing was sent.',
+    })
+    const collection = mintFailureOf(reverted('ExceedsMaxSupply', [1n, 0n]), 'checking')
+    expect(failureCopy(collection, 'Base').sentence).toBe(
+      'Every token of this collection is minted. Nothing was sent.',
+    )
+    expect(failureCopy(mintFailureOf(reverted('ExceedsMaxSupply', [3n, 2n]), 'checking'), 'Base').title).toBe(
+      'Fewer tokens are left',
+    )
+  })
+
+  it('reads a quota with nothing left as cannot mint more, with Close only', () => {
+    const none = mintFailureOf(reverted('ExceedsMintQuota', [1n, 0n]), 'checking')
+    expect(failureCopy(none, 'Base').sentence).toBe(
+      'This wallet cannot mint more in this phase, often because another of its mints landed first. Nothing was sent.',
+    )
+    expect(failureActions(none)).toEqual([{ kind: 'close' }])
+  })
+
+  it("names the vault where the list or the quota is the vault's", () => {
+    const vault = { vault: true }
+    const listed = mintFailureOf(reverted('NotInWhitelist', [ACCOUNT, 1n]), 'checking')
+    expect(failureCopy(listed, 'Base', vault)).toEqual({
+      title: 'This vault is not on the list',
+      sentence: 'The contract does not list this vault for this phase. Nothing was sent.',
+    })
+    const quota = mintFailureOf(reverted('ExceedsMintQuota', [3n, 1n]), 'checking')
+    expect(failureCopy(quota, 'Base', vault)).toEqual({
+      title: 'That is more than this vault can mint',
+      sentence:
+        'This vault can mint 1 more in this phase, often because another of its mints landed first. Nothing was sent.',
+    })
+    expect(failureCopy(quota, 'Base').title).toBe('That is more than this wallet can mint')
   })
 })

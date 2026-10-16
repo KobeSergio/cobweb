@@ -82,7 +82,7 @@ function heading(flow: FlowState, name: string, chainName: string): { title: str
     }
   }
   if (flow.step === 'error') {
-    const copy = failureCopy(flow.failure, chainName)
+    const copy = failureCopy(flow.failure, chainName, { vault: flow.params.vault !== null })
     return { title: copy.title, description: copy.sentence }
   }
   if (flow.step === 'wallet')

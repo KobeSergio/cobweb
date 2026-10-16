@@ -27,8 +27,17 @@ export type MintFailureKind =
 /** Where the mint was: the check, the wallet, or waiting for the chain. */
 export type MintStep = 'checking' | 'wallet' | 'confirming'
 
-/** What a failure's words need: the tokens left, what the wallet may still mint, the wallet's message, the hash. */
-export type MintFailureDetail = { left?: number; allowed?: number; message?: string; hash?: Hex }
+/**
+ * What a failure's words need: the tokens left and whether the phase's cap or the collection's ran out, what the
+ * wallet may still mint, the wallet's message, the hash.
+ */
+export type MintFailureDetail = {
+  left?: number
+  leftOf?: 'phase' | 'collection'
+  allowed?: number
+  message?: string
+  hash?: Hex
+}
 
 export class MintFailure extends Error {
   readonly kind: MintFailureKind
@@ -81,7 +90,11 @@ export function mintFailureOf(error: unknown, at: MintStep, hash?: Hex): MintFai
   const revert = revertOf(chain)
   const kind = revert ? REVERTS[revert.errorName] : undefined
   if (revert && kind) {
-    if (kind === 'sold-out') return fail(kind, { left: Number(revert.args[1]) })
+    if (kind === 'sold-out')
+      return fail(kind, {
+        left: Number(revert.args[1]),
+        leftOf: revert.errorName === 'ExceedsMaxSupply' ? 'collection' : 'phase',
+      })
     if (kind === 'quota-exceeded') return fail(kind, { allowed: Number(revert.args[1]) })
     return fail(kind)
   }
@@ -89,9 +102,17 @@ export function mintFailureOf(error: unknown, at: MintStep, hash?: Hex): MintFai
   return fail('wallet-failed', { message: shortMessageOf(error) })
 }
 
-/** A failure's title and sentence, with its counts and the collection's chain. */
-export function failureCopy(failure: MintFailure, chainName: string): { title: string; sentence: string } {
-  const { left = 0, allowed = 0, message } = failure.detail
+/**
+ * A failure's title and sentence, with its counts and the collection's chain. A mint with a vault's allowance
+ * names the vault where the list or the quota is the vault's.
+ */
+export function failureCopy(
+  failure: MintFailure,
+  chainName: string,
+  minter: { vault: boolean } = { vault: false },
+): { title: string; sentence: string } {
+  const { left = 0, leftOf = 'phase', allowed = 0, message } = failure.detail
+  const holder = minter.vault ? 'vault' : 'wallet'
   switch (failure.kind) {
     case 'rejected':
       return {
@@ -105,22 +126,24 @@ export function failureCopy(failure: MintFailure, chainName: string): { title: s
           'The check found the phase closed, so nothing was sent. The page shows which phases are open.',
       }
     case 'sold-out':
-      return {
-        title: 'Fewer tokens are left',
-        sentence:
-          left === 0
-            ? 'Every token of this phase is minted. Nothing was sent.'
-            : `Only ${left.toLocaleString('en-US')} ${left === 1 ? 'is' : 'are'} left, so nothing was sent.`,
-      }
+      return left === 0
+        ? {
+            title: 'No tokens are left',
+            sentence: `Every token of this ${leftOf} is minted. Nothing was sent.`,
+          }
+        : {
+            title: 'Fewer tokens are left',
+            sentence: `Only ${left.toLocaleString('en-US')} ${left === 1 ? 'is' : 'are'} left, so nothing was sent.`,
+          }
     case 'quota-exceeded':
       return {
-        title: 'That is more than this wallet can mint',
-        sentence: `This wallet can mint ${allowed.toLocaleString('en-US')} more in this phase, often because another of its mints landed first. Nothing was sent.`,
+        title: `That is more than this ${holder} can mint`,
+        sentence: `This ${holder} ${allowed === 0 ? 'cannot mint more' : `can mint ${allowed.toLocaleString('en-US')} more`} in this phase, often because another of its mints landed first. Nothing was sent.`,
       }
     case 'not-listed':
       return {
-        title: 'This wallet is not on the list',
-        sentence: 'The contract does not list this wallet for this phase. Nothing was sent.',
+        title: `This ${holder} is not on the list`,
+        sentence: `The contract does not list this ${holder} for this phase. Nothing was sent.`,
       }
     case 'not-delegate':
       return {
@@ -197,7 +220,8 @@ export function failureActions(failure: MintFailure): FailureAction[] {
     case 'sold-out':
       return left > 0 ? [{ kind: 'mint-count', count: left }, { kind: 'close' }] : [{ kind: 'close' }]
     case 'quota-exceeded':
-      return allowed > 0 ? [{ kind: 'mint-fewer', count: allowed }, { kind: 'retry' }] : [{ kind: 'retry' }]
+      // With nothing left to mint, a retry would be refused the same way.
+      return allowed > 0 ? [{ kind: 'mint-fewer', count: allowed }, { kind: 'retry' }] : [{ kind: 'close' }]
     case 'insufficient-balance':
       return [{ kind: 'mint-fewer', count: 1 }, { kind: 'retry' }]
     case 'not-delegate':
