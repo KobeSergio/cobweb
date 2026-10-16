@@ -1,3 +1,4 @@
+import { statePath, walletPath } from '@cobweb/shared'
 import type { Address } from 'viem'
 import { describe, expect, it } from 'vitest'
 import type { HealthBody } from './health.ts'
@@ -19,6 +20,16 @@ const W: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
 const lower = (address: Address) => address.toLowerCase()
 
 describe('routeOf (docs/specs/2026-10-16-freshness-server.md, section 6.7)', () => {
+  it('routes the paths the mint page builds with the shared package (docs/specs/2026-10-16-mint-page-live-data.md, section 5)', () => {
+    expect(routeOf('GET', statePath(31337, A))).toEqual<Route>({ kind: 'state', chainId: 31337, address: A })
+    expect(routeOf('GET', walletPath(31337, A, W))).toEqual<Route>({
+      kind: 'wallet',
+      chainId: 31337,
+      address: A,
+      wallet: W,
+    })
+  })
+
   it('routes the state, wallet and health paths, HEAD as GET, and the preflight', () => {
     expect(routeOf('GET', `/v1/state/31337/${lower(A)}`)).toEqual<Route>({
       kind: 'state',

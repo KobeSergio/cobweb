@@ -1,4 +1,11 @@
-import { DELEGATE_REGISTRY, delegateRegistryAbi, readEach, type ChainConfig } from '@cobweb/shared'
+import {
+  DELEGATE_REGISTRY,
+  delegateRegistryAbi,
+  readEach,
+  type ChainConfig,
+  type QuotaBody,
+  type WalletBody,
+} from '@cobweb/shared'
 import { collectionAbi } from '@cobweb/shared/collection-abi'
 import { getAddress, type Address, type ContractFunctionParameters, type PublicClient } from 'viem'
 import { vaultsOf, type Delegation } from './delegations.ts'
@@ -23,21 +30,8 @@ export const REGISTRY_RECHECK_MS = 3_600_000
 /** A listing that answers null is logged at most once per 10 s on a chain. */
 export const NULL_LISTING_LOG_EVERY_MS = 10_000
 
-/** One registered group of `walletState`: the quota issued and claimed, both 0 for the public group. */
-export type QuotaBody = { id: number; quota: number; claimed: number }
-
-export type WalletBody = {
-  chainId: number
-  /** The collection, checksummed. */
-  address: Address
-  /** Checksummed. */
-  wallet: Address
-  /** The block the window read at. */
-  block: number
-  publicMinted: number
-  groups: QuotaBody[]
-  vaults: { vault: Address; publicMinted: number; groups: QuotaBody[] }[]
-}
+/** The answer's types live in the shared package with the paths, so the mint page reads what this writes. */
+export type { QuotaBody, WalletBody }
 
 type Answer = WalletBody | 'busy' | 'unreadable'
 type Pair = { address: Address; wallet: Address; waiters: ((answer: Answer) => void)[] }

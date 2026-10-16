@@ -1,37 +1,13 @@
 import { createHash } from 'node:crypto'
-import type { ChainGroup } from '@cobweb/shared'
-import type { Address } from 'viem'
+import type { StateBody } from '@cobweb/shared'
 import type { HotEntry } from './hot-set.ts'
 
 /**
  * The state endpoint's body and its tag (docs/specs/2026-10-16-freshness-server.md, sections 6.7 and 6.10),
- * pure. Liveness is each group's `active`, the contract's own; the times only label countdowns.
+ * pure. Liveness is each group's `active`, the contract's own; the times only label countdowns. The body's type
+ * lives in the shared package with the paths, so the mint page reads what this writes.
  */
-export type StateBody = {
-  chainId: number
-  /** Checksummed. */
-  address: Address
-  /** The block of the last read; it never goes back. */
-  block: number
-  blockTimestamp: number
-  /** Unix seconds of the last successful read, on the server's clock. */
-  readAt: number
-  degraded: boolean
-  maxSupply: number
-  totalMinted: number
-  publicMaxMintPerWallet: number
-  mintFeeFlatWei: string
-  mintFeeBps: number
-  airdropFeePerTokenWei: string
-  mintOnBehalfActive: boolean
-  /** In the contract's order. */
-  groups: ChainGroup[]
-  owner: Address
-  royalty: { receiver: Address; bps: number }
-  baseUri: string
-  transferValidator: Address
-  transferLevel: 'none' | 'unread' | number
-}
+export type { StateBody }
 
 /** The body of an entry with a read, keys in this order and the groups in the contract's. */
 export function stateBody(chainId: number, entry: HotEntry, degraded: boolean): StateBody {

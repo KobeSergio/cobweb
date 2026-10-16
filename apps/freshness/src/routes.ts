@@ -1,24 +1,14 @@
+import type { RefusalCode, StateBody, WalletBody } from '@cobweb/shared'
 import { getAddress, type Address } from 'viem'
 import type { HealthBody } from './health.ts'
-import type { StateBody } from './state-body.ts'
-import type { WalletBody } from './wallet.ts'
 
 /**
  * The routes and the answers (docs/specs/2026-10-16-freshness-server.md, section 6.7), pure: which path a
  * request names, the refusals as `{ "error": "<code>" }`, and every answer's headers.
  */
 
-export type RefusalCode =
-  | 'bad-request'
-  | 'not-found'
-  | 'chain-not-served'
-  | 'not-a-collection'
-  | 'method-not-allowed'
-  | 'chain-unreadable'
-  | 'not-read-yet'
-  | 'wallet-unreadable'
-  | 'busy'
-  | 'internal'
+/** The refusals' codes live in the shared package with the bodies, so the mint page reads what this writes. */
+export type { RefusalCode }
 
 export type Route =
   | { kind: 'state'; chainId: number; address: Address }
