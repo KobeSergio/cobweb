@@ -138,6 +138,21 @@ describe('mintFailureOf (docs/specs/2026-10-16-mint-page-live-data.md, section 7
     )
   })
 
+  it('reads any failure after the send as unconfirmed, never as "Nothing was sent" (fix round 1, item 3)', () => {
+    const afterSend: unknown[] = [
+      new UserRejectedRequestError(new Error('User rejected the request.')),
+      Object.assign(new Error('denied'), { code: 4001 }),
+      new Error('outer', { cause: new Error('insufficient funds for gas * price + value') }),
+      new ChainMismatchError({ chain: anvil, currentChainId: 1 }),
+      reverted('MintGroupInactive', [0n]),
+    ]
+    for (const error of afterSend) {
+      const failure = mintFailureOf(error, 'confirming', HASH)
+      expect([failure.kind, failure.detail.hash]).toEqual(['unconfirmed', HASH])
+      expect(failureCopy(failure, 'Base').sentence).not.toMatch(/nothing was sent/i)
+    }
+  })
+
   it('names the revert a simulation decoded, for the retry on MintGroupInactive', () => {
     expect(revertNameOf(reverted('MintGroupInactive', [0n]))).toBe('MintGroupInactive')
     expect(revertNameOf(new Error('no revert'))).toBeNull()

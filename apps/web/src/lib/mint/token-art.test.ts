@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { gatewayUrlOf, tokenArtOf } from './token-art'
+import { gatewayUrlOf, METADATA_TIMEOUT_MS, tokenArtOf } from './token-art'
 
 const GATEWAY = 'https://ipfs.io/ipfs'
 const CID = 'bafybeihkoviema7g3gxyt6la7vd5ho32ictqbilu3wnlo3rs7ewhnp7lly'
@@ -65,5 +65,24 @@ describe('tokenArtOf', () => {
       throw new Error('offline')
     }) as unknown as typeof fetch
     expect(await tokenArtOf(`ipfs://${CID}/`, 1, GATEWAY, offline)).toBeNull()
+  })
+
+  it('answers null for metadata that has not arrived before its timeout, the read abandoned (fix round 1, item 5)', async () => {
+    const timeout = new AbortController()
+    const timer = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeout.signal)
+    // A read that never answers until its signal aborts, as a gateway stuck looking for a CID does.
+    const hanging = ((_url: string, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('The operation timed out.')))
+      })) as unknown as typeof fetch
+    try {
+      const art = tokenArtOf(`ipfs://${CID}/`, 1, GATEWAY, hanging)
+      timeout.abort()
+      await expect(art).resolves.toBeNull()
+      expect(timer).toHaveBeenCalledWith(METADATA_TIMEOUT_MS)
+      expect(METADATA_TIMEOUT_MS).toBe(10_000)
+    } finally {
+      timer.mockRestore()
+    }
   })
 })

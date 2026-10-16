@@ -50,8 +50,18 @@ export function liveMintSource(
   },
 ): MintSource {
   const fetchImpl = deps.fetchImpl ?? fetch
+  // Until the first body lands, each state poll asks past the browser's stored copy: on a page load a 304 would
+  // hand back the copy of the last change, and the chain clock would anchor on its block time. Later polls stay
+  // conditional; a 304 then hands back a block the page already has, which moves nothing.
+  let answered = false
   return {
-    pollState: () => pollState(deps.freshnessUrl, page.chain.id, page.contract, fetchImpl),
+    async pollState() {
+      const poll = await pollState(deps.freshnessUrl, page.chain.id, page.contract, fetchImpl, {
+        fresh: !answered,
+      })
+      if (poll.kind === 'body') answered = true
+      return poll
+    },
     pollWallet: (wallet) => pollWallet(deps.freshnessUrl, page.chain.id, page.contract, wallet, fetchImpl),
     chain: deps.chain,
     async tiers(baseUri, ids) {

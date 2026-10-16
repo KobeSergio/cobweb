@@ -8,7 +8,9 @@ import type { Phase } from '@/components/mint/model'
  * the fetch it is given: one poll of the state or wallet endpoint read into an answer, the track that folds the
  * answers in (the shown body, the highest block, the chain clock's anchor, the failures), the clock, the
  * page's own `degraded` and the cadence. The browser's cache sends `If-None-Match` itself (`cache:
- * 'no-cache'`), so a poll never makes a preflight. Liveness is each group's `active`; nothing here computes it.
+ * 'no-cache'`), so a poll never makes a preflight; a fresh state poll (`cache: 'reload'`) asks past the
+ * browser's stored copy, so a page load never anchors the clock on an old block. Liveness is each group's
+ * `active`; nothing here computes it.
  */
 
 /** An answer older than this at the edge counts as a failed poll. */
@@ -103,29 +105,48 @@ async function refusalCodeOf(response: Response): Promise<string | null> {
   }
 }
 
-/** One request, failed after `POLL_TIMEOUT_MS`; null when the network did not answer. */
-async function request(url: string, fetchImpl: typeof fetch): Promise<Response | null> {
+/**
+ * One request, failed after `POLL_TIMEOUT_MS`; null when the network did not answer. With `no-cache` the
+ * browser asks with its stored copy's `If-None-Match` and hands that copy back on a 304; with `reload` it asks
+ * without one and stores the server's answer.
+ */
+async function request(
+  url: string,
+  fetchImpl: typeof fetch,
+  cache: 'no-cache' | 'reload' = 'no-cache',
+): Promise<Response | null> {
   try {
-    return await fetchImpl(url, { cache: 'no-cache', signal: AbortSignal.timeout(POLL_TIMEOUT_MS) })
+    return await fetchImpl(url, { cache, signal: AbortSignal.timeout(POLL_TIMEOUT_MS) })
   } catch {
     return null
   }
 }
 
+/** The server's origin without a trailing slash, as `ipfsGateway()` trims it; empty without one. */
+const originOf = (base: string | undefined) => (base ?? '').replace(/\/+$/, '')
+
 /**
  * One poll of a collection's state: a body that parses for the asked chain and address, with its edge `Age`;
  * an `Age` above 10 s, a 503 (after its `Retry-After`), a network error, another status or a body that does not
  * parse is a retry; a 404 `not-a-collection` is final for the page load, and any other 404, a 400 or a build
- * without the server's origin final as unavailable.
+ * without the server's origin final as unavailable. A `fresh` poll asks past the browser's stored copy
+ * (`cache: 'reload'`): the page asks so until its first body, because on a page load a 304 would hand back the
+ * copy of the last change, whose block time can be long past, and the chain clock would anchor on it.
  */
 export async function pollState(
   base: string | undefined,
   chainId: number,
   address: Address,
   fetchImpl: typeof fetch = fetch,
+  options: { fresh?: boolean } = {},
 ): Promise<StatePoll> {
-  if (!base) return { kind: 'final', reason: 'unavailable' }
-  const response = await request(`${base}${statePath(chainId, address)}`, fetchImpl)
+  const origin = originOf(base)
+  if (!origin) return { kind: 'final', reason: 'unavailable' }
+  const response = await request(
+    `${origin}${statePath(chainId, address)}`,
+    fetchImpl,
+    options.fresh ? 'reload' : 'no-cache',
+  )
   if (!response) return { kind: 'retry', afterMs: 1_000, reason: 'network' }
   if (response.status === 200) {
     let parsed: ReturnType<typeof stateBodySchema.safeParse>
@@ -162,8 +183,9 @@ export async function pollWallet(
   wallet: Address,
   fetchImpl: typeof fetch = fetch,
 ): Promise<WalletPoll> {
-  if (!base) return { kind: 'final' }
-  const response = await request(`${base}${walletPath(chainId, address, wallet)}`, fetchImpl)
+  const origin = originOf(base)
+  if (!origin) return { kind: 'final' }
+  const response = await request(`${origin}${walletPath(chainId, address, wallet)}`, fetchImpl)
   if (!response) return { kind: 'retry', afterMs: 1_000 }
   if (response.status === 200) {
     let parsed: ReturnType<typeof walletBodySchema.safeParse>

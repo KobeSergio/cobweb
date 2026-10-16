@@ -7,6 +7,12 @@ import { tokenUriOf } from '@/lib/manage/settings-view'
  * does not point at.
  */
 
+/**
+ * How long a metadata read may take: a gateway can need seconds to find a CID, more than a poll's 5 s, and a
+ * read stuck past this answers null rather than holding the art.
+ */
+export const METADATA_TIMEOUT_MS = 10_000
+
 /** A token drawn from its images, bottom first (one for metadata art), and whether it plays as a video. */
 export type TokenArt = { layers: string[]; video: boolean }
 
@@ -19,7 +25,7 @@ export function gatewayUrlOf(uri: string, gateway: string): string | null {
   return uri.startsWith('https://') ? uri : null
 }
 
-/** A token's art from its metadata, or null when the metadata or its image cannot be read. */
+/** A token's art from its metadata, or null when the metadata or its image cannot be read in time. */
 export async function tokenArtOf(
   baseUri: string,
   id: number,
@@ -29,7 +35,7 @@ export async function tokenArtOf(
   const metadataUrl = gatewayUrlOf(tokenUriOf(baseUri, id), gateway)
   if (!metadataUrl) return null
   try {
-    const response = await fetchImpl(metadataUrl)
+    const response = await fetchImpl(metadataUrl, { signal: AbortSignal.timeout(METADATA_TIMEOUT_MS) })
     if (!response.ok) return null
     const metadata = (await response.json()) as { image?: unknown }
     if (typeof metadata.image !== 'string') return null

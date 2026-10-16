@@ -82,8 +82,8 @@ export function liveOf(page: MintPageStatic, body: StateBody): MintLive {
 
 /**
  * A wallet answer as allowances: each group's quota and what it used, a whitelist group eligible when its quota
- * is above 0 (the public group always), and each vault's whitelist groups with quota left on chain, a vault with
- * none left off.
+ * is above 0 (the public group always), and each vault's whitelist groups with a quota above 0; the model works
+ * out what is left. A vault with no such group is left off.
  */
 export function walletViewOf(body: WalletBody): WalletView {
   return {

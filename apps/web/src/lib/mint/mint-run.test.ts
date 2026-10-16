@@ -17,6 +17,7 @@ import { runMint, type MintChain } from './mint-run'
 const CONTRACT: Address = '0x0409454C375c8a6aB05383bFB6D9FcDe9ebB8F85'
 const ACCOUNT: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
 const HASH: Hex = `0x${'cd'.repeat(32)}`
+const REPLACEMENT: Hex = `0x${'ef'.repeat(32)}`
 const params: MintParams = {
   contract: CONTRACT,
   chainId: 31337,
@@ -86,7 +87,7 @@ describe('runMint (docs/specs/2026-10-16-mint-page-live-data.md, section 7.5)', 
     expect(step.wallet).toHaveBeenCalledOnce()
     expect(step.sent).toHaveBeenCalledWith(HASH)
     expect([calls[0]?.functionName, calls[0]?.args, calls[0]?.value]).toEqual(['batchMint', [2n, 0n], 2_000n])
-    expect(chain.receipt).toHaveBeenCalledWith(HASH, 31337)
+    expect(chain.receipt).toHaveBeenCalledWith(HASH, 31337, expect.any(Function))
   })
 
   it('waits for the next answer and checks once more when the group reads live but the check finds it inactive', async () => {
@@ -117,5 +118,34 @@ describe('runMint (docs/specs/2026-10-16-mint-page-live-data.md, section 7.5)', 
     const failure = await runMint(chain, params, live(true), steps()).catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(MintFailure)
     expect(failure).toMatchObject({ kind: 'reverted', detail: { hash: HASH } })
+  })
+
+  it("returns the mined transaction's hash when the wallet replaced it, a cancel as a success without ids (fix round 1, item 4)", async () => {
+    /** A chain whose wallet replaced the sent transaction with one that has this receipt. */
+    const replacing = (receipt: TransactionReceipt): MintChain => ({
+      simulate: async () => async () => HASH,
+      receipt: async (_hash, _chainId, replaced) => {
+        replaced?.(REPLACEMENT)
+        return receipt
+      },
+    })
+    const step = steps()
+    await expect(runMint(replacing(minted([4, 5])), params, live(true), step)).resolves.toEqual({
+      hash: REPLACEMENT,
+      tokenIds: [4, 5],
+      block: 77,
+    })
+    expect(step.sent).toHaveBeenCalledWith(HASH)
+    await expect(runMint(replacing(minted([])), params, live(true), steps())).resolves.toEqual({
+      hash: REPLACEMENT,
+      tokenIds: [],
+      block: 77,
+    })
+    await expect(
+      runMint(replacing(minted([], 'reverted')), params, live(true), steps()),
+    ).rejects.toMatchObject({
+      kind: 'reverted',
+      detail: { hash: REPLACEMENT },
+    })
   })
 })

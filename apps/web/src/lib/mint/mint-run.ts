@@ -13,8 +13,12 @@ import { MintFailure, mintFailureOf, revertNameOf } from './mint-failure'
 export type MintChain = {
   /** Simulates the call; resolves with the function that sends the simulated request, unchanged. */
   simulate(call: MintCall): Promise<() => Promise<Hex>>
-  /** The transaction's receipt, waited for up to three minutes. */
-  receipt(hash: Hex, chainId: number): Promise<TransactionReceipt>
+  /**
+   * The mined transaction's receipt, waited for up to three minutes. When the wallet replaced the transaction (a
+   * speed-up, a cancel, or another transaction with its nonce), it is the replacement's, and `replaced` is told
+   * its hash first.
+   */
+  receipt(hash: Hex, chainId: number, replaced?: (hash: Hex) => void): Promise<TransactionReceipt>
 }
 
 export type MintResult = { hash: Hex; tokenIds: number[]; block: number }
@@ -30,8 +34,8 @@ export async function runMint(
   try {
     send = await chain.simulate(call)
   } catch (error) {
-    // The chain opened the group a moment before the page's state shows it, or the state read it live first:
-    // the check runs once more after the next answer.
+    // The page's state reads the group live while the check's RPC, a block behind, still finds it inactive: the
+    // check runs once more after the next answer. A group the state does not read live is not checked again.
     if (revertNameOf(error) !== 'MintGroupInactive' || !live.isLive(params.groupId))
       throw mintFailureOf(error, 'checking')
     await live.nextAnswer()
@@ -49,15 +53,21 @@ export async function runMint(
     throw mintFailureOf(error, 'wallet')
   }
   steps.sent(hash)
+  // The result is the mined transaction's, and a replacement is its own outcome, not a failure: a speed-up mints
+  // as the original would; a cancel, or another transaction with the nonce, lands with no ids for the receiver,
+  // which the page shows as a success without art, and the failure dialog does not open.
+  let mined = hash
   let receipt: TransactionReceipt
   try {
-    receipt = await chain.receipt(hash, params.chainId)
+    receipt = await chain.receipt(hash, params.chainId, (replacement) => {
+      mined = replacement
+    })
   } catch (error) {
-    throw mintFailureOf(error, 'confirming', hash)
+    throw mintFailureOf(error, 'confirming', mined)
   }
-  if (receipt.status === 'reverted') throw new MintFailure('reverted', { hash })
+  if (receipt.status === 'reverted') throw new MintFailure('reverted', { hash: mined })
   return {
-    hash,
+    hash: mined,
     tokenIds: mintedTokenIds(receipt, params.contract, params.account),
     block: Number(receipt.blockNumber),
   }

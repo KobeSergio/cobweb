@@ -1,3 +1,4 @@
+import type { StateBody } from '@cobweb/shared'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Address } from 'viem'
 import { describe, expect, it, vi } from 'vitest'
@@ -67,5 +68,49 @@ describe('liveMintSource tiers (docs/specs/2026-10-16-mint-page-live-data.md, se
       },
     }
     expect(await source(throwing as unknown as SupabaseClient<Database>).tiers(REAL, [1])).toBeNull()
+  })
+})
+
+describe('liveMintSource pollState (fix round 1, item 1)', () => {
+  const body: StateBody = {
+    chainId: 31337,
+    address: COLLECTION,
+    block: 120,
+    blockTimestamp: 1_791_039_600,
+    readAt: 1_791_039_601,
+    degraded: false,
+    maxSupply: 3,
+    totalMinted: 0,
+    publicMaxMintPerWallet: 1,
+    mintFeeFlatWei: '0',
+    mintFeeBps: 0,
+    airdropFeePerTokenWei: '0',
+    mintOnBehalfActive: false,
+    groups: [],
+    owner: COLLECTION,
+    royalty: { receiver: COLLECTION, bps: 0 },
+    baseUri: '',
+    transferValidator: '0x0000000000000000000000000000000000000000',
+    transferLevel: 'none',
+  }
+  const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status })
+
+  it("asks past the browser's stored copy until the first body lands, then conditionally", async () => {
+    const answers = [json({ error: 'not-read-yet' }, 503), json(body), json(body)]
+    const caches: (RequestCache | undefined)[] = []
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      caches.push(init?.cache)
+      return answers.shift() ?? json({}, 502)
+    }) as unknown as typeof fetch
+    const source = liveMintSource(page, {
+      freshnessUrl: 'https://fresh.example',
+      chain,
+      supabase: fakeSupabase(null).supabase,
+      fetchImpl,
+    })
+    expect((await source.pollState()).kind).toBe('retry')
+    expect((await source.pollState()).kind).toBe('body')
+    expect((await source.pollState()).kind).toBe('body')
+    expect(caches).toEqual(['reload', 'reload', 'no-cache'])
   })
 })

@@ -61,9 +61,10 @@ export function revertNameOf(error: unknown): string | null {
 }
 
 /**
- * A failure in words for the step it happened at. A rejection, the balance and a changed network read the same at
- * every step; a decoded revert reads as its kind with its counts; any other failure is the check's, the wallet's
- * or, once sent, the receipt's not arriving.
+ * A failure in words for the step it happened at. Once sent, any failure is the receipt's not arriving, so nothing
+ * after the send reads "Nothing was sent". Before it, a rejection, the balance and a changed network read the same
+ * at the check and in the wallet; a decoded revert reads as its kind with its counts; any other failure is the
+ * check's or the wallet's.
  */
 export function mintFailureOf(error: unknown, at: MintStep, hash?: Hex): MintFailure {
   if (error instanceof MintFailure) return error
@@ -71,12 +72,12 @@ export function mintFailureOf(error: unknown, at: MintStep, hash?: Hex): MintFai
   const named = (name: string) => chain.some((entry) => (entry as { name?: unknown }).name === name)
   const fail = (kind: MintFailureKind, detail: MintFailureDetail = {}) =>
     new MintFailure(kind, hash ? { ...detail, hash } : detail, { cause: error })
+  if (at === 'confirming') return fail('unconfirmed')
   if (named('UserRejectedRequestError') || chain.some((entry) => (entry as { code?: unknown }).code === 4001))
     return fail('rejected')
   const text = chain.map((entry) => (entry instanceof Error ? entry.message : String(entry))).join(' ')
   if (/insufficient funds/i.test(text)) return fail('insufficient-balance')
   if (named('ChainMismatchError')) return fail('wrong-network')
-  if (at === 'confirming') return fail('unconfirmed')
   const revert = revertOf(chain)
   const kind = revert ? REVERTS[revert.errorName] : undefined
   if (revert && kind) {

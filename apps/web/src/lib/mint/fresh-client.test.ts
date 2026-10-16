@@ -85,6 +85,24 @@ describe('pollState (docs/specs/2026-10-16-mint-page-live-data.md, section 7.1)'
     expect(calls[0]?.init?.cache).toBe('no-cache')
   })
 
+  it("asks a fresh poll past the browser's stored copy and the others conditionally (fix round 1, item 1)", async () => {
+    const { fetchImpl, calls } = fakeFetch([json(body), json(body), json(body)])
+    await pollState(BASE, 31337, COLLECTION, fetchImpl, { fresh: true })
+    await pollState(BASE, 31337, COLLECTION, fetchImpl, { fresh: false })
+    await pollState(BASE, 31337, COLLECTION, fetchImpl)
+    expect(calls.map((call) => call.init?.cache)).toEqual(['reload', 'no-cache', 'no-cache'])
+  })
+
+  it('builds both URLs on an origin given with a trailing slash (fix round 1, item 9)', async () => {
+    const { fetchImpl, calls } = fakeFetch([json(body), json(wallet)])
+    await pollState(`${BASE}/`, 31337, COLLECTION, fetchImpl)
+    await pollWallet(`${BASE}//`, 31337, COLLECTION, WALLET, fetchImpl)
+    expect(calls.map((call) => call.url)).toEqual([
+      `${BASE}/v1/state/31337/${COLLECTION.toLowerCase()}`,
+      `${BASE}/v1/wallet/31337/${COLLECTION.toLowerCase()}/${WALLET.toLowerCase()}`,
+    ])
+  })
+
   it('reads a body with its Age: 10 s is a body, 11 s a failed poll', async () => {
     const { fetchImpl } = fakeFetch([
       json(body, 200, { Age: '10' }),
@@ -219,6 +237,18 @@ describe('pollWallet', () => {
     expect(await pollWallet(BASE, 31337, COLLECTION, WALLET, fetchImpl)).toEqual({ kind: 'final' })
     expect(await pollWallet('', 31337, COLLECTION, WALLET, fetchImpl)).toEqual({ kind: 'final' })
   })
+
+  it('reads a wallet answer with its Age: 10 s is a body, 11 s a failed poll (fix round 1, item 10)', async () => {
+    const { fetchImpl } = fakeFetch([json(wallet, 200, { Age: '10' }), json(wallet, 200, { Age: '11' })])
+    expect(await pollWallet(BASE, 31337, COLLECTION, WALLET, fetchImpl)).toEqual({
+      kind: 'body',
+      body: wallet,
+    })
+    expect(await pollWallet(BASE, 31337, COLLECTION, WALLET, fetchImpl)).toEqual({
+      kind: 'retry',
+      afterMs: 1_000,
+    })
+  })
 })
 
 describe('foldState and the chain clock', () => {
@@ -271,6 +301,14 @@ describe('foldState and the chain clock', () => {
     const track = foldState(EMPTY_TRACK, { kind: 'final', reason: 'not-a-collection' }, 0)
     expect(track.final).toBe('not-a-collection')
     expect(cadenceMs(track, [])).toBeNull()
+  })
+
+  it('keeps a final refusal through a later body and a later retry (fix round 1, item 10)', () => {
+    const stopped = foldState(EMPTY_TRACK, { kind: 'final', reason: 'unavailable' }, 0)
+    const afterBody = foldState(stopped, at(121), 1)
+    const afterRetry = foldState(afterBody, { kind: 'retry', afterMs: 1_000, reason: 'network' }, 2)
+    expect([afterBody.final, afterRetry.final]).toEqual(['unavailable', 'unavailable'])
+    expect([cadenceMs(afterBody, []), cadenceMs(afterRetry, [])]).toEqual([null, null])
   })
 })
 
