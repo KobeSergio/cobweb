@@ -25,16 +25,21 @@ export function SampleMintPage({ page }: { page: MintPageStatic }) {
     () => (search === null ? null : sampleSwitchesOf(new URLSearchParams(search))),
     [search],
   )
+  // `?type=` shows the page as another project type, to the source and the page alike.
+  const shown = useMemo(
+    () => (switches?.type ? { ...page, projectType: switches.type } : page),
+    [page, switches],
+  )
   const sample = useMemo<SampleMode | null>(
     () =>
       switches && {
-        source: sampleMintSource(page, switches),
+        source: sampleMintSource(shown, switches),
         wallet: switches.wallet
           ? { address: DEMO_MINTER, wrongChain: switches.wallet === 'wrong-chain' }
           : null,
       },
-    [page, switches],
+    [shown, switches],
   )
   if (!sample) return <MintPageSkeleton />
-  return <MintPage page={page} sample={sample} />
+  return <MintPage page={shown} sample={sample} />
 }
