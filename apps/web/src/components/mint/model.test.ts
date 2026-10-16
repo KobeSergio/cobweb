@@ -13,6 +13,7 @@ import {
   offeredVaults,
   selectedPhaseId,
   sortPhases,
+  totalLabel,
   totalMinted,
   type Phase,
 } from './model'
@@ -134,6 +135,18 @@ describe('deriveAction (docs/specs/2026-10-16-mint-page-live-data.md, section 7.
     expect(action(free, 2).label).toBe('Mint 2 free')
     const withFee = { ...free, fees: { ...free.fees, mintFeeFlatWei: '100000000000000' } }
     expect(action(withFee, 1).label).toBe('Mint 1 for 0.0001 ETH')
+  })
+
+  it("reads the sticky bar's amount from the mint label's total, whatever the action (fix wave 2 W4)", () => {
+    const free = live([group(1, { active: true, priceWei: '0' })])
+    const withFee = { ...free, fees: { ...free.fees, mintFeeFlatWei: '100000000000000' } }
+    const [phase] = derivePhases(withFee, wallet(), NOW)
+    // Not connected, the action is not a mint, and the amount is still the fee's total.
+    expect(actionFor(withFee, { connected: false }).kind).toBe('connect')
+    expect(totalLabel(withFee, phase ?? null, 1, 'ETH')).toBe('0.0001 ETH')
+    expect(totalLabel(withFee, phase ?? null, 2, 'ETH')).toBe('0.0002 ETH')
+    expect(totalLabel(free, derivePhases(free, wallet(), NOW)[0] ?? null, 1, 'ETH')).toBe('Free')
+    expect(totalLabel(live([group(0, { active: true })]), null, 1, 'ETH')).toBeNull()
   })
 
   it('reads "Reading the chain" before the first answer and "Checking this wallet" before the wallet answer', () => {

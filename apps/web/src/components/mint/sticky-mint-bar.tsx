@@ -5,9 +5,9 @@ import { MinusIcon, PlusIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from '@cobweb/ui/components/button'
 import { transition } from '@cobweb/ui/lib/motion'
-import { formatNative } from '@/lib/demo/helpers'
 import { MintButton } from './mint-action'
 import { useMint } from './mint-context'
+import { totalLabel } from './model'
 
 /**
  * On phones and tablets, the mint action follows the thumb: once the panel's own button scrolls
@@ -47,17 +47,8 @@ export function StickyMintBar() {
   const show = !panelVisible && !soldOut && !track.final && !walletFinal
   // The stepper lives in the bar too, so a collector never scrolls back up to change the quantity.
   const canPickQuantity = action.kind === 'mint' && maxQuantity > 1
-  const symbol = page.chain.nativeSymbol
-  const amount =
-    action.kind === 'mint'
-      ? action.quote.totalWei === 0n
-        ? 'Free'
-        : formatNative(action.quote.totalWei, symbol)
-      : phase
-        ? phase.group.priceWei === '0'
-          ? 'Free'
-          : formatNative(phase.group.priceWei, symbol)
-        : null
+  // The total the mint label reads, whatever the action, so a free phase with a flat fee shows its fee.
+  const amount = totalLabel(live, phase, quantity, page.chain.nativeSymbol)
 
   return (
     <AnimatePresence>

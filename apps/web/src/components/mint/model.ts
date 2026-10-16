@@ -192,6 +192,22 @@ export function quote(live: Pick<MintLive, 'fees'>, priceWei: string, quantity: 
 }
 
 /**
+ * A phase's total for a quantity, as the sticky bar shows it beside its button whatever the action: the total
+ * the mint label reads, "Free" only when it is zero, so a free phase with a flat fee shows the fee's total.
+ * Null without a phase.
+ */
+export function totalLabel(
+  live: Pick<MintLive, 'fees'> | null,
+  phase: Phase | null,
+  quantity: number,
+  symbol: string,
+): string | null {
+  if (!live || !phase) return null
+  const { totalWei } = quote(live, phase.group.priceWei, quantity)
+  return totalWei === 0n ? 'Free' : formatNative(totalWei, symbol)
+}
+
+/**
  * The vaults the panel offers on a phase: on a live phase, those with something left. A spent vault stays in
  * `phase.vaults` for its counts, but there is nothing to mint with it.
  */
