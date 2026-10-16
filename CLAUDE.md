@@ -34,7 +34,7 @@ cd contracts && forge test                # contracts
 supabase start && pnpm --filter @cobweb/web dev      # web app against local Supabase
 pnpm --filter @cobweb/web verify:local    # sign-in and access-rule checks; run after any migration change
 pnpm --filter @cobweb/web verify:storage  # presigned PUT, HEAD, signed GET, delete, the 5 GB cap and the canvas, against local storage
-supabase seed buckets                     # creates the local `art` and `render` buckets from config.toml (a restart alone does not)
+supabase seed buckets                     # creates the local `art`, `render` and `mint-page` buckets from config.toml (a restart alone does not)
 pnpm --filter @cobweb/web chain:local     # Anvil with the factory deployed; prints the .env.local lines
 pnpm --filter @cobweb/web verify:chain    # lock, pay and the refusals against Anvil
 pnpm --filter @cobweb/web verify:sweep    # the upload sweep against local storage
@@ -51,6 +51,7 @@ pnpm --filter @cobweb/web verify:settings   # the read, each setting sent and co
 pnpm --filter @cobweb/freshness dev       # the freshness server on port 3100 against the chains in apps/freshness/.env
 pnpm --filter @cobweb/freshness test      # the freshness server: tiers, the hot set, the ETag, degraded, the delegation filter, the wallet windows
 pnpm --filter @cobweb/web verify:freshness   # the freshness server in process against Anvil: liveness at T-1 and at T, the ETag, the refusals, the wallet endpoint and degraded
+pnpm --filter @cobweb/web verify:mint-page   # the public page against local Supabase, local storage, Anvil and the freshness server in process: save, media and publish, liveness at T-1 and T, a mint through the page's path and the state after it, the tiers
 pnpm --filter @cobweb/web render:local <collectionId>   # renders the collection's paid jobs on the laptop against local Supabase, local storage and Anvil; CARs go to a temp folder
 ```
 

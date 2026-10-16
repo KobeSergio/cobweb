@@ -1,10 +1,12 @@
 // The chain half of the local fixture (docs/specs/2026-10-16-freshness-server.md, section 7.3), so the
 // scripts that send to Anvil cannot drift: the local chain settings with a non-local endpoint refused (from
 // chain-settings.ts, re-exported), the Anvil client, the PASS and FAIL lines, the payment and the factory
-// call, a simulated request sent as it is, and a manage call simulated and sent as the manage machine does.
-// deploy-fixture.ts re-exports it with the Supabase half; verify:freshness imports it alone, so it needs
-// Anvil and nothing else. Never prints a key.
+// call, a simulated request sent as it is, a manage call simulated and sent as the manage machine does, and
+// the mint page's wallet: a wagmi config with the mock connector on an impersonated address
+// (docs/specs/2026-10-16-mint-page-live-data.md, section 10). deploy-fixture.ts re-exports it with the
+// Supabase half; verify:freshness imports it alone, so it needs Anvil and nothing else. Never prints a key.
 
+import { connect, createConfig, mock, type Config } from '@wagmi/core'
 import {
   createTestClient,
   createWalletClient,
@@ -208,4 +210,26 @@ export async function chainReady(): Promise<string | null> {
   return approved
     ? null
     : `the factory does not approve ${COLLECTION_CODE_HASH}; run forge build, the copy script and chain:local again`
+}
+
+/**
+ * The mint page's wallet on Anvil: a wagmi config on the local chain with the mock connector connected as the
+ * address, which Anvil impersonates, so the page's `wagmiMintChain` simulates through the transport and sends
+ * the simulated request through the connector, which hands `eth_sendTransaction` to Anvil as a wallet hands it
+ * to its node. No key: Anvil signs for the impersonated address.
+ */
+export async function wagmiWallet(address: Address): Promise<Config> {
+  await chain.impersonateAccount({ address })
+  const local = { ...anvil, rpcUrls: { default: { http: [rpc] } } }
+  const config = createConfig({
+    chains: [local],
+    connectors: [mock({ accounts: [address] })],
+    transports: { [anvil.id]: http(rpc) },
+    multiInjectedProviderDiscovery: false,
+    storage: null,
+  })
+  const [connector] = config.connectors
+  if (!connector) throw new Error('the mock connector is missing')
+  await connect(config, { connector })
+  return config
 }

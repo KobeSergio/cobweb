@@ -138,6 +138,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.3.0
         version: 19.3.0(@types/react@19.3.0)
+      '@wagmi/core':
+        specifier: 2.22.1
+        version: 2.22.1(@tanstack/query-core@5.104.1)(@types/react@19.3.0)(react@19.3.0)(typescript@6.0.3)(use-sync-external-store@1.4.0(react@19.3.0))(viem@2.57.2(bufferutil@4.1.0)(typescript@6.0.3)(utf-8-validate@5.0.10)(zod@4.6.5))
       multiformats:
         specifier: 14.0.5
         version: 14.0.5
