@@ -172,6 +172,16 @@ export function defaultPhaseId(phases: Phase[]): number | null {
   return next?.group.id ?? null
 }
 
+/**
+ * The phase the panel shows: the visitor's choice while that phase reads live, else the default. The picker lists
+ * live phases only and shows only while the shown phase is live, so a choice that sells out or closes gives way,
+ * as a reload would, instead of keeping the panel on a phase nobody can mint from.
+ */
+export function selectedPhaseId(phases: Phase[], chosen: number | null): number | null {
+  const kept = phases.find((phase) => phase.group.id === chosen)
+  return kept?.status === 'live' ? kept.group.id : defaultPhaseId(phases)
+}
+
 /** Price and fee for a quantity: the contract's `quoteBatchMint` at the state's fees. */
 export function quote(live: Pick<MintLive, 'fees'>, priceWei: string, quantity: number): Quote {
   return quoteOf(live.fees, priceWei, quantity)

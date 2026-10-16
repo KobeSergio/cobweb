@@ -9,6 +9,7 @@ import {
   deriveAction,
   derivePhases,
   localMintOf,
+  selectedPhaseId,
   sortPhases,
   totalMinted,
   type Phase,
@@ -278,5 +279,31 @@ describe('the phases', () => {
     expect(defaultPhaseId(derivePhases(live(groups), wallet(), NOW))).toBe(1)
     const upcoming = [group(4, { scheduledStart: NOW + 500 }), group(2, { scheduledStart: NOW + 100 })]
     expect(defaultPhaseId(derivePhases(live(upcoming), null, NOW))).toBe(2)
+  })
+
+  it('move the panel to Public once the chosen Holders sells out or closes while Public is live (final fix wave M1)', () => {
+    const publicLive = group(0, { active: true })
+    const soldOut = derivePhases(
+      live([publicLive, group(1, { name: 'Holders', active: true, minted: 10, maxSupply: 10 })]),
+      wallet(),
+      NOW,
+    )
+    expect(soldOut.find((phase) => phase.group.id === 1)?.status).toBe('soldout')
+    expect(selectedPhaseId(soldOut, 1)).toBe(0)
+    const closed = derivePhases(live([publicLive, group(1, { name: 'Holders', minted: 3 })]), wallet(), NOW)
+    expect(closed.find((phase) => phase.group.id === 1)?.status).toBe('closed')
+    expect(selectedPhaseId(closed, 1)).toBe(0)
+  })
+
+  it('keep a chosen phase while it is live, even when the default would be another (final fix wave M1)', () => {
+    const phases = derivePhases(
+      live([group(0, { active: true, priceWei: '2' }), group(1, { active: true, priceWei: '5' })]),
+      wallet(),
+      NOW,
+    )
+    expect(defaultPhaseId(phases)).toBe(0)
+    expect(selectedPhaseId(phases, 1)).toBe(1)
+    expect(selectedPhaseId(phases, null)).toBe(0)
+    expect(selectedPhaseId(phases, 9)).toBe(0)
   })
 })

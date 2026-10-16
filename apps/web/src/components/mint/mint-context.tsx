@@ -13,11 +13,11 @@ import type { MintPageStatic } from '@/lib/mint/page-doc'
 import { wagmiMintChain } from '@/lib/mint/wagmi-chain'
 import { createClient } from '@/lib/supabase/client'
 import {
-  defaultPhaseId,
   deriveAction,
   derivePhases,
   localMintOf,
   maxQuantity,
+  selectedPhaseId,
   totalMinted,
   type MintAction,
   type Phase,
@@ -121,9 +121,8 @@ export function MintProvider({ page, sample, children }: MintPageProps & { child
   )
 
   const [chosenPhase, setChosenPhase] = useState<number | null>(null)
-  const phaseId = phases.some((entry) => entry.group.id === chosenPhase)
-    ? chosenPhase
-    : defaultPhaseId(phases)
+  // A choice holds while its phase is live; once it sells out or closes, the panel moves on (model.ts).
+  const phaseId = selectedPhaseId(phases, chosenPhase)
   const phase = phases.find((entry) => entry.group.id === phaseId) ?? null
 
   const [chosenVault, setChosenVault] = useState<Address | null>(null)
