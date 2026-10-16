@@ -121,13 +121,17 @@ export function healthAnswer(body: HealthBody): Answer {
   }
 }
 
-/** The CORS preflight a page's own `If-None-Match` makes. */
+/**
+ * The CORS preflight a page's request headers can make: its own `If-None-Match`, and the `Cache-Control` and
+ * `Pragma` a browser may add to a `no-cache` or `reload` fetch, which every poll is. The Fetch spec adds no
+ * preflight for those, but not every engine is walked (WebKit, where most minters are), so they are allowed.
+ */
 export const PREFLIGHT: Answer = {
   status: 204,
   headers: {
     ...CORS,
     'Access-Control-Allow-Methods': 'GET, HEAD',
-    'Access-Control-Allow-Headers': 'If-None-Match',
+    'Access-Control-Allow-Headers': 'If-None-Match, Cache-Control, Pragma',
     'Access-Control-Max-Age': '86400',
   },
   body: null,

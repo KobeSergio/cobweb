@@ -194,11 +194,21 @@ describe('the answers', () => {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Expose-Headers': 'ETag, Retry-After, Age',
         'Access-Control-Allow-Methods': 'GET, HEAD',
-        'Access-Control-Allow-Headers': 'If-None-Match',
+        // The page's If-None-Match, and what a browser may add to its no-cache and reload polls (final fix wave M9).
+        'Access-Control-Allow-Headers': 'If-None-Match, Cache-Control, Pragma',
         'Access-Control-Max-Age': '86400',
       },
       body: null,
     })
+  })
+
+  it("allow in the preflight the headers a browser adds to the page's no-cache and reload polls (final fix wave M9)", () => {
+    expect(PREFLIGHT.headers['Access-Control-Allow-Headers']?.split(', ')).toEqual([
+      'If-None-Match',
+      'Cache-Control',
+      'Pragma',
+    ])
+    expect(PREFLIGHT.headers['Access-Control-Max-Age']).toBe('86400')
   })
 
   it('give the 500 internal no-store and Retry-After 1, with CORS', () => {

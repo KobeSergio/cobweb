@@ -363,7 +363,7 @@ async function main(): Promise<void> {
       return preflight.status === 204 &&
         preflight.headers.get('access-control-allow-origin') === '*' &&
         preflight.headers.get('access-control-allow-methods') === 'GET, HEAD' &&
-        preflight.headers.get('access-control-allow-headers') === 'If-None-Match' &&
+        preflight.headers.get('access-control-allow-headers') === 'If-None-Match, Cache-Control, Pragma' &&
         preflight.headers.get('access-control-max-age') === '86400' &&
         exposed(preflight)
         ? null
