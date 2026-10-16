@@ -1,4 +1,4 @@
-import type { Address } from 'viem'
+import type { Address, Hex } from 'viem'
 import type { ChainGroup } from './collection-state.ts'
 
 /**
@@ -35,6 +35,30 @@ export type StateBody = {
   baseUri: string
   transferValidator: Address
   transferLevel: 'none' | 'unread' | number
+}
+
+/**
+ * One mint the indexer recorded, as the state body carries it (docs/specs/2026-10-16-indexer-overview.md,
+ * section 5).
+ */
+export type MintBody = {
+  txHash: Hex
+  /** Who received the tokens (a delegated mint's hot wallet, a mint on behalf's receiver), checksummed. */
+  recipient: Address
+  groupId: number
+  amount: number
+  /** The first of its consecutive token ids. */
+  firstTokenId: number
+  /** The block's time (Unix seconds). */
+  blockTimestamp: number
+}
+
+/** A collection's holders and latest mints, from the indexer at the chain's confirmation depth. */
+export type StateActivity = {
+  /** Distinct owners of at least one token, the dead address left out. */
+  holders: number
+  /** At most 10, newest first. */
+  recentMints: MintBody[]
 }
 
 /** One registered group of `walletState`: the quota issued and claimed, both 0 for the public group. */
