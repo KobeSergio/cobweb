@@ -242,7 +242,8 @@ export const LINK_MAX = PAGE_LINK_MAX
 
 /**
  * What to change in a link its pattern refused, for the field's message. The pattern decides; this names the
- * likeliest fix: the scheme, a space, the host (the first of `hosts`), or the path after it.
+ * likeliest fix: the scheme, a space, the host (the first of `hosts`), a port or the host's case, or the path
+ * after it.
  */
 function linkHint(text: string, hosts: readonly string[]): string {
   if (!text.startsWith('https://'))
@@ -250,12 +251,15 @@ function linkHint(text: string, hosts: readonly string[]): string {
       ? 'Use a link that starts with https://.'
       : 'Enter a full link, starting with https://.'
   if (/\s/.test(text)) return 'Remove the spaces from the link.'
-  const host = text
-    .slice('https://'.length)
-    .split(/[/?#]/, 1)[0]!
-    .replace(/^www\./, '')
+  const authority = text.slice('https://'.length).split(/[/?#]/, 1)[0]!
+  const host = authority.replace(/^www\./, '')
   if (hosts.length === 0 || !host) return 'Enter a full link, starting with https://.'
-  return hosts.includes(host) ? `Use a link on ${hosts[0]} with its path.` : `Use a link on ${hosts[0]}.`
+  if (hosts.includes(host)) return `Use a link on ${hosts[0]} with its path.`
+  // The patterns take the host in lowercase and without a port, so a host that is one of `hosts` but for
+  // those is told that fix, one at a time: the port first, then the case.
+  const portless = authority.replace(/:\d*$/, '')
+  if (!hosts.includes(portless.toLowerCase().replace(/^www\./, ''))) return `Use a link on ${hosts[0]}.`
+  return portless === authority ? 'Write the link in lowercase.' : 'Remove the port from the link.'
 }
 
 /** Why a page link is not usable, or null. Empty is fine: the icon is left off the page. The save checks the same. */

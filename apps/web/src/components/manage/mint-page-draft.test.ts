@@ -175,6 +175,14 @@ describe('socialError', () => {
     expect(socialError('https://example.com/owls', 'discord')).toBe('Use a link on discord.gg.')
     expect(socialError('https://example.com/owls', 'telegram')).toBe('Use a link on t.me.')
     expect(socialError('https://x.com/', 'x')).toBe('Use a link on x.com with its path.')
+    // The host as the patterns take it, lowercase and without a port (fix wave 2 T3), one fix at a time.
+    expect(socialError('https://X.com/owls', 'x')).toBe('Write the link in lowercase.')
+    expect(socialError('https://x.com:443/owls', 'x')).toBe('Remove the port from the link.')
+    expect(socialError('https://X.com:443/owls', 'x')).toBe('Remove the port from the link.')
+    // A host that is not the field's in any case or with any port keeps its sentence.
+    expect(socialError('https://Example.com:443/owls', 'x')).toBe('Use a link on x.com.')
+    expect(socialError('https://Example.com:443/owls', 'discord')).toBe('Use a link on discord.gg.')
+    expect(socialError('https://Example.com:443/owls', 'telegram')).toBe('Use a link on t.me.')
     expect(socialError('https://x.com/a b', 'x')).toBe('Remove the spaces from the link.')
     expect(socialError(`https://example.com/${'a'.repeat(190)}`, 'website')).toBe(
       'Use a link of at most 200 characters.',
