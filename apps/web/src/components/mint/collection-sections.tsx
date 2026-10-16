@@ -119,9 +119,10 @@ const TRANSFERS: Record<NonNullable<MintLive['transfers']>, string> = {
 
 /** The contract and its facts: supply, royalties, transfers and the art, from the chain's state. */
 export function Details() {
-  const { page, live } = useMint()
+  const { page, live, track } = useMint()
   const chain = page.chain
-  const pending = <Skeleton className="h-4 w-20" />
+  // The chain's rows pulse until the first answer; after a refusal that ends the polls they are left off.
+  const pending = track.final ? null : <Skeleton className="h-4 w-20" />
   const rows: { label: string; value: React.ReactNode }[] = [
     { label: 'Chain', value: <ChainName chain={chain} /> },
     { label: 'Token standard', value: 'ERC-721C' },
@@ -142,7 +143,7 @@ export function Details() {
     },
     ...(live?.transfers ? [{ label: 'Transfers', value: TRANSFERS[live.transfers] }] : []),
     { label: 'Art', value: live ? (live.revealed ? 'Revealed' : 'Not revealed yet') : pending },
-  ]
+  ].filter((row) => row.value !== null)
   return (
     <section aria-labelledby="details-title">
       <h2 id="details-title" className="text-title">

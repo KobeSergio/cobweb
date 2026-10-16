@@ -52,7 +52,7 @@ export function TokenImage({
 
 /**
  * A token's art from its metadata: the image (or the video) once read, the empty well while it is read, and the
- * artwork pattern with the token's number when it cannot be read.
+ * artwork pattern when it cannot be read, with the token's number when it is a token's.
  */
 export function TokenArtFrame({
   art,
@@ -62,13 +62,22 @@ export function TokenArtFrame({
   eager,
 }: {
   art: TokenArt | null | undefined
-  id: number
+  /** The token's id; null for art that is no token's, such as the collection's avatar. */
+  id: number | null
   alt: string
   className?: string
   eager?: boolean
 }) {
   if (art === null)
-    return <Artwork src={null} alt={alt} seed={`token-${id}`} label={`#${id}`} className={className} />
+    return (
+      <Artwork
+        src={null}
+        alt={alt}
+        seed={id === null ? 'artwork' : `token-${id}`}
+        label={id === null ? undefined : `#${id}`}
+        className={className}
+      />
+    )
   return (
     <TokenImage layers={art?.layers ?? []} video={art?.video} alt={alt} className={className} eager={eager} />
   )

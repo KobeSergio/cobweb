@@ -18,6 +18,9 @@ export function StickyMintBar() {
   const reduce = useReducedMotion()
   const [panelVisible, setPanelVisible] = useState(true)
 
+  // The panel draws its action anew when it changes shape (reading the chain, then loaded; refused has none), so
+  // the bar observes the element on screen, once per shape.
+  const shape = track.final ? 'refused' : live ? 'loaded' : 'reading'
   useEffect(() => {
     const target = document.querySelector('[data-mint-action]')
     if (!target) return
@@ -26,7 +29,7 @@ export function StickyMintBar() {
     })
     observer.observe(target)
     return () => observer.disconnect()
-  }, [])
+  }, [shape])
 
   const show = !panelVisible && !soldOut && !track.final
   // The stepper lives in the bar too, so a collector never scrolls back up to change the quantity.

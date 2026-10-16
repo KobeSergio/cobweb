@@ -1,12 +1,23 @@
-import type { Address } from 'viem'
+import type { Address, Hex } from 'viem'
 import { describe, expect, it } from 'vitest'
 import type { MintGroup } from '@/lib/demo/types'
 import type { LocalMint, MintLive, WalletView } from '@/lib/mint/live-data'
+import type { MintParams } from '@/lib/mint/mint-call'
 import type { MintPageStatic } from '@/lib/mint/page-doc'
-import { defaultPhaseId, deriveAction, derivePhases, sortPhases, totalMinted, type Phase } from './model'
+import {
+  defaultPhaseId,
+  deriveAction,
+  derivePhases,
+  localMintOf,
+  sortPhases,
+  totalMinted,
+  type Phase,
+} from './model'
 
 const WALLET: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
 const VAULT: Address = '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
+const CONTRACT: Address = '0x0409454C375c8a6aB05383bFB6D9FcDe9ebB8F85'
+const HASH: Hex = `0x${'cd'.repeat(32)}`
 const NOW = 1_791_039_600
 const page: Pick<MintPageStatic, 'chain'> = {
   chain: { id: 31337, name: 'Anvil', nativeSymbol: 'ETH', explorerUrl: '', transferLock: false },
@@ -211,6 +222,28 @@ describe('local mints', () => {
     ])
     expect(phase?.vaults[0]).toMatchObject({ vault: VAULT, used: 2, remaining: 1 })
     expect(phase?.wallet).toMatchObject({ used: 0, remaining: 2 })
+  })
+
+  it('count a landed mint by its ids against the allowance it used, and a cancel not at all (Task 5 fix round 1)', () => {
+    const params: MintParams = {
+      contract: CONTRACT,
+      chainId: 31337,
+      groupId: 1,
+      amount: 3,
+      vault: VAULT,
+      valueWei: 0n,
+      account: WALLET,
+    }
+    expect(localMintOf(params, { hash: HASH, tokenIds: [7, 8], block: 105 })).toEqual({
+      groupId: 1,
+      holder: VAULT,
+      count: 2,
+      block: 105,
+    })
+    const own = localMintOf({ ...params, vault: null }, { hash: HASH, tokenIds: [7], block: 105 })
+    expect(own?.holder).toBe(WALLET)
+    // A replacement that minted nothing, such as a cancel, lands with no ids.
+    expect(localMintOf(params, { hash: HASH, tokenIds: [], block: 105 })).toBeNull()
   })
 })
 

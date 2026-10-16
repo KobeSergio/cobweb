@@ -6,7 +6,8 @@ import type { TokenArt } from '@/lib/mint/token-art'
 
 /**
  * Token art for some ids at a base URI (docs/specs/2026-10-16-mint-page-live-data.md, section 7.2), each kept for
- * the page's life: IPFS content does not change. Undefined while a token is read; null when it cannot be.
+ * the page's life: IPFS content does not change. Undefined while a token is read or the state has not answered;
+ * null when it cannot be read, as with an empty base URI.
  */
 export function useTokenArt(
   source: MintSource,
@@ -23,5 +24,6 @@ export function useTokenArt(
       retry: false,
     })),
   })
-  return new Map(ids.map((id, index) => [id, results[index]?.data]))
+  // An empty base URI points at no metadata: each token shows the pattern, not a well that never fills.
+  return new Map(ids.map((id, index) => [id, baseUri === '' ? null : results[index]?.data]))
 }

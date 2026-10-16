@@ -11,8 +11,11 @@ import { useMint } from './mint-context'
 import { TokenArtFrame } from './token-image'
 import { useTokenArt } from './use-token-art'
 
-/** One card of the stage: a token by its id, or an uploaded slide. */
-type Card = { key: string; label: string; tokenId: number | null; art: TokenArt | null | undefined }
+/**
+ * One card of the stage: a token by its id, an uploaded slide, or the avatar until the state answers. Its label
+ * follows the collection's name: a token's number, and none for the avatar or a slide.
+ */
+type Card = { key: string; label: string | null; tokenId: number | null; art: TokenArt | null | undefined }
 
 /** Where each card sits: the front one, two leaning behind it, the rest tucked away. */
 const SLOTS = [
@@ -81,7 +84,7 @@ function useCards(): Card[] {
     return [
       {
         key: 'avatar',
-        label: page.name,
+        label: null,
         tokenId: null,
         art: page.avatarUrl ? { layers: [page.avatarUrl], video: false } : null,
       },
@@ -92,7 +95,7 @@ function useCards(): Card[] {
         ? tokenCard(slide.tokenId)
         : {
             key: slide.id,
-            label: slide.fileName,
+            label: null,
             tokenId: null,
             art: { layers: [slide.url], video: slide.mediaType === 'video' },
           },
@@ -116,6 +119,13 @@ export function ArtStage() {
   const [ambient, setAmbient] = useState<Record<string, string>>({})
   const count = featured.length
   const current = featured[front]
+  /** A card's name: the collection's with the token's number, else with the card's place when there are several. */
+  const nameOf = (card: Card, index: number) =>
+    card.label
+      ? `${collectionName} ${card.label}`
+      : count > 1
+        ? `${collectionName}, ${index + 1} of ${count}`
+        : collectionName
   const autoplay = !reduce && !paused && !hovering && count > 1
 
   useEffect(() => {
@@ -192,8 +202,8 @@ export function ArtStage() {
             >
               <TokenArtFrame
                 art={token.art}
-                id={token.tokenId ?? 0}
-                alt={`${collectionName} ${token.label}`}
+                id={token.tokenId}
+                alt={nameOf(token, index)}
                 eager={index < 3}
                 className="size-full"
               />
@@ -211,8 +221,13 @@ export function ArtStage() {
 
       <div className="mx-auto mt-6 flex w-[84%] max-w-[34rem] items-center justify-between gap-4 sm:w-[76%] lg:w-[82%]">
         <p className="min-w-0 truncate text-sm text-muted-foreground" aria-live="polite">
-          <span className="font-medium text-foreground">{collectionName}</span>{' '}
-          <span className="numeric">{current.label}</span>
+          <span className="font-medium text-foreground">{collectionName}</span>
+          {current.label && (
+            <>
+              {' '}
+              <span className="numeric">{current.label}</span>
+            </>
+          )}
         </p>
         <div className={cn('flex shrink-0 items-center gap-1', count < 2 && 'invisible')}>
           <Button variant="ghost" size="icon-sm" aria-label="Previous token" onClick={() => move(-1)}>
@@ -244,7 +259,7 @@ export function ArtStage() {
           <button
             key={token.key}
             type="button"
-            aria-label={`Show ${collectionName} ${token.label}`}
+            aria-label={`Show ${nameOf(token, index)}`}
             aria-current={index === front}
             onClick={() => setFront(index)}
             className={cn(
@@ -252,7 +267,7 @@ export function ArtStage() {
               index === front ? 'border-foreground/60' : 'border-border opacity-55 hover:opacity-90',
             )}
           >
-            <TokenArtFrame art={token.art} id={token.tokenId ?? 0} alt="" className="size-full" />
+            <TokenArtFrame art={token.art} id={token.tokenId} alt="" className="size-full" />
           </button>
         ))}
       </div>

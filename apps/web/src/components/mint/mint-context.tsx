@@ -4,7 +4,6 @@ import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { createContext, use, useCallback, useMemo, useRef, useState } from 'react'
 import type { Address } from 'viem'
 import { useAccount, useConfig, useSwitchChain } from 'wagmi'
-import { DEMO_MINTER } from '@/lib/demo'
 import type { FreshTrack } from '@/lib/mint/fresh-client'
 import type { LocalMint, MintLive, WalletView } from '@/lib/mint/live-data'
 import { liveMintSource, type MintSource } from '@/lib/mint/live-source'
@@ -17,12 +16,12 @@ import {
   defaultPhaseId,
   deriveAction,
   derivePhases,
+  localMintOf,
   maxQuantity,
   totalMinted,
   type MintAction,
   type Phase,
 } from './model'
-import { sampleMintSource } from './sample-source'
 import type { MintPageProps } from './types'
 import { useLiveState } from './use-live-state'
 import { useMintFlow, type FlowState } from './use-mint-flow'
@@ -80,15 +79,15 @@ const minutesSince = (fromMs: number, nowMs: number) => Math.max(0, Math.floor((
 
 export function MintProvider({ page, sample, children }: MintPageProps & { children: React.ReactNode }) {
   const config = useConfig()
+  // Sample mode brings its own source (components/mint/sample-page.tsx); the live one reads the freshness server.
   const source = useMemo<MintSource>(
     () =>
-      sample
-        ? sampleMintSource(page, sample)
-        : liveMintSource(page, {
-            freshnessUrl: process.env.NEXT_PUBLIC_FRESHNESS_URL,
-            chain: wagmiMintChain(config),
-            supabase: createClient(),
-          }),
+      sample?.source ??
+      liveMintSource(page, {
+        freshnessUrl: process.env.NEXT_PUBLIC_FRESHNESS_URL,
+        chain: wagmiMintChain(config),
+        supabase: createClient(),
+      }),
     [page, sample, config],
   )
   const state = useLiveState(source, page)
@@ -97,9 +96,9 @@ export function MintProvider({ page, sample, children }: MintPageProps & { child
   const { switchChain, isPending: switchingReal } = useSwitchChain()
   const { openConnectModal } = useConnectModal()
 
-  // The wallet: a forced sample wallet, or the real connected one.
-  const forced = sample?.wallet ? DEMO_MINTER : null
-  const [forcedWrongChain, setForcedWrongChain] = useState(sample?.wallet === 'wrong-chain')
+  // The wallet: the sample's stand-in, or the real connected one.
+  const forced = sample?.wallet?.address ?? null
+  const [forcedWrongChain, setForcedWrongChain] = useState(sample?.wallet?.wrongChain ?? false)
   const [forcedSwitching, setForcedSwitching] = useState(false)
   const real = account.isConnected && account.address ? account.address : null
   const walletAddress = forced ?? real
@@ -161,15 +160,9 @@ export function MintProvider({ page, sample, children }: MintPageProps & { child
   const refreshWallet = walletState.refresh
   const onMinted = useCallback(
     (params: MintParams, result: MintResult) => {
-      setLocal((current) => [
-        ...current,
-        {
-          groupId: params.groupId,
-          holder: params.vault ?? params.account,
-          count: result.tokenIds.length || params.amount,
-          block: result.block,
-        },
-      ])
+      // Counted by its ids until the answers read it; a cancel, with none, counts nothing.
+      const landed = localMintOf(params, result)
+      if (landed) setLocal((current) => [...current, landed])
       setRawQuantity(1)
       refreshWallet()
       refresh()

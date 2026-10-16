@@ -1,7 +1,8 @@
 import { formatNative } from '@/lib/demo/helpers'
 import type { Address, MintGroup } from '@/lib/demo/types'
 import type { LocalMint, MintLive, WalletView } from '@/lib/mint/live-data'
-import { quoteOf, type Quote } from '@/lib/mint/mint-call'
+import { quoteOf, type MintParams, type Quote } from '@/lib/mint/mint-call'
+import type { MintResult } from '@/lib/mint/mint-run'
 import type { MintPageStatic } from '@/lib/mint/page-doc'
 import { formatCountdown } from './format'
 
@@ -57,6 +58,21 @@ const unreadByState = (live: MintLive, local: readonly LocalMint[]) =>
 export function totalMinted(live: MintLive, local: readonly LocalMint[] = []): number {
   const extra = unreadByState(live, local).reduce((sum, mint) => sum + mint.count, 0)
   return Math.min(live.supply.max, live.supply.minted + extra)
+}
+
+/**
+ * What a landed mint adds to the page's counts until the answers read it: its ids, against the allowance it used
+ * (the vault's, else the wallet's). A mint always has its ids in the receipt; none is a replacement that minted
+ * nothing, such as a cancel, and counts nothing.
+ */
+export function localMintOf(params: MintParams, result: MintResult): LocalMint | null {
+  if (result.tokenIds.length === 0) return null
+  return {
+    groupId: params.groupId,
+    holder: params.vault ?? params.account,
+    count: result.tokenIds.length,
+    block: result.block,
+  }
 }
 
 /**

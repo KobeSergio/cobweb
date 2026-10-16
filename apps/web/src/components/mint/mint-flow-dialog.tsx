@@ -69,6 +69,13 @@ export function MintFlowDialog() {
 function heading(flow: FlowState, name: string, chainName: string): { title: string; description: string } {
   if (flow.step === 'success') {
     const count = flow.tokenIds.length
+    // No ids: the wallet replaced the mint with a transaction that minted nothing to it, such as a cancel.
+    if (count === 0)
+      return {
+        title: 'No tokens were minted',
+        description:
+          'Your wallet replaced the mint with another transaction, which minted nothing to this wallet.',
+      }
     return {
       title: `Welcome to ${name}`,
       description: `${count === 1 ? 'Your new token is' : `Your ${count} new tokens are`} in your wallet.`,

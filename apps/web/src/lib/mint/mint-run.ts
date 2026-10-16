@@ -45,6 +45,8 @@ export async function runMint(
       throw mintFailureOf(again, 'checking')
     }
   }
+  // Outside any try: a wallet step that throws (a flow closed during the check) ends the run before the wallet
+  // opens, and nothing is sent.
   steps.wallet()
   let hash: Hex
   try {

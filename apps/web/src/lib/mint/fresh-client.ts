@@ -264,9 +264,14 @@ export function chainNowOf(track: FreshTrack, nowMs: number): number | null {
   return Math.floor(track.anchor.seconds + (nowMs - track.anchor.at) / 1_000)
 }
 
-/** The page's own degraded flag: a body is shown and no answer was accepted for 10 s. */
-export function ownDegraded(track: FreshTrack, nowMs: number): boolean {
-  return track.body !== null && track.lastGoodAt !== null && nowMs - track.lastGoodAt >= OWN_DEGRADED_MS
+/**
+ * The page's own degraded flag: a body is shown and no answer was accepted for 10 s while the tab was visible.
+ * Nothing polls while it is hidden, so the 10 s count from the later of the last accepted answer and
+ * `visibleSince`, when the tab last became visible (`performance.now()`).
+ */
+export function ownDegraded(track: FreshTrack, nowMs: number, visibleSince: number | null = null): boolean {
+  if (track.body === null || track.lastGoodAt === null) return false
+  return nowMs - Math.max(track.lastGoodAt, visibleSince ?? track.lastGoodAt) >= OWN_DEGRADED_MS
 }
 
 /**

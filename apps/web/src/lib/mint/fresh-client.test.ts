@@ -336,4 +336,12 @@ describe('cadenceMs and ownDegraded', () => {
     expect(ownDegraded(shown, 10_000)).toBe(true)
     expect(ownDegraded(EMPTY_TRACK, 60_000)).toBe(false)
   })
+
+  it("counts the 10 s from the tab's return when it was hidden past the last answer (Task 5 fix round 1)", () => {
+    expect(ownDegraded(shown, 40_000, 35_000)).toBe(false)
+    expect(ownDegraded(shown, 45_000, 35_000)).toBe(true)
+    // A return before the last answer changes nothing.
+    expect(ownDegraded(shown, 10_000, -5_000)).toBe(true)
+    expect(ownDegraded(EMPTY_TRACK, 60_000, 0)).toBe(false)
+  })
 })

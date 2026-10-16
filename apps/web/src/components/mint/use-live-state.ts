@@ -30,6 +30,8 @@ export function useLiveState(source: MintSource, page: MintPageStatic) {
   const waiters = useRef<(() => void)[]>([])
   const [startedAt] = useState(() => performance.now())
   const [now, setNow] = useState<number | null>(null)
+  /** When the tab last became visible (`performance.now()`); null until it is hidden and shown again. */
+  const [visibleSince, setVisibleSince] = useState<number | null>(null)
 
   const query = useQuery({
     queryKey: ['mint-state', page.chain.id, page.contract.toLowerCase()],
@@ -66,8 +68,17 @@ export function useLiveState(source: MintSource, page: MintPageStatic) {
     return () => window.clearInterval(id)
   }, [])
 
-  /** Polls at once, after a mint. */
-  const refresh = useCallback(() => void refetch.current(), [])
+  // Nothing polls while the tab is hidden, so the page's own degraded flag counts from its return at the earliest.
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') setVisibleSince(performance.now())
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [])
+
+  /** Polls at once, after a mint; a poll already in flight is the one waited for, not cancelled and sent again. */
+  const refresh = useCallback(() => void refetch.current({ cancelRefetch: false }), [])
 
   /** Resolves on the next accepted answer, or after 2 s; asks for it at once. */
   const nextAnswer = useCallback(
@@ -80,7 +91,7 @@ export function useLiveState(source: MintSource, page: MintPageStatic) {
         }
         const timer = window.setTimeout(done, NEXT_ANSWER_MAX_MS)
         waiters.current.push(done)
-        void refetch.current()
+        void refetch.current({ cancelRefetch: false })
       }),
     [],
   )
@@ -95,8 +106,8 @@ export function useLiveState(source: MintSource, page: MintPageStatic) {
     live,
     /** The chain's time by the anchor, ticking each second; labels only. */
     chainNow: at === null ? null : chainNowOf(track, at),
-    /** No answer was accepted for 10 s while a body is shown. */
-    ownDegraded: at !== null && ownDegraded(track, at),
+    /** No answer was accepted for 10 s while a body is shown and the tab was visible. */
+    ownDegraded: at !== null && ownDegraded(track, at, visibleSince),
     /** Since when the page has had no accepted answer (`performance.now()`), for the banner's minutes. */
     lastGoodAt: track.lastGoodAt,
     /** No body yet after 10 s. */

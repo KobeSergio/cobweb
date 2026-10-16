@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ExternalLinkIcon, Share2Icon } from 'lucide-react'
 import { motion, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
+import type { Hex } from 'viem'
 import { Button } from '@cobweb/ui/components/button'
 import { EASE_OUT } from '@cobweb/ui/lib/motion'
 import { cn } from '@cobweb/ui/lib/utils'
@@ -51,6 +52,7 @@ export function MintSuccess() {
     retry: false,
   })
   if (flow.step !== 'success') return null
+  if (ids.length === 0) return <NoTokens hash={flow.hash} />
   const supply = live?.supply.max ?? 0
   const chain = page.chain
   const name = page.name
@@ -164,6 +166,30 @@ export function MintSuccess() {
           </Button>
         </div>
       </motion.div>
+    </div>
+  )
+}
+
+/**
+ * A mint the wallet replaced with a transaction that minted nothing to it, such as a cancel: the transaction that
+ * landed, and Done. The failure dialog does not open for it (lib/mint/mint-run.ts).
+ */
+function NoTokens({ hash }: { hash: Hex }) {
+  const { page, closeFlow } = useMint()
+  return (
+    <div className="mt-6 grid gap-4">
+      {page.chain.explorerUrl && (
+        <a
+          href={explorerTxUrl(page.chain, hash)}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center justify-center gap-1.5 text-[0.8125rem] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+        >
+          View transaction
+          <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
+        </a>
+      )}
+      <Button onClick={closeFlow}>Done</Button>
     </div>
   )
 }

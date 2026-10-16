@@ -14,10 +14,18 @@ export type FlowState =
   | { step: 'success'; params: MintParams; hash: Hex; tokenIds: number[] }
   | { step: 'error'; params: MintParams; failedAt: FlowStep; failure: MintFailure; hash?: Hex }
 
+/** Thrown from the wallet step of a flow closed during the check, so its run ends before the wallet opens. */
+class MintCancelled extends Error {
+  constructor() {
+    super('The mint was closed before the wallet opened.')
+    this.name = 'MintCancelled'
+  }
+}
+
 /**
  * The mint, step by step, on `runMint` (docs/specs/2026-10-16-mint-page-live-data.md, section 7.5): the check,
- * the wallet with the simulated request, then the chain. A closed flow stops following its mint; a transaction
- * already sent keeps going on chain.
+ * the wallet with the simulated request, then the chain. A flow closed during the check ends before the wallet
+ * opens, so nothing is sent; a transaction already sent keeps going on chain, and a closed flow stops showing it.
  */
 export function useMintFlow(options: {
   chain: MintChain
@@ -38,8 +46,10 @@ export function useMintFlow(options: {
       try {
         const result = await runMint(chain, params, live, {
           wallet: () => {
+            // Closed during the check: the run ends here, before the wallet opens, and nothing is sent.
+            if (!alive()) throw new MintCancelled()
             at = 'wallet'
-            if (alive()) setState({ step: 'wallet', params })
+            setState({ step: 'wallet', params })
           },
           sent: (sent) => {
             at = 'confirming'
@@ -50,15 +60,19 @@ export function useMintFlow(options: {
         onMinted(params, result)
         if (alive()) setState({ step: 'success', params, hash: result.hash, tokenIds: result.tokenIds })
       } catch (error) {
+        // A closed flow shows nothing, its cancel included.
+        if (error instanceof MintCancelled || !alive()) return
         const failure = error instanceof MintFailure ? error : mintFailureOf(error, at, hash)
-        if (alive())
-          setState({ step: 'error', params, failedAt: at, failure, hash: failure.detail.hash ?? hash })
+        setState({ step: 'error', params, failedAt: at, failure, hash: failure.detail.hash ?? hash })
       }
     },
     [chain, live, onMinted],
   )
 
-  /** Closes the flow. A transaction already sent keeps going on chain; only the view stops. */
+  /**
+   * Closes the flow. A run still in its check ends before the wallet opens; a transaction already sent keeps going
+   * on chain, and only the view stops.
+   */
   const reset = useCallback(() => {
     run.current += 1
     setState({ step: 'idle' })

@@ -77,6 +77,25 @@ describe('runMint (docs/specs/2026-10-16-mint-page-live-data.md, section 7.5)', 
     expect(send).not.toHaveBeenCalled()
   })
 
+  it('a wallet step that throws never sends', async () => {
+    // A flow closed during the check throws from its wallet step (components/mint/use-mint-flow.ts): the run ends
+    // there, so the wallet never opens and nothing is sent (Task 5 fix round 1).
+    const send = vi.fn(async () => HASH)
+    const { chain } = fakeChain([send])
+    const closed = new Error('closed during the check')
+    const step = {
+      wallet: vi.fn(() => {
+        throw closed
+      }),
+      sent: vi.fn(),
+    }
+    await expect(runMint(chain, params, live(true), step)).rejects.toBe(closed)
+    expect(step.wallet).toHaveBeenCalledOnce()
+    expect(send).not.toHaveBeenCalled()
+    expect(step.sent).not.toHaveBeenCalled()
+    expect(chain.receipt).not.toHaveBeenCalled()
+  })
+
   it('sends with the function the simulation answered, then reads the ids and the block from the receipt', async () => {
     const send = vi.fn(async () => HASH)
     const { chain, calls } = fakeChain([send])
