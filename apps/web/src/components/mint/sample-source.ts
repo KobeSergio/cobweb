@@ -59,11 +59,13 @@ export type SampleWalletMode = 'connected' | 'not-listed' | 'limit' | 'wrong-cha
  *   ?fail=<kind>          the first mint attempt fails this way, any kind of the dialog's fourteen
  *                         (rejected, phase-closed, sold-out, quota-exceeded, not-listed, not-delegate,
  *                         price-changed, insufficient-balance, contract-wallet, wrong-network, check-failed,
- *                         wallet-failed, reverted, unconfirmed); "Try again" then succeeds
+ *                         wallet-failed, reverted, unconfirmed); "Try again" then succeeds. not-delegate
+ *                         reads best when the mint is from a vault, as its title names one
  *   ?degraded=1           the freshness server could not read the chain recently
  *   ?start=<seconds>      move the next scheduled start this close, to watch a countdown reach zero
- *   ?refusal=reading      the first answer takes 6 s; slow: no answer, so the page says it keeps trying;
- *                         not-a-collection | unavailable: the server refuses the collection for the page load
+ *   ?refusal=reading      the first answer takes 6 s; slow: every poll answers "retry", so once 10 s pass
+ *                         with no body the page says it keeps trying; not-a-collection | unavailable: the
+ *                         server refuses the collection for the page load
  *   ?art=placeholder      before the reveal: the placeholder's art, no featured tokens, no tiers
  *   ?type=single_asset | one_of_one   every token's number of the supply in place of its tier
  */
@@ -75,7 +77,7 @@ export type SampleSwitches = {
   start: number | null
   /** The first mint attempt fails this way; "Try again" then succeeds. */
   fail: MintFailureKind | null
-  /** How the state answers, when it does not answer at once. */
+  /** How the state answers in place of a body, or how long its first body takes. */
   refusal: 'reading' | 'slow' | 'not-a-collection' | 'unavailable' | null
   /** Before the reveal; the sample is revealed otherwise. */
   art: 'placeholder' | null
@@ -83,22 +85,24 @@ export type SampleSwitches = {
   type: 'single_asset' | 'one_of_one' | null
 }
 
-const FAILURES: MintFailureKind[] = [
-  'rejected',
-  'phase-closed',
-  'sold-out',
-  'quota-exceeded',
-  'not-listed',
-  'not-delegate',
-  'price-changed',
-  'insufficient-balance',
-  'contract-wallet',
-  'wrong-network',
-  'check-failed',
-  'wallet-failed',
-  'reverted',
-  'unconfirmed',
-]
+/** Every kind of the dialog; a kind added to `MintFailureKind` stops compiling here until it is listed. */
+const FAILURE_KINDS: Record<MintFailureKind, true> = {
+  rejected: true,
+  'phase-closed': true,
+  'sold-out': true,
+  'quota-exceeded': true,
+  'not-listed': true,
+  'not-delegate': true,
+  'price-changed': true,
+  'insufficient-balance': true,
+  'contract-wallet': true,
+  'wrong-network': true,
+  'check-failed': true,
+  'wallet-failed': true,
+  reverted: true,
+  unconfirmed: true,
+}
+const FAILURES = Object.keys(FAILURE_KINDS) as MintFailureKind[]
 const REFUSALS = ['reading', 'slow', 'not-a-collection', 'unavailable'] as const
 const TYPES = ['single_asset', 'one_of_one'] as const
 const WALLETS: Exclude<SampleWalletMode, null>[] = ['connected', 'not-listed', 'limit', 'wrong-chain']
@@ -142,16 +146,19 @@ function sampleFailure(
   chainName: string,
 ): { at: 'check' | 'wallet' | 'receipt'; error: Error | null } {
   const [amount, group, vault] = call.args
+  /** What a refusal says is left: one fewer than asked, so a single token leaves none to offer again. */
+  const fewer = amount > 1n ? amount - 1n : 0n
   switch (kind) {
     case 'phase-closed':
       return { at: 'check', error: revert('MintGroupInactive', [group], call) }
     case 'sold-out':
-      return { at: 'check', error: revert('ExceedsMintGroupMaxSupply', [amount, 1n], call) }
+      return { at: 'check', error: revert('ExceedsMintGroupMaxSupply', [amount, fewer], call) }
     case 'quota-exceeded':
-      return { at: 'check', error: revert('ExceedsMintQuota', [amount, 1n], call) }
+      return { at: 'check', error: revert('ExceedsMintQuota', [amount, fewer], call) }
     case 'not-listed':
       return { at: 'check', error: revert('NotInWhitelist', [call.account, group], call) }
     case 'not-delegate':
+      // Reads best from a vault; from the wallet itself the revert names the wallet as its own vault.
       return { at: 'check', error: revert('NotDelegate', [call.account, vault ?? call.account], call) }
     case 'price-changed':
       return { at: 'check', error: revert('InsufficientEther', [call.value + 1n, call.value], call) }
@@ -245,6 +252,8 @@ export function sampleMintSource(
   const mints: { groupId: number; holder: Address; count: number; block: number }[] = []
   let nextTokenId = data.supply.minted + 1
   let failuresLeft = switches.fail === 'phase-closed' ? 2 : switches.fail ? 1 : 0
+  /** The wallet's failure for the attempt that sends: a rejection, a changed network, a failed signing. */
+  let failNextSend: Error | null = null
   /** The receipt's own failure for the attempt that sent it: reverted, or never confirmed. */
   let failNextReceipt: 'reverted' | 'unconfirmed' | null = null
   let txSeed = 0
@@ -266,11 +275,17 @@ export function sampleMintSource(
         switches.fail && failuresLeft > 0 ? sampleFailure(switches.fail, call, page.chain.name) : null
       if (failure) failuresLeft -= 1
       if (failure?.at === 'check' && failure.error) throw failure.error
+      // The wallet's and the receipt's failures stay armed until a send or a receipt reads them, so an
+      // attempt that ends between the check and the wallet (a flow closed during the check) does not use
+      // one up unseen.
+      if (failure?.at === 'wallet') failNextSend = failure.error
       if (failure?.at === 'receipt')
         failNextReceipt = switches.fail === 'unconfirmed' ? 'unconfirmed' : 'reverted'
       return async () => {
         await wait(1_600)
-        if (failure?.at === 'wallet' && failure.error) throw failure.error
+        const failing = failNextSend
+        failNextSend = null
+        if (failing) throw failing
         txSeed += 1
         const hash = sampleTxHash(9_000 + txSeed)
         pending.set(hash, call)

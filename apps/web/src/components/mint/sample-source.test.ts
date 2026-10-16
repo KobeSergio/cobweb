@@ -1,7 +1,7 @@
 import type { StateBody } from '@cobweb/shared'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEMO_MINTER, DEMO_NOW, DEMO_TOKENS, DEMO_VAULT } from '@/lib/demo'
-import { mintCallOf, type MintParams } from '@/lib/mint/mint-call'
+import type { MintParams } from '@/lib/mint/mint-call'
 import { MintFailure, type MintFailureKind } from '@/lib/mint/mint-failure'
 import { runMint } from '@/lib/mint/mint-run'
 import type { MintPageStatic } from '@/lib/mint/page-doc'
@@ -84,14 +84,22 @@ describe('sampleMintSource (docs/specs/2026-10-16-mint-page-live-data.md, sectio
   it('is revealed unless ?art=placeholder, and counts a confirmed mint from its block on', async () => {
     expect((await state(sampleMintSource(page, switches(), clock))).baseUri).toBe(SAMPLE_REVEALED_URI)
     const source = sampleMintSource(page, switches('art=placeholder'), clock)
+    const minted = (body: StateBody) => body.groups.find((entry) => entry.id === 1)!.minted
+    /** What the sample minter has claimed in phase 1, as the wallet answer reads it now. */
+    const claimed = async () => {
+      const poll = await settle(source.pollWallet(DEMO_MINTER), 500)
+      if (poll.kind !== 'body') throw new Error(`no body: ${poll.kind}`)
+      return poll.body.groups.find((entry) => entry.id === 1)!.claimed
+    }
     const before = await state(source)
+    const claimedBefore = await claimed()
     expect(before.baseUri).toBe(SAMPLE_PLACEHOLDER_URI)
     const result = await mint(source)
     expect(result.tokenIds).toEqual([before.totalMinted + 1])
     const after = await state(source)
     expect(after.totalMinted).toBe(before.totalMinted + 1)
-    const wallet = await settle(source.pollWallet(DEMO_MINTER))
-    expect(wallet.kind === 'body' && wallet.body.groups.find((entry) => entry.id === 1)?.claimed).toBe(2)
+    expect(minted(after)).toBe(minted(before) + 1)
+    expect(await claimed()).toBe(claimedBefore + 1)
   })
 
   it('answers each ?refusal= as the server would: final, retried, or the first answer after 6 s', async () => {
@@ -102,13 +110,15 @@ describe('sampleMintSource (docs/specs/2026-10-16-mint-page-live-data.md, sectio
           reason: refusal,
         },
       )
-    expect(await settle(sampleMintSource(page, switches('refusal=slow'), clock).pollState())).toMatchObject({
+    expect(await settle(sampleMintSource(page, switches('refusal=slow'), clock).pollState())).toEqual({
       kind: 'retry',
+      afterMs: 1_000,
+      reason: 'not-read-yet',
     })
-    const startedAt = now
+    // The body is built when the 6 s wait ends, so its chain time is 6 s on (with no wait, the sample's now).
     const reading = sampleMintSource(page, switches('refusal=reading'), clock)
-    expect((await settle(reading.pollState())).kind).toBe('body')
-    expect(now - startedAt).toBeGreaterThanOrEqual(6_000)
+    const poll = await settle(reading.pollState())
+    expect(poll.kind === 'body' && poll.body.blockTimestamp).toBe(DEMO_NOW + 6)
   })
 
   it('fails the first attempt as each ?fail= kind says, and lets "Try again" succeed', async () => {
@@ -136,7 +146,46 @@ describe('sampleMintSource (docs/specs/2026-10-16-mint-page-live-data.md, sectio
       expect((failure as MintFailure).kind, kind).toBe(kind)
       await expect(mint(source, overrides), kind).resolves.toMatchObject({ tokenIds: [expect.any(Number)] })
     }
-    expect(mintCallOf(params).functionName).toBe('batchMint')
+  })
+
+  it('does not use up a wallet failure on a flow closed during the check', async () => {
+    for (const kind of ['rejected', 'wrong-network', 'wallet-failed'] as const) {
+      const source = sampleMintSource(page, switches(`fail=${kind}`), clock)
+      const closed = runMint(
+        source.chain,
+        params,
+        { isLive: () => true, nextAnswer: async () => {} },
+        {
+          wallet: () => {
+            throw new Error('The flow was closed.')
+          },
+          sent: () => {},
+        },
+      )
+      await expect(settle(closed), kind).rejects.toThrow('The flow was closed.')
+      const failure = await mint(source).catch((error: unknown) => error)
+      expect(failure, kind).toBeInstanceOf(MintFailure)
+      expect((failure as MintFailure).kind, kind).toBe(kind)
+      await expect(mint(source), kind).resolves.toMatchObject({ tokenIds: [expect.any(Number)] })
+    }
+  })
+
+  it('leaves none for a single token refused, and one fewer than asked above that', async () => {
+    for (const [kind, count] of [
+      ['sold-out', 'left'],
+      ['quota-exceeded', 'allowed'],
+    ] as const)
+      for (const [amount, expected] of [
+        [1, 0],
+        [3, 2],
+      ] as const) {
+        const label = `${kind} for ${amount}`
+        const failure = await mint(sampleMintSource(page, switches(`fail=${kind}`), clock), { amount }).catch(
+          (error: unknown) => error,
+        )
+        expect(failure, label).toBeInstanceOf(MintFailure)
+        expect((failure as MintFailure).detail[count], label).toBe(expected)
+      }
   })
 })
 
