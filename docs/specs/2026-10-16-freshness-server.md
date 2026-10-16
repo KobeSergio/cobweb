@@ -744,6 +744,8 @@ Owed to the second sub-project: the database and the public read path (`mint_pag
 `public.mint_page`), the mint page on the answers of 6.10 with the web app's variable for the freshness origin, and a
 timeout on its server render's fetch, which can wait out a join.
 
+> **16 October 2026:** Closed by [2026-10-16-mint-page-live-data.md](2026-10-16-mint-page-live-data.md): the database, the public read path and the mint page on the answers of 6.10 landed, with `NEXT_PUBLIC_FRESHNESS_URL` for the origin. The server render's timeout is moot: the page's HTML is cached by link and carries no chain state, and the first state is the browser's first poll.
+
 Owed to the third sub-project: the indexer runs in `apps/freshness` beside the reader, sharing `logs.ts` and the
 clients; its scan covers every deployed collection at each chain's depth with `Transfer`, the mint events,
 `NFTsAirdropped` and `MintFundsWithdrawn`, which the reader's scan leaves out.

@@ -228,6 +228,8 @@ done, with failure at any step and a way forward.
 
 > **16 October 2026:** Airdrop, Settings and the Overview's pointer, Reveal and proceeds run on real data ([2026-10-15-airdrop-settings.md](2026-10-15-airdrop-settings.md)). What changed from the sample: an airdrop goes in batches of at most 500 wallets and 1,000 tokens, each sent with exactly the contract's fee for its tokens as the value; the list is frozen at the first send and kept in the browser with "Check again" and "Discard", and a discarded batch that landed mints twice if it is sent again (the waiting panel says so); History is Cobweb's record of the batches it confirmed, with token ids from the receipt's `Transfer` logs, and airdrops sent outside Cobweb are not listed; a burn is at most 1,000 tokens a transaction; a repeated address's summed quantity is checked against 1,000; Settings reads the contract with copies for when it cannot be read; "Withdrawn so far" counts the withdrawals made through Cobweb; "Platform fees per token" comes from `fees()`; "Paid by minters" waits for Phase 6; Reveal offers the rendered metadata, the placeholder and another IPFS link; the level control follows the validator's code; a wallet that is not the contract's owner reads everything and sends nothing; the Overview's pointer also reads Custom, and its proceeds come from the contract.
 
+> **16 October 2026:** The Mint page tab runs on real data ([2026-10-16-mint-page-live-data.md](2026-10-16-mint-page-live-data.md)). What changed from the sample: the five sections are saved with the page and shown on it, each when its switch is on and it has content; the files go to a public bucket with tighter caps (the banner, the About banner and slides 5 MB, the avatar and team photos 2 MB, an MP4 slide or the music 20 MB) and SVG is no longer taken, since a file on a public origin can carry script; an About banner joins the About panel; the token avatar the audit listed stays out; the public switch saves with the page, and Preview opens the owner's view at `/<slug>/preview` under a banner, public or not.
+
 ### 4.7 Public mint page (`/[slug]`)
 
 - Stands alone: slim top bar with identity and wallet button, no app sidebar, "Powered by Cobweb"
@@ -272,6 +274,8 @@ Hard rules, from `CLAUDE.md`:
    data says active. Countdowns run from `blockTimestamp`, not the browser clock.
 2. Simulate, then send the simulated request. The wallet opens only after the simulation passes.
 3. The page makes no shared-state RPC calls.
+
+> **16 October 2026:** The public mint page runs on live data ([2026-10-16-mint-page-live-data.md](2026-10-16-mint-page-live-data.md)): refusal panels while the chain is read, when the first answer is slow, when the chain does not confirm the collection and when live status is not available; Remind me on a scheduled phase (Google Calendar or an `.ics` file, nothing stored); and the rarity spot, each minted token's tier chip on a revealed generative collection, "Rarity shows after the reveal" before it, and "#<id> of <supply>" for a single asset or a 1/1.
 
 ## 5. Sample data contract
 
@@ -744,3 +748,4 @@ Sample data changed, additively: `MintGroup.description` and `visible`, `Airdrop
 `MintPageSections`, `DEMO_MINT_PAGE_SECTIONS`, and descriptions, visibility and first token ids on
 the existing sample phases and airdrops (the Team phase is hidden, so the sample mint page shows two
 phases).
+> **16 October 2026:** The audit's Mint page items are settled by [2026-10-16-mint-page-live-data.md](2026-10-16-mint-page-live-data.md): the sections and their limits as listed above, with that spec's caps (section 4.4) in place of the forms' 20 MB and no SVG; text keeps its line breaks in place of rich text; the token avatar stays out; featured tokens are up to six, picked from the rendered set.
