@@ -420,6 +420,65 @@ export type Database = {
           },
         ]
       }
+      mint_pages: {
+        Row: {
+          about_banner_key: string | null
+          avatar_key: string | null
+          banner_key: string | null
+          collection_id: string
+          description: string
+          discord_url: string | null
+          featured_token_ids: number[]
+          published: boolean
+          published_at: string | null
+          sections: Json
+          telegram_url: string | null
+          updated_at: string
+          website_url: string | null
+          x_url: string | null
+        }
+        Insert: {
+          about_banner_key?: string | null
+          avatar_key?: string | null
+          banner_key?: string | null
+          collection_id: string
+          description?: string
+          discord_url?: string | null
+          featured_token_ids?: number[]
+          published?: boolean
+          published_at?: string | null
+          sections?: Json
+          telegram_url?: string | null
+          updated_at?: string
+          website_url?: string | null
+          x_url?: string | null
+        }
+        Update: {
+          about_banner_key?: string | null
+          avatar_key?: string | null
+          banner_key?: string | null
+          collection_id?: string
+          description?: string
+          discord_url?: string | null
+          featured_token_ids?: number[]
+          published?: boolean
+          published_at?: string | null
+          sections?: Json
+          telegram_url?: string | null
+          updated_at?: string
+          website_url?: string | null
+          x_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'mint_pages_collection_id_fkey'
+            columns: ['collection_id']
+            isOneToOne: true
+            referencedRelation: 'collections'
+            referencedColumns: ['id']
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string
@@ -677,6 +736,32 @@ export type Database = {
             columns: ['trait_id']
             isOneToOne: false
             referencedRelation: 'traits'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      token_ranks: {
+        Row: {
+          created_at: string
+          job_id: string
+          ranks: number[]
+        }
+        Insert: {
+          created_at?: string
+          job_id: string
+          ranks: number[]
+        }
+        Update: {
+          created_at?: string
+          job_id?: string
+          ranks?: number[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'token_ranks_job_id_fkey'
+            columns: ['job_id']
+            isOneToOne: true
+            referencedRelation: 'render_jobs'
             referencedColumns: ['id']
           },
         ]
@@ -1566,6 +1651,18 @@ export type Database = {
         }
         Returns: boolean
       }
+      mint_page: {
+        Args: { p_slug: string }
+        Returns: Json
+      }
+      mint_page_preview: {
+        Args: { p_slug: string }
+        Returns: Json
+      }
+      mint_page_tiers: {
+        Args: { p_base_uri: string; p_ids: number[]; p_slug: string }
+        Returns: Json
+      }
       record_upload: {
         Args: {
           p_bytes: number
@@ -1598,6 +1695,15 @@ export type Database = {
       swap_token_ids_for_check: {
         Args: { p_a: number; p_b: number; p_collection_id: string }
         Returns: undefined
+      }
+      token_ranks_record: {
+        Args: {
+          p_collection_id: string
+          p_job_id: string
+          p_owner: string
+          p_ranks: number[]
+        }
+        Returns: boolean
       }
       whitelist_chunk_record: {
         Args: {

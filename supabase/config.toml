@@ -137,6 +137,13 @@ public = false
 file_size_limit = "50MiB"
 allowed_mime_types = ["image/png"]
 
+# The public mint page's media (docs/specs/2026-10-16-mint-page-live-data.md, section 4.4). Public: the page and its
+# cached HTML link the objects directly. Written only through presigned PUTs the Mint page tab's actions sign.
+[storage.buckets.mint-page]
+public = true
+file_size_limit = "20MiB"
+allowed_mime_types = ["image/png", "image/jpeg", "image/webp", "image/gif", "video/mp4", "audio/mpeg"]
+
 # Allow connections via S3 compatible clients
 [storage.s3_protocol]
 enabled = true

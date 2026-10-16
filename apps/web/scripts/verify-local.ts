@@ -578,6 +578,8 @@ async function main(): Promise<void> {
     'whitelist_entries',
     'airdrops',
     'withdrawals',
+    'mint_pages',
+    'token_ranks',
   ]) {
     await check(`anon: reads nothing from ${table}`, async () => {
       const { data, error } = await anon.from(table).select()
@@ -1063,6 +1065,7 @@ async function main(): Promise<void> {
   await artPhases(A, B)
   await artWhitelist(A, B)
   await artAirdropSettings(A, B)
+  await artMintPage(A, B)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -6834,6 +6837,482 @@ async function artAirdropSettings(A: Creator, B: Creator): Promise<void> {
       if (refused) return `owner update: ${refused}`
       const copy = await settingsCopy(cid)
       return copy.royalty_bps === 1500 && copy.state_block === 101 ? null : JSON.stringify(copy)
+    },
+  )
+}
+
+// ---------------------------------------------------------------------------------------------
+// 9n. The mint page: mint_pages with its checks, grants and trigger, token_ranks with token_ranks_record, and
+// the public reads mint_page, mint_page_preview and mint_page_tiers
+// (docs/specs/2026-10-16-mint-page-live-data.md, section 4)
+// ---------------------------------------------------------------------------------------------
+type PageCheckRow = { published: boolean; published_at: string | null; description: string }
+
+async function pageRow(cid: string): Promise<PageCheckRow | null> {
+  const { data, error } = await admin
+    .from('mint_pages')
+    .select('published, published_at, description')
+    .eq('collection_id', cid)
+    .maybeSingle()
+  if (error) throw new Error(`mint page: ${describe(error as DbError)}`)
+  return data as PageCheckRow | null
+}
+
+/** A key of the mint-page bucket under a collection: `<collection id>/<64 hex>.<ext>`. */
+const PAGE_KEY = (cid: string, n: number, ext = 'png') => `${cid}/${HEX64(0xa000 + n)}.${ext}`
+const PAGE_SENTENCE = 'A mint page goes public once its contract is deployed and it has a link.'
+/** JSON with every object's keys sorted, since jsonb answers its keys in its own order. */
+const sortedJson = (value: unknown) =>
+  JSON.stringify(value, (_key, entry: unknown) =>
+    entry && typeof entry === 'object' && !Array.isArray(entry)
+      ? Object.fromEntries(Object.entries(entry).sort(([a], [b]) => (a < b ? -1 : 1)))
+      : entry,
+  )
+const RANK_SENTENCE = 'The rendered set could not be ranked.'
+/** The deployment's constructor as collection_record_deploy stores it, with the deploy-time base URI. */
+const recordedArgs = (baseUri: string) => ({
+  name: 'Verify',
+  symbol: 'VFY',
+  maxSupply: '3',
+  groupSupplies: ['2', '1'],
+  groupPrices: ['0', '1000000000000000'],
+  baseUri,
+})
+
+async function artMintPage(A: Creator, B: Creator): Promise<void> {
+  const payer = A.account.address.toLowerCase()
+  const realUri = `ipfs://${CID('e')}/`
+  const placeholderUri = `ipfs://${CID('q')}/metadata.json`
+  const deployUri = `ipfs://${CID('p')}/metadata.json`
+  // Rendered and recorded as deployed on the real set, as 9k records one, with a fee that can be searched for.
+  const { cid, jobId } = await renderedFixture(A, payer, 181)
+  const recorded = await callArt(
+    admin,
+    'collection_record_deploy',
+    recordArgs(A.userId, cid, payer, 14, {
+      p_args: recordedArgs(realUri),
+      p_mint_fee_flat_wei: '123456789123',
+    }),
+  )
+  if (recorded.error) throw new Error(`setup: record: ${describe(recorded.error)}`)
+  const deployedRow = await stored(cid)
+  const pageSlug = deployedRow?.slug
+  if (!deployedRow || !pageSlug) throw new Error('setup: the deployed collection has no link')
+  // A collection that finished its art later, deployed on an earlier placeholder than its latest done one.
+  const deferred = await deferredFixture(A)
+  const deferredRecord = await callArt(
+    admin,
+    'collection_record_deploy',
+    recordArgs(A.userId, deferred.cid, payer, 15, { p_base_uri: deployUri, p_args: recordedArgs(deployUri) }),
+  )
+  if (deferredRecord.error) throw new Error(`setup: deferred record: ${describe(deferredRecord.error)}`)
+  const deferredSlug = (await stored(deferred.cid))?.slug
+  if (!deferredSlug) throw new Error('setup: the deferred collection has no link')
+  // A draft with a link, and a collection marked deployed without one.
+  const draft = await insertCollection(A.client)
+  if (!draft.row) throw new Error(`setup: ${describe(draft.error)}`)
+  const draftId = draft.row.id
+  const draftSlug = slug()
+  const draftLink = await reserve(A.client, draftId, draftSlug)
+  if (draftLink) throw new Error(`setup: draft link: ${describe(draftLink)}`)
+  const bare = await insertCollection(A.client)
+  if (!bare.row) throw new Error(`setup: ${describe(bare.error)}`)
+  const bareId = bare.row.id
+  const bareSet = await admin
+    .from('collections')
+    .update({ status: 'deployed', max_supply: 3, chain_id: 31337, contract_address: ADDRESS40(0xb0b) })
+    .eq('id', bareId)
+  if (bareSet.error) throw new Error(`setup: bare: ${describe(bareSet.error as DbError)}`)
+  // A listed wallet the document must never carry.
+  const listedWallet = ADDRESS40(0x11573d)
+  const holders = await groupRowId(cid, 1)
+  const listed = await A.client
+    .from('whitelist_entries')
+    .insert({ mint_group_id: holders, collection_id: cid, wallet_address: listedWallet, quota: 2 })
+  if (listed.error) throw new Error(`setup: whitelist: ${describe(listed.error as DbError)}`)
+
+  const page = (client: SupabaseClient, patch: Record<string, unknown>, at = cid) =>
+    client.from('mint_pages').update(patch).eq('collection_id', at).select()
+  const read = async (client: SupabaseClient, fn: string, slugText: string) => {
+    const { data, error } = await client.rpc(fn, { p_slug: slugText })
+    return { doc: data as Record<string, unknown> | null, error: error as DbError }
+  }
+  const tiers = async (client: SupabaseClient, baseUri: string, ids: number[], at = pageSlug) => {
+    const { data, error } = await client.rpc('mint_page_tiers', {
+      p_slug: at,
+      p_base_uri: baseUri,
+      p_ids: ids,
+    })
+    if (error) throw new Error(`mint_page_tiers: ${describe(error as DbError)}`)
+    return data as { total: number; ranks: Record<string, number> } | null
+  }
+  const rank = (client: SupabaseClient, overrides: Record<string, unknown> = {}) =>
+    callArt(client, 'token_ranks_record', {
+      p_collection_id: cid,
+      p_owner: A.userId,
+      p_job_id: jobId,
+      p_ranks: [2, 3, 1],
+      ...overrides,
+    })
+
+  await check(
+    'mint_pages: the owner inserts and reads its row; B reads nothing and cannot insert, update or publish it',
+    async () => {
+      const inserted = await A.client.from('mint_pages').insert({ collection_id: cid }).select()
+      if (inserted.error) return `insert: ${describe(inserted.error as DbError)}`
+      const own = await A.client.from('mint_pages').select('collection_id').eq('collection_id', cid)
+      if (own.error || own.data.length !== 1)
+        return `A reads ${own.data?.length ?? describe(own.error as DbError)}`
+      const problems: string[] = []
+      const other = await B.client.from('mint_pages').select().eq('collection_id', cid)
+      const unseen = expectNothing(other.error as DbError, other.data)
+      if (unseen) problems.push(`B reads: ${unseen}`)
+      const foreign = await B.client.from('mint_pages').insert({ collection_id: bareId }).select()
+      const refused = expectError(foreign.error as DbError, PERMISSION, foreign.data)
+      if (refused) problems.push(`B inserts: ${refused}`)
+      for (const [label, patch] of [
+        ['update', { description: 'Taken over' }],
+        ['publish', { published: true }],
+      ] as const) {
+        const changed = await page(B.client, patch)
+        const nothing = expectNothing(changed.error as DbError, changed.data)
+        if (nothing) problems.push(`B ${label}: ${nothing}`)
+      }
+      if (problems.length) return problems.join('; ')
+      const row = await pageRow(cid)
+      return row?.published === false && row.description === '' ? null : JSON.stringify(row)
+    },
+  )
+
+  await check(
+    "mint_pages: a description over 2,000 characters, an http link, an X link on another host, a 201-character link, seven featured ids, a repeated or zero id, a key outside the collection or of another shape, and sections over 64 KB or naming another collection's key are refused",
+    async () => {
+      const problems: string[] = []
+      for (const [label, patch] of [
+        ['2,001 characters', { description: 'd'.repeat(2001) }],
+        ['http link', { website_url: 'http://example.com' }],
+        ['X on another host', { x_url: 'https://example.com/owls' }],
+        ['201 characters', { website_url: `https://example.com/${'a'.repeat(181)}` }],
+        ['seven ids', { featured_token_ids: [1, 2, 3, 4, 5, 6, 7] }],
+        ['a repeated id', { featured_token_ids: [2, 2] }],
+        ['id 0', { featured_token_ids: [0] }],
+        ["another collection's key", { banner_key: PAGE_KEY(draftId, 1) }],
+        ['an SVG key', { avatar_key: `${cid}/${HEX64(0xa001)}.svg` }],
+        ['a short hash', { about_banner_key: `${cid}/abc.png` }],
+        ['over 64 KB', { sections: { faq: { enabled: true, items: [] }, note: 'x'.repeat(65_600) } }],
+        [
+          "another collection's key in sections",
+          { sections: { team: { enabled: true, members: [{ imageKey: PAGE_KEY(draftId, 2) }] } } },
+        ],
+      ] as const) {
+        const changed = await page(A.client, patch)
+        const problem = expectError(changed.error as DbError, CHECK, changed.data)
+        if (problem) problems.push(`${label}: ${problem}`)
+      }
+      if (problems.length) return problems.join('; ')
+      const row = await pageRow(cid)
+      return row?.description === '' ? null : JSON.stringify(row)
+    },
+  )
+
+  await check(
+    'mint_pages: publishing a draft, or a deployed collection without a link, is refused; publishing a deployed collection with a link sets published_at',
+    async () => {
+      const problems: string[] = []
+      for (const [label, at] of [
+        ['a draft', draftId],
+        ['no link', bareId],
+      ] as const) {
+        const inserted = await A.client
+          .from('mint_pages')
+          .insert({ collection_id: at, published: true })
+          .select()
+        const problem = expectSentence(inserted.error as DbError, CHECK, PAGE_SENTENCE)
+        if (problem) problems.push(`${label}: ${problem}`)
+      }
+      const unpublishedDraft = await A.client.from('mint_pages').insert({ collection_id: draftId }).select()
+      if (unpublishedDraft.error)
+        problems.push(`the draft's row: ${describe(unpublishedDraft.error as DbError)}`)
+      const draftPublish = await page(A.client, { published: true }, draftId)
+      const draftRefused = expectSentence(draftPublish.error as DbError, CHECK, PAGE_SENTENCE)
+      if (draftRefused) problems.push(`publishing the draft's row: ${draftRefused}`)
+      if (problems.length) return problems.join('; ')
+      const before = Date.now()
+      const published = await page(A.client, { published: true })
+      if (published.error) return `publish: ${describe(published.error as DbError)}`
+      const row = await pageRow(cid)
+      const at = row?.published_at ? Date.parse(row.published_at) : 0
+      return row?.published && Math.abs(at - before) < 60_000 ? null : JSON.stringify(row)
+    },
+  )
+
+  await check(
+    'mint_pages: the owner cannot set published_at or updated_at, and cannot delete the row',
+    async () => {
+      const problems: string[] = []
+      for (const [label, patch] of [
+        ['published_at', { published_at: '2020-01-01T00:00:00Z' }],
+        ['updated_at', { updated_at: '2020-01-01T00:00:00Z' }],
+      ] as const) {
+        const changed = await page(A.client, patch)
+        const problem = expectError(changed.error as DbError, PERMISSION, changed.data)
+        if (problem) problems.push(`${label}: ${problem}`)
+      }
+      const removed = await A.client.from('mint_pages').delete().eq('collection_id', cid).select()
+      const kept = expectError(removed.error as DbError, PERMISSION, removed.data)
+      if (kept) problems.push(`delete: ${kept}`)
+      if (problems.length) return problems.join('; ')
+      const row = await pageRow(cid)
+      return row?.published && row.published_at && !row.published_at.startsWith('2020')
+        ? null
+        : JSON.stringify(row)
+    },
+  )
+
+  // The page's fields, Holders moved before Public, and a description on the deferred collection itself.
+  const saved = await page(A.client, {
+    description: 'From the page',
+    banner_key: PAGE_KEY(cid, 1),
+    about_banner_key: PAGE_KEY(cid, 2, 'jpg'),
+    website_url: 'https://example.com/owls',
+    x_url: 'https://x.com/owls',
+    discord_url: 'https://discord.gg/owls',
+    telegram_url: 'https://t.me/owls',
+    featured_token_ids: [2, 1],
+    sections: { music: { enabled: true, key: PAGE_KEY(cid, 3, 'mp3'), fileName: 'theme.mp3' } },
+  })
+  if (saved.error) throw new Error(`setup: page: ${describe(saved.error as DbError)}`)
+  const moved = await callArt(A.client, 'mint_group_move', {
+    p_collection_id: cid,
+    p_onchain_id: 1,
+    p_up: true,
+  })
+  if (moved.error) throw new Error(`setup: move: ${describe(moved.error)}`)
+  const described = await A.client
+    .from('collections')
+    .update({ description: 'Owls who keep odd hours.' })
+    .eq('id', deferred.cid)
+  if (described.error) throw new Error(`setup: description: ${describe(described.error as DbError)}`)
+  const deferredPage = await A.client.from('mint_pages').insert({ collection_id: deferred.cid }).select()
+  if (deferredPage.error) throw new Error(`setup: deferred page: ${describe(deferredPage.error as DbError)}`)
+
+  await check(
+    'mint_page: anon and B read the published document by its link in any case, and null for an unpublished page, a draft and an unknown link',
+    async () => {
+      const problems: string[] = []
+      for (const [label, client] of [
+        ['anon', anon],
+        ['B', B.client],
+      ] as const) {
+        const published = await read(client, 'mint_page', pageSlug.toUpperCase())
+        if (published.error || published.doc?.slug !== pageSlug)
+          problems.push(
+            `${label} published: ${published.error ? describe(published.error) : JSON.stringify(published.doc)}`,
+          )
+        for (const [what, at] of [
+          ['unpublished', deferredSlug],
+          ['draft', draftSlug],
+          ['unknown', `no-such-${runId}`],
+        ] as const) {
+          const missing = await read(client, 'mint_page', at)
+          if (missing.error || missing.doc !== null)
+            problems.push(
+              `${label} ${what}: ${missing.error ? describe(missing.error) : JSON.stringify(missing.doc)}`,
+            )
+        }
+      }
+      return problems.length ? problems.join('; ') : null
+    },
+  )
+
+  await check(
+    "mint_page: the document has the page's fields and the phases by position, an empty description reads the collection's, and it holds no owner id, payout, transaction, fee, CID, real base URI or whitelist entry",
+    async () => {
+      const { doc, error } = await read(anon, 'mint_page', pageSlug)
+      if (error || !doc) return error ? describe(error) : 'no document'
+      const want = {
+        slug: pageSlug,
+        name: deployedRow.name,
+        symbol: 'VFY',
+        projectType: 'generative',
+        chainId: 31337,
+        contract: ADDRESS40(14),
+        description: 'From the page',
+        media: { banner: PAGE_KEY(cid, 1), avatar: null, aboutBanner: PAGE_KEY(cid, 2, 'jpg') },
+        socials: {
+          website: 'https://example.com/owls',
+          x: 'https://x.com/owls',
+          discord: 'https://discord.gg/owls',
+          telegram: 'https://t.me/owls',
+        },
+        featuredTokenIds: [2, 1],
+        sections: { music: { enabled: true, key: PAGE_KEY(cid, 3, 'mp3'), fileName: 'theme.mp3' } },
+        phases: [
+          { id: 1, name: 'Holders', description: '', visible: true, position: 0 },
+          { id: 0, name: 'Public', description: '', visible: true, position: 1 },
+        ],
+        placeholders: [],
+        published: true,
+      }
+      const got = Object.fromEntries(Object.keys(want).map((key) => [key, doc[key]]))
+      if (sortedJson(got) !== sortedJson(want)) return `document ${JSON.stringify(doc)}`
+      const extra = Object.keys(doc).filter((key) => !(key in want))
+      if (extra.length) return `extra keys: ${extra.join(', ')}`
+      const text = JSON.stringify(doc)
+      const leaked = [
+        A.userId,
+        payer,
+        `0x${HEX64(2014)}`,
+        '123456789123',
+        CID('d'),
+        CID('e'),
+        listedWallet,
+      ].filter((value) => text.includes(value))
+      if (leaked.length) return `holds ${leaked.join(', ')}`
+      const empty = await read(A.client, 'mint_page_preview', deferredSlug)
+      return empty.doc?.description === 'Owls who keep odd hours.'
+        ? null
+        : `empty description: ${JSON.stringify(empty.doc?.description)}`
+    },
+  )
+
+  await check(
+    "mint_page: placeholders hold the placeholder job's and the deploy-time base URIs, never the real job's",
+    async () => {
+      const { doc, error } = await read(A.client, 'mint_page_preview', deferredSlug)
+      if (error || !doc) return error ? describe(error) : 'no document'
+      const placeholders = JSON.stringify(doc.placeholders)
+      if (placeholders !== JSON.stringify([deployUri, placeholderUri])) return `deferred: ${placeholders}`
+      const real = await read(anon, 'mint_page', pageSlug)
+      return JSON.stringify(real.doc?.placeholders) === '[]'
+        ? null
+        : `deployed on the real set: ${JSON.stringify(real.doc?.placeholders)}`
+    },
+  )
+
+  await check(
+    'mint_page_preview: the owner reads the unpublished document; B and anon read null',
+    async () => {
+      const own = await read(A.client, 'mint_page_preview', deferredSlug)
+      if (own.error || own.doc?.slug !== deferredSlug || own.doc.published !== false)
+        return `owner: ${own.error ? describe(own.error) : JSON.stringify(own.doc)}`
+      const other = await read(B.client, 'mint_page_preview', deferredSlug)
+      if (other.error || other.doc !== null)
+        return `B: ${other.error ? describe(other.error) : JSON.stringify(other.doc)}`
+      const signedOut = await read(anon, 'mint_page_preview', deferredSlug)
+      return signedOut.doc === null ? null : `anon: ${JSON.stringify(signedOut.doc)}`
+    },
+  )
+
+  await check(
+    "token_ranks_record: a signed-out caller and the owner's session cannot execute it; the service role records a permutation for the done real job and answers true, a second record false",
+    async () => {
+      const problems: string[] = []
+      for (const [label, client] of [
+        ['anon', anon],
+        ['owner', A.client],
+      ] as const) {
+        const { error } = await rank(client)
+        const problem = expectError(error, PERMISSION)
+        if (problem) problems.push(`${label}: ${problem}`)
+      }
+      if (problems.length) return problems.join('; ')
+      const first = await rank(admin)
+      if (first.error || first.data !== true)
+        return `first: ${first.error ? describe(first.error) : String(first.data)}`
+      const second = await rank(admin, { p_ranks: [1, 2, 3] })
+      if (second.error || second.data !== false)
+        return `second: ${second.error ? describe(second.error) : String(second.data)}`
+      const { data } = await admin.from('token_ranks').select('ranks').eq('job_id', jobId).single()
+      return JSON.stringify(data?.ranks) === '[2,3,1]' ? null : JSON.stringify(data)
+    },
+  )
+
+  await check(
+    "token_ranks_record: a placeholder job, another collection's job, a wrong length and a repeated rank are refused",
+    async () => {
+      const problems: string[] = []
+      for (const [label, overrides] of [
+        ['a placeholder job', { p_collection_id: deferred.cid, p_job_id: deferred.jobId, p_ranks: [1] }],
+        ["another collection's job", { p_job_id: deferred.jobId }],
+        ['a wrong length', { p_ranks: [1, 2] }],
+        ['a repeated rank', { p_ranks: [1, 1, 2] }],
+      ] as const) {
+        const { error } = await rank(admin, overrides)
+        const problem = expectSentence(error, CHECK, RANK_SENTENCE)
+        if (problem) problems.push(`${label}: ${problem}`)
+      }
+      return problems.length ? problems.join('; ') : null
+    },
+  )
+
+  await check(
+    "token_ranks: the owner reads its job's row; B and anon read nothing; no client writes it",
+    async () => {
+      const own = await A.client.from('token_ranks').select('ranks').eq('job_id', jobId)
+      if (own.error || JSON.stringify(own.data) !== JSON.stringify([{ ranks: [2, 3, 1] }]))
+        return `owner: ${own.error ? describe(own.error as DbError) : JSON.stringify(own.data)}`
+      const problems: string[] = []
+      for (const [label, client] of [
+        ['B', B.client],
+        ['anon', anon],
+      ] as const) {
+        const { data, error } = await client.from('token_ranks').select()
+        const problem = expectNothing(error as DbError, data)
+        if (problem) problems.push(`${label}: ${problem}`)
+      }
+      for (const [label, result] of [
+        [
+          'insert',
+          await A.client
+            .from('token_ranks')
+            .insert({ job_id: deferred.jobId, ranks: [1] })
+            .select(),
+        ],
+        [
+          'update',
+          await A.client
+            .from('token_ranks')
+            .update({ ranks: [1, 2, 3] })
+            .eq('job_id', jobId)
+            .select(),
+        ],
+        ['delete', await A.client.from('token_ranks').delete().eq('job_id', jobId).select()],
+      ] as const) {
+        const problem = expectError(result.error as DbError, PERMISSION, result.data)
+        if (problem) problems.push(`owner ${label}: ${problem}`)
+      }
+      return problems.length ? problems.join('; ') : null
+    },
+  )
+
+  await check(
+    'mint_page_tiers: up to 20 ids at the real base URI of a published generative collection; null for another base URI, an unpublished page, 21 ids or no ranks',
+    async () => {
+      const ranked = await tiers(anon, realUri, [1, 2, 3, 4])
+      if (JSON.stringify(ranked) !== JSON.stringify({ ranks: { '1': 2, '2': 3, '3': 1 }, total: 3 }))
+        return `ranked: ${JSON.stringify(ranked)}`
+      const problems: string[] = []
+      if ((await tiers(anon, placeholderUri, [1])) !== null) problems.push('another base URI')
+      if (
+        (await tiers(
+          anon,
+          realUri,
+          Array.from({ length: 21 }, (_, index) => index + 1),
+        )) !== null
+      )
+        problems.push('21 ids')
+      const hidden = await page(A.client, { published: false })
+      if (hidden.error) return `unpublish: ${describe(hidden.error as DbError)}`
+      if ((await tiers(anon, realUri, [1])) !== null) problems.push('an unpublished page')
+      const shown = await page(A.client, { published: true })
+      if (shown.error) return `publish again: ${describe(shown.error as DbError)}`
+      const dropped = await admin.from('token_ranks').delete().eq('job_id', jobId)
+      if (dropped.error) return `drop the ranks: ${describe(dropped.error as DbError)}`
+      if ((await tiers(anon, realUri, [1])) !== null) problems.push('no ranks')
+      const again = await rank(admin)
+      if (again.error || again.data !== true) return `record again: ${String(again.data)}`
+      return problems.length ? problems.join('; ') : null
     },
   )
 }
