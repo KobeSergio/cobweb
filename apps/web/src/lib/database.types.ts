@@ -28,9 +28,55 @@ export type Database = {
   }
   public: {
     Tables: {
+      airdrop_recipients: {
+        Row: {
+          block: number
+          block_time: string
+          collection_id: string
+          first_token_id: number
+          recipient: string
+          tokens: number
+          tx_hash: string
+        }
+        Insert: {
+          block: number
+          block_time: string
+          collection_id: string
+          first_token_id: number
+          recipient: string
+          tokens: number
+          tx_hash: string
+        }
+        Update: {
+          block?: number
+          block_time?: string
+          collection_id?: string
+          first_token_id?: number
+          recipient?: string
+          tokens?: number
+          tx_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'airdrop_recipients_collection_id_fkey'
+            columns: ['collection_id']
+            isOneToOne: false
+            referencedRelation: 'collections'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'airdrop_recipients_tx_hash_fkey'
+            columns: ['tx_hash']
+            isOneToOne: false
+            referencedRelation: 'airdrops'
+            referencedColumns: ['tx_hash']
+          },
+        ]
+      }
       airdrops: {
         Row: {
           block: number
+          block_time: string | null
           collection_id: string
           confirmed_at: string
           fee_paid_wei: number
@@ -38,12 +84,13 @@ export type Database = {
           kind: string
           last_token_id: number
           recipients: number
-          sent_by: string
+          sent_by: string | null
           tokens: number
           tx_hash: string
         }
         Insert: {
           block: number
+          block_time?: string | null
           collection_id: string
           confirmed_at?: string
           fee_paid_wei: number
@@ -51,12 +98,13 @@ export type Database = {
           kind: string
           last_token_id: number
           recipients: number
-          sent_by: string
+          sent_by?: string | null
           tokens: number
           tx_hash: string
         }
         Update: {
           block?: number
+          block_time?: string | null
           collection_id?: string
           confirmed_at?: string
           fee_paid_wei?: number
@@ -64,7 +112,7 @@ export type Database = {
           kind?: string
           last_token_id?: number
           recipients?: number
-          sent_by?: string
+          sent_by?: string | null
           tokens?: number
           tx_hash?: string
         }
@@ -316,6 +364,47 @@ export type Database = {
           },
         ]
       }
+      indexer_cursors: {
+        Row: {
+          chain_id: number
+          collection_id: string
+          contract: string
+          from_block: number
+          holders: number
+          indexed_block: number
+          synced_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          chain_id: number
+          collection_id: string
+          contract: string
+          from_block: number
+          holders?: number
+          indexed_block: number
+          synced_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          chain_id?: number
+          collection_id?: string
+          contract?: string
+          from_block?: number
+          holders?: number
+          indexed_block?: number
+          synced_at?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'indexer_cursors_collection_id_fkey'
+            columns: ['collection_id']
+            isOneToOne: true
+            referencedRelation: 'collections'
+            referencedColumns: ['id']
+          },
+        ]
+      }
       layers: {
         Row: {
           art_collection_id: string
@@ -474,6 +563,53 @@ export type Database = {
             foreignKeyName: 'mint_pages_collection_id_fkey'
             columns: ['collection_id']
             isOneToOne: true
+            referencedRelation: 'collections'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      mints: {
+        Row: {
+          amount: number
+          block: number
+          block_time: string
+          collection_id: string
+          first_token_id: number
+          group_id: number
+          log_index: number
+          recipient: string
+          tx_hash: string
+          vault: string | null
+        }
+        Insert: {
+          amount: number
+          block: number
+          block_time: string
+          collection_id: string
+          first_token_id: number
+          group_id: number
+          log_index: number
+          recipient: string
+          tx_hash: string
+          vault?: string | null
+        }
+        Update: {
+          amount?: number
+          block?: number
+          block_time?: string
+          collection_id?: string
+          first_token_id?: number
+          group_id?: number
+          log_index?: number
+          recipient?: string
+          tx_hash?: string
+          vault?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'mints_collection_id_fkey'
+            columns: ['collection_id']
+            isOneToOne: false
             referencedRelation: 'collections'
             referencedColumns: ['id']
           },
@@ -736,6 +872,38 @@ export type Database = {
             columns: ['trait_id']
             isOneToOne: false
             referencedRelation: 'traits'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      token_owners: {
+        Row: {
+          block: number
+          collection_id: string
+          log_index: number
+          owner: string
+          token_id: number
+        }
+        Insert: {
+          block: number
+          collection_id: string
+          log_index: number
+          owner: string
+          token_id: number
+        }
+        Update: {
+          block?: number
+          collection_id?: string
+          log_index?: number
+          owner?: string
+          token_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'token_owners_collection_id_fkey'
+            columns: ['collection_id']
+            isOneToOne: false
+            referencedRelation: 'collections'
             referencedColumns: ['id']
           },
         ]
@@ -1605,6 +1773,29 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      indexer_record: {
+        Args: {
+          p_chain_id: number
+          p_collections: string[]
+          p_from_block: number
+          p_records: Json
+          p_synced_at: string
+          p_to_block: number
+        }
+        Returns: Json
+      }
+      indexer_start: {
+        Args: { p_collection_id: string; p_from_block: number }
+        Returns: Json
+      }
+      indexer_summaries: {
+        Args: { p_chain_id: number }
+        Returns: Json
+      }
+      indexer_targets: {
+        Args: { p_chain_id: number }
+        Returns: Json
       }
       mint_group_move: {
         Args: { p_collection_id: string; p_onchain_id: number; p_up: boolean }

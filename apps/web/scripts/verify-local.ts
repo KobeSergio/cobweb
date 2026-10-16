@@ -580,6 +580,10 @@ async function main(): Promise<void> {
     'withdrawals',
     'mint_pages',
     'token_ranks',
+    'indexer_cursors',
+    'mints',
+    'token_owners',
+    'airdrop_recipients',
   ]) {
     await check(`anon: reads nothing from ${table}`, async () => {
       const { data, error } = await anon.from(table).select()
@@ -1066,6 +1070,7 @@ async function main(): Promise<void> {
   await artWhitelist(A, B)
   await artAirdropSettings(A, B)
   await artMintPage(A, B)
+  await artIndexer(A, B)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -7342,6 +7347,667 @@ async function artMintPage(A: Creator, B: Creator): Promise<void> {
       const again = await rank(admin)
       if (again.error || again.data !== true) return `record again: ${String(again.data)}`
       return problems.length ? problems.join('; ') : null
+    },
+  )
+}
+
+// ---------------------------------------------------------------------------------------------
+// 9o. The indexer: indexer_cursors, mints, token_owners and airdrop_recipients, the airdrops changes, and the
+// four service-role functions indexer_targets, indexer_start, indexer_record and indexer_summaries
+// (docs/specs/2026-10-16-indexer-overview.md, section 4)
+// ---------------------------------------------------------------------------------------------
+type CursorCheckRow = {
+  chain_id: number
+  contract: string
+  from_block: number
+  indexed_block: number
+  synced_at: string | null
+  holders: number
+}
+
+async function cursorRow(cid: string): Promise<CursorCheckRow | null> {
+  const { data, error } = await admin
+    .from('indexer_cursors')
+    .select('chain_id, contract, from_block, indexed_block, synced_at, holders')
+    .eq('collection_id', cid)
+    .maybeSingle()
+  if (error) throw new Error(`cursor: ${describe(error as DbError)}`)
+  return data as CursorCheckRow | null
+}
+
+/** Every row the indexer keeps for a collection, as the service role reads them, as one string to compare. */
+async function indexedRows(cid: string): Promise<string> {
+  const read = async (table: string, columns: string, order: string) => {
+    const { data, error } = await admin.from(table).select(columns).eq('collection_id', cid).order(order)
+    if (error) throw new Error(`${table}: ${describe(error as DbError)}`)
+    return data
+  }
+  return JSON.stringify([
+    await read(
+      'mints',
+      'tx_hash, log_index, block, block_time, recipient, vault, group_id, amount, first_token_id',
+      'tx_hash',
+    ),
+    await read('token_owners', 'token_id, owner, block, log_index', 'token_id'),
+    await read(
+      'airdrops',
+      'tx_hash, kind, recipients, tokens, fee_paid_wei::text, first_token_id, last_token_id, block, sent_by, block_time',
+      'tx_hash',
+    ),
+    await read(
+      'airdrop_recipients',
+      'tx_hash, first_token_id, recipient, tokens, block, block_time',
+      'first_token_id',
+    ),
+    await read('withdrawals', 'tx_hash, amount_wei::text, payout_address, block', 'tx_hash'),
+    await cursorRow(cid),
+  ])
+}
+
+const GAP_SENTENCE = 'The indexer would skip blocks.'
+const CHAIN_SENTENCE = 'A collection is not indexed on this chain.'
+const OUTSIDE_SENTENCE = 'A record names a collection outside this write.'
+/** A transaction the indexer's records name. */
+const INDEX_TX = (n: number) => `0x${HEX64(0x1d3e_0000 + n)}`
+/** A holder the records name. */
+const HOLDER = (n: number) => ADDRESS40(0x401d_0000 + n)
+const DEAD_ADDRESS = '0x000000000000000000000000000000000000dead'
+/** A test block's time in Unix seconds, the moment `blockTime` (9k) writes as ISO. */
+const blockSeconds = (block: number) => 1_793_491_200 + block
+/** Two times as the same moment, whatever their format. */
+const sameTime = (a: string | null | undefined, b: string) => !!a && Date.parse(a) === Date.parse(b)
+
+type IndexRecords = {
+  mints?: Record<string, unknown>[]
+  owners?: Record<string, unknown>[]
+  airdrops?: Record<string, unknown>[]
+  withdrawals?: Record<string, unknown>[]
+}
+
+const recordWrite = (
+  collections: string[],
+  from: number,
+  to: number,
+  records: IndexRecords,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> => ({
+  p_chain_id: 31337,
+  p_from_block: from,
+  p_to_block: to,
+  p_synced_at: null,
+  p_collections: collections,
+  p_records: records,
+  ...overrides,
+})
+
+const mintRecord = (cid: string, n: number, block: number, overrides: Record<string, unknown> = {}) => ({
+  collectionId: cid,
+  tx: INDEX_TX(n),
+  logIndex: 3,
+  block,
+  blockTime: blockSeconds(block),
+  recipient: HOLDER(1),
+  vault: null,
+  groupId: 0,
+  amount: 1,
+  firstTokenId: 1,
+  ...overrides,
+})
+
+const ownerRecord = (cid: string, tokenId: number, owner: string, block: number, logIndex = 0) => ({
+  collectionId: cid,
+  tokenId,
+  owner,
+  block,
+  logIndex,
+})
+
+/** A mints row as a client would insert it. */
+const mintRecordRow = (cid: string) => ({
+  log_index: 0,
+  collection_id: cid,
+  block: 1,
+  block_time: blockTime(1),
+  recipient: HOLDER(1),
+  group_id: 0,
+  amount: 1,
+  first_token_id: 1,
+})
+
+async function artIndexer(A: Creator, B: Creator): Promise<void> {
+  const payer = A.account.address.toLowerCase()
+  // Two collections recorded as deployed on 31337 as 9k records one, a third on Base, and a draft.
+  const deployedOn = async (tag: number, n: number, chainId: number) => {
+    const { cid } = await renderedFixture(A, payer, tag)
+    const recorded = await callArt(
+      admin,
+      'collection_record_deploy',
+      recordArgs(A.userId, cid, payer, n, { p_chain_id: chainId }),
+    )
+    if (recorded.error) throw new Error(`setup: record: ${describe(recorded.error)}`)
+    return cid
+  }
+  const first = await deployedOn(191, 16, 31337)
+  const second = await deployedOn(192, 17, 31337)
+  const onBase = await deployedOn(193, 18, 8453)
+  const draft = await insertCollection(A.client)
+  if (!draft.row) throw new Error(`setup: ${describe(draft.error)}`)
+  const draftId = draft.row.id
+  const indexer = (client: SupabaseClient, fn: string, args: Record<string, unknown>) =>
+    callArt(client, fn, args)
+
+  await check(
+    "indexer functions: a signed-out caller and the owner's session cannot execute indexer_targets, indexer_start, indexer_record or indexer_summaries",
+    async () => {
+      const problems: string[] = []
+      for (const [label, client] of [
+        ['anon', anon],
+        ['owner', A.client],
+      ] as const)
+        for (const [fn, args] of [
+          ['indexer_targets', { p_chain_id: 31337 }],
+          ['indexer_start', { p_collection_id: first, p_from_block: 100 }],
+          ['indexer_record', recordWrite([first], 100, 101, {})],
+          ['indexer_summaries', { p_chain_id: 31337 }],
+        ] as const) {
+          const { error } = await indexer(client, fn, args)
+          const problem = expectError(error, PERMISSION)
+          if (problem) problems.push(`${label} ${fn}: ${problem}`)
+        }
+      if (problems.length) return problems.join('; ')
+      return (await cursorRow(first)) === null ? null : 'a cursor was written'
+    },
+  )
+
+  await check(
+    "indexer_targets: the service role reads the chain's deployed collections with their contract, deploy transaction and cursor, and no draft or collection of another chain",
+    async () => {
+      const { data, error } = await indexer(admin, 'indexer_targets', { p_chain_id: 31337 })
+      if (error) return describe(error)
+      const targets = data as Record<string, unknown>[]
+      const ids = targets.map((target) => target.collectionId)
+      const want = (cid: string, n: number) => ({
+        collectionId: cid,
+        contract: ADDRESS40(n),
+        deployTx: `0x${HEX64(2000 + n)}`,
+        fromBlock: null,
+        indexedBlock: null,
+        syncedAt: null,
+      })
+      const problems: string[] = []
+      for (const [cid, n] of [
+        [first, 16],
+        [second, 17],
+      ] as const) {
+        const target = targets.find((entry) => entry.collectionId === cid)
+        if (sortedJson(target) !== sortedJson(want(cid, n))) problems.push(`target ${JSON.stringify(target)}`)
+      }
+      if (ids.indexOf(first) > ids.indexOf(second)) problems.push('not in deploy order')
+      if (ids.includes(draftId) || ids.includes(onBase))
+        problems.push('a draft or a Base collection is listed')
+      const base = await indexer(admin, 'indexer_targets', { p_chain_id: 8453 })
+      const baseIds = ((base.data ?? []) as Record<string, unknown>[]).map((target) => target.collectionId)
+      if (!baseIds.includes(onBase)) problems.push('Base does not list its collection')
+      return problems.length ? problems.join('; ') : null
+    },
+  )
+
+  await check(
+    'indexer_start: the cursor starts at the deploy block, indexed one below it, not synced, with 0 holders; a second start keeps the first; a collection without a deployment is refused',
+    async () => {
+      const started = await indexer(admin, 'indexer_start', { p_collection_id: first, p_from_block: 100 })
+      if (started.error) return `start: ${describe(started.error)}`
+      const want = {
+        collectionId: first,
+        contract: ADDRESS40(16),
+        deployTx: `0x${HEX64(2016)}`,
+        fromBlock: 100,
+        indexedBlock: 99,
+        syncedAt: null,
+      }
+      if (sortedJson(started.data) !== sortedJson(want)) return `answer ${JSON.stringify(started.data)}`
+      const again = await indexer(admin, 'indexer_start', { p_collection_id: first, p_from_block: 150 })
+      if (again.error || sortedJson(again.data) !== sortedJson(want))
+        return `second start: ${again.error ? describe(again.error) : JSON.stringify(again.data)}`
+      const row = await cursorRow(first)
+      const kept =
+        row?.chain_id === 31337 &&
+        row.contract === ADDRESS40(16) &&
+        row.from_block === 100 &&
+        row.indexed_block === 99 &&
+        row.synced_at === null &&
+        row.holders === 0
+      if (!kept) return `cursor ${JSON.stringify(row)}`
+      const refused = await indexer(admin, 'indexer_start', { p_collection_id: draftId, p_from_block: 1 })
+      return expectSentence(refused.error, CHECK, NOT_DEPLOYED_SENTENCE)
+    },
+  )
+  for (const [cid, block] of [
+    [second, 100],
+    [onBase, 100],
+  ] as const) {
+    const started = await indexer(admin, 'indexer_start', { p_collection_id: cid, p_from_block: block })
+    if (started.error) throw new Error(`setup: start: ${describe(started.error)}`)
+  }
+
+  // Two mints (the second delegated), the six owners they and an airdrop leave, the airdrop with its two runs and
+  // a withdrawal, from block 100 to 120.
+  const firstWrite = recordWrite(
+    [first],
+    100,
+    120,
+    {
+      mints: [
+        mintRecord(first, 1, 110, { amount: 2, firstTokenId: 1 }),
+        mintRecord(first, 2, 115, {
+          logIndex: 2,
+          recipient: HOLDER(2),
+          vault: HOLDER(9),
+          groupId: 1,
+          firstTokenId: 3,
+        }),
+      ],
+      owners: [
+        ownerRecord(first, 1, HOLDER(1), 110, 1),
+        ownerRecord(first, 2, HOLDER(1), 110, 2),
+        ownerRecord(first, 3, HOLDER(2), 115, 1),
+        ownerRecord(first, 4, HOLDER(3), 118, 0),
+        ownerRecord(first, 5, HOLDER(3), 118, 1),
+        ownerRecord(first, 6, HOLDER(4), 118, 2),
+      ],
+      airdrops: [
+        {
+          collectionId: first,
+          tx: INDEX_TX(3),
+          block: 118,
+          blockTime: blockSeconds(118),
+          kind: 'airdrop',
+          recipients: 2,
+          tokens: 3,
+          feePaidWei: '150000000000000',
+          firstTokenId: 4,
+          lastTokenId: 6,
+          runs: [
+            { recipient: HOLDER(3), tokens: 2, firstTokenId: 4 },
+            { recipient: HOLDER(4), tokens: 1, firstTokenId: 6 },
+          ],
+        },
+      ],
+      withdrawals: [
+        {
+          collectionId: first,
+          tx: INDEX_TX(4),
+          block: 119,
+          payoutAddress: payer,
+          amountWei: '2000000000000000',
+        },
+      ],
+    },
+    { p_synced_at: blockTime(120) },
+  )
+  const firstAnswer = {
+    [first]: {
+      collectionId: first,
+      contract: ADDRESS40(16),
+      holders: 4,
+      syncedAt: blockSeconds(120),
+      recentMints: [
+        {
+          tx: INDEX_TX(2),
+          recipient: HOLDER(2),
+          groupId: 1,
+          amount: 1,
+          firstTokenId: 3,
+          blockTime: blockSeconds(115),
+        },
+        {
+          tx: INDEX_TX(1),
+          recipient: HOLDER(1),
+          groupId: 0,
+          amount: 2,
+          firstTokenId: 1,
+          blockTime: blockSeconds(110),
+        },
+      ],
+    },
+  }
+
+  await check(
+    "indexer_record: mints, owners, an airdrop with its recipients and a withdrawal are recorded, the cursor moves to the range's end with its synced time, and the answer carries the holders and the mints newest first",
+    async () => {
+      const written = await indexer(admin, 'indexer_record', firstWrite)
+      if (written.error) return `write: ${describe(written.error)}`
+      if (sortedJson(written.data) !== sortedJson(firstAnswer))
+        return `answer ${JSON.stringify(written.data)}`
+      const problems: string[] = []
+      const mints = await admin
+        .from('mints')
+        .select('tx_hash, log_index, block, block_time, recipient, vault, group_id, amount, first_token_id')
+        .eq('collection_id', first)
+        .order('block')
+      const delegated = mints.data?.[1]
+      if (
+        mints.error ||
+        mints.data.length !== 2 ||
+        delegated?.vault !== HOLDER(9) ||
+        delegated.recipient !== HOLDER(2) ||
+        !sameTime(delegated.block_time, blockTime(115))
+      )
+        problems.push(`mints ${mints.error ? describe(mints.error as DbError) : JSON.stringify(mints.data)}`)
+      if ((await countRows('token_owners', 'collection_id', first)) !== 6) problems.push('not six owners')
+      const drops = await airdropRows(first)
+      if (drops.length !== 1 || drops[0]?.kind !== 'airdrop' || drops[0].fee_paid_wei !== '150000000000000')
+        problems.push(`airdrops ${JSON.stringify(drops)}`)
+      if ((await countRows('airdrop_recipients', 'tx_hash', INDEX_TX(3))) !== 2) problems.push('not two runs')
+      const withdrawals = await withdrawalRows(first)
+      if (withdrawals.length !== 1 || withdrawals[0]?.amount_wei !== '2000000000000000')
+        problems.push(`withdrawals ${JSON.stringify(withdrawals)}`)
+      const row = await cursorRow(first)
+      if (row?.indexed_block !== 120 || !sameTime(row.synced_at, blockTime(120)) || row.holders !== 4)
+        problems.push(`cursor ${JSON.stringify(row)}`)
+      return problems.length ? problems.join('; ') : null
+    },
+  )
+
+  await check(
+    'indexer_record: the same write again changes no row and answers the same; a range that would skip blocks, a collection of another chain and a record naming a collection outside the write are refused',
+    async () => {
+      const before = await indexedRows(first)
+      const again = await indexer(admin, 'indexer_record', firstWrite)
+      if (again.error) return `again: ${describe(again.error)}`
+      if (sortedJson(again.data) !== sortedJson(firstAnswer)) return `answer ${JSON.stringify(again.data)}`
+      if ((await indexedRows(first)) !== before) return 'the same write changed a row'
+      const refused = refusedAll([
+        [
+          'a gap',
+          (await indexer(admin, 'indexer_record', recordWrite([first], 122, 125, {}))).error,
+          CHECK,
+          GAP_SENTENCE,
+        ],
+        [
+          'a range ending before it starts',
+          (await indexer(admin, 'indexer_record', recordWrite([first], 121, 120, {}))).error,
+          CHECK,
+          GAP_SENTENCE,
+        ],
+        [
+          'a collection of another chain',
+          (await indexer(admin, 'indexer_record', recordWrite([onBase], 101, 102, {}))).error,
+          CHECK,
+          CHAIN_SENTENCE,
+        ],
+        [
+          'a record outside the write',
+          (
+            await indexer(
+              admin,
+              'indexer_record',
+              recordWrite([first], 121, 122, { mints: [mintRecord(second, 5, 121)] }),
+            )
+          ).error,
+          CHECK,
+          OUTSIDE_SENTENCE,
+        ],
+      ])
+      if (refused) return refused
+      return (await indexedRows(first)) === before ? null : 'a refused write changed a row'
+    },
+  )
+
+  await check(
+    'token_owners: an older transfer of a token is ignored and a newer one wins; holders count distinct owners without the dead address',
+    async () => {
+      const written = await indexer(
+        admin,
+        'indexer_record',
+        recordWrite([first], 121, 130, {
+          owners: [
+            ownerRecord(first, 1, HOLDER(5), 125),
+            ownerRecord(first, 2, HOLDER(6), 105),
+            ownerRecord(first, 7, DEAD_ADDRESS, 126),
+          ],
+        }),
+      )
+      if (written.error) return `write: ${describe(written.error)}`
+      const { data, error } = await admin
+        .from('token_owners')
+        .select('token_id, owner')
+        .eq('collection_id', first)
+        .order('token_id')
+      if (error) return describe(error as DbError)
+      const owners = data.map((row) => `${row.token_id}:${row.owner}`).join(' ')
+      const want = [HOLDER(5), HOLDER(1), HOLDER(2), HOLDER(3), HOLDER(3), HOLDER(4), DEAD_ADDRESS]
+        .map((owner, index) => `${index + 1}:${owner}`)
+        .join(' ')
+      if (owners !== want) return `owners ${owners}`
+      const row = await cursorRow(first)
+      // Five holders: the dead address is not one, and a write without a synced time keeps the last.
+      return row?.holders === 5 && row.indexed_block === 130 && sameTime(row.synced_at, blockTime(120))
+        ? null
+        : `cursor ${JSON.stringify(row)}`
+    },
+  )
+
+  await check(
+    'airdrops: a row the indexer writes has no sender and its block time; a row airdrop_record wrote keeps its sender and gains its block time; a transaction with two airdrops keeps the first and both recipient rows',
+    async () => {
+      const proven = await callArt(
+        admin,
+        'airdrop_record',
+        dropArgs(A.userId, first, INDEX_TX(5), payer, {
+          p_recipients: 1,
+          p_tokens: 1,
+          p_fee_paid_wei: '50000000000000',
+          p_first_token_id: 8,
+          p_last_token_id: 8,
+          p_block: 135,
+        }),
+      )
+      if (proven.error) return `airdrop_record: ${describe(proven.error)}`
+      const written = await indexer(
+        admin,
+        'indexer_record',
+        recordWrite([first], 131, 140, {
+          owners: [ownerRecord(first, 8, HOLDER(6), 135)],
+          airdrops: [
+            {
+              collectionId: first,
+              tx: INDEX_TX(5),
+              block: 135,
+              blockTime: blockSeconds(135),
+              kind: 'airdrop',
+              recipients: 1,
+              tokens: 1,
+              feePaidWei: '50000000000000',
+              firstTokenId: 8,
+              lastTokenId: 8,
+              runs: [{ recipient: HOLDER(6), tokens: 1, firstTokenId: 8 }],
+            },
+          ],
+        }),
+      )
+      if (written.error) return `write: ${describe(written.error)}`
+      const { data, error } = await admin
+        .from('airdrops')
+        .select('tx_hash, sent_by, block_time')
+        .eq('collection_id', first)
+        .order('block')
+      if (error) return describe(error as DbError)
+      const [read, proved] = data
+      if (
+        read?.tx_hash !== INDEX_TX(3) ||
+        read.sent_by !== null ||
+        !sameTime(read.block_time, blockTime(118))
+      )
+        return `the indexer's row ${JSON.stringify(read)}`
+      if (proved?.sent_by !== payer || !sameTime(proved.block_time, blockTime(135)))
+        return `airdrop_record's row ${JSON.stringify(proved)}`
+      if ((await countRows('airdrop_recipients', 'tx_hash', INDEX_TX(5))) !== 1) return 'no recipient row'
+      // A contract owner batching two airdropNFTs calls in one transaction (Review Focus 3): one airdrops row,
+      // the first, and every recipient row.
+      const twice = (firstTokenId: number, recipient: string) => ({
+        collectionId: first,
+        tx: INDEX_TX(7),
+        block: 141,
+        blockTime: blockSeconds(141),
+        kind: 'airdrop',
+        recipients: 1,
+        tokens: 1,
+        feePaidWei: '50000000000000',
+        firstTokenId,
+        lastTokenId: firstTokenId,
+        runs: [{ recipient, tokens: 1, firstTokenId }],
+      })
+      const batched = await indexer(
+        admin,
+        'indexer_record',
+        recordWrite([first], 141, 145, {
+          owners: [ownerRecord(first, 9, HOLDER(7), 141, 1), ownerRecord(first, 10, HOLDER(8), 141, 3)],
+          airdrops: [twice(9, HOLDER(7)), twice(10, HOLDER(8))],
+        }),
+      )
+      if (batched.error) return `two airdrops in one transaction: ${describe(batched.error)}`
+      const kept = await admin.from('airdrops').select('first_token_id').eq('tx_hash', INDEX_TX(7))
+      if (kept.error || JSON.stringify(kept.data) !== JSON.stringify([{ first_token_id: 9 }]))
+        return `two airdrops kept ${kept.error ? describe(kept.error as DbError) : JSON.stringify(kept.data)}`
+      return (await countRows('airdrop_recipients', 'tx_hash', INDEX_TX(7))) === 2
+        ? null
+        : 'not both recipient rows'
+    },
+  )
+
+  await check(
+    'indexer_cursors, mints and airdrop_recipients: the owner reads its rows; B reads nothing; no client inserts, updates or deletes them',
+    async () => {
+      const before = await indexedRows(first)
+      const problems: string[] = []
+      for (const [table, rows, patch, row] of [
+        [
+          'indexer_cursors',
+          1,
+          { holders: 9 },
+          {
+            collection_id: draftId,
+            chain_id: 31337,
+            contract: ADDRESS40(0x1d),
+            from_block: 1,
+            indexed_block: 0,
+          },
+        ],
+        ['mints', 2, { amount: 9 }, { ...mintRecordRow(draftId), tx_hash: INDEX_TX(6) }],
+        [
+          'airdrop_recipients',
+          5,
+          { tokens: 9 },
+          {
+            tx_hash: INDEX_TX(3),
+            first_token_id: 9,
+            collection_id: first,
+            recipient: HOLDER(7),
+            tokens: 1,
+            block: 118,
+            block_time: blockTime(118),
+          },
+        ],
+      ] as const) {
+        const own = await A.client.from(table).select().eq('collection_id', first)
+        if (own.error || own.data.length !== rows)
+          problems.push(`A reads ${table}: ${own.data?.length ?? describe(own.error as DbError)}`)
+        const other = await B.client.from(table).select().eq('collection_id', first)
+        const unseen = expectNothing(other.error as DbError, other.data)
+        if (unseen) problems.push(`B reads ${table}: ${unseen}`)
+        for (const [label, result] of [
+          ['inserts', await A.client.from(table).insert(row).select()],
+          ['updates', await A.client.from(table).update(patch).eq('collection_id', first).select()],
+          ['deletes', await A.client.from(table).delete().eq('collection_id', first).select()],
+        ] as const) {
+          const refused = expectError(result.error as DbError, PERMISSION, result.data)
+          if (refused) problems.push(`A ${label} ${table}: ${refused}`)
+        }
+      }
+      if (problems.length) return problems.join('; ')
+      return (await indexedRows(first)) === before ? null : 'a client changed a row'
+    },
+  )
+
+  await check('token_owners: neither the owner nor B reads or writes it', async () => {
+    const before = await indexedRows(first)
+    const problems: string[] = []
+    for (const [label, client] of [
+      ['owner', A.client],
+      ['B', B.client],
+    ] as const) {
+      const read = await client.from('token_owners').select().eq('collection_id', first)
+      const unseen = expectNothing(read.error as DbError, read.data)
+      if (unseen) problems.push(`${label} reads: ${unseen}`)
+      for (const [what, result] of [
+        [
+          'inserts',
+          await client
+            .from('token_owners')
+            .insert({ collection_id: first, token_id: 99, owner: HOLDER(8), block: 1, log_index: 0 })
+            .select(),
+        ],
+        [
+          'updates',
+          await client
+            .from('token_owners')
+            .update({ owner: HOLDER(8) })
+            .eq('collection_id', first)
+            .select(),
+        ],
+        ['deletes', await client.from('token_owners').delete().eq('collection_id', first).select()],
+      ] as const) {
+        const refused = expectError(result.error as DbError, PERMISSION, result.data)
+        if (refused) problems.push(`${label} ${what}: ${refused}`)
+      }
+    }
+    if (problems.length) return problems.join('; ')
+    return (await indexedRows(first)) === before ? null : 'a client changed an owner'
+  })
+
+  await check(
+    'indexer_summaries: every cursor of the chain with its holders, synced time and at most 10 mints, newest first',
+    async () => {
+      // Twelve mints of one token each on the second collection, all to one holder, from block 101 to 112.
+      const mints = Array.from({ length: 12 }, (_, index) =>
+        mintRecord(second, 20 + index, 101 + index, { recipient: HOLDER(7), firstTokenId: index + 1 }),
+      )
+      const owners = mints.map((mint) => ownerRecord(second, mint.firstTokenId, HOLDER(7), mint.block, 1))
+      const written = await indexer(
+        admin,
+        'indexer_record',
+        recordWrite([second], 100, 112, { mints, owners }, { p_synced_at: blockTime(112) }),
+      )
+      if (written.error) return `write: ${describe(written.error)}`
+      const { data, error } = await indexer(admin, 'indexer_summaries', { p_chain_id: 31337 })
+      if (error) return describe(error)
+      const summaries = data as {
+        collectionId: string
+        holders: number
+        syncedAt: number | null
+        recentMints: { tx: string }[]
+      }[]
+      const cursors = await admin.from('indexer_cursors').select('collection_id').eq('chain_id', 31337)
+      if (cursors.error) return describe(cursors.error as DbError)
+      const listed = summaries.map((entry) => entry.collectionId).sort()
+      const all = cursors.data.map((row) => row.collection_id as string).sort()
+      if (JSON.stringify(listed) !== JSON.stringify(all))
+        return `listed ${listed.length} of ${all.length} cursors`
+      if (listed.includes(onBase)) return 'the Base cursor is listed'
+      const one = summaries.find((entry) => entry.collectionId === first)
+      if (one?.holders !== 8 || one.syncedAt !== blockSeconds(120) || one.recentMints.length !== 2)
+        return `first ${JSON.stringify(one)}`
+      const two = summaries.find((entry) => entry.collectionId === second)
+      const newest = mints
+        .slice(2)
+        .reverse()
+        .map((mint) => mint.tx)
+      return two?.holders === 1 &&
+        two.syncedAt === blockSeconds(112) &&
+        JSON.stringify(two.recentMints.map((mint) => mint.tx)) === JSON.stringify(newest)
+        ? null
+        : `second ${JSON.stringify(two)}`
     },
   )
 }
