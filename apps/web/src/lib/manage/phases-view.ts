@@ -1,6 +1,6 @@
 import type { Address } from 'viem'
 import type { MintGroup } from '@/lib/demo/types'
-import type { ChainGroup, ChainState, PhaseRowCopy, PhasesView } from './phases-types'
+import type { ChainGroup, ChainState, PhaseRow, PhaseRowCopy, PhasesView } from './phases-types'
 
 /**
  * The Phases view, pure (docs/specs/2026-10-15-phases.md, section 6.2): the contract's groups joined with
@@ -21,7 +21,7 @@ export const TIMESTAMP_MAX = 253_402_300_799
 const kindOf = (id: number): MintGroup['kind'] => (id === 0 ? 'public' : 'whitelist')
 
 /** Rows in the creator's order: by position, then by id; a row parked inside a move sorts last. */
-function byPosition(a: PhaseRowCopy, b: PhaseRowCopy): number {
+function byPosition(a: PhaseRow, b: PhaseRow): number {
   const left = a.position ?? Number.MAX_SAFE_INTEGER
   const right = b.position ?? Number.MAX_SAFE_INTEGER
   return left - right || a.onchain_id - b.onchain_id
@@ -44,9 +44,9 @@ function fromChain(group: ChainGroup): Omit<MintGroup, 'name' | 'description' | 
 /**
  * The chain's groups with their rows: rows by position, then id, each group taking its row's name,
  * description and visibility; the groups without a row follow by id as "Group N" (`named: false`); a row
- * the chain does not list is left out.
+ * the chain does not list is left out. The mint page passes its document's rows, which carry these fields alone.
  */
-export function joinPhases(state: Pick<ChainState, 'groups'>, rows: PhaseRowCopy[]): MintGroup[] {
+export function joinPhases(state: Pick<ChainState, 'groups'>, rows: readonly PhaseRow[]): MintGroup[] {
   const onChain = new Map(state.groups.map((group) => [group.id, group]))
   const named = [...rows].sort(byPosition).flatMap((row): MintGroup[] => {
     const group = onChain.get(row.onchain_id)

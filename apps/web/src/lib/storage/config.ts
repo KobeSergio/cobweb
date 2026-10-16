@@ -29,6 +29,14 @@ export function renderBucket(): string {
   return bucket
 }
 
+/**
+ * The public bucket of the mint page's media (`MINT_PAGE_S3_BUCKET`, default `mint-page`), behind the same
+ * endpoint and credentials as the art bucket (docs/specs/2026-10-16-mint-page-live-data.md, section 4.4).
+ */
+export function mintPageBucket(): string {
+  return process.env.MINT_PAGE_S3_BUCKET || 'mint-page'
+}
+
 let client: S3Client | null = null
 
 /** One S3 client for the server process. */

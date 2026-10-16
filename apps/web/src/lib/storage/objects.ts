@@ -9,14 +9,15 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { s3, storageConfig } from './config.ts'
 
-/** A PUT URL bound to the declared type and length, valid 15 minutes by default. */
+/** A PUT URL bound to the declared type and length, valid 15 minutes by default, on the art bucket unless another is named. */
 export async function presignPut(
   key: string,
   mime: string,
   bytes: number,
   expiresSeconds = 900,
+  options: { bucket?: string } = {},
 ): Promise<string> {
-  const { bucket } = storageConfig()
+  const bucket = options.bucket ?? storageConfig().bucket
   const command = new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: mime, ContentLength: bytes })
   // Signing content-type makes the type part of the URL, next to content-length and host.
   return getSignedUrl(s3(), command, {
@@ -36,12 +37,15 @@ export async function presignGet(
 }
 
 /**
- * Size and type of a stored object. Null means "no object at this key". A missing bucket also
- * HEADs as 404, so a wrongly configured bucket looks like a missing object; callers that treat
- * null as "not uploaded yet" should know that.
+ * Size and type of a stored object, on the art bucket unless another is named. Null means "no object at
+ * this key". A missing bucket also HEADs as 404, so a wrongly configured bucket looks like a missing object;
+ * callers that treat null as "not uploaded yet" should know that.
  */
-export async function headObject(key: string): Promise<{ bytes: number; mime: string | null } | null> {
-  const { bucket } = storageConfig()
+export async function headObject(
+  key: string,
+  options: { bucket?: string } = {},
+): Promise<{ bytes: number; mime: string | null } | null> {
+  const bucket = options.bucket ?? storageConfig().bucket
   try {
     const head = await s3().send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
     return { bytes: Number(head.ContentLength ?? 0), mime: head.ContentType ?? null }
@@ -52,9 +56,10 @@ export async function headObject(key: string): Promise<{ bytes: number; mime: st
   }
 }
 
-export async function deleteObjects(keys: string[]): Promise<void> {
+/** Deletes the objects, on the art bucket unless another is named. */
+export async function deleteObjects(keys: string[], options: { bucket?: string } = {}): Promise<void> {
   if (keys.length === 0) return
-  const { bucket } = storageConfig()
+  const bucket = options.bucket ?? storageConfig().bucket
   for (let i = 0; i < keys.length; i += 1000) {
     const batch = keys.slice(i, i + 1000)
     const response = await s3().send(

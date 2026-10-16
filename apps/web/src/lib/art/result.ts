@@ -146,3 +146,13 @@ export const WITHDRAWAL_TIMED_OUT =
 export const NOT_OWNER = (owner: string) =>
   `This wallet is not the contract's owner. Changes on chain need ${owner}.`
 export const IPFS_LINK_INVALID = 'Enter a full ipfs:// link with its CID.'
+
+// The mint page (docs/specs/2026-10-16-mint-page-live-data.md, section 6.2). The database raises PAGE_NOT_PUBLIC and
+// RANKS_REFUSED as they are.
+export const PAGE_NOT_PUBLIC = 'A mint page goes public once its contract is deployed and it has a link.'
+export const RANKS_REFUSED = 'The rendered set could not be ranked.'
+// Said by the server or the screen (the database does not raise these).
+export const PAGE_LINK_FIRST = 'Set a link first. The page can go public once it has one.'
+export const PAGE_FIELDS = 'Some fields could not be saved. Check them and try again.'
+export const PAGE_FILE_MISSING = 'A file did not finish uploading. Choose it again, then save.'
+export const PAGE_UPLOAD_FAILED = 'A file could not be uploaded. Try again.'

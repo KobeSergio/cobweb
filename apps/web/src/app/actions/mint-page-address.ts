@@ -1,9 +1,10 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, updateTag } from 'next/cache'
 import { z } from 'zod'
 import { getVerifiedUser } from '@/lib/auth'
 import { slugSchema } from '@/lib/collections'
+import { mintPageTag } from '@/lib/mint/page-urls'
 import { createClient } from '@/lib/supabase/server'
 
 export type ReserveSlugResult =
@@ -18,7 +19,8 @@ const inputSchema = z.object({
  * Reserves a mint page link for a collection the signed-in creator owns. Before deploy the
  * reservation lasts 3 days; on a deployed collection without a link it is kept at once.
  * The database function `reserve_slug` checks ownership again, takes over a lapsed reservation and
- * (until a migration allows it) refuses to change the link of a deployed collection.
+ * (until a migration allows it) refuses to change the link of a deployed collection. A link saved on a deployed
+ * collection expires its mint page's tag, since a not-found answer may be cached for it.
  */
 export async function reserveSlug(collectionId: string, slug: string): Promise<ReserveSlugResult> {
   const user = await getVerifiedUser()
@@ -36,7 +38,7 @@ export async function reserveSlug(collectionId: string, slug: string): Promise<R
   const supabase = await createClient()
   const { data: current } = await supabase
     .from('collections')
-    .select('id, owner_id')
+    .select('id, owner_id, status')
     .eq('id', parsed.data.collectionId)
     .maybeSingle()
   if (!current || current.owner_id !== user.id)
@@ -61,6 +63,8 @@ export async function reserveSlug(collectionId: string, slug: string): Promise<R
     .eq('id', parsed.data.collectionId)
     .maybeSingle()
 
+  const savedSlug = saved?.slug ?? parsed.data.slug
+  if (current.status === 'deployed') updateTag(mintPageTag(savedSlug))
   revalidatePath('/collections/[id]', 'layout')
-  return { ok: true, slug: saved?.slug ?? parsed.data.slug, reservedAt: saved?.slug_reserved_at ?? null }
+  return { ok: true, slug: savedSlug, reservedAt: saved?.slug_reserved_at ?? null }
 }

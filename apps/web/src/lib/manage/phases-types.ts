@@ -41,6 +41,12 @@ export type PhaseAdd = { onchainId: number; name: string; description: string; v
 /** What a confirm must find in the receipt, and the add's row to write when it does. */
 export type PhaseTxExpected = { event: ExpectedEvent; add?: PhaseAdd }
 
+/**
+ * The part of a `mint_groups` row the join reads: the mint page's document carries these alone
+ * (docs/specs/2026-10-16-mint-page-live-data.md, section 6.1).
+ */
+export type PhaseRow = Pick<PhaseRowCopy, 'onchain_id' | 'name' | 'description' | 'visible' | 'position'>
+
 /** A `mint_groups` row as the view reads it: numeric columns as text, so no wei is lost. */
 export type PhaseRowCopy = {
   onchain_id: number

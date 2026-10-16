@@ -2,6 +2,7 @@
 
 import { cache } from 'react'
 import { manageRecordError } from '@/lib/art/db-error'
+import { errorSummary } from '@/lib/art/lock-core'
 import { txHash as txHashSchema } from '@/lib/art/lock-schemas'
 import type { ActionResult } from '@/lib/art/result'
 import { parse } from '@/lib/art/schemas'
@@ -10,12 +11,15 @@ import { parseSentCall } from '@/lib/manage/phase-schemas'
 import { phasesWrite } from '@/lib/manage/phases-write'
 import { confirmSettingsTxCore, readSettingsState, settingsViewCore } from '@/lib/manage/settings-core'
 import type { SettingsView } from '@/lib/manage/settings-types'
+import { ensureTokenRanksCore } from '@/lib/mint/ranks-core'
 
 /**
  * Settings' server actions (docs/specs/2026-10-15-airdrop-settings.md, section 6.5). Each checks its input first,
  * then runs through `phasesWrite`, which checks the session and the ownership (CLAUDE.md rule 4), with the record
  * functions' sentences for a database refusal. A confirm takes the hash and the call the browser sent, checked
- * against the Settings functions; the server proves the change from its receipt and reads the chain again.
+ * against the Settings functions; the server proves the change from its receipt and reads the chain again. A
+ * confirmed reveal records the rendered set's ranks for the mint page (docs/specs/2026-10-16-mint-page-live-data.md,
+ * section 6.3).
  */
 
 /** One chain read per request, however many times a page asks (React's cache). */
@@ -36,9 +40,18 @@ export async function confirmSettingsTx(
   if (!hash.ok) return hash
   const call = parseSentCall(sent, SETTINGS_FUNCTIONS)
   if (!call.ok) return call
+  const confirmed = callOf(call.data)
   return phasesWrite(
     collectionId,
-    (ctx) => confirmSettingsTxCore(ctx, hash.data, callOf(call.data)),
+    async (ctx) => {
+      const outcome = await confirmSettingsTxCore(ctx, hash.data, confirmed)
+      // A failure is logged and the confirm's answer is unchanged.
+      if ('data' in outcome && confirmed.functionName === 'setBaseURI' && outcome.data.pointer === 'revealed')
+        await ensureTokenRanksCore(ctx).catch((error: unknown) =>
+          console.error(`The ranks of ${ctx.collection.id} could not be recorded: ${errorSummary(error)}`),
+        )
+      return outcome
+    },
     manageRecordError,
   )
 }
