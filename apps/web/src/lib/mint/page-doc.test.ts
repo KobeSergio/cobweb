@@ -233,6 +233,60 @@ describe('pageSectionsOf', () => {
     expect(pageSectionsOf({}, media)).toEqual({})
     expect(pageSectionsOf('not an object', media)).toEqual({})
   })
+
+  it('leaves off a team whose member links to javascript:, and drops a field no schema names (final fix wave M5)', () => {
+    const member = full.team.members[0]!
+    const scripted = pageSectionsOf(
+      { ...full, team: { enabled: true, members: [{ ...member, x: 'javascript:alert(1)' }] } },
+      media,
+    )
+    expect(scripted.team).toBeUndefined()
+    expect(Object.keys(scripted).sort()).toEqual(['carousel', 'faq', 'music', 'roadmap'])
+    const extra = pageSectionsOf(
+      {
+        ...full,
+        team: { enabled: true, members: [{ ...member, html: '<img src=x onerror=alert(1)>' }] },
+        faq: { ...full.faq, onclick: 'alert(1)' },
+      },
+      media,
+    )
+    expect(extra.team?.[0]).toEqual({
+      id: 'team-1',
+      name: 'Mara Quill',
+      role: 'Artist',
+      bio: 'Draws every owl by hand.',
+      imageUrl: media(key(1)),
+      x: 'https://x.com/mara',
+    })
+    expect(extra.faq).toEqual(full.faq.items)
+  })
+
+  it('leaves off a section that names a key of another shape, such as a URL (final fix wave M5)', () => {
+    const sections = pageSectionsOf(
+      {
+        ...full,
+        team: {
+          enabled: true,
+          members: [{ ...full.team.members[0]!, imageKey: 'https://evil.example/a.png' }],
+        },
+        music: { enabled: true, key: 'https://evil.example/theme.mp3', fileName: 'theme.mp3' },
+        carousel: {
+          enabled: true,
+          items: [
+            {
+              id: 's',
+              kind: 'upload',
+              key: `${COLLECTION}/layers/a.png`,
+              fileName: 'a.png',
+              mediaType: 'image',
+            },
+          ],
+        },
+      },
+      media,
+    )
+    expect(Object.keys(sections).sort()).toEqual(['faq', 'roadmap'])
+  })
 })
 
 describe('pageDocSchema and pageStaticOf (section 4.3)', () => {
@@ -242,6 +296,25 @@ describe('pageDocSchema and pageStaticOf (section 4.3)', () => {
     const { phases: _phases, ...withoutPhases } = doc
     void _phases
     expect(pageDocSchema.safeParse(withoutPhases).success).toBe(false)
+  })
+
+  it('reads a link or a page key that fails its check as none, so the page leaves it off (final fix wave M5)', () => {
+    const parsed = pageDocSchema.parse({
+      ...doc,
+      media: {
+        banner: 'https://evil.example/banner.png',
+        avatar: `${COLLECTION}/${'0'.repeat(64)}.svg`,
+        aboutBanner: key(5, 'jpg'),
+      },
+      socials: {
+        website: 'javascript:alert(1)',
+        x: 'http://x.com/owls',
+        discord: 'https://evil.example/owls',
+        telegram: 'https://t.me/owls',
+      },
+    })
+    expect(parsed.media).toEqual({ banner: null, avatar: null, aboutBanner: key(5, 'jpg') })
+    expect(parsed.socials).toEqual({ website: null, x: null, discord: null, telegram: 'https://t.me/owls' })
   })
 
   it('builds the page: the chain, the checksummed contract, URLs for the keys, the links that are set and the rows', () => {

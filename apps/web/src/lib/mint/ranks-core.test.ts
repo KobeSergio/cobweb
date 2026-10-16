@@ -15,12 +15,16 @@ describe('ranksOf (docs/specs/2026-10-16-mint-page-live-data.md, section 6.3)', 
     expect(ranks).toEqual([...ranked].sort((a, b) => a.id - b.id).map((token) => token.rank))
   })
 
-  it('is a permutation of 1 to the count, whatever order the list is stored in', () => {
-    const reversed = [...DEMO_TOKENS].reverse().slice(0, 40)
-    const ranks = ranksOf(
-      reversed.map(({ id, dna }) => ({ id: id - 737, dna })),
-      DEMO_LAYERS,
+  it('ranks a list stored in another order the same, as a permutation of 1 to the count (final fix wave M5)', () => {
+    // The set's last 40 tokens as their own set, numbered from 1 by position, whatever ids the demo set uses.
+    const tail = DEMO_TOKENS.slice(-40).map(({ dna }, index) => ({ id: index + 1, dna }))
+    const ranks = ranksOf(tail, DEMO_LAYERS)
+    expect([...ranks].sort((a, b) => a - b)).toEqual(
+      Array.from({ length: tail.length }, (_, index) => index + 1),
     )
-    expect([...ranks].sort((a, b) => a - b)).toEqual(Array.from({ length: 40 }, (_, index) => index + 1))
+    expect(ranksOf([...tail].reverse(), DEMO_LAYERS)).toEqual(ranks)
+    const byDna = [...tail].sort((a, b) => a.dna.join(' ').localeCompare(b.dna.join(' ')))
+    expect(byDna.map((token) => token.id)).not.toEqual(tail.map((token) => token.id))
+    expect(ranksOf(byDna, DEMO_LAYERS)).toEqual(ranks)
   })
 })

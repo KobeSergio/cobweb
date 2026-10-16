@@ -53,6 +53,7 @@ const mb = (bytes: number) => Math.ceil(bytes / MB)
 export function mintPageMediaProblem(slot: MediaSlot, file: FileFacts): string | null {
   const rule = MEDIA_SLOTS[slot]
   if (!rule.types.includes(file.mime)) return TYPE_SENTENCE[slot]
+  if (file.bytes < 1) return 'The file is empty.'
   const max = rule.maxBytes[file.mime] ?? 0
   if (file.bytes > max) return `${mb(file.bytes)} MB is over the ${mb(max)} MB limit.`
   if (

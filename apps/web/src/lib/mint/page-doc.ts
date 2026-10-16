@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { chainView } from '@/lib/chain/chain-view'
 import type { Socials, SupportedChain } from '@/lib/demo/types'
 import type { PhaseRow } from '@/lib/manage/phases-types'
-import { MEMBER_LINK_MAX, MEMBER_LINK_PATTERN } from './links'
+import { MEMBER_LINK_MAX, MEMBER_LINK_PATTERN, PAGE_LINK_MAX, PAGE_LINK_PATTERNS } from './links'
 
 /**
  * The public mint page's document (docs/specs/2026-10-16-mint-page-live-data.md, sections 4.1, 4.3 and 6.1),
@@ -20,6 +20,16 @@ const required = (max: number) => z.string().max(max).regex(/\S/)
 const optional = (max: number) => z.string().max(max)
 /** A team member's link: https, up to 40 characters (links.ts, shared with the tab). */
 const memberLink = z.string().max(MEMBER_LINK_MAX).regex(MEMBER_LINK_PATTERN)
+/**
+ * A media key as the mint-page bucket names it, `<collection id>/<sha256>.<ext>` (media.ts). The save checks the
+ * key is the collection's and of its slot's types, and the database checks it again; read, the shape alone keeps
+ * anything else, a URL included, from ever reaching the page.
+ */
+const mediaKey = z
+  .string()
+  .regex(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[0-9a-f]{64}\.(png|jpg|jpeg|webp|gif|mp4|mp3)$/,
+  )
 /** Every item of a list has its own id. */
 const distinctIds = (items: readonly { id: string }[]) =>
   new Set(items.map((item) => item.id)).size === items.length
@@ -68,7 +78,7 @@ export const SECTION_SCHEMAS: { [K in keyof StoredSections]: z.ZodType<StoredSec
           name: required(20),
           role: required(20),
           bio: optional(500),
-          imageKey: z.string().nullable(),
+          imageKey: mediaKey.nullable(),
           x: memberLink.optional(),
           discord: memberLink.optional(),
           telegram: memberLink.optional(),
@@ -92,7 +102,7 @@ export const SECTION_SCHEMAS: { [K in keyof StoredSections]: z.ZodType<StoredSec
       .refine(distinctIds),
   }),
   music: z
-    .object({ enabled: z.boolean(), key: z.string().nullable(), fileName: required(100).nullable() })
+    .object({ enabled: z.boolean(), key: mediaKey.nullable(), fileName: required(100).nullable() })
     .refine((music) => (music.key === null) === (music.fileName === null)),
   carousel: z.object({
     enabled: z.boolean(),
@@ -103,7 +113,7 @@ export const SECTION_SCHEMAS: { [K in keyof StoredSections]: z.ZodType<StoredSec
             .object({
               id: itemId,
               kind: z.literal('upload'),
-              key: z.string(),
+              key: mediaKey,
               fileName: required(100),
               mediaType: z.enum(['image', 'video']),
             })
@@ -169,7 +179,12 @@ export type PageDoc = {
   published: boolean
 }
 
-const nullableText = z.string().nullable()
+/**
+ * A page key or link the document carries, checked again on read as the save and the database check it: one that
+ * fails reads as none, so the page leaves that image or button off rather than showing it or failing whole.
+ */
+const pageKey = mediaKey.nullable().catch(null)
+const pageLink = (pattern: RegExp) => z.string().max(PAGE_LINK_MAX).regex(pattern).nullable().catch(null)
 
 export const pageDocSchema: z.ZodType<PageDoc> = z.object({
   slug: z.string(),
@@ -179,12 +194,12 @@ export const pageDocSchema: z.ZodType<PageDoc> = z.object({
   chainId: z.number().int(),
   contract: z.string().regex(/^0x[0-9a-f]{40}$/),
   description: z.string(),
-  media: z.object({ banner: nullableText, avatar: nullableText, aboutBanner: nullableText }),
+  media: z.object({ banner: pageKey, avatar: pageKey, aboutBanner: pageKey }),
   socials: z.object({
-    website: nullableText,
-    x: nullableText,
-    discord: nullableText,
-    telegram: nullableText,
+    website: pageLink(PAGE_LINK_PATTERNS.website),
+    x: pageLink(PAGE_LINK_PATTERNS.x),
+    discord: pageLink(PAGE_LINK_PATTERNS.discord),
+    telegram: pageLink(PAGE_LINK_PATTERNS.telegram),
   }),
   featuredTokenIds: z.array(z.number().int()),
   sections: z.unknown(),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { FileFacts } from '@/lib/storage/admission'
-import { keyBelongs, mimeOfKey, mintPageKey, mintPageMediaProblem } from './media'
+import { keyBelongs, mimeOfKey, mintPageKey, mintPageMediaProblem, type MediaSlot } from './media'
 
 const MB = 1024 * 1024
 const COLLECTION = '0a977c0b-7e53-476b-8c08-6c685315c3af'
@@ -63,6 +63,22 @@ describe('mintPageMediaProblem (docs/specs/2026-10-16-mint-page-live-data.md, se
       'The avatar must be at least 400 by 400.',
     )
     expect(mintPageMediaProblem('banner', image('image/png', MB, 100))).toBeNull()
+  })
+
+  it('refuses an empty file in every slot in words, after its type (final fix wave M5)', () => {
+    const empty: [MediaSlot, FileFacts][] = [
+      ['banner', image('image/png', 0)],
+      ['about', image('image/webp', 0)],
+      ['avatar', image('image/png', 0)],
+      ['team', image('image/gif', 0)],
+      ['slide', { mime: 'video/mp4', bytes: 0, width: null, height: null }],
+      ['music', { mime: 'audio/mpeg', bytes: 0, width: null, height: null }],
+    ]
+    for (const [slot, file] of empty)
+      expect(mintPageMediaProblem(slot, file), slot).toBe('The file is empty.')
+    expect(mintPageMediaProblem('music', { mime: 'audio/wav', bytes: 0, width: null, height: null })).toBe(
+      'Use an MP3 file.',
+    )
   })
 })
 

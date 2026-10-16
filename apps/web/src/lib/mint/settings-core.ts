@@ -5,6 +5,7 @@ import {
   NOT_DEPLOYED,
   PAGE_CHANGED_ELSEWHERE,
   PAGE_FIELDS,
+  PAGE_FILE_MISMATCH,
   PAGE_FILE_MISSING,
   PAGE_LINK_FIRST,
   PAGE_NOT_PUBLIC,
@@ -98,16 +99,23 @@ export type MintPageInput = {
 /** The most files one save can name: three page images, twelve team photos, five slides and the music. */
 export const MEDIA_ASKS_MAX = 21
 
+/**
+ * The asks a presign takes. The tab only sends files `mintPageMediaProblem` passed (an empty one among them is
+ * refused when picked), so anything else is a client that skipped it: every field reads UNSAVED, never zod's English.
+ */
 export const mediaAsksSchema: z.ZodType<MediaAsk[]> = z
   .array(
-    z.object({
-      slot: z.enum(['banner', 'avatar', 'about', 'team', 'slide', 'music']),
-      mime: z.string().max(64),
-      bytes: z.number().int().min(1),
-      width: z.number().int().min(1).nullable(),
-      height: z.number().int().min(1).nullable(),
-      contentHash: z.string().regex(/^[0-9a-f]{64}$/),
-    }),
+    z.object(
+      {
+        slot: z.enum(['banner', 'avatar', 'about', 'team', 'slide', 'music'], { error: UNSAVED }),
+        mime: z.string({ error: UNSAVED }).max(64),
+        bytes: z.number({ error: UNSAVED }).int().min(1),
+        width: z.number({ error: UNSAVED }).int().min(1).nullable(),
+        height: z.number({ error: UNSAVED }).int().min(1).nullable(),
+        contentHash: z.string({ error: UNSAVED }).regex(/^[0-9a-f]{64}$/),
+      },
+      { error: UNSAVED },
+    ),
     { error: UNSAVED },
   )
   .min(1, UNSAVED)
@@ -227,8 +235,21 @@ async function readRow(ctx: PhasesContext): Promise<PageRow | null> {
   return data
 }
 
-async function viewOf(ctx: PhasesContext, row: PageRow | null): Promise<MintPageSettingsView> {
+/** The art the tab features from: the latest done real job's base URI, which only the owner's tab receives. */
+async function artOf(ctx: PhasesContext): Promise<MintPageSettingsView['art']> {
   const real = await doneJobRow(ctx.supabase, ctx.collection.id, 'real')
+  return {
+    realBaseUri: real?.base_uri ?? null,
+    supply: ctx.collection.max_supply ?? 0,
+    projectType: ctx.collection.project_type,
+  }
+}
+
+/**
+ * The tab's view of a row, read nothing more: a save reads its art before the write, so once the row is written
+ * nothing can throw before the action answers it and expires the page's tag.
+ */
+function viewOf(row: PageRow | null, art: MintPageSettingsView['art']): MintPageSettingsView {
   const ref = (key: string | null): MediaRef | null => (key === null ? null : { key, url: mediaUrl(key) })
   const socials: Socials = {}
   if (row?.website_url) socials.website = row.website_url
@@ -246,11 +267,7 @@ async function viewOf(ctx: PhasesContext, row: PageRow | null): Promise<MintPage
     socials,
     featuredTokenIds: row?.featured_token_ids ?? [],
     sections: editableSectionsOf(storedSectionsOf(row?.sections), mediaUrl),
-    art: {
-      realBaseUri: real?.base_uri ?? null,
-      supply: ctx.collection.max_supply ?? 0,
-      projectType: ctx.collection.project_type,
-    },
+    art,
     updatedAt: row?.updated_at ?? null,
   }
 }
@@ -308,13 +325,15 @@ async function rank(ctx: PhasesContext): Promise<void> {
 /** The tab's view: the row (the defaults without one), its keys with their URLs and the art the tab features from. */
 export async function mintPageSettingsCore(ctx: PhasesContext): Promise<DeployOutcome<MintPageSettingsView>> {
   if (!(await deployed(ctx))) return { refused: NOT_DEPLOYED }
-  return { data: await viewOf(ctx, await readRow(ctx)) }
+  const [row, art] = await Promise.all([readRow(ctx), artOf(ctx)])
+  return { data: viewOf(row, art) }
 }
 
 /**
- * The PUT URLs a save needs, one per file: each file refused in its slot's words, an object already stored at
- * its key with the same length and type answering no URL, else a URL on the mint-page bucket bound to the type
- * and the length, valid 15 minutes.
+ * The PUT URLs a save needs, one per file: each file refused in its slot's words; an object already stored at its
+ * key answering no URL, since a key names its bytes and an object is never written twice (spec section 4.4), and
+ * refused as PAGE_FILE_MISMATCH when its length or type is not the file's; else a URL on the mint-page bucket bound
+ * to the type and the length, valid 15 minutes.
  */
 export async function presignMintPageMediaCore(
   ctx: PhasesContext,
@@ -326,13 +345,19 @@ export async function presignMintPageMediaCore(
     if (problem) return { refused: problem }
   }
   const bucket = mintPageBucket()
-  const signed = await Promise.all(
+  const found = await Promise.all(
     asks.map(async (ask) => {
       const key = mintPageKey(ctx.collection.id, ask.contentHash, ask.mime)
-      const head = await headObject(key, { bucket })
-      if (head && head.bytes === ask.bytes && head.mime === ask.mime) return { key, putUrl: null }
-      return { key, putUrl: await presignPut(key, ask.mime, ask.bytes, 900, { bucket }) }
+      return { ask, key, head: await headObject(key, { bucket }) }
     }),
+  )
+  if (found.some(({ ask, head }) => head && (head.bytes !== ask.bytes || head.mime !== ask.mime)))
+    return { refused: PAGE_FILE_MISMATCH }
+  const signed = await Promise.all(
+    found.map(async ({ ask, key, head }) => ({
+      key,
+      putUrl: head ? null : await presignPut(key, ask.mime, ask.bytes, 900, { bucket }),
+    })),
   )
   return { data: signed }
 }
@@ -348,9 +373,10 @@ function fits(slot: MediaSlot, key: string, head: { bytes: number; mime: string 
  * Saves the whole draft (the action parsed it with `mintPageInputSchema`): featured tokens and token slides
  * within the supply, every key the collection's, the row unchanged since the draft's view read it (else
  * PAGE_CHANGED_ELSEWHERE, so a stale tab never reverts another save or the Overview's switch, nor deletes the
- * media they keep), each key the stored row does not name already uploaded within its slot's cap, then the row;
- * then the objects the old row named and the new one does not are deleted, and a published page has its ranks
- * recorded (both logged on failure, never the save's).
+ * media they keep), each key the stored row does not name in the same slot already uploaded within that slot's
+ * cap (a key moved to another slot is checked against the new one's), then the row; then the objects the old row
+ * named and the new one does not are deleted, and a published page has its ranks recorded (both logged on
+ * failure, never the save's). The art is read before the write, so a write that lands always answers its view.
  */
 export async function saveMintPageCore(
   ctx: PhasesContext,
@@ -368,13 +394,15 @@ export async function saveMintPageCore(
   if (keys.some(({ key, slot }) => !keyBelongs(collection.id, key, slot))) return { refused: PAGE_FIELDS }
   const old = await readRow(ctx)
   if ((old?.updated_at ?? null) !== input.updatedAt) return { refused: PAGE_CHANGED_ELSEWHERE }
-  const stored = new Set(old ? rowKeys(old).map(({ key }) => key) : [])
+  const storedKeys = old ? rowKeys(old) : []
+  const inSlot = new Set(storedKeys.map(({ key, slot }) => `${slot} ${key}`))
   const bucket = mintPageBucket()
   for (const { key, slot } of keys) {
-    if (stored.has(key)) continue
+    if (inSlot.has(`${slot} ${key}`)) continue
     const head = await headObject(key, { bucket })
     if (!head || !fits(slot, key, head)) return { refused: PAGE_FILE_MISSING }
   }
+  const art = await artOf(ctx)
   const saved = await writeRow(
     ctx,
     {
@@ -396,14 +424,14 @@ export async function saveMintPageCore(
   if ('error' in saved) return refusalOf(saved.error)
   const { row } = saved
   const kept = new Set(keys.map(({ key }) => key))
-  const replaced = [...stored].filter((key) => !kept.has(key))
+  const replaced = [...new Set(storedKeys.map(({ key }) => key))].filter((key) => !kept.has(key))
   try {
     await deleteObjects(replaced, { bucket })
   } catch (error) {
     console.error(`The replaced media of ${collection.id} could not be deleted: ${errorSummary(error)}`)
   }
   if (row.published) await rank(ctx)
-  return { data: await viewOf(ctx, row) }
+  return { data: viewOf(row, art) }
 }
 
 /** The Overview's public switch: a page goes public only with a link, and the trigger checks the deployment again. */
@@ -415,10 +443,8 @@ export async function setMintPagePublishedCore(
   if (published && !ctx.collection.slug) return { refused: PAGE_LINK_FIRST }
   const saved = await writeRow(ctx, { published })
   if ('refused' in saved) return saved
-  if ('error' in saved) {
-    if (saved.error.code === '23514') return { refused: saved.error.message }
-    return { error: saved.error }
-  }
+  // The trigger's sentence reads as it is; any other check's reads as the fields' sentence, never raw.
+  if ('error' in saved) return refusalOf(saved.error)
   if (published) await rank(ctx)
   return { data: { published } }
 }
