@@ -116,6 +116,36 @@ export function draftOf(view: MintPageSettingsView): MintPageDraft {
   }
 }
 
+/**
+ * The sections with a team member's photo set, or removed with null. A picked photo lands once the browser
+ * has read the file, so it applies to the sections as they are by then: an edit made meanwhile stays, and a
+ * member removed meanwhile stays removed.
+ */
+export function withMemberImage(
+  sections: DraftSections,
+  memberId: string,
+  image: DraftFile | null,
+): DraftSections {
+  const { team } = sections
+  if (!team.members.some((member) => member.id === memberId)) return sections
+  return {
+    ...sections,
+    team: {
+      ...team,
+      members: team.members.map((member) => (member.id === memberId ? { ...member, image } : member)),
+    },
+  }
+}
+
+/**
+ * The sections with an uploaded slide added after the others, as they are once its file has been read. A
+ * carousel filled meanwhile goes over its count, which `draftInvalid` refuses until a slide is removed.
+ */
+export function withUploadSlide(sections: DraftSections, slide: DraftUploadSlide): DraftSections {
+  const { carousel } = sections
+  return { ...sections, carousel: { ...carousel, items: [...carousel.items, slide] } }
+}
+
 /** Every file of the draft with its slot, in the page's order: the three page images, the team, the slides, the track. */
 function filesOf(draft: MintPageDraft): { slot: MediaSlot; media: DraftFile }[] {
   const { team, carousel, music } = draft.sections

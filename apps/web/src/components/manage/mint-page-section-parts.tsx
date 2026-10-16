@@ -10,7 +10,14 @@ import { Textarea } from '@cobweb/ui/components/textarea'
 import { TokenArtFrame } from '@/components/mint/token-image'
 import { MEDIA_SLOTS, type MediaSlot } from '@/lib/mint/media'
 import type { TokenArt } from '@/lib/mint/token-art'
-import { LIMITS, memberLinkError, tokenArtSource, type DraftFile, type DraftSlide } from './mint-page-draft'
+import {
+  LIMITS,
+  memberLinkError,
+  tokenArtSource,
+  type DraftFile,
+  type DraftSlide,
+  type DraftUploadSlide,
+} from './mint-page-draft'
 import { pickFile, TokenPicker } from './mint-page-fields'
 
 type WithId = { id: string }
@@ -236,6 +243,7 @@ export function FilePick({
 export function Carousel({
   items,
   onChange,
+  onUpload,
   art,
   ids,
   realBaseUri,
@@ -244,6 +252,8 @@ export function Carousel({
 }: {
   items: DraftSlide[]
   onChange: (items: DraftSlide[]) => void
+  /** Adds an uploaded slide once its file is read, to the slides as they are then (withUploadSlide). */
+  onUpload: (slide: DraftUploadSlide) => void
   art: Map<number, TokenArt | null | undefined>
   ids: number[]
   realBaseUri: string | null
@@ -314,16 +324,13 @@ export function Carousel({
           slot="slide"
           hint=""
           onFile={(media, file) =>
-            onChange([
-              ...items,
-              {
-                id: `slide-${Date.now()}`,
-                kind: 'upload',
-                fileName: file.name.slice(0, 100) || 'slide',
-                mediaType: file.type === 'video/mp4' ? 'video' : 'image',
-                media,
-              },
-            ])
+            onUpload({
+              id: `slide-${Date.now()}`,
+              kind: 'upload',
+              fileName: file.name.slice(0, 100) || 'slide',
+              mediaType: file.type === 'video/mp4' ? 'video' : 'image',
+              media,
+            })
           }
           icon={null}
         />

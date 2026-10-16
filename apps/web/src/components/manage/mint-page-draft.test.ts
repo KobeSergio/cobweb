@@ -15,8 +15,12 @@ import {
   pickedUrls,
   socialError,
   tokenArtSource,
+  withMemberImage,
+  withUploadSlide,
   type DraftFile,
+  type DraftMember,
   type DraftSections,
+  type DraftUploadSlide,
   type MintPageDraft,
 } from './mint-page-draft'
 
@@ -342,6 +346,38 @@ describe('pickedFileProblem', () => {
     expect(pickedFileProblem('avatar', { mime: 'image/png', bytes: 10, width: 200, height: 200 })).toBe(
       'The avatar must be at least 400 by 400.',
     )
+  })
+})
+
+describe('a file picked in a section, applied once the browser has read it (fix wave 2 T4)', () => {
+  it('keeps a member removed during the read removed, and sets the photo on the member picked for', () => {
+    const draft = draftOf(view)
+    const mara = draft.sections.team.members[0]!
+    const ola: DraftMember = { id: 'team-2', name: 'Ola', role: 'Builder', bio: '', image: null }
+    const photo = picked('ola.png', 'image/png')
+    // Ola's photo is picked while the team is Mara and Ola; Mara is removed before the file is read.
+    const current: DraftSections = { ...draft.sections, team: { enabled: true, members: [ola] } }
+    expect(withMemberImage(current, ola.id, photo).team).toEqual({
+      enabled: true,
+      members: [{ ...ola, image: photo }],
+    })
+    // A photo picked for Mara, who is gone by the time it lands, brings nobody back.
+    expect(withMemberImage(current, mara.id, photo)).toBe(current)
+  })
+
+  it('adds a slide after the slides as they are when it lands, so one removed meanwhile stays out', () => {
+    const draft = draftOf(view)
+    const slide: DraftUploadSlide = {
+      id: 'slide-3',
+      kind: 'upload',
+      fileName: 'b.png',
+      mediaType: 'image',
+      media: picked('b.png', 'image/png'),
+    }
+    // The image is picked beside slides 1 and 2; slide 2 is removed before the file is read.
+    const kept = draft.sections.carousel.items.filter((item) => item.id !== 'slide-2')
+    const current: DraftSections = { ...draft.sections, carousel: { enabled: true, items: kept } }
+    expect(withUploadSlide(current, slide).carousel.items).toEqual([...kept, slide])
   })
 })
 

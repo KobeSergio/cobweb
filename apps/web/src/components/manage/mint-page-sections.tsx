@@ -5,7 +5,13 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@c
 import { Panel } from '@cobweb/ui/components/panel'
 import { Switch } from '@cobweb/ui/components/switch'
 import type { TokenArt } from '@/lib/mint/token-art'
-import { LIMITS, type DraftMember, type DraftSections } from './mint-page-draft'
+import {
+  LIMITS,
+  withMemberImage,
+  withUploadSlide,
+  type DraftMember,
+  type DraftSections,
+} from './mint-page-draft'
 import { ImageSlot } from './mint-page-fields'
 import { Carousel, FilePick, ItemList, Text } from './mint-page-section-parts'
 
@@ -14,7 +20,8 @@ type Section = keyof DraftSections
 /**
  * Team, Roadmap, FAQ, music and a carousel (docs/specs/2026-10-16-mint-page-live-data.md, section 4.1): the mint
  * page's own sections, each with its switch, saved with the rest of the draft. Files stay in the browser until
- * Save, which uploads them first.
+ * Save, which uploads them first. Every change is an update of the sections as they are when it applies, so a
+ * file that lands after its read keeps the edits made meanwhile.
  */
 export function MintPageSections({
   value,
@@ -26,7 +33,7 @@ export function MintPageSections({
   projectType,
 }: {
   value: DraftSections
-  onChange: (value: DraftSections) => void
+  onChange: (update: (current: DraftSections) => DraftSections) => void
   art: Map<number, TokenArt | null | undefined>
   ids: number[]
   realBaseUri: string | null
@@ -34,7 +41,7 @@ export function MintPageSections({
   projectType: 'generative' | 'one_of_one' | 'single_asset'
 }) {
   const set = <K extends Section>(key: K, next: Partial<DraftSections[K]>) =>
-    onChange({ ...value, [key]: { ...value[key], ...next } })
+    onChange((current) => ({ ...current, [key]: { ...current[key], ...next } }))
   const toggle = (key: Section) => (
     <Switch
       checked={value[key].enabled}
@@ -70,7 +77,7 @@ export function MintPageSections({
                   label="Photo"
                   hint="Square. PNG, JPG, WebP or GIF, up to 2 MB."
                   value={member.image}
-                  onChange={(image) => update({ image })}
+                  onChange={(image) => onChange((current) => withMemberImage(current, member.id, image))}
                   seed={member.id}
                   slot="team"
                   shape="square"
@@ -218,6 +225,7 @@ export function MintPageSections({
           <Carousel
             items={value.carousel.items}
             onChange={(items) => set('carousel', { items })}
+            onUpload={(slide) => onChange((current) => withUploadSlide(current, slide))}
             art={art}
             ids={ids}
             realBaseUri={realBaseUri}

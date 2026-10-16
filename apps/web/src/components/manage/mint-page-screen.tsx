@@ -346,7 +346,7 @@ export function MintPageScreen({ collection, view, preview, gateway, sample }: M
 
           <MintPageSections
             value={draft.sections}
-            onChange={(sections) => set('sections', sections)}
+            onChange={(update) => setDraft((current) => ({ ...current, sections: update(current.sections) }))}
             art={art}
             ids={pickerIds}
             realBaseUri={realBaseUri}
