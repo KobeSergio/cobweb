@@ -6846,12 +6846,17 @@ async function artAirdropSettings(A: Creator, B: Creator): Promise<void> {
 // the public reads mint_page, mint_page_preview and mint_page_tiers
 // (docs/specs/2026-10-16-mint-page-live-data.md, section 4)
 // ---------------------------------------------------------------------------------------------
-type PageCheckRow = { published: boolean; published_at: string | null; description: string }
+type PageCheckRow = {
+  published: boolean
+  published_at: string | null
+  description: string
+  updated_at: string
+}
 
 async function pageRow(cid: string): Promise<PageCheckRow | null> {
   const { data, error } = await admin
     .from('mint_pages')
-    .select('published, published_at, description')
+    .select('published, published_at, description, updated_at')
     .eq('collection_id', cid)
     .maybeSingle()
   if (error) throw new Error(`mint page: ${describe(error as DbError)}`)
@@ -6869,6 +6874,10 @@ const sortedJson = (value: unknown) =>
       : entry,
   )
 const RANK_SENTENCE = 'The rendered set could not be ranked.'
+/** A timestamptz as PostgREST writes it, in microseconds since the epoch: a Date keeps milliseconds only. */
+const micros = (stamp: string) =>
+  BigInt(Date.parse(stamp.replace(/\.\d+/, ''))) * 1000n +
+  BigInt((/\.(\d+)/.exec(stamp)?.[1] ?? '').padEnd(6, '0').slice(0, 6))
 /** The deployment's constructor as collection_record_deploy stores it, with the deploy-time base URI. */
 const recordedArgs = (baseUri: string) => ({
   name: 'Verify',
@@ -6898,6 +6907,8 @@ async function artMintPage(A: Creator, B: Creator): Promise<void> {
   const deployedRow = await stored(cid)
   const pageSlug = deployedRow?.slug
   if (!deployedRow || !pageSlug) throw new Error('setup: the deployed collection has no link')
+  // Another rendered collection, whose done real job token_ranks_record must refuse for this one.
+  const otherRendered = await renderedFixture(A, payer, 182, { link: false })
   // A collection that finished its art later, deployed on an earlier placeholder than its latest done one.
   const deferred = await deferredFixture(A)
   const deferredRecord = await callArt(
@@ -7070,6 +7081,7 @@ async function artMintPage(A: Creator, B: Creator): Promise<void> {
   )
 
   // The page's fields, Holders moved before Public, and a description on the deferred collection itself.
+  const beforeSave = await pageRow(cid)
   const saved = await page(A.client, {
     description: 'From the page',
     banner_key: PAGE_KEY(cid, 1),
@@ -7082,6 +7094,21 @@ async function artMintPage(A: Creator, B: Creator): Promise<void> {
     sections: { music: { enabled: true, key: PAGE_KEY(cid, 3, 'mp3'), fileName: 'theme.mp3' } },
   })
   if (saved.error) throw new Error(`setup: page: ${describe(saved.error as DbError)}`)
+  const afterSave = await pageRow(cid)
+
+  await check(
+    'mint_pages: a save stamps updated_at later and keeps published_at as the publish set it',
+    async () => {
+      if (!beforeSave?.published_at || !afterSave) return `rows ${JSON.stringify([beforeSave, afterSave])}`
+      const problems: string[] = []
+      if (micros(afterSave.updated_at) <= micros(beforeSave.updated_at))
+        problems.push(`updated_at ${beforeSave.updated_at} then ${afterSave.updated_at}`)
+      if (afterSave.published_at !== beforeSave.published_at)
+        problems.push(`published_at ${beforeSave.published_at} then ${afterSave.published_at}`)
+      return problems.length ? problems.join('; ') : null
+    },
+  )
+
   const moved = await callArt(A.client, 'mint_group_move', {
     p_collection_id: cid,
     p_onchain_id: 1,
@@ -7191,7 +7218,7 @@ async function artMintPage(A: Creator, B: Creator): Promise<void> {
   )
 
   await check(
-    'mint_page_preview: the owner reads the unpublished document; B and anon read null',
+    'mint_page_preview: the owner reads the unpublished document; B reads null and anon is refused',
     async () => {
       const own = await read(A.client, 'mint_page_preview', deferredSlug)
       if (own.error || own.doc?.slug !== deferredSlug || own.doc.published !== false)
@@ -7199,8 +7226,10 @@ async function artMintPage(A: Creator, B: Creator): Promise<void> {
       const other = await read(B.client, 'mint_page_preview', deferredSlug)
       if (other.error || other.doc !== null)
         return `B: ${other.error ? describe(other.error) : JSON.stringify(other.doc)}`
+      // The preview is granted to signed-in callers only (the plan's Decision 8), so anon is refused outright.
       const signedOut = await read(anon, 'mint_page_preview', deferredSlug)
-      return signedOut.doc === null ? null : `anon: ${JSON.stringify(signedOut.doc)}`
+      const refused = expectError(signedOut.error, PERMISSION, signedOut.doc)
+      return refused ? `anon: ${refused}` : null
     },
   )
 
@@ -7234,7 +7263,7 @@ async function artMintPage(A: Creator, B: Creator): Promise<void> {
       const problems: string[] = []
       for (const [label, overrides] of [
         ['a placeholder job', { p_collection_id: deferred.cid, p_job_id: deferred.jobId, p_ranks: [1] }],
-        ["another collection's job", { p_job_id: deferred.jobId }],
+        ["another collection's job", { p_job_id: otherRendered.jobId }],
         ['a wrong length', { p_ranks: [1, 2] }],
         ['a repeated rank', { p_ranks: [1, 1, 2] }],
       ] as const) {
@@ -7290,7 +7319,7 @@ async function artMintPage(A: Creator, B: Creator): Promise<void> {
     'mint_page_tiers: up to 20 ids at the real base URI of a published generative collection; null for another base URI, an unpublished page, 21 ids or no ranks',
     async () => {
       const ranked = await tiers(anon, realUri, [1, 2, 3, 4])
-      if (JSON.stringify(ranked) !== JSON.stringify({ ranks: { '1': 2, '2': 3, '3': 1 }, total: 3 }))
+      if (sortedJson(ranked) !== sortedJson({ total: 3, ranks: { '1': 2, '2': 3, '3': 1 } }))
         return `ranked: ${JSON.stringify(ranked)}`
       const problems: string[] = []
       if ((await tiers(anon, placeholderUri, [1])) !== null) problems.push('another base URI')
