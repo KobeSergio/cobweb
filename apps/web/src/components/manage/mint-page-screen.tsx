@@ -1,8 +1,9 @@
 'use client'
 
-import { ArrowUpRightIcon, CheckIcon, EyeIcon } from 'lucide-react'
+import { ArrowUpRightIcon, CheckIcon, EyeIcon, RotateCwIcon } from 'lucide-react'
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { toast } from 'sonner'
+import { Alert, AlertDescription } from '@cobweb/ui/components/alert'
 import { Button } from '@cobweb/ui/components/button'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@cobweb/ui/components/field'
 import { Input } from '@cobweb/ui/components/input'
@@ -15,6 +16,7 @@ import { sha256Hex } from '@/components/art/uploads/hash'
 import { MintPageAddressField } from '@/components/collections/mint-page-address-field'
 import { sampleTokenArt } from '@/components/mint/sample-source'
 import { useTokenArt } from '@/components/mint/use-token-art'
+import { PAGE_CHANGED_ELSEWHERE } from '@/lib/art/result'
 import type { Tables } from '@/lib/database.types'
 import type { Socials } from '@/lib/demo'
 import type { MintPageSettingsView } from '@/lib/mint/settings-core'
@@ -75,6 +77,8 @@ export function MintPageScreen({ collection, view, preview, gateway, sample }: M
   const [saved, setSaved] = useState<MintPageDraft>(initial)
   const [draft, setDraft] = useState<MintPageDraft>(initial)
   const [saving, setSaving] = useState(false)
+  // A save was refused because the row changed elsewhere after this tab read it.
+  const [stale, setStale] = useState(false)
   const origin = useSyncExternalStore(
     noopSubscribe,
     () => window.location.origin,
@@ -143,12 +147,17 @@ export function MintPageScreen({ collection, view, preview, gateway, sample }: M
       if (sample) await saveOffChain()
       const outcome = await runSave(sent, liveSteps(collection.id), { sample })
       if (!outcome.ok) {
-        toast.error(outcome.error)
+        // Another tab or the Overview wrote the row since this tab read it: only a reload shows what is saved now.
+        if (outcome.error === PAGE_CHANGED_ELSEWHERE) setStale(true)
+        else toast.error(outcome.error)
         return
       }
       setSaved(outcome.draft)
-      // The fieldset keeps the draft as sent while the save runs; one changed anyway keeps its changes, unsaved.
-      setDraft((current) => (current === sent ? outcome.draft : current))
+      // The fieldset keeps the draft as sent while the save runs; one changed anyway keeps its changes, unsaved,
+      // on the new stamp, since this tab's own save is what moved it.
+      setDraft((current) =>
+        current === sent ? outcome.draft : { ...current, updatedAt: outcome.draft.updatedAt },
+      )
       toast.success('Mint page saved')
     } catch {
       toast.error('The mint page could not be saved. Check your connection and try again.')
@@ -367,6 +376,17 @@ export function MintPageScreen({ collection, view, preview, gateway, sample }: M
         </div>
         {invalid && (
           <p className="text-destructive-foreground text-sm">Fix the highlighted fields to save.</p>
+        )}
+        {stale && (
+          <Alert variant="warning">
+            <AlertDescription className="gap-3">
+              <p>{PAGE_CHANGED_ELSEWHERE}</p>
+              <Button type="button" variant="secondary" size="sm" onClick={() => window.location.reload()}>
+                <RotateCwIcon aria-hidden="true" />
+                Reload
+              </Button>
+            </AlertDescription>
+          </Alert>
         )}
       </aside>
     </form>

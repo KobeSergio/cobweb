@@ -46,6 +46,8 @@ export type MintPageDraft = {
   socials: Socials
   featuredTokenIds: number[]
   sections: DraftSections
+  /** The saved row's stamp the draft was made from, sent back with the save (settings-core.ts). */
+  updatedAt: string | null
 }
 /** A picked file with its slot: what a save hashes, signs and uploads. */
 export type PickedEntry = { slot: MediaSlot; file: File; width: number | null; height: number | null }
@@ -110,6 +112,7 @@ export function draftOf(view: MintPageSettingsView): MintPageDraft {
         ),
       },
     },
+    updatedAt: view.updatedAt,
   }
 }
 
@@ -212,6 +215,7 @@ export function inputOf(draft: MintPageDraft, keys: ReadonlyMap<File, string>): 
     },
     featuredTokenIds: draft.featuredTokenIds,
     sections,
+    updatedAt: draft.updatedAt,
   }
 }
 

@@ -55,7 +55,7 @@ import { clientOptions } from './render-deps.ts'
 // The media URLs are Supabase Storage's public ones for the bucket, as the app's are without MINT_PAGE_MEDIA_URL.
 process.env.NEXT_PUBLIC_SUPABASE_URL ??= settings.url
 
-const { presignMintPageMediaCore, saveMintPageCore, setMintPagePublishedCore } =
+const { mintPageSettingsCore, presignMintPageMediaCore, saveMintPageCore, setMintPagePublishedCore } =
   await import('../src/lib/mint/settings-core.ts')
 const { ipfsGateway, mediaUrl } = await import('../src/lib/mint/page-urls.ts')
 const { pageDocSchema, pageStaticOf } = await import('../src/lib/mint/page-doc.ts')
@@ -75,7 +75,8 @@ const { readArtRows } = await import('../src/lib/art/read-rows.ts')
 const { toProject } = await import('../src/lib/art/rows.ts')
 const { mintPageBucket } = await import('../src/lib/storage/config.ts')
 const { deleteObjects, headObject } = await import('../src/lib/storage/objects.ts')
-const { NOT_DEPLOYED, NOT_FOUND, PAGE_FILE_MISSING } = await import('../src/lib/art/result.ts')
+const { NOT_DEPLOYED, NOT_FOUND, PAGE_CHANGED_ELSEWHERE, PAGE_FILE_MISSING } =
+  await import('../src/lib/art/result.ts')
 type MediaAsk = import('../src/lib/mint/settings-core.ts').MediaAsk
 type MintPageInput = import('../src/lib/mint/settings-core.ts').MintPageInput
 type MediaSlot = import('../src/lib/mint/media.ts').MediaSlot
@@ -493,6 +494,9 @@ async function main(): Promise<void> {
           height: null,
         },
       ])
+      // The tab's view first, as the tab reads it: a save carries the row's stamp it was read on.
+      const current = await mintPageSettingsCore(ctx)
+      if (!('data' in current)) return `the view: ${refusal(current)}`
       const input: MintPageInput = {
         published: false,
         description: DESCRIPTION,
@@ -517,6 +521,7 @@ async function main(): Promise<void> {
           music: { enabled: true, key: musicKey!, fileName: 'theme.mp3' },
           carousel: { enabled: true, items: [{ id: 'first', kind: 'token', tokenId: 1 }] },
         },
+        updatedAt: current.data.updatedAt,
       }
       const outcome = await saveMintPageCore(ctx, input)
       if (!('data' in outcome)) return `save: ${refusal(outcome)}`
@@ -552,7 +557,7 @@ async function main(): Promise<void> {
       const fields = ['description', 'links', 'featured', 'banner', 'avatar', 'team', 'music', 'on', 'items']
       const differ = fields.filter((_, index) => JSON.stringify(read[index]) !== JSON.stringify(want[index]))
       if (differ.length) return `saved another ${differ.join(', ')}`
-      draft = input
+      draft = { ...input, updatedAt: view.updatedAt }
       if ((await ownership(stranger, cid)) !== NOT_FOUND) return "the stranger's owner check passed"
       const forged: PhasesContext = {
         supabase: stranger.client,
@@ -565,7 +570,7 @@ async function main(): Promise<void> {
       if (refusal(taken) !== NOT_DEPLOYED) return `the stranger's save through the core: ${refusal(taken)}`
       await stranger.client.from('mint_pages').update({ description: 'Taken.' }).eq('collection_id', cid)
       const missing = await saveMintPageCore(ctx, {
-        ...input,
+        ...saved(),
         media: { ...input.media, about: `${cid}/${HEX64(4242)}.png` },
       })
       if (refusal(missing) !== PAGE_FILE_MISSING) return `a key never uploaded: ${refusal(missing)}`
@@ -641,9 +646,18 @@ async function main(): Promise<void> {
         published: true,
         media: { ...saved().media, banner: newKey! },
       }
-      const outcome = await saveMintPageCore(ctx, next)
+      // Check 5's publish (the Overview's switch) stamped the row after check 4's view, so that draft is stale: it
+      // is refused and deletes nothing; the save on the view read again lands (final fix wave M2).
+      const stale = await saveMintPageCore(ctx, next)
+      if (refusal(stale) !== PAGE_CHANGED_ELSEWHERE)
+        return `a save from before the publish: ${refusal(stale)}`
+      if ((await readMedia(bannerKey)).status !== 200) return 'the refused save deleted the old banner'
+      const current = await mintPageSettingsCore(ctx)
+      if (!('data' in current)) return `the view: ${refusal(current)}`
+      const reread: MintPageInput = { ...next, updatedAt: current.data.updatedAt }
+      const outcome = await saveMintPageCore(ctx, reread)
       if (!('data' in outcome)) return `save: ${refusal(outcome)}`
-      draft = next
+      draft = { ...reread, updatedAt: outcome.data.updatedAt }
       const old = await readMedia(bannerKey)
       const head = await headObject(bannerKey, { bucket })
       if (head || old.status === 200) return `the old banner reads ${old.status}`

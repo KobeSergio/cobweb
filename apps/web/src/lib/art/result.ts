@@ -156,3 +156,6 @@ export const PAGE_LINK_FIRST = 'Set a link first. The page can go public once it
 export const PAGE_FIELDS = 'Some fields could not be saved. Check them and try again.'
 export const PAGE_FILE_MISSING = 'A file did not finish uploading. Choose it again, then save.'
 export const PAGE_UPLOAD_FAILED = 'A file could not be uploaded. Try again.'
+// A save from a tab that read the row before another tab's save or the Overview's switch: saving it would revert them.
+export const PAGE_CHANGED_ELSEWHERE =
+  'This page changed in another tab or in the Overview. Reload it, then save again.'

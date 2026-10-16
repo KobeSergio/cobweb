@@ -21,11 +21,13 @@ const view: MintPageSettingsView = {
     carousel: { enabled: false, items: [] },
   },
   art: { realBaseUri: null, supply: 10, projectType: 'generative' },
+  updatedAt: '2026-10-16T07:42:17.123456+00:00',
 }
-/** The view the save answers: the avatar stored. */
+/** The view the save answers: the avatar stored, on the stamp the save gave the row. */
 const saved: MintPageSettingsView = {
   ...view,
   media: { banner: null, avatar: { key: key(10), url: `https://media.example/${key(10)}` }, about: null },
+  updatedAt: '2026-10-16T07:43:02.5+00:00',
 }
 
 const picked = (name: string, type: string): DraftFile => ({
@@ -79,6 +81,8 @@ describe('runSave (docs/specs/2026-10-16-mint-page-live-data.md, section 7.9)', 
     ])
     const input = steps.save.mock.calls[0]![0]
     expect([input.media.avatar, input.sections.team.members[0]?.imageKey]).toEqual([key(10), key(11)])
+    // The save carries the stamp the draft was read on, and the saved draft takes the save's own.
+    expect(input.updatedAt).toBe(view.updatedAt)
     expect(outcome).toEqual({ ok: true, draft: draftOf(saved) })
   })
 

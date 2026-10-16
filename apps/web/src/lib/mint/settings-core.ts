@@ -3,6 +3,7 @@ import type { DbError } from '@/lib/art/db-error'
 import { errorSummary } from '@/lib/art/lock-core'
 import {
   NOT_DEPLOYED,
+  PAGE_CHANGED_ELSEWHERE,
   PAGE_FIELDS,
   PAGE_FILE_MISSING,
   PAGE_LINK_FIRST,
@@ -78,6 +79,8 @@ export type MintPageSettingsView = {
   featuredTokenIds: number[]
   sections: EditableSections
   art: { realBaseUri: string | null; supply: number; projectType: MintPageStatic['projectType'] }
+  /** The row's `updated_at` as read (the guard stamps it on every write); null without a row. */
+  updatedAt: string | null
 }
 
 /** The row's editable fields as a save sends them: keys, not URLs. */
@@ -88,6 +91,8 @@ export type MintPageInput = {
   socials: { website: string | null; x: string | null; discord: string | null; telegram: string | null }
   featuredTokenIds: number[]
   sections: StoredSections
+  /** The `updatedAt` of the view the draft was made from: a save lands only on the row as that view read it. */
+  updatedAt: string | null
 }
 
 /** The most files one save can name: three page images, twelve team photos, five slides and the music. */
@@ -130,10 +135,11 @@ export const mintPageInputSchema: z.ZodType<MintPageInput> = z.object({
     .max(6)
     .refine((ids) => new Set(ids).size === ids.length),
   sections: sectionsSchema,
+  updatedAt: z.string().max(64).nullable(),
 })
 
 const ROW_COLUMNS =
-  'published, description, banner_key, avatar_key, about_banner_key, website_url, x_url, discord_url, telegram_url, featured_token_ids, sections'
+  'published, description, banner_key, avatar_key, about_banner_key, website_url, x_url, discord_url, telegram_url, featured_token_ids, sections, updated_at'
 type PageRow = Pick<
   Tables<'mint_pages'>,
   | 'published'
@@ -147,6 +153,7 @@ type PageRow = Pick<
   | 'telegram_url'
   | 'featured_token_ids'
   | 'sections'
+  | 'updated_at'
 >
 
 /** The sections with each stored key's URL beside it. */
@@ -244,31 +251,49 @@ async function viewOf(ctx: PhasesContext, row: PageRow | null): Promise<MintPage
       supply: ctx.collection.max_supply ?? 0,
       projectType: ctx.collection.project_type,
     },
+    updatedAt: row?.updated_at ?? null,
   }
 }
 
 /** A refused write in the creator's words: the trigger's own sentence, else a check's; anything else is an error. */
-function refusalOf(error: DbError & object): { refused: string } | { error: DbError } {
+function refusalOf(error: NonNullable<DbError>): { refused: string } | { error: DbError } {
   if (error.code === '23514')
     return { refused: error.message === PAGE_NOT_PUBLIC ? PAGE_NOT_PUBLIC : PAGE_FIELDS }
   return { error }
 }
 
+/** A write of the row: the row as written, a refusal in the creator's words, or the database's error. */
+type Written = { row: PageRow } | { refused: string } | { error: NonNullable<DbError> }
+
 /**
  * Writes the row's fields: an insert that does nothing when the row exists, then the update, so the owner never
- * needs a right on `collection_id` beyond the insert's.
+ * needs a right on `collection_id` beyond the insert's. A save passes the row it read (`old`, null without one):
+ * its update lands only while `updated_at` holds that row's stamp, or without one the stamp of the row its own
+ * insert made, so a write from another tab or the Overview's switch since the read is refused as
+ * PAGE_CHANGED_ELSEWHERE rather than reverted. The switch passes no row and writes its one column, which the
+ * guard stamps, so a tab that read the row before it is refused.
  */
-async function writeRow(ctx: PhasesContext, fields: TablesUpdate<'mint_pages'>) {
+async function writeRow(
+  ctx: PhasesContext,
+  fields: TablesUpdate<'mint_pages'>,
+  read?: { old: PageRow | null },
+): Promise<Written> {
   const ensured = await ctx.supabase
     .from('mint_pages')
     .upsert({ collection_id: ctx.collection.id }, { onConflict: 'collection_id', ignoreDuplicates: true })
+    .select('updated_at')
   if (ensured.error) return { error: ensured.error }
-  return ctx.supabase
-    .from('mint_pages')
-    .update(fields)
-    .eq('collection_id', ctx.collection.id)
+  // Without a row read, the save's insert must be the one that made it: none means another write made it since.
+  const stamp = read ? (read.old?.updated_at ?? ensured.data[0]?.updated_at ?? null) : undefined
+  if (stamp === null) return { refused: PAGE_CHANGED_ELSEWHERE }
+  const update = ctx.supabase.from('mint_pages').update(fields).eq('collection_id', ctx.collection.id)
+  const saved = await (stamp === undefined ? update : update.eq('updated_at', stamp))
     .select(ROW_COLUMNS)
-    .single()
+    .maybeSingle()
+  if (saved.error) return { error: saved.error }
+  if (saved.data) return { row: saved.data }
+  // No row matched: its stamp moved after the read (the owner's row exists, and the ownership was checked).
+  return { refused: read ? PAGE_CHANGED_ELSEWHERE : PAGE_FIELDS }
 }
 
 /** Records the ranks for a published page; a failure is logged and never fails the save. */
@@ -321,9 +346,11 @@ function fits(slot: MediaSlot, key: string, head: { bytes: number; mime: string 
 
 /**
  * Saves the whole draft (the action parsed it with `mintPageInputSchema`): featured tokens and token slides
- * within the supply, every key the collection's, each key the stored row does not name already uploaded within
- * its slot's cap, then the row; then the objects the old row named and the new one does not are deleted, and a
- * published page has its ranks recorded (both logged on failure, never the save's).
+ * within the supply, every key the collection's, the row unchanged since the draft's view read it (else
+ * PAGE_CHANGED_ELSEWHERE, so a stale tab never reverts another save or the Overview's switch, nor deletes the
+ * media they keep), each key the stored row does not name already uploaded within its slot's cap, then the row;
+ * then the objects the old row named and the new one does not are deleted, and a published page has its ranks
+ * recorded (both logged on failure, never the save's).
  */
 export async function saveMintPageCore(
   ctx: PhasesContext,
@@ -340,6 +367,7 @@ export async function saveMintPageCore(
   const keys = keysOf({ ...input.media, sections: input.sections })
   if (keys.some(({ key, slot }) => !keyBelongs(collection.id, key, slot))) return { refused: PAGE_FIELDS }
   const old = await readRow(ctx)
+  if ((old?.updated_at ?? null) !== input.updatedAt) return { refused: PAGE_CHANGED_ELSEWHERE }
   const stored = new Set(old ? rowKeys(old).map(({ key }) => key) : [])
   const bucket = mintPageBucket()
   for (const { key, slot } of keys) {
@@ -347,22 +375,26 @@ export async function saveMintPageCore(
     const head = await headObject(key, { bucket })
     if (!head || !fits(slot, key, head)) return { refused: PAGE_FILE_MISSING }
   }
-  const saved = await writeRow(ctx, {
-    published: input.published,
-    description: input.description,
-    banner_key: input.media.banner,
-    avatar_key: input.media.avatar,
-    about_banner_key: input.media.about,
-    website_url: input.socials.website,
-    x_url: input.socials.x,
-    discord_url: input.socials.discord,
-    telegram_url: input.socials.telegram,
-    featured_token_ids: input.featuredTokenIds,
-    sections: input.sections,
-  })
-  if ('error' in saved && saved.error) return refusalOf(saved.error)
-  const row = 'data' in saved ? saved.data : null
-  if (!row) return { refused: PAGE_FIELDS }
+  const saved = await writeRow(
+    ctx,
+    {
+      published: input.published,
+      description: input.description,
+      banner_key: input.media.banner,
+      avatar_key: input.media.avatar,
+      about_banner_key: input.media.about,
+      website_url: input.socials.website,
+      x_url: input.socials.x,
+      discord_url: input.socials.discord,
+      telegram_url: input.socials.telegram,
+      featured_token_ids: input.featuredTokenIds,
+      sections: input.sections,
+    },
+    { old },
+  )
+  if ('refused' in saved) return saved
+  if ('error' in saved) return refusalOf(saved.error)
+  const { row } = saved
   const kept = new Set(keys.map(({ key }) => key))
   const replaced = [...stored].filter((key) => !kept.has(key))
   try {
@@ -382,7 +414,8 @@ export async function setMintPagePublishedCore(
   if (!(await deployed(ctx))) return { refused: NOT_DEPLOYED }
   if (published && !ctx.collection.slug) return { refused: PAGE_LINK_FIRST }
   const saved = await writeRow(ctx, { published })
-  if ('error' in saved && saved.error) {
+  if ('refused' in saved) return saved
+  if ('error' in saved) {
     if (saved.error.code === '23514') return { refused: saved.error.message }
     return { error: saved.error }
   }

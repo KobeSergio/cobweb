@@ -55,6 +55,7 @@ const view: MintPageSettingsView = {
     },
   },
   art: { realBaseUri: null, supply: 10, projectType: 'generative' },
+  updatedAt: '2026-10-16T07:42:17.123456+00:00',
 }
 const picked = (name: string, type: string): DraftFile => ({
   kind: 'picked',
@@ -89,7 +90,16 @@ describe('the Mint page draft (docs/specs/2026-10-16-mint-page-live-data.md, sec
           ],
         },
       },
+      updatedAt: '2026-10-16T07:42:17.123456+00:00',
     })
+  })
+
+  it("keeps the view's stamp through the draft and back to the save, null without a row (final fix wave M2)", () => {
+    const draft = draftOf(view)
+    expect(draft.updatedAt).toBe(view.updatedAt)
+    draft.description = 'Changed.'
+    expect(inputOf(draft, new Map()).updatedAt).toBe(view.updatedAt)
+    expect(inputOf(draftOf({ ...view, updatedAt: null }), new Map()).updatedAt).toBeNull()
   })
 
   it('lists each picked file once with its slot, and keys it as its upload was named', () => {

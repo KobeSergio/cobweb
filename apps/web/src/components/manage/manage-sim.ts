@@ -109,6 +109,8 @@ export function sampleMintPageView(
       supply: sampleSupply(collection.max_supply, DEMO_COLLECTION.maxSupply),
       projectType: collection.project_type,
     },
+    // Sample mode writes no row, so nothing stamps one.
+    updatedAt: null,
   }
 }
 
