@@ -779,21 +779,23 @@ Known:
 
 ## 13. Acceptance criteria
 
-- [ ] `pnpm --filter @cobweb/freshness start` runs the TypeScript source on Node 24 with no build step, on `PORT`,
+- [x] `pnpm --filter @cobweb/freshness start` runs the TypeScript source on Node 24 with no build step, on `PORT`,
       reading each chain whose two variables are set; `COBWEB_TEST_CHAINS=1` shows the test chains under
       `NODE_ENV=production` in the shared list, the web app's browser bundle and its wallet's chain list.
-- [ ] Per chain and tick, one `eth_getLogs` and one `readEach` at one block over the hot set, at 1 s, 2 s or 20 s as
+- [x] Per chain and tick, one `eth_getLogs` and one `readEach` at one block over the hot set, at 1 s, 2 s or 20 s as
       section 6.6 sets them; the extras on their logs and every 60 s; liveness only from the view's `active`.
-- [ ] The state endpoint answers every field of 6.7 with a weak ETag that unchanged ticks keep, 304 to a match, the
+- [x] The state endpoint answers every field of 6.7 with a weak ETag that unchanged ticks keep, 304 to a match, the
       cache and CORS headers, 404 for an address that is not a collection and 503 with `Retry-After` before the first
       read; `degraded` follows 6.6.
-- [ ] The wallet endpoint answers `walletState` and up to 10 vaults with empty-rights delegations, from 200 ms windows,
+- [x] The wallet endpoint answers `walletState` and up to 10 vaults with empty-rights delegations, from 200 ms windows,
       with `s-maxage=5`.
-- [ ] `/health` reports each chain's tier, lag and hot collections, and never an RPC URL.
-- [ ] `apps/web` imports the five readers from `@cobweb/shared` with no behaviour change; `pnpm typecheck`, `lint`,
+- [x] `/health` reports each chain's tier, lag and hot collections, and never an RPC URL.
+- [x] `apps/web` imports the five readers from `@cobweb/shared` with no behaviour change; `pnpm typecheck`, `lint`,
       `test`, `format:check` and `build` pass, and every verify script still passes.
-- [ ] `verify:freshness` passes its 16 checks, the server half of Phase 6's exit criterion among them; section 11's
+- [x] `verify:freshness` passes its 16 checks, the server half of Phase 6's exit criterion among them; section 11's
       docs are written, and the landing note lists the owner's hosted steps.
+
+Checked on 16 October 2026 on Anvil and local Supabase: `pnpm typecheck`, `pnpm lint`, `pnpm test` (shared 103, freshness 110 in 11 files, web 697 in 74 files, dna 60, render 117, worker 282) and `pnpm format:check` pass; `pnpm build` passes, and in the client chunks a build with `COBWEB_TEST_CHAINS=1` compiles the switch to show the test chains while the default build compiles it to hide them (the wallet chunk adds Sepolia, Robinhood Chain Testnet and Anvil behind that switch); `verify:local` 365, `verify:chain` 12, `verify:storage` 15, `verify:sweep` 8, `verify:render` 22, `verify:deploy` 15, `verify:phases` 20, `verify:whitelist` 18, `verify:airdrop` 15 (the 500-wallet batch at 26,880,045 gas), `verify:settings` 17 and `verify:freshness` 16 (about 60 s; once more with the Supabase variables unset, on Anvil alone), each with 0 failed. The start as Railway runs it: with `NODE_ENV=production COBWEB_TEST_CHAINS=1 PORT=3100` the server served Anvil and answered the state endpoint (200 in 43 ms on a collection's first request, 304 on its weak ETag, HEAD without a body, a lowercase address checksummed), the wallet endpoint, `/health` and every refusal, with no URL in its log; without the switch it served no chain and answered `chain-not-served`; SIGTERM ended both starts with the port free. Departures from this spec's letter, each ruled during the run and listed in section 14 (items 17 to 26): section 7.3's lint rule is not in the branch and is the owner's one-line step (a plugin hook that guards lint configs refused the edit; the patch is ready); the web app fixes `COBWEB_TEST_CHAINS` at build time and Turborepo passes it to the build; `index.ts` reads `PORT || 3100`; the early wake is floored at one fast tick, a stale wake moment does not shorten the delay after a successful tick, and after a failed tick the reader retries at the fast cadence while a start's window is open; the tier `degraded` and `/health` use counts the entries with a read; every CORS answer exposes `ETag`, `Retry-After` and `Age`; the router works on the raw request target; `close()` stops accepting first and waits for the requests in flight; a failed factory read counts on its chain's `/health`, is logged at most once per 10 s, and at most 50 are in flight per chain; a malformed factory address refuses the start; an entry keeps its mark after a full read below the scanned block; a null registry listing is logged; the server keeps idle connections 65 s. Hosted steps still owed (section 12): the Railway service for `apps/freshness` with its build command, start command (`pnpm --filter @cobweb/freshness start`), watch paths, health check on `/health`, one replica, `RAILPACK_NODE_VERSION=24` and the variables (`PORT`, `NODE_ENV=production`, `COBWEB_TEST_CHAINS=1` while only the test chains have factories, and `RPC_URL_<id>` with `FACTORY_ADDRESS_<id>` per served chain); the owner's `eslint.config.mjs` step; the Cloudflare rule in Phase 7. Defects found and fixed during the run: d4f524d (Turborepo stripped the switch from the web build), 7c06ebd (a frozen read made an idle chain read back to back), af288c1 (the reader's head guard, gap count, scanned block, null-call rule and stop contract pinned; a tick that throws outside its try caught), bcf29c0 (a request target such as `//` answered 500; `close()` kept accepting; a joining collection flashed `degraded` on its neighbours), and the fix wave 9c27097, 69166d1, 6e8062e, 8961962, b724026, 2ba6d6e, 0ccc1a2 and 4168894 (the parked review items, the verify's two deploys simulated, the fixture's settings in a side-effect-free module, the whole-branch review's items).
 
 ## 14. Reconciliations with the rulings
 
@@ -848,3 +850,35 @@ workable reading:
     server answers no vaults where it has none, and the launch check confirms the code on each chain.
 16. "`/health` reporting each chain's lag": the lag is the time since the block time of the head the last good tick
     read, and `/health` always answers 200, so Railway's deploy check passes while one RPC provider is down.
+
+17. Run, 16 October 2026: section 6.6's early wake is never sooner than one fast interval after the tick's start, and a wake
+    moment that lies at or before the tick's start comes from a stale read and does not shorten the delay after a
+    successful tick (7c06ebd and 9c27097), while after a failed tick the reader retries at the fast cadence as long as
+    a read's window moment has passed, so an RPC blip at the wake tick cannot leave a start unread for 20 s (4168894); a fresh read's wake is unchanged, since its `readAt` is after the tick's start.
+18. Run, 16 October 2026: the tier a request's `degraded` and `/health` use is computed over the chain's entries that have a
+    read, not "its chain's tier" over every entry (line 410), so a joining collection cannot flash `degraded` on its
+    neighbours; the tick's own scheduling tier still counts an unread entry as live (bcf29c0).
+19. Run, 16 October 2026: every CORS answer carries `Access-Control-Expose-Headers: ETag, Retry-After, Age`, which section
+    6.10's conditional fetch, `Retry-After` retry and the edge's `Age` need across origins (bcf29c0, b724026).
+20. Run, 16 October 2026: the router works on the raw request target, so `//`, a dotted path, a backslash and an
+    absolute-form target answer 404 `not-found` where `new URL` answered 500 (bcf29c0); `close()` stops accepting
+    before the readers stop, waits for the requests in flight and keeps idle connections 65 s (bcf29c0, b724026).
+21. Run, 16 October 2026: `index.ts` reads `PORT || 3100` where section 6.1 writes `??`, since a blank `PORT=` in a copied
+    `.env` means unset, as a blank chain variable does (6852718); a start failure is logged with its code (0ccc1a2).
+22. Run, 16 October 2026: a failed factory read (`isCollection`) counts into its chain's `failedTicks` and `lastError` on
+    `/health` and is logged at most once per chain per 10 s; at most 50 factory reads are in flight per chain and a
+    state request beyond them answers 503 `busy`; a malformed `FACTORY_ADDRESS_<id>` refuses the start (b724026).
+23. Run, 16 October 2026: an entry read in full at a head below the scanned block keeps its mark, so an extras change in the
+    blocks between that head and the scanned block is read on the next tick (9c27097); a null registry listing is
+    logged at most once per chain per 10 s (section 6.8), and the wallet windows checksum their two addresses before
+    reading (9c27097, 4168894).
+24. Run, 16 October 2026: section 7.3's lint rule is the owner's one-line step, since a plugin hook that guards lint configs
+    refused the edit during the run; the patch is ready and nothing in `apps/web` imports `@cobweb/shared/clients`.
+25. Run, 16 October 2026: the web app fixes `COBWEB_TEST_CHAINS` at build time (both bundles), and `turbo.json` declares it
+    for the build task, since Turborepo's strict environment would otherwise strip it (d4f524d); a hosted test
+    environment sets it where the build runs and rebuilds after changing it.
+26. Run, 16 October 2026: section 6.10 with a cache in front: the browser's own `stale-while-revalidate` and Phase 7's edge can
+    serve a poll one answer late and answer an outage from the edge's copy for up to 60 s with `degraded: false`, so
+    the mint page fetches with `cache: 'no-cache'` (still conditional), reads `Age` and treats an `Age` above 10 s as
+    unreachable, keeps the highest `block` it has seen and ignores a body below it, and treats a 404
+    `not-a-collection` as final for that page load only (about 70 s; a fresh deploy can read it on a lagging node).
