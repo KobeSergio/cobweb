@@ -127,8 +127,12 @@ export function MintProvider({ page, sample, children }: MintPageProps & { child
   )
 
   const [chosenPhase, setChosenPhase] = useState<number | null>(null)
-  // A choice holds while its phase is live; once it sells out or closes, the panel moves on (model.ts).
+  // A choice holds while its phase is live; once it sells out or closes, the panel moves on (model.ts) and
+  // the choice is dropped, so a phase that reopens later is offered in the picker but not switched to. It is
+  // dropped while rendering, as React adjusts state from a render: React renders once more at once, with no
+  // choice left to drop, before anything is shown.
   const phaseId = selectedPhaseId(phases, chosenPhase)
+  if (chosenPhase !== null && phaseId !== chosenPhase) setChosenPhase(null)
   const phase = phases.find((entry) => entry.group.id === phaseId) ?? null
 
   const [chosenVault, setChosenVault] = useState<Address | null>(null)
