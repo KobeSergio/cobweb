@@ -252,7 +252,11 @@ export function deriveAction(input: {
   const q = quote(live, phase.group.priceWei, quantity)
   return {
     kind: 'mint',
-    label: `Mint ${quantity} for ${formatNative(q.totalWei, page.chain.nativeSymbol)}`,
+    // A free phase with no flat fee totals nothing: "Mint 1 free" rather than "Mint 1 for 0 ETH".
+    label:
+      q.totalWei === 0n
+        ? `Mint ${quantity} free`
+        : `Mint ${quantity} for ${formatNative(q.totalWei, page.chain.nativeSymbol)}`,
     quote: q,
   }
 }

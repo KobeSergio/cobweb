@@ -181,11 +181,12 @@ function PhaseRow({ phase, selected }: { phase: Phase; selected: boolean }) {
         phase.wallet &&
         (status === 'live' || status === 'scheduled' || status === 'starting') && (
           <p className="mt-2 text-[0.8125rem] text-muted-foreground">
+            {/* The public phase's own count: a whitelist phase's mints count on its own row. */}
             Anyone can mint.{' '}
             <span className="numeric">
               {phase.wallet.used} of {phase.wallet.quota}
             </span>{' '}
-            minted by you
+            minted by you in {group.name}
           </p>
         )}
     </li>

@@ -50,7 +50,9 @@ export function StickyMintBar() {
   const symbol = page.chain.nativeSymbol
   const amount =
     action.kind === 'mint'
-      ? formatNative(action.quote.totalWei, symbol)
+      ? action.quote.totalWei === 0n
+        ? 'Free'
+        : formatNative(action.quote.totalWei, symbol)
       : phase
         ? phase.group.priceWei === '0'
           ? 'Free'

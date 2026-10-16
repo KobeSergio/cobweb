@@ -114,6 +114,28 @@ describe('deriveAction (docs/specs/2026-10-16-mint-page-live-data.md, section 7.
     expect(action.label).toBe('Mint 1 for 0.001 ETH')
   })
 
+  it('reads a zero total as free, and a free phase with a flat fee by its fee (final fix wave M10)', () => {
+    const free = live([group(1, { active: true, priceWei: '0' })])
+    const action = (state: MintLive, quantity: number) => {
+      const [phase] = derivePhases(state, wallet(), NOW)
+      return deriveAction({
+        page,
+        live: state,
+        phase: phase ?? null,
+        connected: true,
+        walletRead: true,
+        wrongChain: false,
+        quantity,
+        vault: null,
+        soldOut: false,
+      })
+    }
+    expect(action(free, 1).label).toBe('Mint 1 free')
+    expect(action(free, 2).label).toBe('Mint 2 free')
+    const withFee = { ...free, fees: { ...free.fees, mintFeeFlatWei: '100000000000000' } }
+    expect(action(withFee, 1).label).toBe('Mint 1 for 0.0001 ETH')
+  })
+
   it('reads "Reading the chain" before the first answer and "Checking this wallet" before the wallet answer', () => {
     expect(
       deriveAction({

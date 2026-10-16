@@ -126,7 +126,7 @@ function FlowBody() {
 
   const { params } = flow
   const chain = page.chain
-  const total = formatNative(params.valueWei, chain.nativeSymbol)
+  const total = params.valueWei === 0n ? 'Free' : formatNative(params.valueWei, chain.nativeSymbol)
   const group = live?.groups.find((entry) => entry.id === params.groupId)
   const actions =
     flow.step === 'error'
