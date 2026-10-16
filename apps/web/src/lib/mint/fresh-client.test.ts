@@ -8,6 +8,7 @@ import {
   foldState,
   ownDegraded,
   pollState,
+  readingLong,
   pollWallet,
   POLL_TIMEOUT_MS,
   RETRY_MAX_MS,
@@ -343,5 +344,14 @@ describe('cadenceMs and ownDegraded', () => {
     // A return before the last answer changes nothing.
     expect(ownDegraded(shown, 10_000, -5_000)).toBe(true)
     expect(ownDegraded(EMPTY_TRACK, 60_000, 0)).toBe(false)
+  })
+
+  it("reads long with no body 10 s after the start, or after the tab's return when it loaded hidden (final fix wave O5)", () => {
+    expect(readingLong(EMPTY_TRACK, 9_999, 0)).toBe(false)
+    expect(readingLong(EMPTY_TRACK, 10_000, 0)).toBe(true)
+    // Loaded in a background tab at 0 and shown at 30 s: the first poll has only just gone out.
+    expect(readingLong(EMPTY_TRACK, 31_000, 0, 30_000)).toBe(false)
+    expect(readingLong(EMPTY_TRACK, 40_000, 0, 30_000)).toBe(true)
+    expect(readingLong(shown, 60_000, 0)).toBe(false)
   })
 })

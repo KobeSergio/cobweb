@@ -56,7 +56,11 @@ export function MintFlowDialog() {
         showCloseButton={!locked}
         onEscapeKeyDown={(event) => locked && event.preventDefault()}
         onInteractOutside={(event) => locked && event.preventDefault()}
-        className={cn('gap-0 sm:max-w-md', flow.step === 'success' && 'sm:max-w-xl')}
+        // Only a success with tokens widens for their art; the no-tokens view keeps the default width.
+        className={cn(
+          'gap-0 sm:max-w-md',
+          flow.step === 'success' && flow.tokenIds.length > 0 && 'sm:max-w-xl',
+        )}
       >
         <DialogTitle className="text-title pr-8">{title}</DialogTitle>
         <DialogDescription className="mt-1.5 text-sm leading-relaxed">{description}</DialogDescription>

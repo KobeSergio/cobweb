@@ -275,6 +275,20 @@ export function ownDegraded(track: FreshTrack, nowMs: number, visibleSince: numb
 }
 
 /**
+ * The page has had no body 10 s after it started reading, while the tab was visible: nothing polls while it is
+ * hidden, so a page loaded in a background tab counts from `visibleSince`, its return, rather than from its load.
+ */
+export function readingLong(
+  track: FreshTrack,
+  nowMs: number,
+  startedAt: number,
+  visibleSince: number | null = null,
+): boolean {
+  if (track.body !== null) return false
+  return nowMs - Math.max(startedAt, visibleSince ?? startedAt) >= OWN_DEGRADED_MS
+}
+
+/**
  * The wait before the next state poll: none after a final refusal; the retry's after a failure; 1 s with no body
  * yet or while a visible phase is starting or scheduled within 60 s by the chain clock; else 3 s.
  */

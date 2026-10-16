@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 import type { Hex } from 'viem'
 import type { MintParams } from '@/lib/mint/mint-call'
 import { MintFailure, mintFailureOf, type MintStep } from '@/lib/mint/mint-failure'
@@ -15,10 +15,29 @@ export type FlowState =
   | { step: 'error'; params: MintParams; failedAt: FlowStep; failure: MintFailure; hash?: Hex }
 
 /** Thrown from the wallet step of a flow closed during the check, so its run ends before the wallet opens. */
-class MintCancelled extends Error {
+export class MintCancelled extends Error {
   constructor() {
     super('The mint was closed before the wallet opened.')
     this.name = 'MintCancelled'
+  }
+}
+
+/**
+ * The flow's runs, pure: each is alive until the next one starts or the flow closes, so a closed or replaced run
+ * neither opens the wallet nor shows its end.
+ */
+export function flowRuns() {
+  let current = 0
+  return {
+    /** Starts a run; the answer says whether it is still the flow's. */
+    begin(): () => boolean {
+      const id = ++current
+      return () => current === id
+    },
+    /** The flow closed: the running one is no longer alive. */
+    close(): void {
+      current += 1
+    },
   }
 }
 
@@ -33,13 +52,12 @@ export function useMintFlow(options: {
   onMinted: (params: MintParams, result: MintResult) => void
 }) {
   const [state, setState] = useState<FlowState>({ step: 'idle' })
-  const run = useRef(0)
+  const [runs] = useState(flowRuns)
   const { chain, live, onMinted } = options
 
   const start = useCallback(
     async (params: MintParams) => {
-      const id = ++run.current
-      const alive = () => run.current === id
+      const alive = runs.begin()
       let at: FlowStep = 'checking'
       let hash: Hex | undefined
       setState({ step: 'checking', params })
@@ -66,7 +84,7 @@ export function useMintFlow(options: {
         setState({ step: 'error', params, failedAt: at, failure, hash: failure.detail.hash ?? hash })
       }
     },
-    [chain, live, onMinted],
+    [chain, live, onMinted, runs],
   )
 
   /**
@@ -74,9 +92,9 @@ export function useMintFlow(options: {
    * on chain, and only the view stops.
    */
   const reset = useCallback(() => {
-    run.current += 1
+    runs.close()
     setState({ step: 'idle' })
-  }, [])
+  }, [runs])
 
   return { state, start, reset }
 }

@@ -8,8 +8,8 @@ import {
   EMPTY_TRACK,
   foldState,
   NEXT_ANSWER_MAX_MS,
-  OWN_DEGRADED_MS,
   ownDegraded,
+  readingLong,
   type FreshTrack,
 } from '@/lib/mint/fresh-client'
 import { liveOf, type MintLive } from '@/lib/mint/live-data'
@@ -110,8 +110,8 @@ export function useLiveState(source: MintSource, page: MintPageStatic) {
     ownDegraded: at !== null && ownDegraded(track, at, visibleSince),
     /** Since when the page has had no accepted answer (`performance.now()`), for the banner's minutes. */
     lastGoodAt: track.lastGoodAt,
-    /** No body yet after 10 s. */
-    waitingLong: !track.body && now !== null && now - startedAt >= OWN_DEGRADED_MS,
+    /** No body yet after 10 s, counted from the tab's return when the page loaded hidden. */
+    waitingLong: now !== null && readingLong(track, now, startedAt, visibleSince),
     nextAnswer,
     refresh,
   }
