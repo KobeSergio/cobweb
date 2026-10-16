@@ -40,6 +40,13 @@ const addressShape = z.custom<Address>(
   (value) => typeof value === 'string' && isAddress(value, { strict: false }),
 )
 const count = z.number().int().min(0)
+/**
+ * A group's start: a finite number at or above 0 (`z.number()` refuses NaN and the infinities). The reader
+ * sends the chain's uint256 as a number, so a start set outside Cobweb past 2^53, such as uint256 max for
+ * "never", arrives as a large whole float that `count` refuses; the model reads a start past the year 9999
+ * as none.
+ */
+const start = z.number().min(0)
 const wei = z.string().regex(/^[0-9]+$/)
 
 const stateBodySchema: z.ZodType<StateBody> = z.object({
@@ -62,7 +69,7 @@ const stateBodySchema: z.ZodType<StateBody> = z.object({
       priceWei: wei,
       maxSupply: count,
       minted: count,
-      startTimestamp: count,
+      startTimestamp: start,
       flag: z.boolean(),
       active: z.boolean(),
     }),

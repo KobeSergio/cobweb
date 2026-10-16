@@ -1,6 +1,7 @@
 import type { StateBody, WalletBody } from '@cobweb/shared'
 import type { Address } from 'viem'
 import { describe, expect, it, vi } from 'vitest'
+import { derivePhases } from '@/components/mint/model'
 import {
   cadenceMs,
   chainNowOf,
@@ -15,6 +16,8 @@ import {
   type FreshTrack,
   type StatePoll,
 } from './fresh-client'
+import { liveOf } from './live-data'
+import type { MintPageStatic } from './page-doc'
 
 const BASE = 'https://fresh.example'
 const COLLECTION: Address = '0x0409454C375c8a6aB05383bFB6D9FcDe9ebB8F85'
@@ -206,6 +209,56 @@ describe('pollState (docs/specs/2026-10-16-mint-page-live-data.md, section 7.1)'
       reason: 'unavailable',
     })
     expect(calls).toHaveLength(3)
+  })
+})
+
+describe('a group start past 2^53 on live data (fix wave 2 W3)', () => {
+  const page: MintPageStatic = {
+    slug: 'night-owls',
+    name: 'Night Owls',
+    symbol: 'OWLS',
+    projectType: 'generative',
+    chain: { id: 31337, name: 'Anvil', nativeSymbol: 'ETH', explorerUrl: '', transferLock: false },
+    contract: COLLECTION,
+    description: '',
+    bannerUrl: null,
+    avatarUrl: null,
+    aboutBannerUrl: null,
+    socials: {},
+    featuredTokenIds: [],
+    sections: {},
+    phases: [{ onchain_id: 0, name: 'Public', description: '', visible: true, position: 0 }],
+    placeholders: [],
+    gateway: 'https://ipfs.io/ipfs',
+  }
+  /** The body with its one group closed and starting at `startTimestamp`. */
+  const startingAt = (startTimestamp: number): StateBody => ({
+    ...body,
+    groups: [{ ...body.groups[0]!, flag: false, active: false, startTimestamp }],
+  })
+
+  it('parses a start of uint256 max, which the model reads as unscheduled with no countdown', async () => {
+    // Set outside Cobweb as "never".
+    const never = Number(2n ** 256n - 1n)
+    const { fetchImpl } = fakeFetch([json(startingAt(never))])
+    const poll = await pollState(BASE, 31337, COLLECTION, fetchImpl)
+    expect(poll).toEqual<StatePoll>({ kind: 'body', body: startingAt(never), ageSeconds: 0 })
+    if (poll.kind !== 'body') return
+    const [phase] = derivePhases(liveOf(page, poll.body), null, poll.body.blockTimestamp)
+    expect([phase?.status, phase?.startsIn]).toEqual(['unscheduled', null])
+  })
+
+  it('still refuses a negative, NaN or infinite start as a failed poll', async () => {
+    for (const startTimestamp of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      // JSON carries neither NaN nor an infinity, so this answer hands its body to the schema as it is.
+      const answer = Object.assign(json({}), { json: async () => startingAt(startTimestamp) })
+      const { fetchImpl } = fakeFetch([answer])
+      expect(await pollState(BASE, 31337, COLLECTION, fetchImpl), String(startTimestamp)).toEqual<StatePoll>({
+        kind: 'retry',
+        afterMs: 1_000,
+        reason: 'network',
+      })
+    }
   })
 })
 
