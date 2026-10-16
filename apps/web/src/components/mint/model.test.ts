@@ -4,6 +4,7 @@ import type { MintGroup } from '@/lib/demo/types'
 import type { LocalMint, MintLive, WalletView } from '@/lib/mint/live-data'
 import type { MintParams } from '@/lib/mint/mint-call'
 import type { MintPageStatic } from '@/lib/mint/page-doc'
+import { REMINDER_MAX_SECONDS } from '@/lib/mint/remind'
 import {
   defaultPhaseId,
   deriveAction,
@@ -293,6 +294,28 @@ describe('the phases', () => {
     const closed = derivePhases(live([publicLive, group(1, { name: 'Holders', minted: 3 })]), wallet(), NOW)
     expect(closed.find((phase) => phase.group.id === 1)?.status).toBe('closed')
     expect(selectedPhaseId(closed, 1)).toBe(0)
+  })
+
+  it('read a start past the end of the year 9999 as none: no countdown, and not scheduled (final fix wave M4)', () => {
+    const far = REMINDER_MAX_SECONDS + 1
+    const [unset, after] = derivePhases(
+      live([group(1, { scheduledStart: far }), group(2, { scheduledStart: 2 ** 256, minted: 3 })]),
+      wallet(),
+      NOW,
+    )
+    expect([unset?.status, unset?.startsIn, after?.status, after?.startsIn]).toEqual([
+      'unscheduled',
+      null,
+      'closed',
+      null,
+    ])
+    expect(actionFor(live([group(0, { scheduledStart: far })])).label).toBe('Minting is paused')
+    // At the bound the start still has its date and its countdown.
+    const [last] = derivePhases(live([group(0, { scheduledStart: REMINDER_MAX_SECONDS })]), wallet(), NOW)
+    expect([last?.status, last?.startsIn]).toEqual(['scheduled', REMINDER_MAX_SECONDS - NOW])
+    expect(actionFor(live([group(0, { scheduledStart: REMINDER_MAX_SECONDS })])).label).toMatch(
+      /^Starts in \d+d /,
+    )
   })
 
   it('keep a chosen phase while it is live, even when the default would be another (final fix wave M1)', () => {

@@ -4,7 +4,7 @@ import type { LocalMint, MintLive, WalletView } from '@/lib/mint/live-data'
 import { quoteOf, type MintParams, type Quote } from '@/lib/mint/mint-call'
 import type { MintResult } from '@/lib/mint/mint-run'
 import type { MintPageStatic } from '@/lib/mint/page-doc'
-import { formatCountdown } from './format'
+import { formatCountdown, shownStart } from './format'
 
 /*
  * The mint page's rules, as pure functions of the chain's state (docs/specs/2026-10-16-mint-page-live-data.md,
@@ -33,7 +33,10 @@ export type Phase = {
   group: MintGroup
   status: PhaseStatus
   remainingSupply: number
-  /** Seconds until the scheduled start, by the chain clock. Null when nothing is scheduled or the clock is not set. */
+  /**
+   * Seconds until the scheduled start, by the chain clock. Null when nothing is scheduled, the start is past the
+   * end of the year 9999 (`shownStart`), or the clock is not set.
+   */
   startsIn: number | null
   /** The connected wallet's own allowance in this phase; null until its answer arrives. */
   wallet: (Allowance & { eligible: boolean }) | null
@@ -103,13 +106,15 @@ export function derivePhases(
         .reduce((sum, mint) => sum + mint.count, 0)
       const minted = group.minted + localForGroup
       const remainingSupply = Math.max(0, Math.min(group.maxSupply - minted, collectionLeft))
-      const startsIn = group.scheduledStart > 0 && chainNow !== null ? group.scheduledStart - chainNow : null
+      // A start past the end of the year 9999 has no date to show or count down to, so it reads as none.
+      const start = shownStart(group.scheduledStart)
+      const startsIn = start > 0 && chainNow !== null ? start - chainNow : null
 
       let status: PhaseStatus
       if (remainingSupply === 0 && (group.active || minted >= group.maxSupply || collectionLeft === 0)) {
         status = 'soldout'
       } else if (group.active) status = 'live'
-      else if (group.scheduledStart > 0) status = startsIn === null || startsIn > 0 ? 'scheduled' : 'starting'
+      else if (start > 0) status = startsIn === null || startsIn > 0 ? 'scheduled' : 'starting'
       else status = minted > 0 ? 'closed' : 'unscheduled'
 
       let walletAllowance: Phase['wallet'] = null
