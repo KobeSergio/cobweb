@@ -10,7 +10,7 @@ import type { TokenArt } from '@/lib/mint/token-art'
  * null when it cannot be read, as with an empty base URI.
  */
 export function useTokenArt(
-  source: MintSource,
+  source: Pick<MintSource, 'tokenArt'>,
   baseUri: string | null,
   ids: readonly number[],
 ): Map<number, TokenArt | null | undefined> {

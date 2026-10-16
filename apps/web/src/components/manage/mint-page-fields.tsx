@@ -1,21 +1,54 @@
 'use client'
 
-import { CheckIcon, ImageUpIcon, XIcon } from 'lucide-react'
+import { CheckIcon, ImageUpIcon, PlusIcon, XIcon } from 'lucide-react'
 import { useId, useState } from 'react'
 import { Artwork } from '@cobweb/ui/components/artwork'
 import { Button } from '@cobweb/ui/components/button'
 import { FieldError } from '@cobweb/ui/components/field'
+import { Input } from '@cobweb/ui/components/input'
 import { Spinner } from '@cobweb/ui/components/spinner'
 import { cn } from '@cobweb/ui/lib/utils'
-import type { GeneratedToken } from '@/lib/demo'
+import { MEDIA_SLOTS, mintPageMediaProblem, type MediaSlot } from '@/lib/mint/media'
+import type { TokenArt } from '@/lib/mint/token-art'
+import { TokenArtFrame } from '@/components/mint/token-image'
 import { count } from './format'
+import type { DraftFile } from './mint-page-draft'
 
 export const MAX_FEATURED = 6
+/** How many of the rendered set the pickers show as thumbnails; any other id is added by its number. */
+export const PICKER_TOKENS = 48
+
+/** The width and height of an image file, or nulls when it cannot be read as one. */
+function sizeOf(url: string): Promise<{ width: number | null; height: number | null }> {
+  return new Promise((resolve) => {
+    const image = new Image()
+    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight })
+    image.onerror = () => resolve({ width: null, height: null })
+    image.src = url
+  })
+}
 
 /**
- * An image slot: shows the current image, takes a new one by click or drop, and checks its
- * type, size and shape. The file stays in the browser until the page is saved.
- * SEAM: on save, the file is uploaded to storage and the URL stored with the settings.
+ * A file picked for a slot, checked against the slot's types and caps (docs/specs/2026-10-16-mint-page-live-data.md,
+ * section 4.4) with its size read for images; the file stays in the browser until the page is saved.
+ */
+export async function pickFile(
+  file: File,
+  slot: MediaSlot,
+): Promise<{ picked: DraftFile; problem: null } | { picked: null; problem: string }> {
+  const url = URL.createObjectURL(file)
+  const size = file.type.startsWith('image/') ? await sizeOf(url) : { width: null, height: null }
+  const problem = mintPageMediaProblem(slot, { mime: file.type, bytes: file.size, ...size })
+  if (problem) {
+    URL.revokeObjectURL(url)
+    return { picked: null, problem }
+  }
+  return { picked: { kind: 'picked', file, url, ...size }, problem: null }
+}
+
+/**
+ * An image slot: shows the current image, takes a new one by click, checks its type, size and shape, and keeps it
+ * in the browser until the page is saved.
  */
 export function ImageSlot({
   label,
@@ -23,54 +56,38 @@ export function ImageSlot({
   value,
   onChange,
   seed,
+  slot,
   shape,
-  maxBytes,
 }: {
   label: string
   hint: string
-  value: string
-  onChange: (url: string) => void
+  value: DraftFile | null
+  onChange: (value: DraftFile | null) => void
   seed: string
+  slot: MediaSlot
   shape: 'banner' | 'square'
-  maxBytes: number
 }) {
   const id = useId()
   const [error, setError] = useState<string | null>(null)
   const [warning, setWarning] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
-  function take(file: File | undefined) {
+  async function take(file: File | undefined) {
     if (!file) return
     setError(null)
     setWarning(null)
-    if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml'].includes(file.type)) {
-      setError('Use a PNG, JPG, WebP, GIF or SVG image.')
-      return
-    }
-    if (file.size > maxBytes) {
-      setError(
-        `The image is ${(file.size / 1_048_576).toFixed(1)} MB. The limit is ${maxBytes / 1_048_576} MB.`,
-      )
-      return
-    }
     setLoading(true)
-    const url = URL.createObjectURL(file)
-    const image = new Image()
-    image.onload = () => {
-      setLoading(false)
-      const ratio = image.naturalWidth / image.naturalHeight
+    const { picked, problem } = await pickFile(file, slot)
+    setLoading(false)
+    if (!picked) return setError(problem)
+    if (picked.kind === 'picked' && picked.width && picked.height) {
+      const ratio = picked.width / picked.height
       if (shape === 'square' && Math.abs(ratio - 1) > 0.05)
         setWarning('This image is not square, so its edges will be cropped.')
       if (shape === 'banner' && (ratio < 2.5 || ratio > 4))
         setWarning('Banners look best at 3 to 1, such as 1500 by 500. This one will be cropped.')
-      onChange(url)
     }
-    image.onerror = () => {
-      setLoading(false)
-      URL.revokeObjectURL(url)
-      setError('The image could not be read. Try another file.')
-    }
-    image.src = url
+    onChange(picked)
   }
 
   return (
@@ -80,7 +97,7 @@ export function ImageSlot({
       </p>
       <div className={cn('flex gap-4', shape === 'banner' ? 'flex-col' : 'items-center')}>
         <Artwork
-          src={value || null}
+          src={value?.url ?? null}
           alt={`${label} preview`}
           seed={seed}
           label={value ? undefined : 'None'}
@@ -107,19 +124,19 @@ export function ImageSlot({
                 <input
                   id={`${id}-file`}
                   type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                  accept={MEDIA_SLOTS[slot].types.join(',')}
                   className="sr-only"
                   aria-labelledby={`${id}-label`}
                   aria-describedby={`${id}-hint`}
                   onChange={(event) => {
-                    take(event.target.files?.[0])
+                    void take(event.target.files?.[0])
                     event.target.value = ''
                   }}
                 />
               </label>
             </Button>
             {value && (
-              <Button variant="ghost" size="sm" onClick={() => onChange('')}>
+              <Button type="button" variant="ghost" size="sm" onClick={() => onChange(null)}>
                 <XIcon aria-hidden="true" />
                 Remove
               </Button>
@@ -136,69 +153,174 @@ export function ImageSlot({
   )
 }
 
-/** Choose up to six tokens for the page's gallery strip, in the order picked. */
-export function FeaturedPicker({
-  candidates,
+/** "Add by number": any token id up to the supply. */
+function AddByNumber({
+  supply,
+  taken,
+  onAdd,
+  disabled,
+}: {
+  supply: number
+  taken: number[]
+  onAdd: (id: number) => void
+  disabled: boolean
+}) {
+  const id = useId()
+  const [text, setText] = useState('')
+  const value = Number(text)
+  const problem = !text.trim()
+    ? null
+    : !Number.isInteger(value) || value < 1 || value > supply
+      ? `Enter a token from 1 to ${count(supply)}.`
+      : taken.includes(value)
+        ? 'That token is already chosen.'
+        : null
+  const add = () => {
+    if (!text.trim() || problem) return
+    onAdd(value)
+    setText('')
+  }
+  return (
+    <div className="grid gap-1.5">
+      <div className="flex items-center gap-2">
+        <Input
+          id={id}
+          inputMode="numeric"
+          aria-label="Token number"
+          placeholder="Token number"
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              add()
+            }
+          }}
+          className="w-36"
+          disabled={disabled}
+        />
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={add}
+          disabled={disabled || !text.trim() || !!problem}
+        >
+          <PlusIcon aria-hidden="true" />
+          Add by number
+        </Button>
+      </div>
+      {problem && <FieldError>{problem}</FieldError>}
+    </div>
+  )
+}
+
+/**
+ * Tokens of the rendered set to pick from: ids 1 to 48 (at most the supply) with thumbnails from their metadata at
+ * the real job's base URI, plus any id up to the supply by its number. Without a done real job there are no
+ * previews; a single asset picks none, since every token shares its image.
+ */
+export function TokenPicker({
+  art,
+  ids,
   value,
   onChange,
+  max,
+  realBaseUri,
+  supply,
+  projectType,
 }: {
-  candidates: GeneratedToken[]
+  art: Map<number, TokenArt | null | undefined>
+  ids: number[]
   value: number[]
   onChange: (ids: number[]) => void
+  max: number
+  realBaseUri: string | null
+  supply: number
+  projectType: 'generative' | 'one_of_one' | 'single_asset'
 }) {
-  if (candidates.length === 0) {
+  if (projectType === 'single_asset') {
     return (
       <p className="text-muted-foreground text-sm">
-        No token previews yet. They appear once the art is rendered.
+        Every token shares one image, which the page shows in place of featured tokens.
       </p>
     )
   }
-  const full = value.length >= MAX_FEATURED
+  const full = value.length >= max
   return (
     <div className="grid gap-3">
       <p className="text-muted-foreground text-[0.8125rem]" aria-live="polite">
-        <span className="numeric text-foreground">{value.length}</span> of {MAX_FEATURED} chosen.
+        <span className="numeric text-foreground">{value.length}</span> of {max} chosen.
         {full ? ' Remove one to choose another.' : ' Shown in the order you pick them.'}
       </p>
-      <ul className="grid grid-cols-4 gap-2 sm:grid-cols-6 xl:grid-cols-8">
-        {candidates.map((token) => {
-          const position = value.indexOf(token.id)
-          const chosen = position >= 0
-          return (
-            <li key={token.id}>
-              <button
-                type="button"
-                aria-pressed={chosen}
-                aria-label={`${token.name}${chosen ? `, featured ${position + 1}` : ''}`}
-                disabled={!chosen && full}
-                onClick={() =>
-                  onChange(chosen ? value.filter((id) => id !== token.id) : [...value, token.id])
-                }
-                className={cn(
-                  'group focus-visible:ring-ring focus-visible:ring-offset-background relative block w-full overflow-hidden rounded-lg border outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
-                  'transition-[transform,border-color,opacity] duration-150 disabled:cursor-not-allowed disabled:opacity-40',
-                  chosen ? 'border-primary' : 'hover:border-border-strong',
-                )}
-              >
-                <Artwork src={token.previewUrl} alt="" seed={String(token.id)} />
-                {chosen && (
-                  <span className="bg-primary text-primary-foreground numeric absolute top-1 right-1 flex size-5 items-center justify-center rounded-full text-[0.6875rem] font-semibold">
-                    {position + 1}
+      {value.some((id) => !ids.includes(id)) && (
+        <ul className="flex flex-wrap gap-2">
+          {value
+            .filter((id) => !ids.includes(id))
+            .map((id) => (
+              <li key={id}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onChange(value.filter((other) => other !== id))}
+                >
+                  <span className="numeric">#{count(id)}</span>
+                  <XIcon aria-hidden="true" />
+                  <span className="sr-only">Remove</span>
+                </Button>
+              </li>
+            ))}
+        </ul>
+      )}
+      {realBaseUri === null ? (
+        <p className="text-muted-foreground text-sm">
+          No token previews yet. They appear once the art is rendered.
+        </p>
+      ) : (
+        <ul className="grid grid-cols-4 gap-2 sm:grid-cols-6 xl:grid-cols-8">
+          {ids.map((tokenId) => {
+            const position = value.indexOf(tokenId)
+            const chosen = position >= 0
+            return (
+              <li key={tokenId}>
+                <button
+                  type="button"
+                  aria-pressed={chosen}
+                  aria-label={`Token ${tokenId}${chosen ? `, chosen ${position + 1}` : ''}`}
+                  disabled={!chosen && full}
+                  onClick={() =>
+                    onChange(chosen ? value.filter((id) => id !== tokenId) : [...value, tokenId])
+                  }
+                  className={cn(
+                    'group focus-visible:ring-ring focus-visible:ring-offset-background relative block w-full overflow-hidden rounded-lg border outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
+                    'transition-[transform,border-color,opacity] duration-150 disabled:cursor-not-allowed disabled:opacity-40',
+                    chosen ? 'border-primary' : 'hover:border-border-strong',
+                  )}
+                >
+                  <TokenArtFrame art={art.get(tokenId)} id={tokenId} alt="" />
+                  {chosen && (
+                    <span className="bg-primary text-primary-foreground numeric absolute top-1 right-1 flex size-5 items-center justify-center rounded-full text-[0.6875rem] font-semibold">
+                      {position + 1}
+                    </span>
+                  )}
+                  {!chosen && (
+                    <span className="bg-background/70 absolute top-1 right-1 hidden size-5 items-center justify-center rounded-full group-hover:flex">
+                      <CheckIcon aria-hidden="true" className="size-3" />
+                    </span>
+                  )}
+                  <span className="numeric bg-background/70 text-muted-foreground absolute bottom-1 left-1 rounded-sm px-1 text-[0.625rem]">
+                    #{count(tokenId)}
                   </span>
-                )}
-                {!chosen && (
-                  <span className="bg-background/70 absolute top-1 right-1 hidden size-5 items-center justify-center rounded-full group-hover:flex">
-                    <CheckIcon aria-hidden="true" className="size-3" />
-                  </span>
-                )}
-                <span className="numeric bg-background/70 text-muted-foreground absolute bottom-1 left-1 rounded-sm px-1 text-[0.625rem]">
-                  #{count(token.id)}
-                </span>
-              </button>
-            </li>
-          )
-        })}
-      </ul>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {supply > 0 && (
+        <AddByNumber supply={supply} taken={value} disabled={full} onAdd={(id) => onChange([...value, id])} />
+      )}
     </div>
   )
 }

@@ -31,6 +31,7 @@ import type { MintCall } from '@/lib/mint/mint-call'
 import type { MintFailureKind } from '@/lib/mint/mint-failure'
 import type { MintChain } from '@/lib/mint/mint-run'
 import type { MintPageStatic } from '@/lib/mint/page-doc'
+import type { TokenArt } from '@/lib/mint/token-art'
 
 /**
  * The sample-mode source (docs/specs/2026-10-16-mint-page-live-data.md, section 8): the same answers the live
@@ -152,6 +153,14 @@ function quotasOf(
           }),
         })),
   }
+}
+
+/** A sample token's art: its preview, or its layers stacked; the placeholder's image before the reveal. */
+export async function sampleTokenArt(baseUri: string, id: number): Promise<TokenArt | null> {
+  if (baseUri === SAMPLE_PLACEHOLDER_URI) return { layers: [DEMO_PLACEHOLDER.imageUrl], video: false }
+  const token = DEMO_TOKENS[id - 1]
+  if (!token) return null
+  return { layers: token.previewUrl ? [token.previewUrl] : tokenLayerUrls(token.dna), video: false }
 }
 
 /** The sample source for a page. `now` is the wall clock, so the sample's chain time moves in real seconds. */
@@ -314,11 +323,6 @@ export function sampleMintSource(
       return { total: DEMO_TOKENS.length, ranks }
     },
 
-    async tokenArt(baseUri, id) {
-      if (baseUri === SAMPLE_PLACEHOLDER_URI) return { layers: [DEMO_PLACEHOLDER.imageUrl], video: false }
-      const token = DEMO_TOKENS[id - 1]
-      if (!token) return null
-      return { layers: token.previewUrl ? [token.previewUrl] : tokenLayerUrls(token.dna), video: false }
-    },
+    tokenArt: sampleTokenArt,
   }
 }

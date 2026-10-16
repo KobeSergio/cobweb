@@ -1,34 +1,40 @@
 'use client'
 
 import { MusicIcon } from 'lucide-react'
-import { useState } from 'react'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@cobweb/ui/components/accordion'
-import { Badge } from '@cobweb/ui/components/badge'
 import { Panel } from '@cobweb/ui/components/panel'
 import { Switch } from '@cobweb/ui/components/switch'
-import {
-  // Seam: replaced by the mint page section tables in Phase 6.
-  DEMO_MINT_PAGE_SECTIONS,
-  type GeneratedToken,
-  type MintPageSections as Sections,
-  type TeamMember,
-} from '@/lib/demo'
+import type { TokenArt } from '@/lib/mint/token-art'
+import type { DraftMember, DraftSections } from './mint-page-draft'
 import { ImageSlot } from './mint-page-fields'
-import { Carousel, FilePick, ItemList, LIMITS, MB, Text } from './mint-page-section-parts'
+import { Carousel, FilePick, ItemList, LIMITS, Text } from './mint-page-section-parts'
 
-type Section = keyof Sections
+type Section = keyof DraftSections
 
 /**
- * Team, Roadmap, FAQ, music and carousel: the mint page sections that return in Phase 6. The
- * form works on sample data so the fields and limits can be reviewed now; nothing is saved and the
- * public page does not show them yet.
- * Seam: Phase 6 stores each section (and its on/off switch) with the mint page settings and uploads
- * files to storage on save.
+ * Team, Roadmap, FAQ, music and a carousel (docs/specs/2026-10-16-mint-page-live-data.md, section 4.1): the mint
+ * page's own sections, each with its switch, saved with the rest of the draft. Files stay in the browser until
+ * Save, which uploads them first.
  */
-export function MintPageSections({ candidates }: { candidates: GeneratedToken[] }) {
-  const [value, setValue] = useState<Sections>(DEMO_MINT_PAGE_SECTIONS)
-  const set = <K extends Section>(key: K, next: Partial<Sections[K]>) =>
-    setValue((current) => ({ ...current, [key]: { ...current[key], ...next } }))
+export function MintPageSections({
+  value,
+  onChange,
+  art,
+  ids,
+  realBaseUri,
+  supply,
+  projectType,
+}: {
+  value: DraftSections
+  onChange: (value: DraftSections) => void
+  art: Map<number, TokenArt | null | undefined>
+  ids: number[]
+  realBaseUri: string | null
+  supply: number
+  projectType: 'generative' | 'one_of_one' | 'single_asset'
+}) {
+  const set = <K extends Section>(key: K, next: Partial<DraftSections[K]>) =>
+    onChange({ ...value, [key]: { ...value[key], ...next } })
   const toggle = (key: Section) => (
     <Switch
       checked={value[key].enabled}
@@ -39,12 +45,8 @@ export function MintPageSections({ candidates }: { candidates: GeneratedToken[] 
 
   return (
     <Panel
-      title={
-        <span className="flex items-center gap-2">
-          More sections <Badge variant="outline">Phase 6</Badge>
-        </span>
-      }
-      description="Team, roadmap, FAQ, music and a carousel, as on the old mint pages. Preview only: these are not saved and not shown on the page until Phase 6."
+      title="More sections"
+      description="Team, roadmap, FAQ, music and a carousel. Each shows on the page when its switch is on and it has content."
       bodyClassName="p-0"
     >
       <Accordion type="multiple" className="px-5 lg:px-6">
@@ -53,23 +55,23 @@ export function MintPageSections({ candidates }: { candidates: GeneratedToken[] 
             items={value.team.members}
             onChange={(members) => set('team', { members })}
             addLabel="Add a member"
-            create={(): TeamMember => ({
+            create={(): DraftMember => ({
               id: `team-${Date.now()}`,
               name: '',
               role: '',
               bio: '',
-              imageUrl: '',
+              image: null,
             })}
             render={(member, update) => (
               <div className="grid gap-4">
                 <ImageSlot
                   label="Photo"
-                  hint="Square. PNG, JPG or GIF, up to 20 MB."
-                  value={member.imageUrl}
-                  onChange={(imageUrl) => update({ imageUrl })}
+                  hint="Square. PNG, JPG, WebP or GIF, up to 2 MB."
+                  value={member.image}
+                  onChange={(image) => update({ image })}
                   seed={member.id}
+                  slot="team"
                   shape="square"
-                  maxBytes={LIMITS.mb * MB}
                 />
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Text
@@ -187,16 +189,15 @@ export function MintPageSections({ candidates }: { candidates: GeneratedToken[] 
           />
         </Block>
 
-        <Block id="music" title="Music" count={value.music.fileName ? 1 : 0} toggle={toggle('music')}>
+        <Block id="music" title="Music" count={value.music.track ? 1 : 0} toggle={toggle('music')}>
           <FilePick
-            label={value.music.fileName ?? 'No track'}
-            accept="audio/mpeg,.mp3"
+            label={value.music.track ? (value.music.fileName ?? 'Track') : 'No track'}
+            slot="music"
             hint="One MP3, up to 20 MB. It plays with the collection's avatar as its cover."
-            check={(file) =>
-              file.type === 'audio/mpeg' || /\.mp3$/i.test(file.name) ? null : 'Use an MP3 file.'
+            onFile={(track, file) =>
+              set('music', { track, fileName: file.name.slice(0, 100) || 'track.mp3' })
             }
-            onFile={(file, url) => set('music', { fileName: file.name, url })}
-            onRemove={value.music.fileName ? () => set('music', { fileName: null, url: null }) : undefined}
+            onRemove={value.music.track ? () => set('music', { track: null, fileName: null }) : undefined}
             icon={<MusicIcon aria-hidden="true" />}
           />
         </Block>
@@ -210,8 +211,12 @@ export function MintPageSections({ candidates }: { candidates: GeneratedToken[] 
         >
           <Carousel
             items={value.carousel.items}
-            candidates={candidates}
             onChange={(items) => set('carousel', { items })}
+            art={art}
+            ids={ids}
+            realBaseUri={realBaseUri}
+            supply={supply}
+            projectType={projectType}
           />
         </Block>
       </Accordion>

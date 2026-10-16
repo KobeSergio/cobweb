@@ -15,13 +15,14 @@ import {
   MintPageAddressField,
   type AddressCollection,
 } from '@/components/collections/mint-page-address-field'
+import { setMintPagePublished } from '@/app/actions/mint-page'
 import type { ActionResult } from '@/lib/art/result'
 import type { SupportedChain } from '@/lib/demo'
 import type { ManageCall } from '@/lib/manage/phase-calls'
 import type { SettingsView } from '@/lib/manage/settings-types'
 import { AddressLine } from './bits'
 import { count, percent, relativeTo } from './format'
-import { saveOffChain, SAMPLE } from './manage-sim'
+import { saveOffChain } from './manage-sim'
 import { UNREADABLE_REASON } from './phase-row'
 import { RevealDialog } from './settings-dialogs'
 
@@ -39,6 +40,7 @@ type RevealProps = {
  */
 export function OverviewHeader({
   collectionId,
+  avatarUrl,
   name,
   contract,
   deployedAt,
@@ -51,6 +53,8 @@ export function OverviewHeader({
   ...reveal
 }: {
   collectionId: string
+  /** The mint page's avatar; the artwork pattern without one. */
+  avatarUrl: string | null
   name: string
   contract: Address
   deployedAt: number
@@ -67,7 +71,7 @@ export function OverviewHeader({
       className="bg-card shadow-raised flex flex-wrap items-center gap-x-6 gap-y-4 rounded-xl border p-4"
     >
       <Artwork
-        src={SAMPLE.mintPage.avatarUrl}
+        src={avatarUrl}
         alt={`${name} artwork`}
         seed={collectionId}
         className="size-14 shrink-0 rounded-lg border"
@@ -217,14 +221,17 @@ function ContractPointer({
 
 /**
  * The mint page link as a plain input with a check/save button, the public/private switch beside
- * it, and a way to open the page. With no link yet the switch is off and disabled.
+ * it, and a way to open the page. With no link yet the switch is off and disabled. The switch writes the mint
+ * page's row (sample mode only waits).
  */
 export function MintPageLinkBar({
   collection,
   initialPublished,
+  sample,
 }: {
   collection: AddressCollection
   initialPublished: boolean
+  sample: boolean
 }) {
   const id = useId()
   const [slug, setSlug] = useState(collection.slug)
@@ -235,8 +242,15 @@ export function MintPageLinkBar({
     setPublished(next)
     setSaving(true)
     try {
-      // SEAM: the mint page settings server action (session and ownership checked) writes `published`.
-      await saveOffChain()
+      if (sample) await saveOffChain()
+      else {
+        const result = await setMintPagePublished(collection.id, next)
+        if (!result.ok) {
+          setPublished(!next)
+          toast.error(result.error)
+          return
+        }
+      }
       toast.success(next ? 'Mint page is public' : 'Mint page is private')
     } catch {
       setPublished(!next)

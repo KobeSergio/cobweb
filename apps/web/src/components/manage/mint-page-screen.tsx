@@ -1,7 +1,7 @@
 'use client'
 
-import { ArrowUpRightIcon, CheckIcon } from 'lucide-react'
-import { useId, useState, useSyncExternalStore } from 'react'
+import { ArrowUpRightIcon, CheckIcon, EyeIcon } from 'lucide-react'
+import { useId, useMemo, useState, useSyncExternalStore } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@cobweb/ui/components/button'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@cobweb/ui/components/field'
@@ -10,83 +10,60 @@ import { Panel } from '@cobweb/ui/components/panel'
 import { Spinner } from '@cobweb/ui/components/spinner'
 import { Switch } from '@cobweb/ui/components/switch'
 import { Textarea } from '@cobweb/ui/components/textarea'
+import { presignMintPageMedia, saveMintPage } from '@/app/actions/mint-page'
+import { sha256Hex } from '@/components/art/uploads/hash'
 import { MintPageAddressField } from '@/components/collections/mint-page-address-field'
+import { sampleTokenArt } from '@/components/mint/sample-source'
+import { useTokenArt } from '@/components/mint/use-token-art'
+import { PAGE_UPLOAD_FAILED } from '@/lib/art/result'
 import type { Tables } from '@/lib/database.types'
-import type { GeneratedToken, MintPageData, MintPageSettings, Socials } from '@/lib/demo'
+import type { Socials } from '@/lib/demo'
+import type { MintPageSettingsView } from '@/lib/mint/settings-core'
+import { tokenArtOf } from '@/lib/mint/token-art'
 import { CopyButton } from './bits'
-import { FeaturedPicker, ImageSlot } from './mint-page-fields'
-import { MintPagePreview } from './mint-page-preview'
-import { MintPageSections } from './mint-page-sections'
 import { saveOffChain } from './manage-sim'
+import {
+  draftInvalid,
+  draftOf,
+  inputOf,
+  mediaAskOf,
+  pickedFiles,
+  SOCIAL_FIELDS,
+  socialError,
+  type MintPageDraft,
+} from './mint-page-draft'
+import { ImageSlot, MAX_FEATURED, PICKER_TOKENS, TokenPicker } from './mint-page-fields'
+import { MintPagePreview, type PreviewData } from './mint-page-preview'
+import { MintPageSections } from './mint-page-sections'
 
 export type MintPageScreenProps = {
   collection: Tables<'collections'>
-  settings: MintPageSettings
-  /** Tokens with a preview image, to choose featured tokens from. */
-  featuredCandidates: GeneratedToken[]
-  /** What the public page would render now, for a live preview. */
-  preview: MintPageData
-}
-
-type Draft = Pick<
-  MintPageSettings,
-  'description' | 'bannerUrl' | 'avatarUrl' | 'socials' | 'featuredTokenIds' | 'published'
->
-
-const SOCIALS: { key: keyof Socials; label: string; placeholder: string; hosts: string[] }[] = [
-  { key: 'website', label: 'Website', placeholder: 'https://', hosts: [] },
-  { key: 'x', label: 'X', placeholder: 'https://x.com/yourname', hosts: ['x.com', 'twitter.com'] },
-  {
-    key: 'discord',
-    label: 'Discord invite',
-    placeholder: 'https://discord.gg/invite',
-    hosts: ['discord.gg', 'discord.com'],
-  },
-  {
-    key: 'telegram',
-    label: 'Telegram',
-    placeholder: 'https://t.me/yourgroup',
-    hosts: ['t.me', 'telegram.me'],
-  },
-]
-
-/** Longest link accepted, as in legacy. */
-const LINK_MAX = 200
-
-/** Why a social link is not usable, or null. Empty is fine: the icon is left off the page. */
-function socialError(value: string | undefined, hosts: string[]): string | null {
-  if (!value?.trim()) return null
-  if (value.trim().length > LINK_MAX) return `Use a link of at most ${LINK_MAX} characters.`
-  try {
-    const url = new URL(value.trim())
-    if (url.protocol !== 'https:') return 'Use a link that starts with https://.'
-    const host = url.hostname.replace(/^www\./, '')
-    if (hosts.length > 0 && !hosts.includes(host)) return `Use a ${hosts[0]} link.`
-    return null
-  } catch {
-    return 'Enter a full link, starting with https://.'
-  }
+  /** The row with its media, sections and the art the tab features from (the sample's in sample mode). */
+  view: MintPageSettingsView
+  /** What the miniature draws besides the draft. */
+  preview: PreviewData
+  /** The IPFS gateway token thumbnails are read through. */
+  gateway: string
+  /** Sample mode: files stay browser URLs and Save waits instead of writing. */
+  sample: boolean
 }
 
 const noopSubscribe = () => () => {}
 
-/** Manage drop, mint page: description, banner, avatar, socials, featured tokens, preview and the link to share. */
-export function MintPageScreen({ collection, settings, featuredCandidates, preview }: MintPageScreenProps) {
+/**
+ * Manage drop, mint page (docs/specs/2026-10-16-mint-page-live-data.md, section 7.9): the link, the public switch,
+ * the description, the banner, avatar and About banner, the links, featured tokens and the sections, in one draft
+ * that Save uploads and writes, beside a miniature of the page. Preview opens the owner's view of the page.
+ */
+export function MintPageScreen({ collection, view, preview, gateway, sample }: MintPageScreenProps) {
   const id = useId()
   // The link is set here when the collection has none, or changed after a warning.
   const [slug, setSlug] = useState(collection.slug)
   const [changing, setChanging] = useState(false)
   const mintPageHref = slug ? `/${slug}` : null
-  const initial: Draft = {
-    description: settings.description,
-    bannerUrl: settings.bannerUrl,
-    avatarUrl: settings.avatarUrl,
-    socials: settings.socials,
-    featuredTokenIds: settings.featuredTokenIds,
-    published: settings.published,
-  }
-  const [saved, setSaved] = useState<Draft>(initial)
-  const [draft, setDraft] = useState<Draft>(initial)
+  const initial = useMemo(() => draftOf(view), [view])
+  const [saved, setSaved] = useState<MintPageDraft>(initial)
+  const [draft, setDraft] = useState<MintPageDraft>(initial)
   const [saving, setSaving] = useState(false)
   const origin = useSyncExternalStore(
     noopSubscribe,
@@ -97,21 +74,83 @@ export function MintPageScreen({ collection, settings, featuredCandidates, previ
   // Shown as cobweb.app/<link>, as on Deploy and the Overview; copy and open use the real origin.
   const displayUrl = `cobweb.app/${slug ?? 'your-link'}`
 
+  const { realBaseUri, supply, projectType } = view.art
+  const artSource = useMemo(
+    () => ({
+      tokenArt: sample
+        ? sampleTokenArt
+        : (base: string, tokenId: number) => tokenArtOf(base, tokenId, gateway),
+    }),
+    [sample, gateway],
+  )
+  const pickerIds = useMemo(
+    () => Array.from({ length: Math.min(PICKER_TOKENS, supply) }, (_, index) => index + 1),
+    [supply],
+  )
+  const tokenSlides = draft.sections.carousel.items.flatMap((item) =>
+    item.kind === 'token' ? [item.tokenId] : [],
+  )
+  const artIds = [...new Set([...pickerIds, ...draft.featuredTokenIds, ...tokenSlides])]
+  const art = useTokenArt(artSource, realBaseUri, realBaseUri ? artIds : [])
+
   const errors = Object.fromEntries(
-    SOCIALS.map((social) => [social.key, socialError(draft.socials[social.key], social.hosts)]),
+    SOCIAL_FIELDS.map((social) => [social.key, socialError(draft.socials[social.key], social.hosts)]),
   ) as Record<keyof Socials, string | null>
-  const invalid = Object.values(errors).some(Boolean) || draft.description.length > 2000
+  const invalid = draftInvalid(draft)
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved)
-  const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
+  const set = <K extends keyof MintPageDraft>(key: K, value: MintPageDraft[K]) =>
     setDraft((current) => ({ ...current, [key]: value }))
+  const setMedia = (slot: keyof MintPageDraft['media'], value: MintPageDraft['media'][typeof slot]) =>
+    setDraft((current) => ({ ...current, media: { ...current.media, [slot]: value } }))
+
+  /** Uploads the picked files (each PUT bound to its type and length), then writes the whole draft. */
+  async function saveLive(): Promise<boolean> {
+    const files = pickedFiles(draft)
+    const keys = new Map<File, string>()
+    if (files.length) {
+      const asks = await Promise.all(
+        files.map(async (entry) => mediaAskOf(entry, await sha256Hex(entry.file))),
+      )
+      const signed = await presignMintPageMedia(collection.id, asks)
+      if (!signed.ok) {
+        toast.error(signed.error)
+        return false
+      }
+      for (const [index, entry] of signed.data.entries()) {
+        const file = files[index]!.file
+        keys.set(file, entry.key)
+        if (!entry.putUrl) continue
+        const put = await fetch(entry.putUrl, {
+          method: 'PUT',
+          body: file,
+          headers: { 'Content-Type': file.type },
+        })
+        if (!put.ok) {
+          toast.error(PAGE_UPLOAD_FAILED)
+          return false
+        }
+      }
+    }
+    const result = await saveMintPage(collection.id, inputOf(draft, keys))
+    if (!result.ok) {
+      toast.error(result.error)
+      return false
+    }
+    const next = draftOf(result.data)
+    setSaved(next)
+    setDraft(next)
+    return true
+  }
 
   async function save(event: React.FormEvent) {
     event.preventDefault()
     if (invalid || !dirty) return
     setSaving(true)
     try {
-      await saveOffChain()
-      setSaved(draft)
+      if (sample) {
+        await saveOffChain()
+        setSaved(draft)
+      } else if (!(await saveLive())) return
       toast.success('Mint page saved')
     } catch {
       toast.error('The mint page could not be saved. Check your connection and try again.')
@@ -120,25 +159,28 @@ export function MintPageScreen({ collection, settings, featuredCandidates, previ
     }
   }
 
-  const featured = draft.featuredTokenIds
-    .map((tokenId) => featuredCandidates.find((token) => token.id === tokenId))
-    .filter((token): token is GeneratedToken => !!token)
-    .map((token) => ({ id: token.id, name: token.name, imageUrl: token.previewUrl ?? '' }))
-
   return (
     <form onSubmit={save} className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,26rem)]">
       <div className="grid gap-6">
         <Panel title="Mint page link" bodyClassName="grid gap-4 p-5 lg:p-6">
           {mintPageHref && !changing ? (
-            <div className="bg-well shadow-inset flex min-w-0 items-center gap-2 rounded-md border py-1.5 pr-1.5 pl-3">
+            <div className="bg-well shadow-inset flex min-w-0 flex-wrap items-center gap-2 rounded-md border py-1.5 pr-1.5 pl-3">
               <span className="numeric min-w-0 flex-1 truncate text-sm">{displayUrl}</span>
               <CopyButton value={publicUrl} label="Copy link" size="icon-sm" />
               <Button variant="ghost" size="sm" asChild>
-                <a href={mintPageHref} target="_blank" rel="noreferrer">
-                  Open mint page
-                  <ArrowUpRightIcon aria-hidden="true" />
+                <a href={`${mintPageHref}/preview`} target="_blank" rel="noreferrer">
+                  <EyeIcon aria-hidden="true" />
+                  Preview
                 </a>
               </Button>
+              {saved.published && (
+                <Button variant="ghost" size="sm" asChild>
+                  <a href={mintPageHref} target="_blank" rel="noreferrer">
+                    Open mint page
+                    <ArrowUpRightIcon aria-hidden="true" />
+                  </a>
+                </Button>
+              )}
               <Button type="button" variant="ghost" size="sm" onClick={() => setChanging(true)}>
                 Change link
               </Button>
@@ -169,7 +211,7 @@ export function MintPageScreen({ collection, settings, featuredCandidates, previ
                 {!mintPageHref
                   ? 'Set a link first. The page can go public once it has one.'
                   : draft.published
-                    ? 'Anyone with the link can see it and mint.'
+                    ? 'Anyone with the link can see it and mint. Saved with the page.'
                     : 'Hidden. Visitors see that the page is not available.'}
               </FieldDescription>
             </div>
@@ -189,36 +231,45 @@ export function MintPageScreen({ collection, settings, featuredCandidates, previ
               />
               <FieldDescription id={`${id}-description-help`}>
                 <span className="numeric">{draft.description.length.toLocaleString('en-US')}</span> of 2,000
-                characters. The first lines show above the mint button.
+                characters. Shown in About on the page.
               </FieldDescription>
             </Field>
             <ImageSlot
               label="Banner"
-              hint="3 to 1, such as 1500 by 500. Up to 5 MB."
-              value={draft.bannerUrl}
-              onChange={(url) => set('bannerUrl', url)}
+              hint="3 to 1, such as 1500 by 500. PNG, JPG, WebP or GIF, up to 5 MB."
+              value={draft.media.banner}
+              onChange={(value) => setMedia('banner', value)}
               seed={`${collection.id}-banner`}
+              slot="banner"
               shape="banner"
-              maxBytes={5 * 1_048_576}
             />
             <ImageSlot
               label="Avatar"
-              hint="Square, at least 400 by 400. Up to 2 MB."
-              value={draft.avatarUrl}
-              onChange={(url) => set('avatarUrl', url)}
+              hint="Square, at least 400 by 400. PNG, JPG, WebP or GIF, up to 2 MB."
+              value={draft.media.avatar}
+              onChange={(value) => setMedia('avatar', value)}
               seed={`${collection.id}-avatar`}
+              slot="avatar"
               shape="square"
-              maxBytes={2 * 1_048_576}
+            />
+            <ImageSlot
+              label="About banner"
+              hint="Shown above About; the banner stands in without one. 3 to 1, up to 5 MB."
+              value={draft.media.about}
+              onChange={(value) => setMedia('about', value)}
+              seed={`${collection.id}-about`}
+              slot="about"
+              shape="banner"
             />
           </FieldGroup>
         </Panel>
 
         <Panel
           title="Links"
-          description="Each link you add shows as an icon on the page."
+          description="Each link you add shows as a button in About."
           bodyClassName="grid gap-5 p-5 lg:p-6"
         >
-          {SOCIALS.map((social) => (
+          {SOCIAL_FIELDS.map((social) => (
             <Field key={social.key} data-invalid={!!errors[social.key]}>
               <FieldLabel htmlFor={`${id}-${social.key}`}>{social.label}</FieldLabel>
               <Input
@@ -241,17 +292,30 @@ export function MintPageScreen({ collection, settings, featuredCandidates, previ
 
         <Panel
           title="Featured tokens"
-          description="A strip of tokens under the mint panel."
+          description="Shown in the art stage and in From the collection once the collection is revealed."
           bodyClassName="p-5 lg:p-6"
         >
-          <FeaturedPicker
-            candidates={featuredCandidates}
+          <TokenPicker
+            art={art}
+            ids={pickerIds}
             value={draft.featuredTokenIds}
             onChange={(ids) => set('featuredTokenIds', ids)}
+            max={MAX_FEATURED}
+            realBaseUri={realBaseUri}
+            supply={supply}
+            projectType={projectType}
           />
         </Panel>
 
-        <MintPageSections candidates={featuredCandidates} />
+        <MintPageSections
+          value={draft.sections}
+          onChange={(sections) => set('sections', sections)}
+          art={art}
+          ids={pickerIds}
+          realBaseUri={realBaseUri}
+          supply={supply}
+          projectType={projectType}
+        />
       </div>
 
       <aside aria-label="Preview" className="grid gap-4 lg:sticky lg:top-6">
@@ -260,12 +324,12 @@ export function MintPageScreen({ collection, settings, featuredCandidates, previ
           url={displayUrl}
           overrides={{
             description: draft.description,
-            bannerUrl: draft.bannerUrl,
-            avatarUrl: draft.avatarUrl,
+            bannerUrl: draft.media.banner?.url ?? null,
+            avatarUrl: draft.media.avatar?.url ?? null,
             socials: Object.fromEntries(
               Object.entries(draft.socials).filter(([key, value]) => value && !errors[key as keyof Socials]),
             ),
-            featured,
+            featured: draft.featuredTokenIds.map((tokenId) => ({ id: tokenId, art: art.get(tokenId) })),
           }}
         />
         <div className="bg-card shadow-raised flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3">

@@ -52,12 +52,15 @@ export function DeployedView({
   record,
   chain,
   artSrc,
+  mintPagePublished,
   focusOnMount = false,
 }: {
   collection: Tables<'collections'>
   record: DeployRecord
   chain: SupportedChain
   artSrc: string | null
+  /** The mint page is public: the link row opens it. */
+  mintPagePublished: boolean
   /** Move focus to the heading, after a deploy that just finished on this screen. */
   focusOnMount?: boolean
 }) {
@@ -103,8 +106,8 @@ export function DeployedView({
       icon: <Share2Icon />,
       title: 'Prepare the mint page',
       text: slug
-        ? 'Add a banner and links. The public page opens with Phase 6.'
-        : 'Choose its link, add a banner and links. The public page opens with Phase 6.',
+        ? 'Add a banner and links, then make the page public.'
+        : 'Choose its link, add a banner and links, then make the page public.',
     },
   ]
 
@@ -201,9 +204,20 @@ export function DeployedView({
                 {slug ? (
                   <span className="flex min-w-0 flex-col items-end">
                     <span className="numeric text-[0.8125rem]">cobweb.app/{slug}</span>
-                    <span className="text-muted-foreground text-xs">
-                      Opens with the public mint page in Phase 6.
-                    </span>
+                    {mintPagePublished ? (
+                      <a
+                        href={`/${slug}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs underline-offset-4 hover:underline"
+                      >
+                        Open mint page
+                      </a>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">
+                        Not public yet. Make it public in Manage drop, Mint page.
+                      </span>
+                    )}
                   </span>
                 ) : (
                   <span className="text-muted-foreground text-[0.8125rem]">

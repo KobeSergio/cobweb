@@ -6,11 +6,13 @@ import { Artwork } from '@cobweb/ui/components/artwork'
 import { Button } from '@cobweb/ui/components/button'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@cobweb/ui/components/field'
 import { Input } from '@cobweb/ui/components/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@cobweb/ui/components/select'
 import { Textarea } from '@cobweb/ui/components/textarea'
-import type { GeneratedToken, MintPageSections as Sections } from '@/lib/demo'
+import { MEDIA_SLOTS, type MediaSlot } from '@/lib/mint/media'
+import type { TokenArt } from '@/lib/mint/token-art'
+import type { DraftFile, DraftSlide } from './mint-page-draft'
+import { pickFile, TokenPicker } from './mint-page-fields'
 
-/** Legacy's limits for each section (MintPageDetailsContent and its Team, Roadmap, FAQs, MusicPlayer, CarouselUploader). */
+/** Legacy's limits for each section (docs/specs/2026-10-16-mint-page-live-data.md, section 4.1). */
 export const LIMITS = {
   name: 20,
   role: 20,
@@ -20,9 +22,7 @@ export const LIMITS = {
   title: 20,
   question: 40,
   slides: 5,
-  mb: 20,
 }
-export const MB = 1_048_576
 
 type WithId = { id: string }
 
@@ -153,21 +153,19 @@ export function Text({
   )
 }
 
-/** One file chosen in the browser, checked for type and the 20 MB limit. */
+/** One file picked in the browser for a slot, checked against the slot's types and caps; it stays there until Save. */
 export function FilePick({
   label,
-  accept,
+  slot,
   hint,
-  check,
   onFile,
   onRemove,
   icon,
 }: {
   label: string
-  accept: string
+  slot: MediaSlot
   hint: string
-  check: (file: File) => string | null
-  onFile: (file: File, url: string) => void
+  onFile: (picked: DraftFile, file: File) => void
   onRemove?: () => void
   icon: React.ReactNode
 }) {
@@ -190,16 +188,16 @@ export function FilePick({
             <input
               id={id}
               type="file"
-              accept={accept}
+              accept={MEDIA_SLOTS[slot].types.join(',')}
               className="sr-only"
               onChange={(event) => {
                 const file = event.target.files?.[0]
                 event.target.value = ''
                 if (!file) return
-                const problem =
-                  check(file) ?? (file.size > LIMITS.mb * MB ? `The file is over ${LIMITS.mb} MB.` : null)
-                setError(problem)
-                if (!problem) onFile(file, URL.createObjectURL(file))
+                void pickFile(file, slot).then(({ picked, problem }) => {
+                  setError(problem)
+                  if (picked) onFile(picked, file)
+                })
               }}
             />
           </label>
@@ -210,112 +208,115 @@ export function FilePick({
           </Button>
         )}
       </div>
-      <p className="text-muted-foreground text-[0.8125rem]">{hint}</p>
+      {hint && <p className="text-muted-foreground text-[0.8125rem]">{hint}</p>}
       {error && <FieldError>{error}</FieldError>}
     </div>
   )
 }
 
-/** Up to five slides: uploaded images or MP4s, or the collection's own tokens. */
+/**
+ * Up to five slides: uploaded images or MP4s, or the collection's own tokens, picked from the rendered set or by
+ * their number. Token slides show on the page once the collection is revealed.
+ */
 export function Carousel({
   items,
-  candidates,
   onChange,
+  art,
+  ids,
+  realBaseUri,
+  supply,
+  projectType,
 }: {
-  items: Sections['carousel']['items']
-  candidates: GeneratedToken[]
-  onChange: (items: Sections['carousel']['items']) => void
+  items: DraftSlide[]
+  onChange: (items: DraftSlide[]) => void
+  art: Map<number, TokenArt | null | undefined>
+  ids: number[]
+  realBaseUri: string | null
+  supply: number
+  projectType: 'generative' | 'one_of_one' | 'single_asset'
 }) {
   const full = items.length >= LIMITS.slides
-  const pickable = candidates.filter(
-    (token) => !items.some((item) => item.kind === 'token' && item.tokenId === token.id),
-  )
+  const uploads = items.filter((item) => item.kind === 'upload').length
+  const tokenIds = items.flatMap((item) => (item.kind === 'token' ? [item.tokenId] : []))
+  /** Keeps the uploads where they are, drops the tokens unpicked and adds the tokens picked, at the end. */
+  const pickTokens = (picked: number[]) => {
+    const kept = items.filter((item) => item.kind === 'upload' || picked.includes(item.tokenId))
+    const added = picked
+      .filter((id) => !tokenIds.includes(id))
+      .map((tokenId): DraftSlide => ({ id: `slide-${Date.now()}-${tokenId}`, kind: 'token', tokenId }))
+    onChange([...kept, ...added])
+  }
   return (
     <div className="grid gap-4">
       <ul className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-        {items.map((item) => {
-          const token =
-            item.kind === 'token' ? candidates.find((entry) => entry.id === item.tokenId) : undefined
-          return (
-            <li key={item.id} className="relative">
-              <Artwork
-                src={
-                  item.kind === 'upload'
-                    ? item.mediaType === 'image'
-                      ? item.url
-                      : null
-                    : (token?.previewUrl ?? null)
-                }
-                alt=""
-                seed={item.id}
-                label={item.kind === 'upload' && item.mediaType === 'video' ? 'MP4' : undefined}
-                className="rounded-lg border"
-              />
-              <span className="numeric bg-background/70 absolute bottom-1 left-1 rounded-sm px-1 text-[0.625rem]">
-                {item.kind === 'token' ? `#${item.tokenId}` : item.fileName.slice(0, 12)}
-              </span>
-              <Button
-                type="button"
-                variant="secondary"
-                size="icon-xs"
-                className="absolute top-1 right-1"
-                aria-label="Remove slide"
-                onClick={() => onChange(items.filter((other) => other.id !== item.id))}
-              >
-                <Trash2Icon />
-              </Button>
-            </li>
-          )
-        })}
+        {items.map((item) => (
+          <li key={item.id} className="relative">
+            <Artwork
+              src={
+                item.kind === 'upload'
+                  ? item.mediaType === 'image'
+                    ? item.media.url
+                    : null
+                  : (art.get(item.tokenId)?.layers.at(-1) ?? null)
+              }
+              alt=""
+              seed={item.id}
+              label={item.kind === 'upload' && item.mediaType === 'video' ? 'MP4' : undefined}
+              className="rounded-lg border"
+            />
+            <span className="numeric bg-background/70 absolute bottom-1 left-1 rounded-sm px-1 text-[0.625rem]">
+              {item.kind === 'token' ? `#${item.tokenId}` : item.fileName.slice(0, 12)}
+            </span>
+            <Button
+              type="button"
+              variant="secondary"
+              size="icon-xs"
+              className="absolute top-1 right-1"
+              aria-label="Remove slide"
+              onClick={() => onChange(items.filter((other) => other.id !== item.id))}
+            >
+              <Trash2Icon />
+            </Button>
+          </li>
+        ))}
       </ul>
       <p className="text-muted-foreground text-[0.8125rem]">
-        <span className="numeric">{items.length}</span> of {LIMITS.slides} slides. PNG, JPG, GIF or MP4, up to
-        20 MB each.
+        <span className="numeric">{items.length}</span> of {LIMITS.slides} slides. PNG, JPG, WebP or GIF up to
+        5 MB, or an MP4 up to 20 MB. Token slides show once the collection is revealed.
       </p>
       {!full && (
-        <div className="flex flex-wrap items-center gap-3">
-          <FilePick
-            label=""
-            accept="image/png,image/jpeg,image/gif,video/mp4"
-            hint=""
-            check={(file) =>
-              /^(image\/(png|jpeg|gif)|video\/mp4)$/.test(file.type) ? null : 'Use a PNG, JPG, GIF or MP4.'
-            }
-            onFile={(file, url) =>
-              onChange([
-                ...items,
-                {
-                  id: `slide-${Date.now()}`,
-                  kind: 'upload',
-                  url,
-                  fileName: file.name,
-                  mediaType: file.type === 'video/mp4' ? 'video' : 'image',
-                },
-              ])
-            }
-            icon={null}
-          />
-          {pickable.length > 0 && (
-            <Select
-              value=""
-              onValueChange={(tokenId) =>
-                onChange([...items, { id: `slide-${Date.now()}`, kind: 'token', tokenId: Number(tokenId) }])
-              }
-            >
-              <SelectTrigger className="w-48" aria-label="Add a token">
-                <SelectValue placeholder="Add a token" />
-              </SelectTrigger>
-              <SelectContent>
-                {pickable.slice(0, 50).map((token) => (
-                  <SelectItem key={token.id} value={String(token.id)}>
-                    {token.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </div>
+        <FilePick
+          label=""
+          slot="slide"
+          hint=""
+          onFile={(media, file) =>
+            onChange([
+              ...items,
+              {
+                id: `slide-${Date.now()}`,
+                kind: 'upload',
+                fileName: file.name.slice(0, 100) || 'slide',
+                mediaType: file.type === 'video/mp4' ? 'video' : 'image',
+                media,
+              },
+            ])
+          }
+          icon={null}
+        />
       )}
+      <div className="grid gap-2">
+        <p className="text-sm font-medium">Add a token</p>
+        <TokenPicker
+          art={art}
+          ids={ids}
+          value={tokenIds}
+          onChange={pickTokens}
+          max={LIMITS.slides - uploads}
+          realBaseUri={realBaseUri}
+          supply={supply}
+          projectType={projectType}
+        />
+      </div>
     </div>
   )
 }

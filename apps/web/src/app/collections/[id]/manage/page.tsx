@@ -1,9 +1,11 @@
 import { getAddress } from 'viem'
 import { getDeployment } from '@/app/actions/deploy'
+import { getMintPageSettings } from '@/app/actions/mint-page'
 import { getPhases } from '@/app/actions/phases'
 import { getSettings } from '@/app/actions/settings'
 import { ManageUnavailable } from '@/components/manage/manage-unavailable'
 import { OverviewScreen } from '@/components/manage/overview-screen'
+import { SAMPLE } from '@/components/manage/manage-sim'
 import { sampleSettingsView } from '@/components/manage/settings-sim'
 import { StagePage } from '@/components/shell/stage-page'
 import { NOT_DEPLOYED } from '@/lib/art/result'
@@ -33,8 +35,9 @@ const DESCRIPTION =
 /**
  * Manage drop, overview (docs/specs/2026-10-15-airdrop-settings.md, section 7.5). The header's chain, contract and
  * deploy time come from the deployment record; minted and the live phases from the server's read of the chain;
- * what the base URI points at, Reveal and proceeds from the settings read. Holders, the mint page bar's published
- * state and recent mints keep their sample values until Phase 6, and "Paid by minters" shows in sample mode only.
+ * what the base URI points at, Reveal and proceeds from the settings read; the avatar and the mint page bar's public
+ * switch from the mint page's row (docs/specs/2026-10-16-mint-page-live-data.md, section 7.9). Holders and recent
+ * mints keep their sample values until the indexer, and "Paid by minters" shows in sample mode only.
  * In sample mode `?art=deferred` shows the deferred-art scenario, whose real set is not rendered yet, and
  * `?art=revealed` a collection already revealed.
  */
@@ -76,24 +79,28 @@ export default async function Page({
           wallet={wallet}
           sample
           paidByMintersWei={DEMO_ACTIVITY.proceeds.grossWei}
+          mintPage={{ avatarUrl: SAMPLE.mintPage.avatarUrl, published: SAMPLE.mintPage.published }}
         />
       </StagePage>
     )
   }
 
-  const [record, phases, settings] = await Promise.all([
+  const [record, phases, settings, mintPage] = await Promise.all([
     getDeployment(collection.id),
     getPhases(collection.id),
     getSettings(collection.id),
+    getMintPageSettings(collection.id),
   ])
-  if (!record.ok || !record.data || !phases.ok || !settings.ok) {
+  if (!record.ok || !record.data || !phases.ok || !settings.ok || !mintPage.ok) {
     const message = !record.ok
       ? record.error
       : !phases.ok
         ? phases.error
         : !settings.ok
           ? settings.error
-          : NOT_DEPLOYED
+          : !mintPage.ok
+            ? mintPage.error
+            : NOT_DEPLOYED
     return (
       <StagePage title={TITLE} description={DESCRIPTION} width="wide">
         <ManageUnavailable title="The drop could not be read" message={message} />
@@ -119,6 +126,7 @@ export default async function Page({
         wallet={wallet}
         sample={false}
         paidByMintersWei={null}
+        mintPage={{ avatarUrl: mintPage.data.media.avatar?.url ?? null, published: mintPage.data.published }}
       />
     </StagePage>
   )

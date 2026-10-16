@@ -34,6 +34,8 @@ export type DeployScreenProps = {
   sampleOutcome?: string
   /** "Finish the art later" (MASTER_PLAN, Flow: pre-reveal): the contract starts on the placeholder. */
   artDeferred?: boolean
+  /** The mint page is public, for the deployed view's link row. */
+  mintPagePublished: boolean
 }
 
 /** The sample's deployment record: the Night Owls deployment on Base, as `?state=deployed` shows it. */
@@ -85,6 +87,7 @@ export function DeployScreen({ artDeferred = false, ...props }: DeployScreenProp
           sampleOutcome={props.sampleOutcome}
           sessionWallet={DEMO_CREATOR}
           artSrc={start.placeholder ? start.placeholder.imageUrl : '/demo/tokens/1.svg'}
+          mintPagePublished={props.mintPagePublished}
           previous={props.previous}
           next={props.next}
         />
@@ -114,6 +117,7 @@ export function DeployScreen({ artDeferred = false, ...props }: DeployScreenProp
         sample={false}
         sessionWallet={props.sessionWallet}
         artSrc={artSrc}
+        mintPagePublished={props.mintPagePublished}
         previous={props.previous}
         next={props.next}
       />

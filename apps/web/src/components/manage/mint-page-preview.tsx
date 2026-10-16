@@ -1,35 +1,50 @@
-import { GlobeIcon, LockIcon, MessageCircleIcon, SendIcon } from 'lucide-react'
+import { GlobeIcon, MessageCircleIcon, SendIcon } from 'lucide-react'
 import { Artwork } from '@cobweb/ui/components/artwork'
 import { Progress } from '@cobweb/ui/components/progress'
 import { StatusBadge } from '@cobweb/ui/components/status-badge'
 import { cn } from '@cobweb/ui/lib/utils'
 import { ChainName } from '@/components/chains/chain-icon'
-import { formatNative, type MintPageData, type Socials } from '@/lib/demo'
+import { TokenArtFrame } from '@/components/mint/token-image'
+import { formatNative, type MintGroup, type Socials, type SupportedChain } from '@/lib/demo'
+import type { TokenArt } from '@/lib/mint/token-art'
 import { count, percent } from './format'
+
+/** What the miniature draws that the form does not edit: the collection, minted so far and the live phase. */
+export type PreviewData = {
+  name: string
+  symbol: string
+  slug: string | null
+  chain: SupportedChain
+  minted: number
+  max: number
+  /** The phase open now, from the chain's last read; null when none is, or the chain was not read. */
+  live: Pick<MintGroup, 'name' | 'priceWei'> | null
+}
 
 export type PreviewOverrides = {
   description: string
-  bannerUrl: string
-  avatarUrl: string
+  bannerUrl: string | null
+  avatarUrl: string | null
   socials: Socials
-  featured: { id: number; name: string; imageUrl: string }[]
+  featured: { id: number; art: TokenArt | null | undefined }[]
 }
 
 /**
- * A miniature of the public mint page, drawn from the same data the page renders, with the
- * form's unsaved values laid over it. Not interactive: it is a picture of the page.
+ * A miniature of the public mint page: minted and the live phase from the phases view (the sample's in sample
+ * mode), with the form's unsaved values laid over it. Not interactive: it is a picture of the page.
  */
 export function MintPagePreview({
   data,
   overrides,
   url,
 }: {
-  data: MintPageData
+  data: PreviewData
   overrides: PreviewOverrides
   url: string
 }) {
-  const { collection, supply } = data
-  const live = data.groups.find((group) => group.active)
+  const collection = data
+  const supply = { minted: data.minted, max: data.max }
+  const live = data.live
   const symbol = collection.chain.nativeSymbol
   const socials = [
     overrides.socials.website && { key: 'web', label: 'Website', icon: <GlobeIcon className="size-3" /> },
@@ -71,7 +86,7 @@ export function MintPagePreview({
         <Artwork
           src={overrides.bannerUrl || null}
           alt=""
-          seed={`${collection.slug}-banner`}
+          seed={`${collection.slug ?? collection.name}-banner`}
           label={overrides.bannerUrl ? undefined : 'No banner'}
           className="aspect-[3/1]"
         />
@@ -81,7 +96,7 @@ export function MintPagePreview({
             <Artwork
               src={overrides.avatarUrl || null}
               alt=""
-              seed={`${collection.slug}-avatar`}
+              seed={`${collection.slug ?? collection.name}-avatar`}
               className="border-background relative z-10 -mt-7 size-14 shrink-0 rounded-lg border-2"
             />
             <div className="min-w-0 pt-2">
@@ -135,23 +150,12 @@ export function MintPagePreview({
             <span className="bg-primary text-primary-foreground flex h-7 items-center justify-center rounded-md text-[0.75rem] font-semibold">
               Mint
             </span>
-            {collection.transfersLocked && (
-              <p className="text-muted-foreground flex items-center gap-1 text-[0.625rem]">
-                <LockIcon className="size-2.5" /> Transfers locked
-              </p>
-            )}
           </div>
 
           {overrides.featured.length > 0 && (
             <div className="grid grid-cols-6 gap-1.5">
               {overrides.featured.slice(0, 6).map((token) => (
-                <Artwork
-                  key={token.id}
-                  src={token.imageUrl}
-                  alt=""
-                  seed={String(token.id)}
-                  className="rounded-sm"
-                />
+                <TokenArtFrame key={token.id} art={token.art} id={token.id} alt="" className="rounded-sm" />
               ))}
             </div>
           )}

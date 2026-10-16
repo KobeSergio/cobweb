@@ -63,6 +63,8 @@ export type DeployFlowProps = {
   /** The session's wallet: the payout default, and the deployer the server prepares for. */
   sessionWallet: Address
   artSrc: string | null
+  /** The mint page is public, for the deployed view's link row. */
+  mintPagePublished: boolean
   previous?: FlowLink
   next?: FlowLink
 }
@@ -481,6 +483,7 @@ export function DeployFlow(props: DeployFlowProps) {
             record={record}
             chain={chainView(record.chainId)}
             artSrc={props.artSrc}
+            mintPagePublished={props.mintPagePublished}
             focusOnMount={justDeployed}
           />
         </div>

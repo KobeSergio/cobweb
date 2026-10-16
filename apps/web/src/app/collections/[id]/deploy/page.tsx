@@ -1,5 +1,7 @@
 import { getAddress } from 'viem'
 import { getDeployView } from '@/app/actions/deploy'
+import { getMintPageSettings } from '@/app/actions/mint-page'
+import { SAMPLE } from '@/components/manage/manage-sim'
 import { DeployScreen } from '@/components/deploy/deploy-screen'
 import { StagePage } from '@/components/shell/stage-page'
 import { requireOwnedCollection, requireUser } from '@/lib/auth'
@@ -51,6 +53,9 @@ export default async function DeployPage({
     view = result.data
   }
   const deployed = ctx.demo ? sampleDeployed : view !== null && view.record !== null
+  // The deployed view's link row opens the page once it is public.
+  const mintPage = !ctx.demo && deployed ? await getMintPageSettings(collection.id) : null
+  const mintPagePublished = ctx.demo ? SAMPLE.mintPage.published : !!(mintPage?.ok && mintPage.data.published)
 
   return (
     <StagePage
@@ -78,6 +83,7 @@ export default async function DeployPage({
         previous={ctx.previous}
         next={ctx.next}
         sampleOutcome={ctx.demo ? await searchParam(searchParams, 'outcome') : undefined}
+        mintPagePublished={mintPagePublished}
       />
     </StagePage>
   )

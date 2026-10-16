@@ -16,7 +16,7 @@ import { manageTabHref } from '@/lib/steps'
 import { Row } from './bits'
 import { realManageActions } from './manage-actions'
 import { ManageActionsProvider, type ManageTarget } from './manage-context'
-import { SAMPLE, sampleManageActions, samplePhasesView } from './manage-sim'
+import { sampleManageActions, samplePhasesView } from './manage-sim'
 import { MintPageLinkBar, OverviewHeader } from './overview-cards'
 import { LiveNow, RecentMints } from './overview-parts'
 import { settingsServer, type SettingsServer } from './settings-server'
@@ -46,8 +46,10 @@ export type OverviewScreenProps = {
   /** The sign-in wallet: Reveal is sent from it, and the owner check compares it with the contract's owner. */
   wallet: Address
   sample: boolean
-  /** "Paid by minters": the sample's in sample mode, null on real data until Phase 6. */
+  /** "Paid by minters": the sample's in sample mode, null on real data until the indexer. */
   paidByMintersWei: string | null
+  /** The mint page's row: its avatar and whether it is public. */
+  mintPage: { avatarUrl: string | null; published: boolean }
 }
 
 /**
@@ -72,6 +74,7 @@ export function OverviewScreen({
   wallet,
   sample,
   paidByMintersWei,
+  mintPage,
 }: OverviewScreenProps) {
   const config = useConfig()
   const [settings, setSettings] = useState(initial)
@@ -109,6 +112,7 @@ export function OverviewScreen({
       <div className="grid gap-5">
         <OverviewHeader
           collectionId={collection.id}
+          avatarUrl={mintPage.avatarUrl}
           name={collection.name}
           contract={contract}
           deployedAt={deployedAt}
@@ -122,7 +126,11 @@ export function OverviewScreen({
           confirm={(hash, call) => server.confirm(hash, call)}
           onConfirmed={setSettings}
         />
-        <MintPageLinkBar collection={{ ...collection, slug }} initialPublished={SAMPLE.mintPage.published} />
+        <MintPageLinkBar
+          collection={{ ...collection, slug }}
+          initialPublished={mintPage.published}
+          sample={sample}
+        />
 
         <div className="mt-3 grid gap-5 lg:grid-cols-3">
           {/* Live phases and proceeds on the right from 1024px, first on narrow screens. */}

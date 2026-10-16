@@ -7,9 +7,12 @@
  */
 import { collectionAbi } from '@cobweb/shared/collection-abi'
 import { ContractFunctionRevertedError, encodeErrorResult } from 'viem'
+import { SAMPLE_REVEALED_URI } from '@/components/mint/sample-source'
+import type { Tables } from '@/lib/database.types'
 import {
   DEMO_COLLECTION,
   DEMO_DEPLOYMENT,
+  DEMO_MINT_PAGE_SECTIONS,
   DEMO_MINT_PAGE_SETTINGS,
   DEMO_NOW,
   DEMO_PUBLIC_MAX_PER_WALLET,
@@ -22,6 +25,7 @@ import type { ActionResult } from '@/lib/art/result'
 import { phaseCalls, type ManageCall } from '@/lib/manage/phase-calls'
 import type { PhaseAdd, PhasesView } from '@/lib/manage/phases-types'
 import type { SettingsView } from '@/lib/manage/settings-types'
+import type { MintPageSettingsView } from '@/lib/mint/settings-core'
 import type { ManageActions } from './manage-actions'
 import type { PendingAdd } from './manage-machine'
 import type { PhasesServer } from './phases-server'
@@ -47,16 +51,65 @@ export function chainReadGroup(group: Omit<MintGroup, 'active'>, blockTimestamp:
 
 /** Sample values the Overview still reads beyond its props until Phase 6. Each names the real source. */
 export const SAMPLE = {
-  /** SEAM: the mint page settings row (avatar and the public switch on the overview). */
+  /** The sample's mint page row: the Overview's avatar and public switch in sample mode. */
   mintPage: DEMO_MINT_PAGE_SETTINGS,
 } as const
 
-/**
- * Saves off-chain settings (mint page details).
- * SEAM: a server action that checks the session and ownership, then writes the settings row.
- */
+/** Saves off-chain settings in sample mode, where nothing is written: the mint page's draft and its switch. */
 export async function saveOffChain(): Promise<void> {
   await wait(900)
+}
+
+/**
+ * The Mint page tab's view in sample mode: the sample's settings and sections, its files as their URLs (which stand
+ * in for keys, since sample mode uploads nothing), and the sample's rendered set to feature from.
+ */
+export function sampleMintPageView(
+  collection: Pick<Tables<'collections'>, 'project_type' | 'max_supply'>,
+): MintPageSettingsView {
+  const settings = DEMO_MINT_PAGE_SETTINGS
+  const { team, roadmap, faq, music, carousel } = DEMO_MINT_PAGE_SECTIONS
+  const ref = (url: string) => (url ? { key: url, url } : null)
+  return {
+    published: settings.published,
+    description: settings.description,
+    media: { banner: ref(settings.bannerUrl), avatar: ref(settings.avatarUrl), about: null },
+    socials: settings.socials,
+    featuredTokenIds: settings.featuredTokenIds,
+    sections: {
+      team: {
+        enabled: team.enabled,
+        members: team.members.map(({ imageUrl, ...member }) => ({
+          ...member,
+          imageKey: imageUrl || null,
+          imageUrl: imageUrl || null,
+        })),
+      },
+      roadmap,
+      faq,
+      music: { enabled: music.enabled, key: music.url, fileName: music.fileName, url: music.url },
+      carousel: {
+        enabled: carousel.enabled,
+        items: carousel.items.map((item) =>
+          item.kind === 'token'
+            ? item
+            : {
+                id: item.id,
+                kind: 'upload',
+                key: item.url,
+                url: item.url,
+                fileName: item.fileName,
+                mediaType: item.mediaType,
+              },
+        ),
+      },
+    },
+    art: {
+      realBaseUri: SAMPLE_REVEALED_URI,
+      supply: sampleSupply(collection.max_supply, DEMO_COLLECTION.maxSupply),
+      projectType: collection.project_type,
+    },
+  }
 }
 
 /**
