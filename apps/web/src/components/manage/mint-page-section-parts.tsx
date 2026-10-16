@@ -155,6 +155,7 @@ export function Text({
     maxLength: max,
     placeholder: placeholder ?? (url ? 'https://' : undefined),
     'aria-invalid': !!error,
+    'aria-describedby': error ? `${id}-error` : undefined,
   }
   return (
     <Field data-invalid={!!error}>
@@ -165,7 +166,7 @@ export function Text({
         <Input {...props} onChange={(event) => onChange(event.target.value)} />
       )}
       {error ? (
-        <FieldError>{error}</FieldError>
+        <FieldError id={`${id}-error`}>{error}</FieldError>
       ) : (
         <FieldDescription className="numeric">
           {value.length} / {max}
@@ -212,6 +213,8 @@ export function FilePick({
               type="file"
               accept={MEDIA_SLOTS[slot].types.join(',')}
               className="sr-only"
+              aria-invalid={!!error}
+              aria-describedby={error ? `${id}-error` : undefined}
               onChange={(event) => {
                 const file = event.target.files?.[0]
                 event.target.value = ''
@@ -231,7 +234,7 @@ export function FilePick({
         )}
       </div>
       {hint && <p className="text-muted-foreground text-[0.8125rem]">{hint}</p>}
-      {error && <FieldError>{error}</FieldError>}
+      {error && <FieldError id={`${id}-error`}>{error}</FieldError>}
     </div>
   )
 }

@@ -128,7 +128,8 @@ export function ImageSlot({
                   accept={MEDIA_SLOTS[slot].types.join(',')}
                   className="sr-only"
                   aria-labelledby={`${id}-label`}
-                  aria-describedby={`${id}-hint`}
+                  aria-describedby={error ? `${id}-hint ${id}-error` : `${id}-hint`}
+                  aria-invalid={!!error}
                   onChange={(event) => {
                     void take(event.target.files?.[0])
                     event.target.value = ''
@@ -146,7 +147,7 @@ export function ImageSlot({
           <p id={`${id}-hint`} className="text-muted-foreground text-[0.8125rem]">
             {hint}
           </p>
-          {error && <FieldError>{error}</FieldError>}
+          {error && <FieldError id={`${id}-error`}>{error}</FieldError>}
           {warning && <p className="text-warning-foreground text-[0.8125rem]">{warning}</p>}
         </div>
       </div>
