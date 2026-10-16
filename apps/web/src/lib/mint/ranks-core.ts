@@ -1,4 +1,5 @@
 import { attributeKeyOf, buildTraitIndex, rankTokens, type Layer } from '@cobweb/dna'
+import { errorSummary } from '@/lib/art/lock-core'
 import { readArtRows } from '@/lib/art/read-rows'
 import { toProject } from '@/lib/art/rows'
 import { doneJobRow } from '@/lib/deploy/deploy-core'
@@ -48,4 +49,17 @@ export async function ensureTokenRanksCore(ctx: PhasesContext): Promise<'recorde
   })
   if (error) throw new Error(`The ranks could not be recorded: ${error.code} ${error.message}`)
   return data ? 'recorded' : 'present'
+}
+
+/**
+ * `ensureTokenRanksCore` for its callers, none of which fails on it: the save of a published page, the public
+ * switch and the reveal's confirm. A failure is logged with the collection's id and the error's summary, and the
+ * caller's answer is unchanged.
+ */
+export async function recordTokenRanks(ctx: PhasesContext): Promise<void> {
+  try {
+    await ensureTokenRanksCore(ctx)
+  } catch (error) {
+    console.error(`The ranks of ${ctx.collection.id} could not be recorded: ${errorSummary(error)}`)
+  }
 }

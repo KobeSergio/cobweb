@@ -28,6 +28,7 @@ import {
 } from './media'
 import {
   sectionsSchema,
+  socialsOf,
   storedSectionsOf,
   type MintPageStatic,
   type StoredMember,
@@ -36,7 +37,7 @@ import {
   type StoredUploadSlide,
 } from './page-doc'
 import { mediaUrl } from './page-urls'
-import { ensureTokenRanksCore } from './ranks-core'
+import { recordTokenRanks } from './ranks-core'
 
 /**
  * The Mint page tab on the server (docs/specs/2026-10-16-mint-page-live-data.md, section 6.2): the tab's view
@@ -107,7 +108,7 @@ export const mediaAsksSchema: z.ZodType<MediaAsk[]> = z
   .array(
     z.object(
       {
-        slot: z.enum(['banner', 'avatar', 'about', 'team', 'slide', 'music'], { error: UNSAVED }),
+        slot: z.enum(Object.keys(MEDIA_SLOTS) as [MediaSlot, ...MediaSlot[]], { error: UNSAVED }),
         mime: z.string({ error: UNSAVED }).max(64),
         bytes: z.number({ error: UNSAVED }).int().min(1),
         width: z.number({ error: UNSAVED }).int().min(1).nullable(),
@@ -251,11 +252,12 @@ async function artOf(ctx: PhasesContext): Promise<MintPageSettingsView['art']> {
  */
 function viewOf(row: PageRow | null, art: MintPageSettingsView['art']): MintPageSettingsView {
   const ref = (key: string | null): MediaRef | null => (key === null ? null : { key, url: mediaUrl(key) })
-  const socials: Socials = {}
-  if (row?.website_url) socials.website = row.website_url
-  if (row?.x_url) socials.x = row.x_url
-  if (row?.discord_url) socials.discord = row.discord_url
-  if (row?.telegram_url) socials.telegram = row.telegram_url
+  const socials = socialsOf({
+    website: row?.website_url ?? null,
+    x: row?.x_url ?? null,
+    discord: row?.discord_url ?? null,
+    telegram: row?.telegram_url ?? null,
+  })
   return {
     published: row?.published ?? false,
     description: row?.description ?? '',
@@ -311,15 +313,6 @@ async function writeRow(
   if (saved.data) return { row: saved.data }
   // No row matched: its stamp moved after the read (the owner's row exists, and the ownership was checked).
   return { refused: read ? PAGE_CHANGED_ELSEWHERE : PAGE_FIELDS }
-}
-
-/** Records the ranks for a published page; a failure is logged and never fails the save. */
-async function rank(ctx: PhasesContext): Promise<void> {
-  try {
-    await ensureTokenRanksCore(ctx)
-  } catch (error) {
-    console.error(`The ranks of ${ctx.collection.id} could not be recorded: ${errorSummary(error)}`)
-  }
 }
 
 /** The tab's view: the row (the defaults without one), its keys with their URLs and the art the tab features from. */
@@ -397,11 +390,15 @@ export async function saveMintPageCore(
   const storedKeys = old ? rowKeys(old) : []
   const inSlot = new Set(storedKeys.map(({ key, slot }) => `${slot} ${key}`))
   const bucket = mintPageBucket()
-  for (const { key, slot } of keys) {
-    if (inSlot.has(`${slot} ${key}`)) continue
-    const head = await headObject(key, { bucket })
-    if (!head || !fits(slot, key, head)) return { refused: PAGE_FILE_MISSING }
-  }
+  const uploaded = await Promise.all(
+    keys
+      .filter(({ key, slot }) => !inSlot.has(`${slot} ${key}`))
+      .map(async ({ key, slot }) => {
+        const head = await headObject(key, { bucket })
+        return head !== null && fits(slot, key, head)
+      }),
+  )
+  if (uploaded.includes(false)) return { refused: PAGE_FILE_MISSING }
   const art = await artOf(ctx)
   const saved = await writeRow(
     ctx,
@@ -430,7 +427,7 @@ export async function saveMintPageCore(
   } catch (error) {
     console.error(`The replaced media of ${collection.id} could not be deleted: ${errorSummary(error)}`)
   }
-  if (row.published) await rank(ctx)
+  if (row.published) await recordTokenRanks(ctx)
   return { data: viewOf(row, art) }
 }
 
@@ -445,6 +442,6 @@ export async function setMintPagePublishedCore(
   if ('refused' in saved) return saved
   // The trigger's sentence reads as it is; any other check's reads as the fields' sentence, never raw.
   if ('error' in saved) return refusalOf(saved.error)
-  if (published) await rank(ctx)
+  if (published) await recordTokenRanks(ctx)
   return { data: { published } }
 }

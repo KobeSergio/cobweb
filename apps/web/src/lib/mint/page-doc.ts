@@ -272,8 +272,8 @@ export function pageSectionsOf(raw: unknown, media: (key: string) => string): Mi
   return sections
 }
 
-/** The links that are set, for the page's buttons. */
-function socialsOf(socials: PageDoc['socials']): Socials {
+/** The links that are set, for the page's buttons and the Mint page tab's fields. */
+export function socialsOf(socials: PageDoc['socials']): Socials {
   return Object.fromEntries(Object.entries(socials).filter(([, value]) => value)) as Socials
 }
 

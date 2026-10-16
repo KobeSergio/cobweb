@@ -2,7 +2,6 @@
 
 import { cache } from 'react'
 import { manageRecordError } from '@/lib/art/db-error'
-import { errorSummary } from '@/lib/art/lock-core'
 import { txHash as txHashSchema } from '@/lib/art/lock-schemas'
 import type { ActionResult } from '@/lib/art/result'
 import { parse } from '@/lib/art/schemas'
@@ -11,7 +10,7 @@ import { parseSentCall } from '@/lib/manage/phase-schemas'
 import { phasesWrite } from '@/lib/manage/phases-write'
 import { confirmSettingsTxCore, readSettingsState, settingsViewCore } from '@/lib/manage/settings-core'
 import type { SettingsView } from '@/lib/manage/settings-types'
-import { ensureTokenRanksCore } from '@/lib/mint/ranks-core'
+import { recordTokenRanks } from '@/lib/mint/ranks-core'
 
 /**
  * Settings' server actions (docs/specs/2026-10-15-airdrop-settings.md, section 6.5). Each checks its input first,
@@ -47,9 +46,7 @@ export async function confirmSettingsTx(
       const outcome = await confirmSettingsTxCore(ctx, hash.data, confirmed)
       // A failure is logged and the confirm's answer is unchanged.
       if ('data' in outcome && confirmed.functionName === 'setBaseURI' && outcome.data.pointer === 'revealed')
-        await ensureTokenRanksCore(ctx).catch((error: unknown) =>
-          console.error(`The ranks of ${ctx.collection.id} could not be recorded: ${errorSummary(error)}`),
-        )
+        await recordTokenRanks(ctx)
       return outcome
     },
     manageRecordError,

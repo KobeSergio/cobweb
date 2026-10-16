@@ -4,7 +4,7 @@ import { unstable_cache } from 'next/cache'
 import { getSessionUser } from '@/lib/auth'
 import type { Database } from '@/lib/database.types'
 import { createClient as createSessionClient } from '@/lib/supabase/server'
-import { pageDocSchema, pageStaticOf, type MintPageStatic } from './page-doc'
+import { pageDocSchema, pageStaticOf, type MintPageStatic, type PageDoc } from './page-doc'
 import { ipfsGateway, mediaUrl, mintPageTag } from './page-urls'
 
 export { ipfsGateway, mediaBase, mediaUrl, mintPageTag } from './page-urls'
@@ -26,8 +26,8 @@ function publicClient() {
   )
 }
 
-const pageOf = (raw: unknown) =>
-  pageStaticOf(pageDocSchema.parse(raw), { media: mediaUrl, gateway: ipfsGateway() })
+/** What the page renders from a document, parsed once; a document that does not parse throws. */
+const pageOf = (doc: PageDoc) => pageStaticOf(doc, { media: mediaUrl, gateway: ipfsGateway() })
 
 /** The links are lowercase, so `/Night-Owls` reads and is tagged as `night-owls`. */
 const linkOf = (slug: string) => slug.trim().toLowerCase()
@@ -47,7 +47,7 @@ export async function readMintPage(slug: string): Promise<MintPageStatic | null>
     ['mint-page', link],
     { tags: [mintPageTag(link)], revalidate: 60 },
   )()
-  return raw === null ? null : pageOf(raw)
+  return raw === null ? null : pageOf(pageDocSchema.parse(raw))
 }
 
 /**
@@ -64,9 +64,10 @@ export async function readMintPagePreview(
   const { data, error } = await supabase.rpc('mint_page_preview', { p_slug: link })
   if (error) throw new Error(`The mint page preview could not be read: ${error.code} ${error.message}`)
   if (data === null) return null
-  const page = pageOf(data)
+  const doc = pageDocSchema.parse(data)
+  const page = pageOf(doc)
   const owned = await supabase.from('collections').select('id').eq('slug', link).maybeSingle()
   if (owned.error) throw new Error(`The collection could not be read: ${owned.error.message}`)
   if (!page || !owned.data) return null
-  return { ...page, published: pageDocSchema.parse(data).published, collectionId: owned.data.id }
+  return { ...page, published: doc.published, collectionId: owned.data.id }
 }

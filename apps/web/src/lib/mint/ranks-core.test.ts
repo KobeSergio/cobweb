@@ -1,10 +1,16 @@
 import { attributeKeyOf, buildTraitIndex, rankTokens } from '@cobweb/dna'
 import { describe, expect, it, vi } from 'vitest'
 import { DEMO_LAYERS, DEMO_TOKENS } from '@/lib/demo'
-import { ranksOf } from './ranks-core'
+import type { PhasesContext } from '@/lib/manage/phases-core'
+import { ranksOf, recordTokenRanks } from './ranks-core'
 
-// The core's job read lives in the deploy core, which loads the server's chain clients.
-vi.mock('@/lib/deploy/deploy-core', () => ({ doneJobRow: vi.fn() }))
+const jobs = vi.hoisted(() => ({ doneJobRow: vi.fn() }))
+// The core's job read lives in the deploy core, and the error summary in the lock core: both load the server's
+// chain clients.
+vi.mock('@/lib/deploy/deploy-core', () => jobs)
+vi.mock('@/lib/art/lock-core', () => ({
+  errorSummary: (error: unknown) => (error instanceof Error ? error.message : String(error)),
+}))
 
 describe('ranksOf (docs/specs/2026-10-16-mint-page-live-data.md, section 6.3)', () => {
   it("equals rankTokens with Generate's attribute key, laid out by id", () => {
@@ -26,5 +32,21 @@ describe('ranksOf (docs/specs/2026-10-16-mint-page-live-data.md, section 6.3)', 
     const byDna = [...tail].sort((a, b) => a.dna.join(' ').localeCompare(b.dna.join(' ')))
     expect(byDna.map((token) => token.id)).not.toEqual(tail.map((token) => token.id))
     expect(ranksOf(byDna, DEMO_LAYERS)).toEqual(ranks)
+  })
+})
+
+describe('recordTokenRanks (final fix wave O3)', () => {
+  it("logs a failed record with the collection's id and never throws, so its caller's answer stands", async () => {
+    jobs.doneJobRow.mockRejectedValueOnce(new Error('The render job could not be read: offline'))
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const ctx = { collection: { id: 'c-1', project_type: 'generative' } } as unknown as PhasesContext
+      await expect(recordTokenRanks(ctx)).resolves.toBeUndefined()
+      expect(logged).toHaveBeenCalledWith(
+        'The ranks of c-1 could not be recorded: The render job could not be read: offline',
+      )
+    } finally {
+      logged.mockRestore()
+    }
   })
 })

@@ -32,7 +32,7 @@ vi.mock('@/lib/storage/config', () => ({ mintPageBucket: () => 'mint-page' }))
 vi.mock('@/lib/storage/objects', () => storage)
 vi.mock('@/lib/deploy/deploy-core', () => jobs)
 vi.mock('@/lib/art/lock-core', () => ({ errorSummary: (error: unknown) => String(error) }))
-vi.mock('./ranks-core', () => ({ ensureTokenRanksCore: vi.fn(async () => 'skipped') }))
+vi.mock('./ranks-core', () => ({ recordTokenRanks: vi.fn(async () => {}) }))
 
 const COLLECTION = '0a977c0b-7e53-476b-8c08-6c685315c3af'
 const MB = 1024 * 1024
