@@ -84,7 +84,8 @@ const WORDS: Record<TxSubject, Words> = {
   },
 }
 
-function causes(error: unknown): unknown[] {
+/** The error and its causes, outermost first, at most ten deep. The mint page's failures read them too. */
+export function causes(error: unknown): unknown[] {
   const list: unknown[] = []
   let current: unknown = error
   for (let depth = 0; current && depth < 10; depth++) {
@@ -95,14 +96,14 @@ function causes(error: unknown): unknown[] {
 }
 
 /** The error's `shortMessage` (viem) or `message`, read so a null or undefined rejection never throws inside a catch. */
-function shortMessageOf(error: unknown): string {
+export function shortMessageOf(error: unknown): string {
   const shaped = error as { shortMessage?: unknown; message?: unknown } | null | undefined
   const message = shaped?.shortMessage ?? shaped?.message
   return typeof message === 'string' && message ? message : 'Unknown error.'
 }
 
 /** The custom error viem decoded from a failed simulation (`ContractFunctionRevertedError.data`), or null. */
-function revertOf(chain: unknown[]): { errorName: string; args: readonly unknown[] } | null {
+export function revertOf(chain: unknown[]): { errorName: string; args: readonly unknown[] } | null {
   for (const entry of chain) {
     const shaped = entry as { name?: unknown; data?: { errorName?: unknown; args?: unknown } }
     if (shaped.name !== 'ContractFunctionRevertedError' || typeof shaped.data?.errorName !== 'string')

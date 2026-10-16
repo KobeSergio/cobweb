@@ -44,6 +44,11 @@ describe('tokenUriOf', () => {
     expect(tokenUriOf(PLACEHOLDER)).toBe(PLACEHOLDER)
     expect(tokenUriOf('')).toBe('')
   })
+
+  it("names another token's URI by its id, and a single file for every id (docs/specs/2026-10-16-mint-page-live-data.md, section 7.7)", () => {
+    expect(tokenUriOf(REAL, 12)).toBe(`${REAL}12`)
+    expect(tokenUriOf(PLACEHOLDER, 12)).toBe(PLACEHOLDER)
+  })
 })
 
 const args: PreparedArgs = {

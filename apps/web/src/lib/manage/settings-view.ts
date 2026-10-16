@@ -19,10 +19,13 @@ export function ipfsUriValid(value: string): boolean {
   return value.length <= BASE_URI_MAX && IPFS_URI.test(value)
 }
 
-/** Token 1's URI by the contract's rule: an empty base stays empty, a base without "/" is every token's URI. */
-export function tokenUriOf(base: string): string {
+/**
+ * A token's URI by the contract's rule, token 1's unless an id is given: an empty base stays empty, a base
+ * without "/" is every token's URI.
+ */
+export function tokenUriOf(base: string, tokenId = 1): string {
   if (!base || !base.endsWith('/')) return base
-  return `${base}1`
+  return `${base}${tokenId}`
 }
 
 /**
