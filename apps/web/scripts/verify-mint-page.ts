@@ -3,18 +3,21 @@
 // tokens through the cores with Public (0.001 ETH, 2, 1 per wallet) and Holders (free, 1); the Mint page tab's
 // cores sign, upload, save and publish its media and sections; then the page's own modules read it as the browser
 // does: the document through its builder, the live source's polls at the page's cadence folded into the track, the
-// labels at T-1 and at T, a mint through runMint and wagmiMintChain (the mock connector on the impersonated
-// holder), the local mint, the wallet answers, two failed checks, the tiers and the refusals. Seventeen PASS lines
-// with the cleanup.
+// labels at T-1, at a clock reading T while the state is still at T-1, and at T, a mint through runMint and
+// wagmiMintChain (the mock connector on the impersonated holder), the local mint, the wallet answers, two
+// failed checks, the tiers and the refusals. Seventeen PASS lines with the cleanup.
 //
 //   supabase start && supabase seed buckets
 //   pnpm --filter @cobweb/web chain:local    (then copy its two lines into apps/web/.env.local)
 //   pnpm --filter @cobweb/web verify:mint-page
 //
 // The fixture (scripts/deploy-fixture.ts) reads the settings from the environment, `supabase status -o env` and
-// apps/web/.env.local, and refuses non-local endpoints. Never prints a key. Deletes every row and object it
-// creates; the collection stays on Anvil, and the chain's clock ends about 600 s ahead of where it was. Runs
-// under `node --conditions=react-server --import ./scripts/resolve-ts.mjs`.
+// apps/web/.env.local, and refuses non-local endpoints. Never prints a key or a URL: the first line names the
+// chain and the two hosts. The cleanup runs every step whatever failed before it: it stops the page's polls
+// and the server, releases both wallets (each disconnected and no longer impersonated) and deletes every row
+// and object the run created. What stays is on Anvil: the collection with its one mint, the three fresh
+// accounts with their balances, and the chain's clock about 600 s ahead of where it was. Runs under `node
+// --conditions=react-server --import ./scripts/resolve-ts.mjs`.
 
 import { createHash } from 'node:crypto'
 import { createClient } from '@supabase/supabase-js'
@@ -105,6 +108,8 @@ const LIVE_WITHIN_MS = 2_500
 const START_WITHIN_MS = TIER_MS.idle + 3_000 + 2_000
 /** How long the page may take to read a change: one 2 s tick of a live chain, one 3 s poll and the reads. */
 const CHANGE_WITHIN_MS = TIER_MS.live + 3_000 + 3_000
+/** How long one request to the bucket, a media URL or the server's /health may take. */
+const REQUEST_TIMEOUT_MS = 5_000
 /** The fields of `public.mint_page`'s document, and nothing else. */
 const DOC_KEYS = [
   'slug',
@@ -159,30 +164,37 @@ const askOf = (file: Upload): MediaAsk => ({
   contentHash: createHash('sha256').update(file.body).digest('hex'),
 })
 
-/** Every key the run stored in the bucket, so the cleanup deletes them. */
+/** Every key the run signed in the bucket, so the cleanup deletes whatever a PUT stored. */
 const storedKeys = new Set<string>()
 
 const put = (url: string, mime: string, body: Buffer) =>
-  fetch(url, { method: 'PUT', body: new Uint8Array(body), headers: { 'Content-Type': mime } })
+  fetch(url, {
+    method: 'PUT',
+    body: new Uint8Array(body),
+    headers: { 'Content-Type': mime },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  })
 
-/** Signs the files through the core, PUTs each one the bucket does not hold yet, and answers their keys in order. */
+/**
+ * Signs the files through the core, PUTs each one the bucket does not hold yet, and answers their keys in
+ * order. Each key is tracked once signed, so the cleanup deletes what a PUT stored if a later one fails.
+ */
 async function upload(ctx: PhasesContext, files: Upload[]): Promise<string[]> {
   const signed = await presignMintPageMediaCore(ctx, files.map(askOf))
   if (!('data' in signed)) throw new Error(`presign: ${refusal(signed)}`)
+  for (const { key } of signed.data) storedKeys.add(key)
   for (const [index, { key, putUrl }] of signed.data.entries()) {
     const file = files[index]!
-    if (putUrl) {
-      const stored = await put(putUrl, file.mime, file.body)
-      if (!stored.ok) throw new Error(`PUT ${key}: ${stored.status}`)
-    }
-    storedKeys.add(key)
+    if (!putUrl) continue
+    const stored = await put(putUrl, file.mime, file.body)
+    if (!stored.ok) throw new Error(`PUT ${key}: ${stored.status}`)
   }
   return signed.data.map(({ key }) => key)
 }
 
 /** A media URL read with no session: its status, type and bytes. */
 async function readMedia(key: string): Promise<{ status: number; mime: string | null; body: Buffer }> {
-  const response = await fetch(mediaUrl(key), { signal: AbortSignal.timeout(5_000) })
+  const response = await fetch(mediaUrl(key), { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
   return {
     status: response.status,
     mime: response.headers.get('content-type'),
@@ -218,13 +230,16 @@ async function expectedRanks(
   return { jobId: job.data.id, ranks: ranksOf(tokens, layers) }
 }
 
-/** An answer the page accepted, when it folded it, and the chain clock then. */
-type Seen = { body: StateBody; at: number; chainNow: number | null }
+/**
+ * An answer the page accepted, when it folded it, the chain clock then, and the wait it set before the next
+ * poll (`cadenceMs`; null after a final refusal).
+ */
+type Seen = { body: StateBody; at: number; chainNow: number | null; ms: number | null }
 
 /**
  * The page's state loop without React, as useLiveState runs it: the live source's polls at the page's cadence
  * (`cadenceMs` over `derivePhases`), each folded into the track at `performance.now()`; a mint waiting for the
- * next answer polls at once. Every accepted answer is kept with the chain clock at its fold.
+ * next answer polls at once. Each accepted answer is kept with the chain clock and the wait at its fold.
  */
 function startPage(built: MintPageStatic, source: MintSource) {
   let track: FreshTrack = EMPTY_TRACK
@@ -237,12 +252,12 @@ function startPage(built: MintPageStatic, source: MintSource) {
       const poll = await source.pollState()
       const now = performance.now()
       track = foldState(track, poll, now)
-      if (poll.kind === 'body' && track.body === poll.body) {
-        seen.push({ body: poll.body, at: now, chainNow: chainNowOf(track, now) })
-        for (const resolve of waiters.splice(0)) resolve()
-      }
       const phases = track.body ? derivePhases(liveOf(built, track.body), null, chainNowOf(track, now)) : []
       const ms = cadenceMs(track, phases)
+      if (poll.kind === 'body' && track.body === poll.body) {
+        seen.push({ body: poll.body, at: now, chainNow: chainNowOf(track, now), ms })
+        for (const resolve of waiters.splice(0)) resolve()
+      }
       if (ms === null) return
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, ms)
@@ -346,11 +361,15 @@ const publicLive = (body: StateBody) => body.groups.some((group) => group.id ===
 
 let freshness: Freshness | null = null
 let page: Page | null = null
+/** Each wallet's release, which the cleanup runs. */
+const releases: (() => Promise<void>)[] = []
 /** What main set up, for the cleanup's check. */
 let subject: { creator: Creator; deployed: Deployed; slug: string; jobId: string | null } | null = null
 
 async function main(): Promise<void> {
-  console.log(`Verifying the mint page on ${rpc} against ${settings.url}`)
+  console.log(
+    `Verifying the mint page on chain 31337 at ${new URL(rpc).host} against Supabase at ${new URL(settings.url).host}`,
+  )
   await check(
     '1. setup: Anvil answers as 31337 with the factory approving the shipped code hash, Supabase and the mint-page bucket answer, and the freshness server serves 31337 on a free port',
     async () => {
@@ -362,11 +381,12 @@ async function main(): Promise<void> {
       if (!data.public) return `the ${bucket} bucket is not public`
       const server = await startFreshness({ port: 0, host: '127.0.0.1', chainIds: [31337] })
       freshness = server
-      const health = (await (await fetch(`${server.url}/health`)).json()) as HealthBody
+      const answer = await fetch(`${server.url}/health`, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
+      const health = (await answer.json()) as HealthBody
       const served = health.chains.map((entry) => entry.chainId).join(' ')
       return Number(new URL(server.url).port) > 0 && served === '31337'
         ? null
-        : `${server.url} serves ${served}`
+        : `the freshness server at ${new URL(server.url).host} serves ${served}`
     },
   )
   const server = freshness as Freshness | null
@@ -417,8 +437,13 @@ async function main(): Promise<void> {
       const avatar = image('avatar', 'avatar')
       const signed = await presignMintPageMediaCore(ctx, [askOf(banner), askOf(avatar)])
       if (!('data' in signed)) return `presign: ${refusal(signed)}`
+      // Tracked once signed, so the cleanup deletes an object a PUT stored even when the check stops early.
+      for (const { key } of signed.data) storedKeys.add(key)
       const [forBanner, forAvatar] = signed.data
-      if (!forBanner?.putUrl || !forAvatar?.putUrl) return `no PUT URL: ${JSON.stringify(signed.data)}`
+      if (!forBanner?.putUrl || !forAvatar?.putUrl) {
+        const answers = signed.data.map(({ key, putUrl }) => `${key} ${putUrl ? 'signed' : 'not signed'}`)
+        return `no PUT URL: ${answers.join(', ')}`
+      }
       const otherType = await put(forBanner.putUrl, 'image/jpeg', banner.body)
       const longer = await put(forBanner.putUrl, banner.mime, Buffer.concat([banner.body, Buffer.from('!')]))
       if (otherType.ok || longer.ok)
@@ -429,7 +454,6 @@ async function main(): Promise<void> {
       ] as const) {
         const stored = await put(entry.putUrl!, file.mime, file.body)
         if (!stored.ok) return `PUT ${entry.key}: ${stored.status}`
-        storedKeys.add(entry.key)
         const read = await readMedia(entry.key)
         if (read.status !== 200 || read.mime !== file.mime || !read.body.equals(file.body))
           return `${entry.key} reads ${read.status} ${read.mime}`
@@ -524,7 +548,10 @@ async function main(): Promise<void> {
         'true true true true true',
         '1 1 1',
       ]
-      if (JSON.stringify(read) !== JSON.stringify(want)) return `saved ${JSON.stringify(read)}`
+      // Named, not printed: two of the fields are media URLs, which carry the Supabase host.
+      const fields = ['description', 'links', 'featured', 'banner', 'avatar', 'team', 'music', 'on', 'items']
+      const differ = fields.filter((_, index) => JSON.stringify(read[index]) !== JSON.stringify(want[index]))
+      if (differ.length) return `saved another ${differ.join(', ')}`
       draft = input
       if ((await ownership(stranger, cid)) !== NOT_FOUND) return "the stranger's owner check passed"
       const forged: PhasesContext = {
@@ -576,7 +603,10 @@ async function main(): Promise<void> {
         input.sections.team.members[0]!.imageKey!,
         input.sections.music.key!,
       ].map(mediaUrl)
-      if (JSON.stringify(urls) !== JSON.stringify(wantUrls)) return `media URLs ${JSON.stringify(urls)}`
+      const wrong = ['banner', 'avatar', 'team', 'music'].filter(
+        (_, index) => urls[index] !== wantUrls[index],
+      )
+      if (wrong.length) return `the media URLs of ${wrong.join(', ')} are not the keys' URLs`
       const phases = [...built.phases]
         .sort((a, b) => (a.position ?? Infinity) - (b.position ?? Infinity))
         .map((phase) => `${phase.onchain_id}:${phase.name}`)
@@ -628,8 +658,12 @@ async function main(): Promise<void> {
   if (doc.error || doc.data === null) throw new Error(`the published page: ${doc.error?.message ?? 'null'}`)
   const built = pageStaticOf(pageDocSchema.parse(doc.data), { media: mediaUrl, gateway: ipfsGateway() })
   if (!built) throw new Error('the page does not list chain 31337')
-  const holderChain = wagmiMintChain(await wagmiWallet(holderKey.address))
-  const strangerChain = wagmiMintChain(await wagmiWallet(strangerKey.address))
+  const holderWallet = await wagmiWallet(holderKey.address)
+  releases.push(holderWallet.release)
+  const strangerWallet = await wagmiWallet(strangerKey.address)
+  releases.push(strangerWallet.release)
+  const holderChain = wagmiMintChain(holderWallet.config)
+  const strangerChain = wagmiMintChain(strangerWallet.config)
   /** Every URL the live source fetched, in order. */
   const urls: string[] = []
   const source = liveMintSource(built, {
@@ -659,7 +693,8 @@ async function main(): Promise<void> {
       const first = await view.until(() => true, 5_000, 0)
       if (!first) return 'no state within 5 s'
       const stateUrl = `${server.url}/v1/state/31337/${contract.toLowerCase()}`
-      if (urls[0] !== stateUrl) return `the first request was ${urls[0]}`
+      if (urls[0] !== stateUrl)
+        return `the first request asked ${urls[0] === undefined ? 'nothing' : new URL(urls[0]).pathname}`
       const live = liveOf(built, first.body)
       const groups = live.groups.map((group) => `${group.id}:${group.name}`).join(' ')
       const [quoted] = await chain.readContract({
@@ -669,7 +704,8 @@ async function main(): Promise<void> {
         args: [BigInt(PUBLIC), 1n],
         blockNumber: BigInt(first.body.block),
       })
-      const publicQuote = quote(live, PUBLIC_PRICE.toString(), 1).totalWei
+      // The page quotes the state's price, as deriveAction does.
+      const publicQuote = quote(live, live.groups.find((group) => group.id === PUBLIC)!.priceWei, 1).totalWei
       return groups === '0:Public 1:Holders' &&
         isAddressEqual(live.creator, creatorKey.address) &&
         live.royaltyBps === 500 &&
@@ -685,13 +721,18 @@ async function main(): Promise<void> {
   await sendCall(creatorKey, contract, phaseCalls.schedule(PUBLIC, T))
   const holderBefore = await walletOf(source, holderKey.address)
 
+  /** The first answer that read the block at T-1, found by check 8; check 9's cadence counts from it. */
+  let atStart: Seen | null = null
   await check(
     "8. T-1: with Public scheduled at T and a block mined at T-1, the page's action reads 'Starts in 00:00:01', blocked, and nothing is sent",
     async () => {
+      // "Nothing is sent" is carried by the blocked kind: the mint context runs a mint only for a `mint`
+      // action (mint-context.tsx, `act`), so a blocked button opens no wallet. Nothing here tries to send;
+      // the two nonce reads only confirm that no transaction left the holder meanwhile.
       const nonce = await chain.getTransactionCount({ address: holderKey.address })
       await chain.setNextBlockTimestamp({ timestamp: BigInt(T - 1) })
       await chain.mine({ blocks: 1 })
-      const atStart = await view.until((entry) => entry.body.blockTimestamp === T - 1, START_WITHIN_MS)
+      atStart = await view.until((entry) => entry.body.blockTimestamp === T - 1, START_WITHIN_MS)
       if (!atStart) return `the block at T-1 was not read within ${START_WITHIN_MS} ms`
       const { phase, action } = actionOf(built, liveOf(built, atStart.body), holderBefore, atStart.chainNow)
       if (phase?.group.id !== PUBLIC || action.kind !== 'blocked' || action.label !== 'Starts in 00:00:01')
@@ -704,6 +745,22 @@ async function main(): Promise<void> {
   await check(
     "9. T: a block mined at T is read by the page's 1 s polls with Public live within 2.5 s, the action reads 'Mint 1 for <total>', and no body with a block time below T read Public live",
     async () => {
+      // Beyond section 10's sentence: before the block at T, the page's clock reads T on the block at T-1,
+      // and the button only turns to waiting. Liveness is the state's `active` (CLAUDE.md rule 1); at the
+      // reads of T-1 and of T the clock agrees with it, so only here would a page that took liveness from the
+      // clock offer the mint.
+      const track = view.track()
+      if (!atStart || !track.body || !track.anchor || track.body.blockTimestamp !== T - 1)
+        return `the page's state is not the block at T-1 (${track.body?.blockTimestamp ?? 'none'})`
+      const clockAtT = chainNowOf(track, track.anchor.at + 1_000)
+      const starting = actionOf(built, liveOf(built, track.body), holderBefore, clockAtT).action
+      if (
+        clockAtT === null ||
+        clockAtT < T ||
+        starting.kind !== 'blocked' ||
+        starting.label !== 'Starting, waiting for the chain'
+      )
+        return `with the clock at ${clockAtT} on the block at T-1 the action reads ${starting.kind} ${starting.label}`
       await chain.setNextBlockTimestamp({ timestamp: BigInt(T) })
       await chain.mine({ blocks: 1 })
       const minedAt = performance.now()
@@ -713,6 +770,12 @@ async function main(): Promise<void> {
       )
       if (!atT || atT.at - minedAt > LIVE_WITHIN_MS)
         return `Public did not read live within ${LIVE_WITHIN_MS} ms of the block at T`
+      // Each answer from the read of T-1 up to the read of T set the 1 s cadence for the poll after it.
+      const waits = view.seen
+        .slice(view.seen.indexOf(atStart), view.seen.indexOf(atT))
+        .map((entry) => entry.ms)
+      if (!waits.length || waits.some((ms) => ms !== 1_000))
+        return `the polls between the reads of T-1 and T waited ${waits.join(' ')} ms`
       const live = liveOf(built, atT.body)
       const { action } = actionOf(built, live, await walletOf(source, holderKey.address), atT.chainNow)
       const label = `Mint 1 for ${formatNative(quote(live, PUBLIC_PRICE.toString(), 1).totalWei, built.chain.nativeSymbol)}`
@@ -859,7 +922,10 @@ async function main(): Promise<void> {
     "15. tiers: the tiers read answers ids 1 and 2 at the real base URI with ranksOf's ranks over the stored list, and null at any other base URI",
     async () => {
       const { ranks } = await expectedRanks(creator, deployed)
-      const tiers = await source.tiers(REAL, [1, 2])
+      // The page asks at the state's base URI, which is the real job's on this revealed collection.
+      const baseUri = view.live()?.baseUri
+      if (baseUri !== REAL) return "the state's base URI is not the real job's"
+      const tiers = await source.tiers(baseUri, [1, 2])
       const other = await source.tiers(`ipfs://${CID('f')}/`, [1, 2])
       const want = { total: ranks.length, ranks: { 1: ranks[0], 2: ranks[1] } }
       return ranks.length === 3 && JSON.stringify(tiers) === JSON.stringify(want) && other === null
@@ -896,43 +962,87 @@ async function unpublished(run: NonNullable<typeof subject>): Promise<string | n
     : `preview ${preview.error?.message ?? JSON.stringify(preview.data)}`
 }
 
-/** Deletes every object the run stored in the mint-page bucket, then its rows, or says what is left. */
-async function removeAll(run: typeof subject): Promise<string | null> {
+/** A thrown error in one line: viem's short message, since its full message names the request's URL. */
+function messageOf(error: unknown): string {
+  if (!(error instanceof Error)) return String(error)
+  const short = (error as { shortMessage?: unknown }).shortMessage
+  return typeof short === 'string' ? short : error.message
+}
+
+/** Runs a cleanup step whatever failed before it: its problem (a string it answers or a throw), or null. */
+async function attempt(label: string, fn: () => Promise<unknown>): Promise<string | null> {
+  try {
+    const problem = await fn()
+    return typeof problem === 'string' ? problem : null
+  } catch (error) {
+    return `${label} threw ${messageOf(error)}`
+  }
+}
+
+/**
+ * Deletes every object the run signed in the mint-page bucket, then its rows, each step whatever failed
+ * before it, and answers each step's problem or null, in order.
+ */
+async function removeAll(run: typeof subject): Promise<(string | null)[]> {
   const keys = [...storedKeys]
-  await deleteObjects(keys, { bucket })
-  for (const key of keys) if (await headObject(key, { bucket })) return `${key} is left in ${bucket}`
-  const left = await removeFixtures()
-  if (left || !run) return left
-  const pages = await admin
-    .from('mint_pages')
-    .select('*', { count: 'exact', head: true })
-    .eq('collection_id', run.deployed.cid)
-  if (pages.error || pages.count) return `mint_pages: ${pages.error?.message ?? `${pages.count} left`}`
-  if (!run.jobId) return null
-  const ranks = await admin
-    .from('token_ranks')
-    .select('*', { count: 'exact', head: true })
-    .eq('job_id', run.jobId)
-  return ranks.error || ranks.count ? `token_ranks: ${ranks.error?.message ?? `${ranks.count} left`}` : null
+  const problems = [await attempt('deleting the objects', () => deleteObjects(keys, { bucket }))]
+  for (const key of keys)
+    problems.push(
+      await attempt(`reading ${key}`, async () =>
+        (await headObject(key, { bucket })) ? `${key} is left in ${bucket}` : null,
+      ),
+    )
+  problems.push(await attempt('removing the fixtures', removeFixtures))
+  if (!run) return problems
+  problems.push(
+    await attempt('counting mint_pages', async () => {
+      const pages = await admin
+        .from('mint_pages')
+        .select('*', { count: 'exact', head: true })
+        .eq('collection_id', run.deployed.cid)
+      return pages.error || pages.count
+        ? `mint_pages: ${pages.error?.message ?? `${pages.count} left`}`
+        : null
+    }),
+  )
+  const { jobId } = run
+  if (jobId)
+    problems.push(
+      await attempt('counting token_ranks', async () => {
+        const ranks = await admin
+          .from('token_ranks')
+          .select('*', { count: 'exact', head: true })
+          .eq('job_id', jobId)
+        return ranks.error || ranks.count
+          ? `token_ranks: ${ranks.error?.message ?? `${ranks.count} left`}`
+          : null
+      }),
+    )
+  return problems
 }
 
 async function cleanup(): Promise<void> {
-  await page?.stop()
-  await freshness?.close()
+  // Every step runs whatever failed before it, so a failed stop, close, release or delete never keeps the
+  // rest from running; check 17 reports the first problem.
+  const stopped = [
+    await attempt('stopping the page', async () => {
+      await page?.stop()
+    }),
+    await attempt('closing the freshness server', async () => {
+      await freshness?.close()
+    }),
+  ]
+  for (const release of releases) stopped.push(await attempt('releasing a wallet', release))
   await check(
     '17. unpublish: anon reads null again while the preview still reads the document; the fixtures are removed',
     async () => {
       const run = subject
-      let problem: string | null = 'no collection was deployed'
-      if (run) {
-        try {
-          problem = await unpublished(run)
-        } catch (error) {
-          problem = `threw ${error instanceof Error ? error.message : String(error)}`
-        }
-      }
-      const left = await removeAll(run)
-      return problem ?? left
+      const problems = [
+        ...stopped,
+        run ? await attempt('unpublishing', () => unpublished(run)) : 'no collection was deployed',
+        ...(await removeAll(run)),
+      ]
+      return problems.find((problem) => problem !== null) ?? null
     },
   )
 }
