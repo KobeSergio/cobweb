@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { MintPage } from '@/components/mint/mint-page'
 import { PreviewBanner } from '@/components/mint/preview-banner'
-import { SampleMintPage } from '@/components/mint/sample-page'
+import { LazySampleMintPage } from '@/components/mint/sample-page-lazy'
 import { RESERVED_SLUGS } from '@/lib/collections'
 import { readMintPagePreview } from '@/lib/mint/page-read'
 import { isDemoMode, manageTabHref } from '@/lib/steps'
@@ -25,7 +25,7 @@ export default async function Page(props: PageProps<'/[slug]/preview'>) {
     return (
       <>
         <PreviewBanner published tabHref="/collections" />
-        <SampleMintPage page={samplePageStatic(slug)} />
+        <LazySampleMintPage page={samplePageStatic(slug)} />
       </>
     )
   }

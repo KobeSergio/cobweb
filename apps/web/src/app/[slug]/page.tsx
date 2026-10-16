@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { MintPage } from '@/components/mint/mint-page'
-import { SampleMintPage } from '@/components/mint/sample-page'
+import { LazySampleMintPage } from '@/components/mint/sample-page-lazy'
 import { RESERVED_SLUGS } from '@/lib/collections'
 import type { MintPageStatic } from '@/lib/mint/page-doc'
 import { readMintPage } from '@/lib/mint/page-read'
@@ -48,5 +48,6 @@ export default async function Page(props: PageProps<'/[slug]'>) {
   const { slug } = await props.params
   const page = await pageAt(slug)
   if (!page) notFound()
-  return isDemoMode() ? <SampleMintPage page={page} /> : <MintPage page={page} sample={null} />
+  // The sample page is loaded on its own chunk, so a live visitor never downloads the sample data.
+  return isDemoMode() ? <LazySampleMintPage page={page} /> : <MintPage page={page} sample={null} />
 }
