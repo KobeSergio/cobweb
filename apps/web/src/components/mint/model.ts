@@ -192,6 +192,14 @@ export function quote(live: Pick<MintLive, 'fees'>, priceWei: string, quantity: 
   return quoteOf(live.fees, priceWei, quantity)
 }
 
+/**
+ * The vaults the panel offers on a phase: on a live phase, those with something left. A spent vault stays in
+ * `phase.vaults` for its counts, but there is nothing to mint with it.
+ */
+export function offeredVaults(phase: Phase): Phase['vaults'] {
+  return phase.status === 'live' ? phase.vaults.filter((entry) => entry.remaining > 0) : []
+}
+
 /** Who the tokens are minted against: the wallet itself or one of its delegated vaults. */
 export function allowanceFor(phase: Phase, vault: Address | null): Allowance | null {
   if (vault) return phase.vaults.find((entry) => entry.vault === vault) ?? null

@@ -6,7 +6,7 @@ import { ChoiceCard, ChoiceCards } from '@cobweb/ui/components/choice-cards'
 import { cn } from '@cobweb/ui/lib/utils'
 import { formatNative, shortAddress } from '@/lib/demo/helpers'
 import { useMint } from './mint-context'
-import { quote, type Phase } from './model'
+import { offeredVaults, quote, type Phase } from './model'
 
 /** Compact cards: two side by side inside the panel. */
 const card = 'rounded-lg px-3.5 py-3 [&>span:first-child]:top-3.5 [&>span:first-child]:right-3.5'
@@ -136,10 +136,14 @@ export function Eligibility({ phase }: { phase: Phase }) {
   )
 }
 
-/** Mint with a vault's allowance (delegate.xyz). The tokens still land in this wallet. */
+/**
+ * Mint with a vault's allowance (delegate.xyz). The tokens still land in this wallet. A vault with nothing left in
+ * this phase is not offered (`offeredVaults`); the model keeps it for its counts.
+ */
 export function VaultPicker({ phase }: { phase: Phase }) {
   const { vault, setVault } = useMint()
-  if (phase.vaults.length === 0 || phase.status !== 'live') return null
+  const offered = offeredVaults(phase)
+  if (offered.length === 0) return null
   const own = phase.wallet
   return (
     <fieldset>
@@ -160,7 +164,7 @@ export function VaultPicker({ phase }: { phase: Phase }) {
             <span className="numeric">{own?.eligible ? `${own.remaining} left` : 'Not on the list'}</span>
           }
         />
-        {phase.vaults.map((entry) => (
+        {offered.map((entry) => (
           <ChoiceCard
             key={entry.vault}
             value={entry.vault}

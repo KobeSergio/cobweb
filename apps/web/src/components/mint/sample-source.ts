@@ -220,11 +220,15 @@ function quotasOf(
   }
 }
 
-/** A sample token's art: its preview, or its layers stacked; the placeholder's image before the reveal. */
+/**
+ * A sample token's art: its preview, or its layers stacked; the placeholder's image before the reveal. An id the
+ * sample set does not have fails as a live gateway's 404 does (token-art.ts), so the page tries it again and then
+ * shows the pattern.
+ */
 export async function sampleTokenArt(baseUri: string, id: number): Promise<TokenArt | null> {
   if (baseUri === SAMPLE_PLACEHOLDER_URI) return { layers: [DEMO_PLACEHOLDER.imageUrl], video: false }
   const token = DEMO_TOKENS[id - 1]
-  if (!token) return null
+  if (!token) throw new Error(`The sample set has no token ${id}.`)
   return { layers: token.previewUrl ? [token.previewUrl] : tokenLayerUrls(token.dna), video: false }
 }
 

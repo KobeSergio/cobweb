@@ -32,6 +32,7 @@ export function MintPanel() {
     minted,
     soldOut,
     walletAddress,
+    walletFinal,
     quantity,
     maxQuantity,
   } = useMint()
@@ -131,8 +132,17 @@ export function MintPanel() {
       </div>
 
       <div className="mt-5 space-y-3" data-mint-action>
-        {!soldOut && <MintButton />}
-        <MintHint />
+        {walletFinal && !soldOut ? (
+          // The wallet's read was refused for this page load, so what it can mint is not known: no button.
+          <p role="status" className="text-center text-sm leading-relaxed text-muted-foreground">
+            {REFUSALS.unavailable}
+          </p>
+        ) : (
+          <>
+            {!soldOut && <MintButton />}
+            <MintHint />
+          </>
+        )}
       </div>
     </section>
   )

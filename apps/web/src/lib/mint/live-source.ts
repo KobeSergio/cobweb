@@ -32,6 +32,7 @@ export type MintSource = {
   chain: MintChain
   /** Up to 20 ids' ranks; null before the reveal, without ranks, or when the read fails. */
   tiers(baseUri: string, ids: number[]): Promise<Tiers | null>
+  /** A token's art; null when there is none to show, and a throw when the read fails, so it is tried again. */
   tokenArt(baseUri: string, id: number): Promise<TokenArt | null>
 }
 

@@ -52,22 +52,33 @@ describe('tokenArtOf', () => {
       })
   })
 
-  it('answers null for a failed fetch, metadata without an image, an image of another scheme and an empty base', async () => {
+  it('answers null when there is no art to show: metadata without an image, an image of another scheme, an empty base', async () => {
     const fetchImpl = gatewayFetch({
       [`${GATEWAY}/${CID}/2`]: { name: 'no image' },
       [`${GATEWAY}/${CID}/3`]: { image: 'http://cdn.example/3.png' },
+      [`${GATEWAY}/${CID}/4`]: null,
     })
-    expect(await tokenArtOf(`ipfs://${CID}/`, 1, GATEWAY, fetchImpl)).toBeNull()
     expect(await tokenArtOf(`ipfs://${CID}/`, 2, GATEWAY, fetchImpl)).toBeNull()
     expect(await tokenArtOf(`ipfs://${CID}/`, 3, GATEWAY, fetchImpl)).toBeNull()
+    expect(await tokenArtOf(`ipfs://${CID}/`, 4, GATEWAY, fetchImpl)).toBeNull()
     expect(await tokenArtOf('', 1, GATEWAY, fetchImpl)).toBeNull()
-    const offline = vi.fn(async () => {
-      throw new Error('offline')
-    }) as unknown as typeof fetch
-    expect(await tokenArtOf(`ipfs://${CID}/`, 1, GATEWAY, offline)).toBeNull()
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
   })
 
-  it('answers null for metadata that has not arrived before its timeout, the read abandoned (fix round 1, item 5)', async () => {
+  it('throws for a read that fails, answers another status or is not JSON, so the page tries it again (final fix wave M7)', async () => {
+    const missing = gatewayFetch({})
+    await expect(tokenArtOf(`ipfs://${CID}/`, 1, GATEWAY, missing)).rejects.toThrow('answered 404')
+    const offline = vi.fn(async () => {
+      throw new TypeError('Failed to fetch')
+    }) as unknown as typeof fetch
+    await expect(tokenArtOf(`ipfs://${CID}/`, 1, GATEWAY, offline)).rejects.toThrow('Failed to fetch')
+    const page = vi.fn(
+      async () => new Response('<html>busy</html>', { status: 200 }),
+    ) as unknown as typeof fetch
+    await expect(tokenArtOf(`ipfs://${CID}/`, 1, GATEWAY, page)).rejects.toThrow()
+  })
+
+  it('fails a read that has not answered before its timeout, the read abandoned (fix round 1, item 5)', async () => {
     const timeout = new AbortController()
     const timer = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeout.signal)
     // A read that never answers until its signal aborts, as a gateway stuck looking for a CID does.
@@ -78,7 +89,7 @@ describe('tokenArtOf', () => {
     try {
       const art = tokenArtOf(`ipfs://${CID}/`, 1, GATEWAY, hanging)
       timeout.abort()
-      await expect(art).resolves.toBeNull()
+      await expect(art).rejects.toThrow('The operation timed out.')
       expect(timer).toHaveBeenCalledWith(METADATA_TIMEOUT_MS)
       expect(METADATA_TIMEOUT_MS).toBe(10_000)
     } finally {

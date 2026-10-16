@@ -17,6 +17,7 @@ import {
   derivePhases,
   localMintOf,
   maxQuantity,
+  offeredVaults,
   selectedPhaseId,
   totalMinted,
   type MintAction,
@@ -43,6 +44,11 @@ type MintContextValue = {
   walletAddress: Address | null
   /** The wallet's answer: its quotas and vaults. */
   wallet: WalletView | null
+  /**
+   * The server refused the connected wallet's read for this page load: the panel says live status is not
+   * available in place of the button, as after the state's own final refusal (spec section 7.3).
+   */
+  walletFinal: boolean
   /** Asks for the wallet's answer again ("Check again"). */
   checkWallet: () => void
   /** The wallet is a sample stand-in, not a real connection. */
@@ -126,8 +132,9 @@ export function MintProvider({ page, sample, children }: MintPageProps & { child
   const phase = phases.find((entry) => entry.group.id === phaseId) ?? null
 
   const [chosenVault, setChosenVault] = useState<Address | null>(null)
+  // A chosen vault holds while the picker offers it: on a live phase, with something left.
   const vault =
-    phase?.status === 'live' && phase.vaults.some((entry) => entry.vault === chosenVault) ? chosenVault : null
+    phase && offeredVaults(phase).some((entry) => entry.vault === chosenVault) ? chosenVault : null
   const max = phase ? maxQuantity(phase, vault) : 0
   const [rawQuantity, setRawQuantity] = useState(1)
   const quantity = Math.max(1, Math.min(rawQuantity, Math.max(1, max)))
@@ -216,6 +223,7 @@ export function MintProvider({ page, sample, children }: MintPageProps & { child
     waitingLong: state.waitingLong,
     walletAddress,
     wallet: walletState.view,
+    walletFinal: !!walletAddress && walletState.final,
     checkWallet: walletState.refresh,
     sampleWallet: !!forced,
     wrongChain,

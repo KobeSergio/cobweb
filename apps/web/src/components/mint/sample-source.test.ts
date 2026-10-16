@@ -8,6 +8,7 @@ import type { MintPageStatic } from '@/lib/mint/page-doc'
 import {
   sampleMintSource,
   sampleSwitchesOf,
+  sampleTokenArt,
   SAMPLE_PLACEHOLDER_URI,
   SAMPLE_REVEALED_URI,
   type SampleSwitches,
@@ -211,5 +212,21 @@ describe('sampleMintSource tiers (docs/specs/2026-10-16-mint-page-live-data.md, 
   it('answers null before the reveal and for any other base URI', async () => {
     expect(await sample().tiers(SAMPLE_PLACEHOLDER_URI, [1])).toBeNull()
     expect(await sample().tiers('ipfs://elsewhere/', [1])).toBeNull()
+  })
+})
+
+describe('sampleTokenArt (final fix wave M7)', () => {
+  it("draws a token from its preview or layers, the placeholder before the reveal, and fails an id the set lacks as the gateway's 404 does", async () => {
+    const first = DEMO_TOKENS[0]!
+    expect(await sampleTokenArt(SAMPLE_REVEALED_URI, first.id)).toEqual({
+      layers: [first.previewUrl],
+      video: false,
+    })
+    const placeholder = await sampleTokenArt(SAMPLE_PLACEHOLDER_URI, first.id)
+    expect(placeholder?.layers).toHaveLength(1)
+    expect(placeholder?.layers[0]).not.toBe(first.previewUrl)
+    await expect(sampleTokenArt(SAMPLE_REVEALED_URI, DEMO_TOKENS.length + 1)).rejects.toThrow(
+      `The sample set has no token ${DEMO_TOKENS.length + 1}.`,
+    )
   })
 })

@@ -14,7 +14,19 @@ import { useMint } from './mint-context'
  * out of view, this bar holds the same button at the bottom of the screen.
  */
 export function StickyMintBar() {
-  const { phase, action, page, live, track, soldOut, minted, quantity, setQuantity, maxQuantity } = useMint()
+  const {
+    phase,
+    action,
+    page,
+    live,
+    track,
+    walletFinal,
+    soldOut,
+    minted,
+    quantity,
+    setQuantity,
+    maxQuantity,
+  } = useMint()
   const reduce = useReducedMotion()
   const [panelVisible, setPanelVisible] = useState(true)
 
@@ -31,7 +43,8 @@ export function StickyMintBar() {
     return () => observer.disconnect()
   }, [shape])
 
-  const show = !panelVisible && !soldOut && !track.final
+  // No bar where the panel has no button: sold out, or a final refusal of the state or of the wallet's read.
+  const show = !panelVisible && !soldOut && !track.final && !walletFinal
   // The stepper lives in the bar too, so a collector never scrolls back up to change the quantity.
   const canPickQuantity = action.kind === 'mint' && maxQuantity > 1
   const symbol = page.chain.nativeSymbol

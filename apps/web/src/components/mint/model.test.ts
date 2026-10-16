@@ -10,6 +10,7 @@ import {
   deriveAction,
   derivePhases,
   localMintOf,
+  offeredVaults,
   selectedPhaseId,
   sortPhases,
   totalMinted,
@@ -261,6 +262,24 @@ describe('the phases', () => {
       [0, 0],
       [1, 1],
     ])
+  })
+
+  it('offer only the vaults with something left, on a live phase, and keep a spent one for its counts (final fix wave M7)', () => {
+    const SPENT: Address = '0x90F79bf6EB2c4f870365E785982E1f101E93b906'
+    const view = wallet({
+      delegatedVaults: [
+        { vault: VAULT, groups: [{ groupId: 1, quota: 3, used: 1 }] },
+        { vault: SPENT, groups: [{ groupId: 1, quota: 2, used: 2 }] },
+      ],
+    })
+    const [open] = derivePhases(live([group(1, { active: true })]), view, NOW)
+    expect(open?.vaults.map((entry) => [entry.vault, entry.remaining])).toEqual([
+      [VAULT, 2],
+      [SPENT, 0],
+    ])
+    expect(offeredVaults(open!).map((entry) => entry.vault)).toEqual([VAULT])
+    const [later] = derivePhases(live([group(1, { scheduledStart: NOW + 60 })]), view, NOW)
+    expect(offeredVaults(later!)).toEqual([])
   })
 
   it("keep the join's order within each section: open now, coming up, finished", () => {

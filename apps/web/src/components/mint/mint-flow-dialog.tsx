@@ -119,7 +119,7 @@ function actionLabel(action: FailureAction, hasExplorer: boolean): string | null
 }
 
 function FlowBody() {
-  const { flow, act, closeFlow, page, live, setQuantity, setVault } = useMint()
+  const { flow, act, action: next, closeFlow, page, live, setQuantity, setVault } = useMint()
   const reduce = useReducedMotion()
   if (flow.step === 'idle') return null
   if (flow.step === 'success') return <MintSuccess />
@@ -136,7 +136,9 @@ function FlowBody() {
         })
       : []
   const run = (action: FailureAction) => {
-    if (action.kind === 'retry') return act()
+    // Try again starts the mint the panel offers now; when it offers something else (a switch, a limit, a closed
+    // phase), the flow closes so the panel shows why.
+    if (action.kind === 'retry') return next.kind === 'mint' ? act() : closeFlow()
     if (action.kind === 'mint-count' || action.kind === 'mint-fewer') setQuantity(action.count)
     if (action.kind === 'use-wallet') setVault(null)
     if (action.kind === 'view-transaction' && flow.hash) {
