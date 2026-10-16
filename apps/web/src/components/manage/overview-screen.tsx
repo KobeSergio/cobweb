@@ -30,7 +30,7 @@ export type OverviewScreenProps = {
   chain: SupportedChain
   /** Phases as the chain reports them; `active` comes from `mintGroupActive`. */
   groups: MintGroup[]
-  /** Holders and recent mints: sample until Phase 6. */
+  /** Holders and recent mints: the sample's, on real data too, until the indexer. */
   activity: DropActivity
   /** Everything minted, from the chain read; null while the contract cannot be read. */
   totalMinted: number | null

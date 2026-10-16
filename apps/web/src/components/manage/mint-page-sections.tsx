@@ -5,9 +5,9 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@c
 import { Panel } from '@cobweb/ui/components/panel'
 import { Switch } from '@cobweb/ui/components/switch'
 import type { TokenArt } from '@/lib/mint/token-art'
-import type { DraftMember, DraftSections } from './mint-page-draft'
+import { LIMITS, type DraftMember, type DraftSections } from './mint-page-draft'
 import { ImageSlot } from './mint-page-fields'
-import { Carousel, FilePick, ItemList, LIMITS, Text } from './mint-page-section-parts'
+import { Carousel, FilePick, ItemList, Text } from './mint-page-section-parts'
 
 type Section = keyof DraftSections
 
@@ -55,6 +55,8 @@ export function MintPageSections({
             items={value.team.members}
             onChange={(members) => set('team', { members })}
             addLabel="Add a member"
+            max={LIMITS.members}
+            noun="members"
             create={(): DraftMember => ({
               id: `team-${Date.now()}`,
               name: '',
@@ -129,6 +131,8 @@ export function MintPageSections({
             items={value.roadmap.items}
             onChange={(items) => set('roadmap', { items })}
             addLabel="Add a milestone"
+            max={LIMITS.milestones}
+            noun="milestones"
             create={() => ({ id: `road-${Date.now()}`, date: '', title: '', description: '' })}
             render={(item, update) => (
               <div className="grid gap-4">
@@ -166,6 +170,8 @@ export function MintPageSections({
             items={value.faq.items}
             onChange={(items) => set('faq', { items })}
             addLabel="Add a question"
+            max={LIMITS.questions}
+            noun="questions"
             create={() => ({ id: `faq-${Date.now()}`, question: '', answer: '' })}
             render={(item, update) => (
               <div className="grid gap-4">

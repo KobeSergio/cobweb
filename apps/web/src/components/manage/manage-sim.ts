@@ -49,9 +49,9 @@ export function chainReadGroup(group: Omit<MintGroup, 'active'>, blockTimestamp:
   return { ...group, active: group.flag || scheduledReached }
 }
 
-/** Sample values the Overview still reads beyond its props until Phase 6. Each names the real source. */
+/** Sample values that sample mode reads in place of a real source. Each names the source it stands in for. */
 export const SAMPLE = {
-  /** The sample's mint page row: the Overview's avatar and public switch in sample mode. */
+  /** The sample's mint page row (`getMintPageSettings`): the Overview's avatar and public switch, Deploy's link row. */
   mintPage: DEMO_MINT_PAGE_SETTINGS,
 } as const
 

@@ -34,8 +34,8 @@ export type DeployScreenProps = {
   sampleOutcome?: string
   /** "Finish the art later" (MASTER_PLAN, Flow: pre-reveal): the contract starts on the placeholder. */
   artDeferred?: boolean
-  /** The mint page is public, for the deployed view's link row. */
-  mintPagePublished: boolean
+  /** Whether the mint page is public, for the deployed view's link row; null when its row could not be read. */
+  mintPagePublished: boolean | null
 }
 
 /** The sample's deployment record: the Night Owls deployment on Base, as `?state=deployed` shows it. */

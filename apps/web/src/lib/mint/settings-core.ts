@@ -15,6 +15,7 @@ import type { Socials } from '@/lib/demo/types'
 import type { PhasesContext } from '@/lib/manage/phases-core'
 import { mintPageBucket } from '@/lib/storage/config'
 import { deleteObjects, headObject, presignPut } from '@/lib/storage/objects'
+import { PAGE_LINK_MAX, PAGE_LINK_PATTERNS } from './links'
 import {
   keyBelongs,
   MEDIA_SLOTS,
@@ -107,8 +108,8 @@ export const mediaAsksSchema: z.ZodType<MediaAsk[]> = z
   .min(1, UNSAVED)
   .max(MEDIA_ASKS_MAX, UNSAVED)
 
-/** A page link: https, up to 200 characters, on the hosts the database's checks name. */
-const pageLink = (pattern: RegExp) => z.string().max(200).regex(pattern).nullable()
+/** A page link: https, up to 200 characters, on the hosts the database's checks name (links.ts, shared with the tab). */
+const pageLink = (pattern: RegExp) => z.string().max(PAGE_LINK_MAX).regex(pattern).nullable()
 
 export const mintPageInputSchema: z.ZodType<MintPageInput> = z.object({
   published: z.boolean(),
@@ -119,10 +120,10 @@ export const mintPageInputSchema: z.ZodType<MintPageInput> = z.object({
     about: z.string().nullable(),
   }),
   socials: z.object({
-    website: pageLink(/^https:\/\/\S+$/),
-    x: pageLink(/^https:\/\/(www\.)?(x|twitter)\.com\/\S+$/),
-    discord: pageLink(/^https:\/\/(www\.)?discord\.(gg|com)\/\S+$/),
-    telegram: pageLink(/^https:\/\/(www\.)?(t|telegram)\.me\/\S+$/),
+    website: pageLink(PAGE_LINK_PATTERNS.website),
+    x: pageLink(PAGE_LINK_PATTERNS.x),
+    discord: pageLink(PAGE_LINK_PATTERNS.discord),
+    telegram: pageLink(PAGE_LINK_PATTERNS.telegram),
   }),
   featuredTokenIds: z
     .array(z.number().int().min(1))

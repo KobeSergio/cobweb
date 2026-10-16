@@ -59,8 +59,11 @@ export function DeployedView({
   record: DeployRecord
   chain: SupportedChain
   artSrc: string | null
-  /** The mint page is public: the link row opens it. */
-  mintPagePublished: boolean
+  /**
+   * Whether the mint page is public, for the link row: it opens the page once public. Null when the mint page's row
+   * could not be read: the row shows the link alone.
+   */
+  mintPagePublished: boolean | null
   /** Move focus to the heading, after a deploy that just finished on this screen. */
   focusOnMount?: boolean
 }) {
@@ -213,11 +216,11 @@ export function DeployedView({
                       >
                         Open mint page
                       </a>
-                    ) : (
+                    ) : mintPagePublished === false ? (
                       <span className="text-muted-foreground text-xs">
                         Not public yet. Make it public in Manage drop, Mint page.
                       </span>
-                    )}
+                    ) : null}
                   </span>
                 ) : (
                   <span className="text-muted-foreground text-[0.8125rem]">

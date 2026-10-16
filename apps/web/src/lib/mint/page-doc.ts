@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { chainView } from '@/lib/chain/chain-view'
 import type { Socials, SupportedChain } from '@/lib/demo/types'
 import type { PhaseRow } from '@/lib/manage/phases-types'
+import { MEMBER_LINK_MAX, MEMBER_LINK_PATTERN } from './links'
 
 /**
  * The public mint page's document (docs/specs/2026-10-16-mint-page-live-data.md, sections 4.1, 4.3 and 6.1),
@@ -17,11 +18,8 @@ const itemId = z.string().regex(/^[a-z0-9-]{1,40}$/)
 /** Text of 1 to `max` characters that is not only spaces. */
 const required = (max: number) => z.string().max(max).regex(/\S/)
 const optional = (max: number) => z.string().max(max)
-/** A team member's link: https, up to 40 characters. */
-const memberLink = z
-  .string()
-  .max(40)
-  .regex(/^https:\/\/\S+$/)
+/** A team member's link: https, up to 40 characters (links.ts, shared with the tab). */
+const memberLink = z.string().max(MEMBER_LINK_MAX).regex(MEMBER_LINK_PATTERN)
 /** Every item of a list has its own id. */
 const distinctIds = (items: readonly { id: string }[]) =>
   new Set(items.map((item) => item.id)).size === items.length

@@ -53,9 +53,16 @@ export default async function DeployPage({
     view = result.data
   }
   const deployed = ctx.demo ? sampleDeployed : view !== null && view.record !== null
-  // The deployed view's link row opens the page once it is public.
+  // The deployed view's link row: whether the page is public, from the mint page's row once deployed (before that it
+  // cannot be); null when that read fails, so the row shows the link without a guess.
   const mintPage = !ctx.demo && deployed ? await getMintPageSettings(collection.id) : null
-  const mintPagePublished = ctx.demo ? SAMPLE.mintPage.published : !!(mintPage?.ok && mintPage.data.published)
+  const mintPagePublished = ctx.demo
+    ? SAMPLE.mintPage.published
+    : mintPage === null
+      ? false
+      : mintPage.ok
+        ? mintPage.data.published
+        : null
 
   return (
     <StagePage

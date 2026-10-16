@@ -1,45 +1,51 @@
 'use client'
 
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, Trash2Icon, UploadIcon } from 'lucide-react'
-import { useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Artwork } from '@cobweb/ui/components/artwork'
 import { Button } from '@cobweb/ui/components/button'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@cobweb/ui/components/field'
 import { Input } from '@cobweb/ui/components/input'
 import { Textarea } from '@cobweb/ui/components/textarea'
+import { TokenArtFrame } from '@/components/mint/token-image'
 import { MEDIA_SLOTS, type MediaSlot } from '@/lib/mint/media'
 import type { TokenArt } from '@/lib/mint/token-art'
-import type { DraftFile, DraftSlide } from './mint-page-draft'
+import { LIMITS, memberLinkError, type DraftFile, type DraftSlide } from './mint-page-draft'
 import { pickFile, TokenPicker } from './mint-page-fields'
-
-/** Legacy's limits for each section (docs/specs/2026-10-16-mint-page-live-data.md, section 4.1). */
-export const LIMITS = {
-  name: 20,
-  role: 20,
-  handle: 40,
-  text: 500,
-  date: 20,
-  title: 20,
-  question: 40,
-  slides: 5,
-}
 
 type WithId = { id: string }
 
-/** An ordered list of cards with move, remove and add, as legacy's "Arrange" lists. */
+/**
+ * An ordered list of cards with move, remove and add, as legacy's "Arrange" lists, up to `max` cards: at the cap
+ * the add button gives way to a line naming it, which takes the focus when an add reached the cap.
+ */
 export function ItemList<T extends WithId>({
   items,
   onChange,
   addLabel,
   create,
   render,
+  max,
+  noun,
 }: {
   items: T[]
   onChange: (items: T[]) => void
   addLabel: string
   create: () => T
   render: (item: T, update: (patch: Partial<T>) => void) => React.ReactNode
+  /** The most cards the save takes. */
+  max: number
+  /** What the cards are, plural, for the line at the cap: "Up to 12 members." */
+  noun: string
 }) {
+  const full = items.length >= max
+  const limit = useRef<HTMLParagraphElement>(null)
+  const added = useRef(false)
+  // The add button goes at the cap, so the focus it had moves to the line in its place.
+  useEffect(() => {
+    if (added.current && full) limit.current?.focus()
+    added.current = false
+  }, [full, items.length])
   const move = (from: number, to: number) => {
     const next = [...items]
     next.splice(to, 0, next.splice(from, 1)[0]!)
@@ -87,20 +93,33 @@ export function ItemList<T extends WithId>({
           </li>
         ))}
       </ol>
-      <Button
-        type="button"
-        variant="secondary"
-        className="w-fit"
-        onClick={() => onChange([...items, create()])}
-      >
-        <PlusIcon aria-hidden="true" />
-        {addLabel}
-      </Button>
+      {full ? (
+        <p
+          ref={limit}
+          tabIndex={-1}
+          className="text-muted-foreground focus-visible:ring-ring rounded-sm text-[0.8125rem] outline-none focus-visible:ring-2"
+        >
+          Up to {max} {noun}.
+        </p>
+      ) : (
+        <Button
+          type="button"
+          variant="secondary"
+          className="w-fit"
+          onClick={() => {
+            added.current = true
+            onChange([...items, create()])
+          }}
+        >
+          <PlusIcon aria-hidden="true" />
+          {addLabel}
+        </Button>
+      )}
     </>
   )
 }
 
-/** A text field with legacy's length limit and a counter. `url` asks for an https link. */
+/** A text field with legacy's length limit and a counter. `url` asks for a team member's link, as the save checks it. */
 export function Text({
   label,
   value,
@@ -122,11 +141,7 @@ export function Text({
 }) {
   const id = useId()
   const error =
-    required && !value.trim()
-      ? `Add the ${label.toLowerCase()}.`
-      : url && value.trim() && !/^https:\/\/\S+\.\S+/.test(value.trim())
-        ? 'Use a link that starts with https://.'
-        : null
+    required && !value.trim() ? `Add the ${label.toLowerCase()}.` : url ? memberLinkError(value) : null
   const props = {
     id,
     value,
@@ -181,7 +196,7 @@ export function FilePick({
         <Button variant="secondary" size="sm" asChild>
           <label
             htmlFor={id}
-            className="cursor-pointer has-[input:focus-visible]:ring-2 has-[input:focus-visible]:ring-ring"
+            className="cursor-pointer has-[input:focus-visible]:ring-2 has-[input:focus-visible]:ring-ring has-[input:disabled]:pointer-events-none has-[input:disabled]:opacity-45"
           >
             <UploadIcon aria-hidden="true" />
             Choose a file
@@ -251,19 +266,22 @@ export function Carousel({
       <ul className="grid grid-cols-3 gap-2 sm:grid-cols-5">
         {items.map((item) => (
           <li key={item.id} className="relative">
-            <Artwork
-              src={
-                item.kind === 'upload'
-                  ? item.mediaType === 'image'
-                    ? item.media.url
-                    : null
-                  : (art.get(item.tokenId)?.layers.at(-1) ?? null)
-              }
-              alt=""
-              seed={item.id}
-              label={item.kind === 'upload' && item.mediaType === 'video' ? 'MP4' : undefined}
-              className="rounded-lg border"
-            />
+            {item.kind === 'token' ? (
+              <TokenArtFrame
+                art={art.get(item.tokenId)}
+                id={item.tokenId}
+                alt=""
+                className="overflow-hidden rounded-lg border"
+              />
+            ) : (
+              <Artwork
+                src={item.mediaType === 'image' ? item.media.url : null}
+                alt=""
+                seed={item.id}
+                label={item.mediaType === 'video' ? 'MP4' : undefined}
+                className="rounded-lg border"
+              />
+            )}
             <span className="numeric bg-background/70 absolute bottom-1 left-1 rounded-sm px-1 text-[0.625rem]">
               {item.kind === 'token' ? `#${item.tokenId}` : item.fileName.slice(0, 12)}
             </span>

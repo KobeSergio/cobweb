@@ -8,11 +8,11 @@ import { FieldError } from '@cobweb/ui/components/field'
 import { Input } from '@cobweb/ui/components/input'
 import { Spinner } from '@cobweb/ui/components/spinner'
 import { cn } from '@cobweb/ui/lib/utils'
-import { MEDIA_SLOTS, mintPageMediaProblem, type MediaSlot } from '@/lib/mint/media'
+import { MEDIA_SLOTS, type MediaSlot } from '@/lib/mint/media'
 import type { TokenArt } from '@/lib/mint/token-art'
 import { TokenArtFrame } from '@/components/mint/token-image'
 import { count } from './format'
-import type { DraftFile } from './mint-page-draft'
+import { pickedFileProblem, type DraftFile } from './mint-page-draft'
 
 export const MAX_FEATURED = 6
 /** How many of the rendered set the pickers show as thumbnails; any other id is added by its number. */
@@ -30,7 +30,8 @@ function sizeOf(url: string): Promise<{ width: number | null; height: number | n
 
 /**
  * A file picked for a slot, checked against the slot's types and caps (docs/specs/2026-10-16-mint-page-live-data.md,
- * section 4.4) with its size read for images; the file stays in the browser until the page is saved.
+ * section 4.4) with its size read for images, and refused when the browser cannot draw an image; the file stays in
+ * the browser until the page is saved.
  */
 export async function pickFile(
   file: File,
@@ -38,7 +39,7 @@ export async function pickFile(
 ): Promise<{ picked: DraftFile; problem: null } | { picked: null; problem: string }> {
   const url = URL.createObjectURL(file)
   const size = file.type.startsWith('image/') ? await sizeOf(url) : { width: null, height: null }
-  const problem = mintPageMediaProblem(slot, { mime: file.type, bytes: file.size, ...size })
+  const problem = pickedFileProblem(slot, { mime: file.type, bytes: file.size, ...size })
   if (problem) {
     URL.revokeObjectURL(url)
     return { picked: null, problem }
@@ -117,7 +118,7 @@ export function ImageSlot({
             <Button variant="secondary" size="sm" asChild>
               <label
                 htmlFor={`${id}-file`}
-                className="cursor-pointer has-[input:focus-visible]:ring-2 has-[input:focus-visible]:ring-ring"
+                className="cursor-pointer has-[input:focus-visible]:ring-2 has-[input:focus-visible]:ring-ring has-[input:disabled]:pointer-events-none has-[input:disabled]:opacity-45"
               >
                 <ImageUpIcon aria-hidden="true" />
                 {value ? 'Replace' : 'Upload'}
@@ -187,6 +188,8 @@ function AddByNumber({
           id={id}
           inputMode="numeric"
           aria-label="Token number"
+          aria-invalid={!!problem}
+          aria-describedby={problem ? `${id}-error` : undefined}
           placeholder="Token number"
           value={text}
           onChange={(event) => setText(event.target.value)}
@@ -210,7 +213,7 @@ function AddByNumber({
           Add by number
         </Button>
       </div>
-      {problem && <FieldError>{problem}</FieldError>}
+      {problem && <FieldError id={`${id}-error`}>{problem}</FieldError>}
     </div>
   )
 }
