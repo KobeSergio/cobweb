@@ -26,7 +26,8 @@
     "verify:freshness": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-freshness.ts",
     "verify:mint-page": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-mint-page.ts",
     "verify:indexer": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-indexer.ts",
-    "verify:csp": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-csp.ts"
+    "verify:csp": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-csp.ts",
+    "verify:sources": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-sources.ts"
   },
   "devDependencies": {
     "@cobweb/freshness": "workspace:^",

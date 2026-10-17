@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { admissionInputProblem, servedUrl, toRecord } from './uploads-service'
+import { admissionInputProblem, servedKeyOf, servedUrl, toRecord } from './uploads-service'
 
 const row = {
   id: 'b4f2c9b1-0b3f-4d2a-8f6e-5a1b2c3d4e5f',
@@ -59,5 +59,42 @@ describe('uploads service helpers', () => {
     expect(admissionInputProblem({ ...good, collectionId: 'zzz' })).toBe(
       'This collection could not be found.',
     )
+  })
+})
+
+describe('servedKeyOf (docs/specs/2026-10-17-production-hardening.md, section 7.3)', () => {
+  const original = {
+    kind: 'layer_image' as const,
+    key: 'c/layers/a.png',
+    thumbnailKey: 'c/thumbnails/a.webp',
+  }
+  const served = (variant: 'original' | 'thumb', sourcesDeleted: boolean, thumbnailKey: string | null) =>
+    servedKeyOf({ ...original, variant, thumbnailKey, sourcesDeleted })
+
+  it('serves an original, and its thumbnail for ?variant=thumb, falling back to the original before the purge', () => {
+    expect(served('original', false, original.thumbnailKey)).toBe('c/layers/a.png')
+    expect(served('thumb', false, original.thumbnailKey)).toBe('c/thumbnails/a.webp')
+    expect(served('thumb', false, null)).toBe('c/layers/a.png')
+  })
+
+  it('serves only the thumbnail once the originals are deleted, and nothing for an original-size view', () => {
+    expect(served('thumb', true, original.thumbnailKey)).toBe('c/thumbnails/a.webp')
+    expect(served('thumb', true, null)).toBeNull()
+    expect(served('original', true, original.thumbnailKey)).toBeNull()
+    expect(served('original', true, null)).toBeNull()
+  })
+
+  it('serves a thumbnail row as itself, marked or not', () => {
+    for (const sourcesDeleted of [false, true])
+      for (const variant of ['original', 'thumb'] as const)
+        expect(
+          servedKeyOf({
+            kind: 'thumbnail',
+            key: 'c/thumbnails/a.webp',
+            thumbnailKey: null,
+            variant,
+            sourcesDeleted,
+          }),
+        ).toBe('c/thumbnails/a.webp')
   })
 })

@@ -52,6 +52,24 @@ export type AdmitInput = {
 
 export type ConfirmInput = AdmitInput & { key: string; thumbnailKey: string | null }
 
+/**
+ * The key `/api/uploads/[id]` signs (docs/specs/2026-10-17-production-hardening.md, section 7.3), or null for a
+ * 404. A thumbnail row is served as itself. An original is served as itself, and with `?variant=thumb` as its
+ * thumbnail when it has one. Once the collection's original files are deleted, an original is served only as its
+ * thumbnail through `?variant=thumb`: an original-size view answers null, which `Artwork` draws as its pattern.
+ */
+export function servedKeyOf(input: {
+  variant: 'original' | 'thumb'
+  kind: UploadKind
+  key: string
+  thumbnailKey: string | null
+  sourcesDeleted: boolean
+}): string | null {
+  if (input.kind === 'thumbnail') return input.key
+  if (input.sourcesDeleted) return input.variant === 'thumb' ? input.thumbnailKey : null
+  return input.variant === 'thumb' ? (input.thumbnailKey ?? input.key) : input.key
+}
+
 export function servedUrl(id: string, variant?: 'thumb'): string {
   return variant ? `/api/uploads/${id}?variant=thumb` : `/api/uploads/${id}`
 }
