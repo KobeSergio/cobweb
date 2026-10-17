@@ -406,16 +406,21 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     expect(db.writes).toMatchObject([
       { chainId: 31337, fromBlock: 69n, toBlock: 110n, syncedAt: timeOf(110n), collections: [ID_A, ID_B] },
     ])
-    // Blocks deferred for more than 32 past the written block: the write starts one above it, so the
-    // database sees no gap.
+    // The next pass, 5 s on, reads the mint again in its window, so it writes at once, from the scan's start.
     chain.head = 300n
     await vi.advanceTimersByTimeAsync(20_000)
-    expect(db.writes).toHaveLength(1)
-    chain.head = 310n
-    chain.logs = [...chain.logs, ...mintAt(305n, 2n, B)]
+    expect(db.writes).toHaveLength(2)
+    expect(db.writes[1]).toMatchObject({ fromBlock: 79n, toBlock: 300n })
+    // A window with no record defers the blocks 301 to 400; then blocks deferred for more than 32 past the
+    // written block: the write starts one above it, so the database sees no gap.
+    chain.head = 400n
     await vi.advanceTimersByTimeAsync(20_000)
-    expect(logCalls(chain.calls).slice(-2)).toEqual(['logs 79-300 x2', 'logs 269-310 x2'])
-    expect(db.writes[1]).toMatchObject({ fromBlock: 111n, toBlock: 310n })
+    expect(db.writes).toHaveLength(2)
+    chain.head = 500n
+    chain.logs = [...chain.logs, ...mintAt(450n, 2n, B)]
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(logCalls(chain.calls).slice(-3)).toEqual(['logs 79-300 x2', 'logs 269-400 x2', 'logs 369-500 x2'])
+    expect(db.writes[2]).toMatchObject({ fromBlock: 301n, toBlock: 500n })
     await indexer.stop()
   })
 
@@ -448,11 +453,11 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     await indexer.stop()
   })
 
-  it('writes an idle synced cursor once a minute, though every pass reads again 32 blocks that hold records already written (Critical 1)', async () => {
+  it('writes an idle synced cursor once a minute, not every pass, while the 32 blocks it reads again hold no record (Critical 1)', async () => {
     const { chain, client } = fakeChain()
     const { db, port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 100n)])
-    // A mint the database holds already: its cursor is at 100.
-    chain.logs = mintAt(95n, 1n)
+    // A mint the database holds already, one block below the first window.
+    chain.logs = mintAt(68n, 1n)
     const indexer = indexerOn(client, port)
     await settle()
     for (const head of [101n, 102n]) {
@@ -462,9 +467,16 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     }
     chain.head = 103n
     await vi.advanceTimersByTimeAsync(20_000)
-    // The minute's write carries the mint read again, which lands under its key.
-    expect(db.writes).toMatchObject([{ fromBlock: 71n, toBlock: 103n }])
-    expect(db.writes[0]!.records.mints).toMatchObject([{ block: 95, firstTokenId: 1 }])
+    expect(db.writes).toEqual([
+      {
+        chainId: 31337,
+        fromBlock: 71n,
+        toBlock: 103n,
+        syncedAt: timeOf(103n),
+        collections: [ID_A],
+        records: NO_RECORDS,
+      },
+    ])
     chain.head = 104n
     await vi.advanceTimersByTimeAsync(20_000)
     expect(db.writes).toHaveLength(1)
@@ -474,8 +486,40 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
       'logs 71-103 x1',
       'logs 72-104 x1',
     ])
-    // A record read again is not news, so the passes keep the idle pace: a head read every 20 s.
+    // The passes keep the idle pace: a head read every 20 s.
     expect(chain.calls.filter((call) => call === 'head')).toHaveLength(5)
+    await indexer.stop()
+  })
+
+  it('writes a log a lagging node left out of a segment written anyway with the next read of its block, before a minute passes (Critical 1)', async () => {
+    const { chain, client } = fakeChain()
+    const { db, port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 100n)])
+    chain.head = 110n
+    // A mint at 104 and one at 108, block N; the node answering getLogs is at 105, so the first answer for 69
+    // to 110 holds the first mint and stops short of the second.
+    chain.logs = [...mintAt(104n, 1n), ...mintAt(108n, 2n)]
+    chain.answersTo = 105n
+    const indexer = indexerOn(client, port)
+    await settle()
+    // The first mint is news: the segment is written at once, to 110, past block 108.
+    expect(logCalls(chain.calls)).toEqual(['logs 69-110 x1'])
+    expect(db.writes).toHaveLength(1)
+    expect(db.writes[0]!.records.mints.map((mint) => mint.block)).toEqual([104])
+    // 5 s on (the fast delay after news), the read of 79 to 112 answers block 108: its segment holds records,
+    // so it is written at once although both mints lie at or below the written block.
+    chain.head = 112n
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(logCalls(chain.calls)).toEqual(['logs 69-110 x1', 'logs 79-112 x1'])
+    expect(db.writes).toHaveLength(2)
+    expect(db.writes[1]).toMatchObject({ fromBlock: 79n, toBlock: 112n })
+    expect(db.writes[1]!.records.mints.map((mint) => mint.block)).toEqual([104, 108])
+    // The mints the window reads again are written at each pass, but are not news: the pace stays idle.
+    chain.head = 113n
+    await vi.advanceTimersByTimeAsync(19_000)
+    expect(db.writes).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(logCalls(chain.calls).at(-1)).toBe('logs 81-113 x1')
+    expect(db.writes).toHaveLength(3)
     await indexer.stop()
   })
 
@@ -603,9 +647,9 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     expect(logCalls(chain.calls)).toHaveLength(1)
     await vi.advanceTimersByTimeAsync(1)
     expect(logCalls(chain.calls)).toEqual(['logs 1-500 x1', 'logs 1-500 x1'])
-    // Written this time, so the backfill goes on 1 s later, from 32 blocks below the next block.
+    // Written this time, so the backfill goes on 1 s later: 500 blocks from 32 below the next block, 468 new.
     await vi.advanceTimersByTimeAsync(1_000)
-    expect(logCalls(chain.calls)).toEqual(['logs 1-500 x1', 'logs 1-500 x1', 'logs 469-1000 x1'])
+    expect(logCalls(chain.calls)).toEqual(['logs 1-500 x1', 'logs 1-500 x1', 'logs 469-968 x1'])
     await indexer.stop()
   })
 
@@ -715,14 +759,14 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     db.targets[0]!.indexedBlock = 125n
     await vi.advanceTimersByTimeAsync(6_000)
     expect(db.calls).toEqual(['summaries', 'targets', 'record 1-125', 'targets'])
-    // From the database's block, 125 blocks rather than 500, and still 125 after a success within the minute
-    // of the last failure, which the cursor taken again remembers.
+    // From the database's block, 125 blocks rather than 500 (the 32 read again among them), and still 125
+    // after a success within the minute of the last failure, which the cursor taken again remembers.
     expect(logCalls(chain.calls)).toEqual([
       'logs 1-500 x1',
       'logs 1-250 x1',
       'logs 1-125 x1',
-      'logs 94-250 x1',
-      'logs 219-375 x1',
+      'logs 94-218 x1',
+      'logs 187-311 x1',
     ])
     await indexer.stop()
   })
@@ -746,19 +790,19 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
       'logs 1-7 x1',
       'logs 1-3 x1',
       'logs 1-1 x1',
-      // From 45 s to 100 s, a minute after the last failure, the range stays 1: one new block a second, read
-      // with the 32 before it.
-      ...Array.from({ length: 56 }, (_, index) => `logs ${Math.max(1, index + 1 - 32)}-${index + 1} x1`),
-      // Then each success doubles it, up to 500.
-      'logs 25-58 x1',
-      'logs 27-62 x1',
-      'logs 31-70 x1',
-      'logs 39-86 x1',
-      'logs 55-118 x1',
-      'logs 87-182 x1',
-      'logs 151-310 x1',
-      'logs 279-566 x1',
-      'logs 535-1066 x1',
+      // From 45 s to 100 s, a minute after the last failure, the range stays 1: one block a second, read alone.
+      ...Array.from({ length: 56 }, (_, index) => `logs ${index + 1}-${index + 1} x1`),
+      // Then each success doubles it, up to 500, the blocks read again within it: one new block a scan up to a
+      // range of 32, then 32, 96, 224 and 468.
+      'logs 56-57 x1',
+      'logs 55-58 x1',
+      'logs 52-59 x1',
+      'logs 45-60 x1',
+      'logs 30-61 x1',
+      'logs 30-93 x1',
+      'logs 62-189 x1',
+      'logs 158-413 x1',
+      'logs 382-881 x1',
     ])
     expect(indexer.health()).toMatchObject({ failedPasses: 9, lastError: 'HttpRequestError' })
     expect(errorLines()).toEqual([
@@ -776,23 +820,12 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     chain.logsCap = 100n
     const indexer = indexerOn(client, port)
     await settle()
-    // 500, 250 and 125 fail 5 s apart; 62 succeeds from 15 s, read with the 32 blocks before it (94 in all),
-    // and a minute after each failure one scan of 124 (156 with the 32) probes the cap, fails and halves the
-    // range again: at 71 s, 132 s and 193 s.
+    // 500, 250 and 125 fail 5 s apart; 62 succeeds from 15 s, the 32 blocks read again among them, and a
+    // minute after each failure one scan of 124 probes the cap, fails and halves the range again: at 71 s,
+    // 132 s and 193 s. No scan spans more than its range.
     await vi.advanceTimersByTimeAsync(193_000)
-    const minute = Array<number>(56).fill(94)
-    expect(spansOf(chain.calls)).toEqual([
-      500,
-      250,
-      125,
-      62,
-      ...minute.slice(1),
-      156,
-      ...minute,
-      156,
-      ...minute,
-      156,
-    ])
+    const minute = Array<number>(56).fill(62)
+    expect(spansOf(chain.calls)).toEqual([500, 250, 125, ...minute, 124, ...minute, 124, ...minute, 124])
     // Three failures to reach 62, then one probe a minute: 6 of 174 scans failed, not one in two.
     expect(indexer.health().failedPasses).toBe(6)
     await indexer.stop()
@@ -815,8 +848,8 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
       chain.scans.filter((scan) => scan.addresses.includes(contract.toLowerCase()))
     const stuckLine = `The block 105 of ${ID_X} on Anvil cannot be read; the collection waits there: HttpRequestError: HTTP request failed.`
     await settle()
-    // The four fail together while the range halves to 1 block, then two scans of two, then X alone at 52 s.
-    await vi.advanceTimersByTimeAsync(52_000)
+    // The four fail together while the range halves to 1 block, then two scans of two, then X alone at 54 s.
+    await vi.advanceTimersByTimeAsync(54_000)
     expect(errorLines()).toEqual([
       'The index scan of blocks 69 to 110 on Anvil failed, so its range halves: HttpRequestError: HTTP request failed.',
       stuckLine,
@@ -826,10 +859,10 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     expect(errorLines().slice(1)).toEqual([stuckLine, stuckLine])
     await vi.advanceTimersByTimeAsync(60_000)
     expect(errorLines().slice(1)).toEqual([stuckLine, stuckLine, stuckLine])
-    // The other three read past block 105 to the safe block; X stays at 104, each of its scans alone.
+    // The other three read past block 105 to the safe block; X stays at 104, each of its scans block 105 alone.
     for (const contract of [A, B, C]) expect(scansOfContract(contract).at(-1)!.to).toBe(110n)
     const xs = scansOfContract(X).slice(-25)
-    expect(xs.every((scan) => scan.addresses.length === 1 && scan.from === 73n && scan.to === 105n)).toBe(
+    expect(xs.every((scan) => scan.addresses.length === 1 && scan.from === 105n && scan.to === 105n)).toBe(
       true,
     )
     expect(indexer.health().lastError).toBe('HttpRequestError')
@@ -845,7 +878,7 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     const after = chain.scans.slice(before)
     expect(after.length).toBeGreaterThan(0)
     expect(after.every((scan) => scan.addresses.length === 4)).toBe(true)
-    expect(after[0]).toMatchObject({ from: 1_969n, to: 2_500n })
+    expect(after[0]).toMatchObject({ from: 1_969n, to: 2_468n })
     await indexer.stop()
   })
 

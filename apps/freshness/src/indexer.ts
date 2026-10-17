@@ -36,8 +36,18 @@ const LOG_EVERY_MS = 60_000
 type FailureKind = 'summaries' | 'targets' | 'head' | 'scan' | 'times' | 'write' | 'pass'
 
 /**
- * Whether a segment's records hold one above its collection's written block. The blocks a scan reads again
- * hold records already written, which wait for the minute's write, so an idle cursor is not written every pass.
+ * Whether a segment holds any record: one that does is written at once, the records the scan read again in
+ * its window included, so a log a lagging node's short answer left out of a segment written anyway lands with
+ * the next pass's read of its block. The writes are idempotent; a segment with no record waits for the
+ * minute's write.
+ */
+const hasRecords = (records: Records) =>
+  records.mints.length + records.owners.length + records.airdrops.length + records.withdrawals.length > 0
+
+/**
+ * Whether a segment's records hold one above its collection's written block: news, which sets the pass's fast
+ * pace. The records a scan reads again in its window are written again but are not news, so they leave an
+ * idle chain at its idle pace.
  */
 function hasNewRecords(records: Records, cursors: readonly Cursor[]): boolean {
   const written = new Map(cursors.map((cursor) => [cursor.collectionId, cursor.written]))
@@ -61,8 +71,9 @@ const lowestOf = (cursors: readonly Cursor[], blockOf: (cursor: Cursor) => bigin
  * The indexer of one chain (docs/specs/2026-10-16-indexer-overview.md, section 6.5). Each pass loads the
  * chain's summaries until they have loaded, reads the targets every minute (and after a gap refusal),
  * starting a new one at its deploy transaction's block, reads the head, then scans each cursor's logs up to
- * the safe block in the plan's scans, each starting `REREAD_BLOCKS` below the cursor's scanned block, and
- * writes what they record, segment by segment. A scan that fails halves its range, then at 1 block its
+ * the safe block in the plan's scans, each reading again up to `REREAD_BLOCKS` blocks at and below the cursor's
+ * scanned block within its range, and writes what they record, segment by segment: a segment with any record
+ * at once, one without once a minute. A scan that fails halves its range, then at 1 block its
  * chunk of collections, so a block one collection's logs make unreadable stops that collection alone. Passes
  * never overlap; the next starts the plan's delay after this one started, at once when it ran longer, and the
  * fast delay after a pass with any failure (Review Focus 2); a failed write ends its pass. `activityOf`
@@ -315,7 +326,7 @@ export function chainIndexer(
       const toSafe = segment.toBlock === safe
       const now = Date.now()
       const due =
-        fresh ||
+        hasRecords(records) ||
         (toSafe && scan.cursors.some((cursor) => cursor.syncedAt === null)) ||
         scan.cursors.some((cursor) => now - cursor.writtenAt >= CURSOR_WRITE_EVERY_MS)
       if (due) {
@@ -345,6 +356,7 @@ export function chainIndexer(
           if (segment.toBlock > cursor.written) cursor.written = segment.toBlock
           cursor.writtenAt = now
         }
+        // Only news sets the fast pace, not a record the window read again.
         recorded ||= fresh
       }
       for (const cursor of scan.cursors) {

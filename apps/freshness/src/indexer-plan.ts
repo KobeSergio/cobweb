@@ -6,13 +6,15 @@ import type { Tier } from './tiers.ts'
  * logs each pass asks for, how a scan's logs are cut into writes, and when the next pass runs.
  */
 
-/** The most blocks past its cursor one scan reads. */
+/** The most blocks one scan reads, the blocks it reads again included. */
 export const MAX_RANGE = 500n
 /**
- * The blocks at and below a cursor's scanned block that each scan reads again. The head comes from one request
- * and the logs from another, so behind a load balancer the node answering `getLogs` can be a few blocks behind
- * and answer up to its own head without an error; the next pass reads those blocks again and writes what the
- * short answer left out. 32 blocks is about 8 s on Arbitrum and a minute on Base.
+ * The most blocks at and below a cursor's scanned block that a scan reads again. The head comes from one
+ * request and the logs from another, so behind a load balancer the node answering `getLogs` can be a few
+ * blocks behind and answer up to its own head without an error; the next pass reads those blocks again and
+ * writes what the short answer left out. 32 blocks is about 8 s on Arbitrum and a minute on Base. The window
+ * shrinks with the range, to one block fewer than it, so a scan at 1 block reads that block alone and no scan
+ * reads more than its range.
  */
 export const REREAD_BLOCKS = 32n
 /** The most collections one scan asks for, and a cursor's chunk until a block it cannot read halves it. */
@@ -36,10 +38,10 @@ export const RANGE_GROW_AFTER_MS = 60_000
 /**
  * A collection as a pass reads it. `fromBlock` is its deploy block, below which no scan of it starts;
  * `scanned` is how far this process has read and `written` how far the database's cursor has moved, both
- * blocks; `range` is the blocks past `scanned` its next scan may read; `chunk` the most collections a scan
- * of it asks for, halved by a scan that fails at a range of 1 block; `syncedAt` the chain's time when a pass
- * last read it to the safe block (Unix seconds); `writtenAt` when its cursor was last written; `failedAt` when
- * its last scan failed, undefined until one does.
+ * blocks; `range` is the most blocks its next scan may read, those it reads again included; `chunk` the most
+ * collections a scan of it asks for, halved by a scan that fails at a range of 1 block; `syncedAt` the chain's
+ * time when a pass last read it to the safe block (Unix seconds); `writtenAt` when its cursor was last
+ * written; `failedAt` when its last scan failed, undefined until one does.
  */
 export type Cursor = {
   collectionId: string
@@ -73,9 +75,11 @@ export function safeBlockOf(head: bigint, confirmations: number): bigint {
  * The scans of a pass: the cursors below the safe block grouped by `scanned`. The front group (the highest
  * `scanned`) is planned in full, one scan per chunk of addresses (100, or the group's smallest chunk); the
  * groups behind it take at most 10 scans in all, the closest to the front first, so they reach it and merge.
- * Each scan ends at the lower of the safe block and `scanned` plus the group's smallest range (at least 1
- * block, at most 500), and starts `REREAD_BLOCKS` below `scanned + 1`, never below the lowest deploy block of
- * its cursors, so the blocks near the head are read by at least two passes.
+ * The group's smallest range (at least 1 block, at most 500) bounds each of its scans, the blocks read again
+ * included: a scan starts the window (32 blocks, or one fewer than the range when that is smaller) below
+ * `scanned + 1`, never below the lowest deploy block of its cursors, so the blocks near the head are read by
+ * at least two passes; and the group's scans end together, at the lower of the safe block and the range's last
+ * block from the group's lowest start. At 500 blocks a backfill reads 468 new blocks a scan.
  */
 export function scansOf(cursors: readonly Cursor[], safe: bigint): Scan[] {
   const groups = new Map<bigint, Cursor[]>()
@@ -97,20 +101,26 @@ export function scansOf(cursors: readonly Cursor[], safe: bigint): Scan[] {
       (least, cursor) => Math.max(1, Math.min(least, cursor.chunk)),
       ADDRESSES_PER_SCAN,
     )
-    const end = scanned + range
+    const window = range - 1n < REREAD_BLOCKS ? range - 1n : REREAD_BLOCKS
+    const reread = scanned + 1n - window
+    /** Where a scan of these cursors starts: the window, never below their lowest deploy block. */
+    const startOf = (some: readonly Cursor[]) => {
+      const deployed = some.reduce(
+        (least, cursor) => (cursor.fromBlock < least ? cursor.fromBlock : least),
+        some[0]!.fromBlock,
+      )
+      return deployed > reread ? deployed : reread
+    }
+    // From the group's lowest start, so no scan of the group spans more than the range.
+    const end = startOf(group) + range - 1n
     const toBlock = end < safe ? end : safe
-    const reread = scanned + 1n - REREAD_BLOCKS
     for (let start = 0; start < group.length; start += chunk) {
       if (index > 0) {
         if (lagging === LAGGING_SCANS_PER_PASS) return scans
         lagging++
       }
       const slice = group.slice(start, start + chunk)
-      const deployed = slice.reduce(
-        (least, cursor) => (cursor.fromBlock < least ? cursor.fromBlock : least),
-        slice[0]!.fromBlock,
-      )
-      scans.push({ cursors: slice, fromBlock: deployed > reread ? deployed : reread, toBlock })
+      scans.push({ cursors: slice, fromBlock: startOf(slice), toBlock })
     }
   }
   return scans

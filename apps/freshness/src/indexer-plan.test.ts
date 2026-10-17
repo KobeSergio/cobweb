@@ -57,52 +57,70 @@ describe('safeBlockOf (docs/specs/2026-10-16-indexer-overview.md, section 6.3)',
 describe('scansOf', () => {
   it('groups the cursors by scanned block in chunks of 100 addresses', () => {
     const scans = scansOf([...many(1, 250, 999n)], 2_000n)
-    expect(shape(scans)).toEqual(['968-1499 x100', '968-1499 x100', '968-1499 x50'])
+    expect(shape(scans)).toEqual(['968-1467 x100', '968-1467 x100', '968-1467 x50'])
     expect(scans[2]!.cursors[0]!.collectionId).toBe('collection-201')
   })
 
-  it('reads at most 500 blocks past the scanned block, ends at the safe block, and takes the group smallest range', () => {
+  it('reads at most its range of blocks, those read again included, ends at the safe block, and takes the group smallest range', () => {
     expect(shape(scansOf([cursorAt(1, 999n)], 1_200n))).toEqual(['968-1200 x1'])
-    expect(shape(scansOf([cursorAt(1, 999n)], 5_000n))).toEqual(['968-1499 x1'])
-    expect(shape(scansOf([cursorAt(1, 999n), cursorAt(2, 999n, 125n)], 5_000n))).toEqual(['968-1124 x2'])
+    // 500 blocks: the 32 read again and 468 new ones.
+    expect(shape(scansOf([cursorAt(1, 999n)], 5_000n))).toEqual(['968-1467 x1'])
+    expect(shape(scansOf([cursorAt(1, 999n), cursorAt(2, 999n, 125n)], 5_000n))).toEqual(['968-1092 x2'])
   })
 
   it('takes a range halved down to 1 block, reads 1 block for a range below it, and caps a range above 500', () => {
-    expect(shape(scansOf([cursorAt(1, 999n, 1n)], 5_000n))).toEqual(['968-1000 x1'])
-    expect(shape(scansOf([cursorAt(1, 999n, 250n)], 5_000n))).toEqual(['968-1249 x1'])
-    expect(shape(scansOf([cursorAt(1, 999n, 0n)], 5_000n))).toEqual(['968-1000 x1'])
-    expect(shape(scansOf([cursorAt(1, 999n, -4n)], 5_000n))).toEqual(['968-1000 x1'])
-    expect(shape(scansOf([cursorAt(1, 999n, 1_000n)], 5_000n))).toEqual(['968-1499 x1'])
+    expect(shape(scansOf([cursorAt(1, 999n, 1n)], 5_000n))).toEqual(['1000-1000 x1'])
+    expect(shape(scansOf([cursorAt(1, 999n, 250n)], 5_000n))).toEqual(['968-1217 x1'])
+    expect(shape(scansOf([cursorAt(1, 999n, 0n)], 5_000n))).toEqual(['1000-1000 x1'])
+    expect(shape(scansOf([cursorAt(1, 999n, -4n)], 5_000n))).toEqual(['1000-1000 x1'])
+    expect(shape(scansOf([cursorAt(1, 999n, 1_000n)], 5_000n))).toEqual(['968-1467 x1'])
   })
 
-  it('starts each scan 32 blocks below the block after the scanned one, never below the lowest deploy block of its cursors (Critical 1)', () => {
+  it('reads again one block fewer than the range when the range is under 33 blocks, so a scan at 1 block reads that block alone (Critical 1)', () => {
+    expect(shape(scansOf([cursorAt(1, 999n, 2n)], 5_000n))).toEqual(['999-1000 x1'])
+    expect(shape(scansOf([cursorAt(1, 999n, 16n)], 5_000n))).toEqual(['985-1000 x1'])
+    expect(shape(scansOf([cursorAt(1, 999n, 33n)], 5_000n))).toEqual(['968-1000 x1'])
+    expect(shape(scansOf([cursorAt(1, 999n, 34n)], 5_000n))).toEqual(['968-1001 x1'])
+    expect(shape(scansOf([cursorAt(1, 999n, 64n)], 5_000n))).toEqual(['968-1031 x1'])
+    // Every range spans exactly its blocks: the window, at most 32 and at most the range less one, then the rest
+    // new.
+    for (const range of [1n, 2n, 3n, 16n, 31n, 32n, 33n, 34n, 62n, 125n, 250n, 500n]) {
+      const [scan] = scansOf([cursorAt(1, 999n, range)], 5_000n)
+      const window = range - 1n < REREAD_BLOCKS ? range - 1n : REREAD_BLOCKS
+      expect([scan!.toBlock - scan!.fromBlock + 1n, scan!.toBlock - 999n]).toEqual([range, range - window])
+    }
+  })
+
+  it('starts each scan 32 blocks below the block after the scanned one, never below the lowest deploy block of its cursors, and never spans more than its range (Critical 1)', () => {
     expect(REREAD_BLOCKS).toBe(32n)
-    // A cursor deployed within the last 32 blocks, and a new one, whose first scan starts at its deploy block.
+    // A cursor deployed within the last 32 blocks, and a new one, whose first scan starts at its deploy block
+    // and reads the whole range from there.
     expect(shape(scansOf([cursorAt(1, 999n, MAX_RANGE, { fromBlock: 990n })], 5_000n))).toEqual([
-      '990-1499 x1',
+      '990-1489 x1',
     ])
     expect(shape(scansOf([cursorAt(1, 999n, MAX_RANGE, { fromBlock: 1_000n })], 5_000n))).toEqual([
       '1000-1499 x1',
     ])
     // Near the chain's start, never below block 0.
-    expect(shape(scansOf([cursorAt(1, 10n)], 5_000n))).toEqual(['0-510 x1'])
-    // A scan starts at the lowest start of its own cursors: two chunks of one group, one of them deployed late.
+    expect(shape(scansOf([cursorAt(1, 10n)], 5_000n))).toEqual(['0-499 x1'])
+    // A scan starts at the lowest start of its own cursors, and the group's scans end together, the range from
+    // the group's lowest start: two chunks of one group, one of them deployed late.
     const group = [
       cursorAt(1, 999n, MAX_RANGE, { chunk: 2 }),
       cursorAt(2, 999n, MAX_RANGE, { fromBlock: 1_000n }),
       cursorAt(3, 999n, MAX_RANGE, { fromBlock: 1_000n }),
     ]
-    expect(shape(scansOf(group, 5_000n))).toEqual(['968-1499 x2', '1000-1499 x1'])
+    expect(shape(scansOf(group, 5_000n))).toEqual(['968-1467 x2', '1000-1467 x1'])
   })
 
   it("forms a group's scans by the smallest chunk among its cursors, at least 1 address (Important 2)", () => {
     const group = [...many(1, 4, 999n), cursorAt(5, 999n, MAX_RANGE, { chunk: 2 })]
-    expect(shape(scansOf(group, 5_000n))).toEqual(['968-1499 x2', '968-1499 x2', '968-1499 x1'])
+    expect(shape(scansOf(group, 5_000n))).toEqual(['968-1467 x2', '968-1467 x2', '968-1467 x1'])
     const none = [...many(1, 2, 999n), cursorAt(3, 999n, MAX_RANGE, { chunk: 0 })]
-    expect(shape(scansOf(none, 5_000n))).toEqual(['968-1499 x1', '968-1499 x1', '968-1499 x1'])
+    expect(shape(scansOf(none, 5_000n))).toEqual(['968-1467 x1', '968-1467 x1', '968-1467 x1'])
     // Each group keeps its own chunk.
     const two = [...many(1, 3, 999n), cursorAt(4, 900n, MAX_RANGE, { chunk: 1 }), cursorAt(5, 900n)]
-    expect(shape(scansOf(two, 5_000n))).toEqual(['968-1499 x3', '869-1400 x1', '869-1400 x1'])
+    expect(shape(scansOf(two, 5_000n))).toEqual(['968-1467 x3', '869-1368 x1', '869-1368 x1'])
   })
 
   it('plans the front group in full and at most 10 lagging scans, the closest to the front first', () => {
@@ -113,10 +131,10 @@ describe('scansOf', () => {
       cursorAt(3_000, 100n),
     ]
     expect(shape(scansOf(cursors, 9_000n))).toEqual([
-      '4969-5500 x100',
-      '4969-5500 x50',
-      '3969-4500 x3',
-      ...Array.from({ length: 9 }, () => '2969-3500 x100'),
+      '4969-5468 x100',
+      '4969-5468 x50',
+      '3969-4468 x3',
+      ...Array.from({ length: 9 }, () => '2969-3468 x100'),
     ])
   })
 
