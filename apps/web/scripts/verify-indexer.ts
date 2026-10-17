@@ -11,10 +11,12 @@
 //   pnpm --filter @cobweb/web verify:indexer
 //
 // The fixture (scripts/deploy-fixture.ts) reads the settings from the environment, `supabase status -o env` and
-// apps/web/.env.local, and refuses non-local endpoints. The server's database is the local one, with the service
-// role key the fixture read; the script prints no key and no URL, and a thrown error prints viem's short message
-// or its first line (chain-fixture.ts). Stop any other indexer on the same database first (a running
-// `pnpm --filter @cobweb/freshness dev` with the two variables set): it would race checks 11, 13 and 15. The
+// apps/web/.env.local, and refuses non-local endpoints. The server's indexer connects to the local database as the
+// cobweb_indexer role (docs/specs/2026-10-17-production-hardening.md, section 8.1): through INDEXER_DATABASE_URL
+// when the environment sets a local one, else at a password this run sets through `supabase status`'s DB_URL and
+// clears in its cleanup. The script prints no key, no password and no URL, and a thrown error prints viem's short
+// message or its first line (chain-fixture.ts). Stop any other indexer on the same database first (a running
+// `pnpm --filter @cobweb/freshness dev` with INDEXER_DATABASE_URL set): it would race checks 11, 13 and 15. The
 // indexer reads every collection deployed on Anvil the database lists, the earlier walks' among them, so each
 // server start logs once each one whose deploy is not on this chain, and the cursors it starts or moves for them
 // stay. The cleanup closes the server and deletes the run's own rows: its collection's, with the indexer's for
@@ -22,6 +24,8 @@
 // fresh accounts, 1,200 more blocks and the chain's clock about 1,200 s ahead. Runs under
 // `node --conditions=react-server --import ./scripts/resolve-ts.mjs`.
 
+import { randomBytes } from 'node:crypto'
+import postgres from 'postgres'
 import { isAddressEqual, parseEther, type Address, type Hex } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { statePath, type StateBody } from '@cobweb/shared'
@@ -41,6 +45,7 @@ import {
   deployedCollection,
   failureLine,
   readLockCollection,
+  refuseRemote,
   removeFixtures,
   rpc,
   runChecks,
@@ -53,6 +58,7 @@ import {
   type Deployed,
   type DeployForm,
 } from './deploy-fixture.ts'
+import { config } from './render-deps.ts'
 
 const { activityViewCore } = await import('../src/lib/manage/activity-core.ts')
 const { paidByMintersOf } = await import('../src/lib/manage/activity-view.ts')
@@ -69,12 +75,36 @@ const PUBLIC = 0
 const PUBLIC_PRICE = 1_000_000_000_000_000n
 /** The airdrop fee the platform admin sets (`setAirdropFee`): 0.0001 ETH a token, so the burn pays one. */
 const FEE = 100_000_000_000_000n
-/** The indexer on fast intervals, so each change is read within about a second. */
-const INDEXER: IndexerOptions = {
-  supabaseUrl: settings.url,
-  serviceRoleKey: settings.serviceKey,
-  passMs: { behind: 200, fast: 500, idle: 500 },
-  targetsEveryMs: 1_000,
+/** The indexer's pace: fast intervals, so each change is read within about a second. */
+const PACE = { passMs: { behind: 200, fast: 500, idle: 500 }, targetsEveryMs: 1_000 }
+/** The indexer's options, its database set at the first start. */
+let indexer: IndexerOptions | null = null
+/** Clears the password this run set on cobweb_indexer, when it set one. */
+let clearPassword: (() => Promise<void>) | null = null
+
+/**
+ * The role's connection string: a local INDEXER_DATABASE_URL already set, else the local database as
+ * cobweb_indexer at a password set here through DB_URL, which the cleanup clears.
+ */
+async function indexerDatabaseUrl(): Promise<string> {
+  const given = process.env.INDEXER_DATABASE_URL?.trim()
+  if (given) {
+    refuseRemote(given)
+    return given
+  }
+  const dbUrl = config('SUPABASE_DB_URL', ['DB_URL'])
+  refuseRemote(dbUrl)
+  const password = randomBytes(24).toString('hex')
+  const owner = postgres(dbUrl, { max: 1, onnotice: () => {} })
+  await owner.unsafe(`alter role cobweb_indexer with password '${password}'`)
+  clearPassword = async () => {
+    await owner.unsafe('alter role cobweb_indexer with password null')
+    await owner.end()
+  }
+  const url = new URL(dbUrl)
+  url.username = 'cobweb_indexer'
+  url.password = password
+  return url.toString()
 }
 /** How long a change may take to reach the tables: a pass, a write and the reads. */
 const RECORDED_WITHIN_MS = 5_000
@@ -104,9 +134,10 @@ async function until<T>(read: () => Promise<T | null | undefined | false>, ms: n
 
 let freshness: Freshness | null = null
 
-/** The freshness server in process, serving Anvil alone, with its indexer on. */
+/** The freshness server in process, serving Anvil alone, with its indexer on as cobweb_indexer. */
 async function startServer(): Promise<Freshness> {
-  freshness = await startFreshness({ port: 0, host: '127.0.0.1', chainIds: [31337], indexer: INDEXER })
+  indexer ??= { databaseUrl: await indexerDatabaseUrl(), ...PACE }
+  freshness = await startFreshness({ port: 0, host: '127.0.0.1', chainIds: [31337], indexer })
   return freshness
 }
 
@@ -228,7 +259,7 @@ async function main(): Promise<void> {
   let before: { counted: boolean } | null = null
 
   await check(
-    '1. setup: Anvil answers as 31337 with the factory approving the shipped code hash, Supabase answers, and the freshness server serves 31337 with its indexer on',
+    '1. setup: Anvil answers as 31337 with the factory approving the shipped code hash, Supabase answers, and the freshness server serves 31337 with its indexer on as cobweb_indexer',
     async () => {
       const unready = await chainReady()
       if (unready) return unready
@@ -262,7 +293,7 @@ async function main(): Promise<void> {
       const cursor = await until(async () => {
         const row = await cursorOf(cid)
         return row?.from_block === deployBlock ? row : null
-      }, INDEXER.targetsEveryMs! + 1_000)
+      }, PACE.targetsEveryMs + 1_000)
       if (!cursor)
         return `no cursor at the deploy block ${deployBlock}: ${JSON.stringify(await cursorOf(cid))}`
       const counted = await until(async () => {
@@ -782,6 +813,7 @@ async function cleanup(): Promise<void> {
           return run && (await indexedRows(run.deployed.cid)) !== rows ? 'a row changed after close()' : null
         }),
         await attempt('removing the fixtures', removeFixtures),
+        await attempt('clearing the role password', async () => clearPassword?.()),
       ]
       if (run)
         problems.push(

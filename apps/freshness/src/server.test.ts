@@ -23,7 +23,7 @@ async function isFree(port: number): Promise<boolean> {
   return listening
 }
 
-describe('startFreshness with the indexer (docs/specs/2026-10-16-indexer-overview.md, section 6.1)', () => {
+describe('startFreshness with the indexer (docs/specs/2026-10-17-production-hardening.md, section 8.1)', () => {
   beforeEach(() => {
     vi.spyOn(console, 'log').mockImplementation(() => {})
   })
@@ -35,9 +35,12 @@ describe('startFreshness with the indexer (docs/specs/2026-10-16-indexer-overvie
   it('refuses options it cannot use before it listens, so a caller in process is never left with a listening server', async () => {
     const port = await freePort()
     for (const [indexer, sentence] of [
-      [{ supabaseUrl: 'not a url', serviceRoleKey: 'key' }, 'must be an http or https URL'],
-      [{ supabaseUrl: 'http://127.0.0.1:54321/rest/v1', serviceRoleKey: 'key' }, 'with no path'],
-      [{ supabaseUrl: '', serviceRoleKey: '' }, 'are both needed'],
+      [{ databaseUrl: 'http://127.0.0.1:55321' }, 'must be a postgres:// or postgresql:// connection string'],
+      [{ databaseUrl: 'postgresql://cobweb_indexer@127.0.0.1:55322/postgres' }, 'has no password'],
+      [
+        { databaseUrl: 'postgresql://postgres:pw@127.0.0.1:55322/postgres' },
+        'must connect as the cobweb_indexer role',
+      ],
     ] as const) {
       const refused = await startFreshness({ port, host: '127.0.0.1', chainIds: [], indexer }).then(
         () => null,
@@ -49,16 +52,27 @@ describe('startFreshness with the indexer (docs/specs/2026-10-16-indexer-overvie
     expect(console.log).not.toHaveBeenCalled()
   })
 
-  it('listens with options it can use, the passes starting on each served chain, and closes', async () => {
+  it('listens with options it can use, connecting on the first call, and closes its connections', async () => {
+    // Nothing listens on port 1: a pass would fail as NETWORK, and with no chain served none runs.
     const freshness = await startFreshness({
       port: 0,
       host: '127.0.0.1',
       chainIds: [],
-      indexer: { supabaseUrl: 'http://127.0.0.1:54321', serviceRoleKey: 'key' },
+      indexer: { databaseUrl: 'postgresql://cobweb_indexer:pw@127.0.0.1:1/postgres' },
     })
     const health = await fetch(`${freshness.url}/health`)
     expect([health.status, ((await health.json()) as { status: string }).status]).toEqual([200, 'ok'])
     await freshness.close()
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('The indexer runs on no chain.'))
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('The indexer runs on no chain as cobweb_indexer.'),
+    )
+  })
+
+  it('says the indexer is off without its database', async () => {
+    const freshness = await startFreshness({ port: 0, host: '127.0.0.1', chainIds: [] })
+    await freshness.close()
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('The indexer is off: set INDEXER_DATABASE_URL to run it.'),
+    )
   })
 })

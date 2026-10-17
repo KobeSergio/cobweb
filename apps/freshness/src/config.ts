@@ -36,57 +36,94 @@ export function servedChains(chainIds?: number[]): ChainConfig[] {
   return chains
 }
 
+/** The login role the indexer connects as (docs/specs/2026-10-17-production-hardening.md, section 8.1). */
+export const INDEXER_ROLE = 'cobweb_indexer'
+
 /**
- * The indexer's settings (docs/specs/2026-10-16-indexer-overview.md, section 6.1): its database, the
- * project's API URL and service role key, the names and the client the render worker uses; and the passes'
- * delays and the targets' read, which `verify:indexer` shortens.
+ * The indexer's settings (docs/specs/2026-10-17-production-hardening.md, section 8.1): its database, a connection
+ * string for the cobweb_indexer role, which executes the indexer's four functions and nothing else, with the path
+ * of the database's CA certificate when one is given; and the passes' delays and the targets' read, which
+ * `verify:indexer` shortens.
  */
 export type IndexerOptions = {
-  supabaseUrl: string
-  serviceRoleKey: string
+  databaseUrl: string
+  /** The path of the database's CA certificate (PEM), which the connection's verification then trusts. */
+  sslCaFile?: string
   /** The wait from a pass's start to the next: during a backfill, while a chain is busy, otherwise. */
   passMs?: { behind: number; fast: number; idle: number }
   /** How often the deployed collections are read again. */
   targetsEveryMs?: number
 }
 
-/**
- * Whether a value is a URL supabase-js takes: `http://` or `https://`, then a URL that parses. `createClient`
- * throws on any other.
- */
-function isHttpUrl(value: string): boolean {
-  return /^https?:\/\//i.test(value.trim()) && URL.canParse(value.trim())
+/** Hosts on this machine, where the local stack answers over plain TCP. */
+const LOOPBACK_HOSTS: readonly string[] = ['localhost', '127.0.0.1', '[::1]']
+/** The TLS modes a connection string may name for a database on another machine: the verified ones. */
+const VERIFIED_MODES: readonly string[] = ['verify-ca', 'verify-full']
+
+/** Whether a connection string's host is this machine. */
+export function isLoopbackHost(hostname: string): boolean {
+  return LOOPBACK_HOSTS.includes(hostname)
 }
 
+/** The session pooler's name for the role: cobweb_indexer.<project ref>. */
+const POOLER_USER = /^cobweb_indexer\.[a-z0-9]+$/
+
+/** The variables the indexer read before it had its own role, which nothing reads now. */
+const OLD_VARIABLES = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'] as const
+
 /**
- * The indexer's options from `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, a blank one read as unset: null
- * when neither is set, so the indexer stays off. Otherwise they are checked as `checkIndexerOptions` checks
- * them, which refuses the start as a malformed factory address does.
+ * The indexer's options from `INDEXER_DATABASE_URL`, a blank one read as unset: null when it is unset, so the
+ * indexer stays off; with `INDEXER_DATABASE_SSL_CA`, the path of the database's CA certificate, when set. Otherwise
+ * it is checked as `checkIndexerOptions` checks it, which refuses the start as a malformed factory address does.
  */
 export function indexerOptionsOf(env: Record<string, string | undefined>): IndexerOptions | null {
-  const supabaseUrl = env.SUPABASE_URL ?? ''
-  const serviceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY ?? ''
-  if (!supabaseUrl && !serviceRoleKey) return null
-  return checkIndexerOptions({ supabaseUrl, serviceRoleKey })
+  const databaseUrl = env.INDEXER_DATABASE_URL?.trim() ?? ''
+  if (!databaseUrl) return null
+  const sslCaFile = env.INDEXER_DATABASE_SSL_CA?.trim()
+  return checkIndexerOptions(sslCaFile ? { databaseUrl, sslCaFile } : { databaseUrl })
 }
 
+const refusal = (sentence: string) => new BaseError(sentence, { name: 'ConfigurationError' })
+
 /**
- * The indexer's options, answered as they are once checked: both values set, and `SUPABASE_URL` an http or
- * https URL with no path, as a project's API URL is (a path would send every call to the wrong place). A
- * refusal is a viem `BaseError` named `ConfigurationError` whose sentence names the variables, never a value.
- * `startFreshness` checks its options with it before it listens.
+ * The indexer's options, answered as they are once checked: a `postgres://` or `postgresql://` connection string
+ * with a password, whose user is cobweb_indexer, or the session pooler's cobweb_indexer.<project ref>, and which
+ * asks for no unverified connection to a database that is not on this machine (an `sslmode` or `ssl` parameter,
+ * when given, of verify-ca or verify-full; require, prefer, allow and disable each leave the certificate unchecked
+ * or TLS off). A refusal is a viem `BaseError` named `ConfigurationError` whose sentence never carries any part of
+ * the value. `startFreshness` checks its options with it before it listens.
  */
 export function checkIndexerOptions(options: IndexerOptions): IndexerOptions {
-  if (!options.supabaseUrl || !options.serviceRoleKey)
-    throw new BaseError(
-      'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are both needed to run the indexer; set both or neither.',
-      { name: 'ConfigurationError' },
-    )
-  if (!isHttpUrl(options.supabaseUrl))
-    throw new BaseError('SUPABASE_URL must be an http or https URL.', { name: 'ConfigurationError' })
-  if (new URL(options.supabaseUrl.trim()).pathname !== '/')
-    throw new BaseError("SUPABASE_URL must be the project's URL, with no path.", {
-      name: 'ConfigurationError',
-    })
+  let url: URL | null
+  try {
+    url = new URL(options.databaseUrl.trim())
+  } catch {
+    url = null
+  }
+  if (!url || !['postgres:', 'postgresql:'].includes(url.protocol) || !url.hostname)
+    throw refusal('INDEXER_DATABASE_URL must be a postgres:// or postgresql:// connection string.')
+  if (!url.password)
+    throw refusal("INDEXER_DATABASE_URL has no password; include the cobweb_indexer role's password.")
+  let user: string
+  try {
+    user = decodeURIComponent(url.username)
+  } catch {
+    user = ''
+  }
+  if (user !== INDEXER_ROLE && !POOLER_USER.test(user))
+    throw refusal('INDEXER_DATABASE_URL must connect as the cobweb_indexer role.')
+  if (!isLoopbackHost(url.hostname))
+    for (const name of ['sslmode', 'ssl']) {
+      const mode = url.searchParams.get(name)
+      if (mode !== null && !VERIFIED_MODES.includes(mode))
+        throw refusal(
+          'INDEXER_DATABASE_URL must verify TLS for a database on another machine: leave sslmode out, or set it to verify-full.',
+        )
+    }
   return options
+}
+
+/** `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` where still set: `index.ts` logs them as no longer read. */
+export function unreadIndexerVariables(env: Record<string, string | undefined>): string[] {
+  return OLD_VARIABLES.filter((name) => Boolean(env[name]?.trim()))
 }

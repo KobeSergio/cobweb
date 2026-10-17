@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@cobweb/shared": "workspace:^",
-    "@supabase/supabase-js": "^2.117.2",
+    "postgres": "3.4.9",
     "viem": "^2.57.2"
   }
 }

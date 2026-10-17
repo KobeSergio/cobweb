@@ -5,11 +5,11 @@ import { publicClientFor } from '@cobweb/shared/clients'
 import type { Address } from 'viem'
 import { chainReader } from './chain-reader.ts'
 import { collectionCheck } from './collection-check.ts'
-import { checkIndexerOptions, servedChains, type IndexerOptions } from './config.ts'
+import { checkIndexerOptions, INDEXER_ROLE, servedChains, type IndexerOptions } from './config.ts'
 import { chainHealth, failureLine, type HealthBody } from './health.ts'
 import { hotSet, JOIN_WAIT_MS, type HotEntry } from './hot-set.ts'
 import { chainIndexer, type ChainIndexer } from './indexer.ts'
-import { supabaseIndexerDb } from './indexer-db.ts'
+import { postgresIndexerDb } from './indexer-db.ts'
 import {
   healthAnswer,
   PREFLIGHT,
@@ -33,7 +33,8 @@ export type { WalletBody } from './wallet.ts'
  * The freshness server (docs/specs/2026-10-16-freshness-server.md, section 6): one `node:http` server over
  * the chains whose two variables are set. Without the indexer it makes no call until a request arrives; with
  * it, each served chain's indexer reads the chain's collections into the database from the start
- * (docs/specs/2026-10-16-indexer-overview.md, section 6.1), while the request path still reads no database.
+ * (docs/specs/2026-10-16-indexer-overview.md, section 6.1), connected as the cobweb_indexer role
+ * (docs/specs/2026-10-17-production-hardening.md, section 8.1), while the request path still reads no database.
  * It never computes liveness. `index.ts` starts it on Railway; `verify:freshness` and `verify:indexer` start
  * it in process.
  */
@@ -58,8 +59,8 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
   const startedAt = new Date().toISOString()
   const indexing = options.indexer ?? null
   // Checked and built before the server listens, so options it refuses never leave a caller in process with a
-  // listening server; the indexers' passes start once it listens (Decision 11).
-  const db = indexing ? supabaseIndexerDb(checkIndexerOptions(indexing)) : null
+  // listening server; postgres.js connects on the first call, and the indexers' passes start once it listens.
+  const db = indexing ? postgresIndexerDb(checkIndexerOptions(indexing)) : null
   const hot = hotSet()
   const served = new Map(
     servedChains(options.chainIds).map((chain) => {
@@ -193,6 +194,9 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
       server.off('error', reject)
       resolve()
     })
+  }).catch(async (error: unknown) => {
+    await db?.end()
+    throw error
   })
   const { port } = server.address() as AddressInfo
   if (indexing && db) {
@@ -208,15 +212,16 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
   console.log(
     `The freshness server listens on port ${port}, serving ${listed}. ${
       indexing
-        ? `The indexer runs on ${listed}.`
-        : 'The indexer is off: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to run it.'
+        ? `The indexer runs on ${listed} as ${INDEXER_ROLE}.`
+        : 'The indexer is off: set INDEXER_DATABASE_URL to run it.'
     }`,
   )
 
   /**
    * Stops accepting connections, waits for every reader, window, indexer and request in flight, then closes
-   * the connections left and waits for any request a kept-alive connection carried meanwhile, so the server
-   * makes no call once it resolves (Decision 3). The first failure is thrown once everything has settled.
+   * the connections left and waits for any request a kept-alive connection carried meanwhile, then the indexer's
+   * database connections, so the server makes no call once it resolves. The first failure is thrown once
+   * everything has settled.
    */
   async function shutDown(): Promise<void> {
     const closed = new Promise<Error | undefined>((resolve) => server.close((error) => resolve(error)))
@@ -230,6 +235,7 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
     ])
     server.closeAllConnections()
     settled.push(...(await Promise.allSettled([...answering])))
+    if (db) settled.push(...(await Promise.allSettled([db.end()])))
     const closeError = await closed
     const failure = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected')
     if (failure) throw failure.reason

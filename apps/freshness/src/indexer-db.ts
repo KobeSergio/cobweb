@@ -1,15 +1,16 @@
+import { readFileSync } from 'node:fs'
 import type { MintBody } from '@cobweb/shared'
-import { createClient } from '@supabase/supabase-js'
-import type { Address, Hex } from 'viem'
+import postgres from 'postgres'
+import { BaseError, type Address, type Hex } from 'viem'
 import type { Summary } from './activity.ts'
-import type { IndexerOptions } from './config.ts'
+import { isLoopbackHost, type IndexerOptions } from './config.ts'
 import type { Records } from './indexer-records.ts'
 
 /**
- * The indexer's database (docs/specs/2026-10-16-indexer-overview.md, section 6.2): the four service-role
- * functions of its migration, through supabase-js with the service role key, as the render worker's client.
- * The request path never uses it. A failure throws `IndexerWriteError`, which names the function and the
- * code, never the database's message or the key.
+ * The indexer's database (docs/specs/2026-10-17-production-hardening.md, section 8.1): the four functions of its
+ * migration, called as the cobweb_indexer role over postgres.js, which may execute those four and nothing else.
+ * The request path never uses it. A failure throws `IndexerWriteError`, which names the function and the code,
+ * never the database's message or the connection string.
  */
 
 export type { Summary } from './activity.ts'
@@ -45,7 +46,15 @@ export type IndexerDb = {
   summaries(chainId: number): Promise<Summary[]>
 }
 
-/** How long one database call may take before it is abandoned and counts as failed (Review Focus 1). */
+export type IndexerFunction = 'indexer_targets' | 'indexer_start' | 'indexer_record' | 'indexer_summaries'
+
+/** One function's call with its arguments in order, answering its jsonb. */
+export type IndexerCall = (fn: IndexerFunction, args: readonly unknown[]) => Promise<unknown>
+
+/**
+ * How long one database call may take before it is abandoned and counts as failed: the role's statement_timeout
+ * too (indexer spec, Review Focus 1).
+ */
 export const DB_TIMEOUT_MS = 10_000
 
 /** The refusals that mean the cursors in memory no longer match the database's. */
@@ -55,11 +64,10 @@ const GAP_SENTENCES: readonly string[] = [
 ]
 
 /**
- * A database call that failed: the function and the code, a Postgres code such as 23514, PostgREST's such as
- * PGRST202 (the migration is missing), `HTTP_<status>` for an answer without a code (the gateway's 401 for a
- * wrong key, a proxy's 502 page, an answer with no data), TIMEOUT when the call was abandoned, or NETWORK
- * when no answer came. `gap` when the refusal means the cursors in memory no longer match the database's, so
- * the targets are read again.
+ * A database call that failed: the function and the code, a Postgres code such as 23514, 42501 (a grant is
+ * missing), 42883 (the function is missing) or 28P01 (the password is refused), TIMEOUT when the call was
+ * abandoned, or NETWORK when no answer came. `gap` when the refusal means the cursors in memory no longer match
+ * the database's, so the targets are read again.
  */
 export class IndexerWriteError extends Error {
   readonly code: string
@@ -109,37 +117,19 @@ const summaryOf = (raw: DbSummary): Summary => ({
 const blockOf = (value: number | null) => (value === null ? null : BigInt(value))
 
 /**
- * The port on supabase-js. Blocks travel as numbers, which hold any block below 2^53 exactly, and the sync
- * time as ISO. Each call is abandoned after `DB_TIMEOUT_MS`, so a connection that never answers cannot hold a
- * chain's passes, which never overlap, or the server's close.
+ * The port over a call. Blocks travel as numbers, which hold any block below 2^53 exactly, and the sync time as
+ * ISO. Every function answers jsonb, so a call answering nothing failed too.
  */
-export function supabaseIndexerDb(options: IndexerOptions, fetchImpl: typeof fetch = fetch): IndexerDb {
-  const client = createClient(options.supabaseUrl, options.serviceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: { fetch: fetchImpl },
-  })
-
-  async function call<T>(fn: string, args: Record<string, unknown>): Promise<T> {
-    const timeout = new AbortController()
-    const timer = setTimeout(() => timeout.abort(), DB_TIMEOUT_MS)
-    try {
-      const { data, error, status } = await client.rpc(fn, args).abortSignal(timeout.signal)
-      // Every function answers JSON, so an answer without data failed too: postgrest-js reads a 404 with an
-      // empty body as a 204 with no data and no error. A fetch that failed comes back with status 0.
-      if (error || data === null) {
-        const code =
-          error?.code || (timeout.signal.aborted ? 'TIMEOUT' : status > 0 ? `HTTP_${status}` : 'NETWORK')
-        throw new IndexerWriteError(fn, code, GAP_SENTENCES.includes(error?.message ?? ''))
-      }
-      return data as T
-    } finally {
-      clearTimeout(timer)
-    }
+export function indexerDbOf(call: IndexerCall): IndexerDb {
+  async function answered<T>(fn: IndexerFunction, args: readonly unknown[]): Promise<T> {
+    const answer = await call(fn, args)
+    if (answer === null || answer === undefined) throw new IndexerWriteError(fn, 'NO_ANSWER', false)
+    return answer as T
   }
 
   return {
     async targets(chainId) {
-      const rows = await call<DbTarget[]>('indexer_targets', { p_chain_id: chainId })
+      const rows = await answered<DbTarget[]>('indexer_targets', [chainId])
       return rows.map((row) => ({
         ...row,
         fromBlock: blockOf(row.fromBlock),
@@ -147,21 +137,141 @@ export function supabaseIndexerDb(options: IndexerOptions, fetchImpl: typeof fet
       }))
     },
     async start(collectionId, fromBlock) {
-      await call('indexer_start', { p_collection_id: collectionId, p_from_block: Number(fromBlock) })
+      await answered('indexer_start', [collectionId, Number(fromBlock)])
     },
     async record(write) {
-      const answer = await call<Record<string, DbSummary>>('indexer_record', {
-        p_chain_id: write.chainId,
-        p_from_block: Number(write.fromBlock),
-        p_to_block: Number(write.toBlock),
-        p_synced_at: write.syncedAt === null ? null : new Date(write.syncedAt * 1_000).toISOString(),
-        p_collections: write.collections,
-        p_records: write.records,
-      })
+      const answer = await answered<Record<string, DbSummary>>('indexer_record', [
+        write.chainId,
+        Number(write.fromBlock),
+        Number(write.toBlock),
+        write.syncedAt === null ? null : new Date(write.syncedAt * 1_000).toISOString(),
+        write.collections,
+        write.records,
+      ])
       return Object.values(answer).map(summaryOf)
     },
     async summaries(chainId) {
-      return (await call<DbSummary[]>('indexer_summaries', { p_chain_id: chainId })).map(summaryOf)
+      return (await answered<DbSummary[]>('indexer_summaries', [chainId])).map(summaryOf)
     },
   }
+}
+
+/** Each function's parameters with their casts, so Postgres picks its one signature. */
+export const INDEXER_PARAMETERS: Record<IndexerFunction, string> = {
+  indexer_targets: '$1::integer',
+  indexer_start: '$1::uuid, $2::bigint',
+  indexer_record: '$1::integer, $2::bigint, $3::bigint, $4::timestamptz, $5::uuid[], $6::jsonb',
+  indexer_summaries: '$1::integer',
+}
+
+/** The part of a postgres.js client the port uses: a query with parameters, which can be cancelled, and `end`. */
+export type IndexerSql = {
+  unsafe(query: string, parameters: unknown[]): PromiseLike<{ answer: unknown }[]> & { cancel(): unknown }
+  end(options: { timeout: number }): Promise<void>
+}
+
+/**
+ * The connection's TLS as postgres.js takes it: an object, which it merges into Node's TLS options, so the
+ * certificate is checked against the system's CAs, or the given one, and the host against the certificate (Node's
+ * default); or undefined for a database on this machine, where the connection string decides (plain TCP for the
+ * local stack). Never postgres.js's string modes: in 3.4.9 `require`, `allow` and `prefer` set
+ * `rejectUnauthorized: false`, and `prefer` falls back to plain TCP.
+ */
+export type IndexerTls = { rejectUnauthorized: true; ca?: string } | undefined
+
+/** A CA certificate that cannot be read refuses the start, naming the variable that named it, never the path. */
+const unreadableCa = (variable: string, error: unknown) =>
+  new BaseError(`${variable} names a CA certificate file that cannot be read.`, {
+    name: 'ConfigurationError',
+    cause: error as Error,
+  })
+
+/**
+ * The connection string postgres.js gets and its TLS (docs/specs/2026-10-17-production-hardening.md, section 8.1):
+ * for a database on another machine, always verified (`rejectUnauthorized: true` with Node's host check), trusting
+ * the CA certificate `INDEXER_DATABASE_SSL_CA` names, or else the file the string's `sslrootcert` names, when one
+ * is given; for this machine, whatever the string says unless a CA is given. The string loses `sslrootcert`, which
+ * postgres.js would send the server as a setting; `sslrootcert=system` means the system's CAs, the default.
+ */
+export function indexerConnectionOf(
+  options: IndexerOptions,
+  readCa: (path: string) => string = (path) => readFileSync(path, 'utf8'),
+): { databaseUrl: string; ssl: IndexerTls } {
+  const url = new URL(options.databaseUrl.trim())
+  const rootCert = url.searchParams.get('sslrootcert')
+  url.searchParams.delete('sslrootcert')
+  const databaseUrl = url.toString()
+  let ca: string | undefined
+  if (options.sslCaFile)
+    try {
+      ca = readCa(options.sslCaFile)
+    } catch (error) {
+      throw unreadableCa('INDEXER_DATABASE_SSL_CA', error)
+    }
+  else if (rootCert && rootCert !== 'system')
+    try {
+      ca = readCa(rootCert)
+    } catch (error) {
+      throw unreadableCa('INDEXER_DATABASE_URL', error)
+    }
+  if (ca) return { databaseUrl, ssl: { rejectUnauthorized: true, ca } }
+  if (isLoopbackHost(url.hostname)) return { databaseUrl, ssl: undefined }
+  return { databaseUrl, ssl: { rejectUnauthorized: true } }
+}
+
+/** postgres.js on the connection string: at most 4 connections, no prepared statements, so either pooler mode serves. */
+const connect = (databaseUrl: string, ssl: IndexerTls): IndexerSql =>
+  postgres(databaseUrl, {
+    max: 4,
+    prepare: false,
+    connect_timeout: 10,
+    idle_timeout: 60,
+    onnotice: () => {},
+    ...(ssl === undefined ? {} : { ssl }),
+  }) as unknown as IndexerSql
+
+/** A Postgres refusal's code; anything else (a refused connection, a reset, a closed socket) is NETWORK. */
+const codeOf = (error: unknown) => {
+  const failure = error as { name?: unknown; code?: unknown }
+  return failure?.name === 'PostgresError' && typeof failure.code === 'string' ? failure.code : 'NETWORK'
+}
+
+/**
+ * The port as the cobweb_indexer role, over verified TLS to any database not on this machine: each call is
+ * `select public.<fn>(<parameters with casts>) as answer`, abandoned and cancelled after `DB_TIMEOUT_MS`, so a
+ * connection that never answers cannot hold a chain's passes, which never overlap, or the server's close. `end`
+ * closes the connections. A CA certificate file that cannot be read refuses the start.
+ */
+export function postgresIndexerDb(
+  options: IndexerOptions,
+  open: (databaseUrl: string, ssl: IndexerTls) => IndexerSql = connect,
+): IndexerDb & { end(): Promise<void> } {
+  const { databaseUrl, ssl } = indexerConnectionOf(options)
+  const sql = open(databaseUrl, ssl)
+
+  const call: IndexerCall = async (fn, args) => {
+    const query = sql.unsafe(`select public.${fn}(${INDEXER_PARAMETERS[fn]}) as answer`, [...args])
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timedOut = new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(() => resolve('timeout'), DB_TIMEOUT_MS)
+    })
+    try {
+      const outcome = await Promise.race([query, timedOut])
+      if (outcome === 'timeout') {
+        query.cancel()
+        // Its cancellation fails the query later; the call has failed already, as TIMEOUT.
+        void Promise.resolve(query).catch(() => {})
+        throw new IndexerWriteError(fn, 'TIMEOUT', false)
+      }
+      return outcome[0]?.answer ?? null
+    } catch (error) {
+      if (error instanceof IndexerWriteError) throw error
+      const message = (error as { message?: unknown })?.message
+      throw new IndexerWriteError(fn, codeOf(error), GAP_SENTENCES.includes(String(message)))
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  return { ...indexerDbOf(call), end: () => sql.end({ timeout: 5 }) }
 }

@@ -1,6 +1,13 @@
 import { availableChains } from '@cobweb/shared'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { checkIndexerOptions, DEFAULT_PORT, indexerOptionsOf, portOf, servedChains } from './config.ts'
+import {
+  checkIndexerOptions,
+  DEFAULT_PORT,
+  indexerOptionsOf,
+  portOf,
+  servedChains,
+  unreadIndexerVariables,
+} from './config.ts'
 import { errorLine } from './health.ts'
 
 const FACTORY = '0x5FbDB2315678afecb367f032d93F642f64180aa3'
@@ -91,84 +98,108 @@ describe('portOf (docs/specs/2026-10-16-freshness-server.md, section 6.2)', () =
   })
 })
 
-describe('indexerOptionsOf (docs/specs/2026-10-16-indexer-overview.md, section 6.1)', () => {
-  const URL = 'http://127.0.0.1:54321'
-  const KEY = 'service-role-key-value'
+describe('indexerOptionsOf (docs/specs/2026-10-17-production-hardening.md, section 8.1)', () => {
+  const PASSWORD = 's3cret-Pa55word'
+  const LOCAL = `postgresql://cobweb_indexer:${PASSWORD}@127.0.0.1:55322/postgres`
+  const POOLER = `postgres://cobweb_indexer.abcdefghijklmnopqrst:${PASSWORD}@aws-0-us-east-1.pooler.supabase.com:5432/postgres`
 
-  it('answers the options from both variables, and null from neither or from blanks', () => {
-    expect(indexerOptionsOf({ SUPABASE_URL: URL, SUPABASE_SERVICE_ROLE_KEY: KEY })).toEqual({
-      supabaseUrl: URL,
-      serviceRoleKey: KEY,
-    })
+  it('answers the options from a local URL or the session pooler, and null when unset or blank', () => {
+    expect(indexerOptionsOf({ INDEXER_DATABASE_URL: LOCAL })).toEqual({ databaseUrl: LOCAL })
+    expect(indexerOptionsOf({ INDEXER_DATABASE_URL: ` ${POOLER} ` })).toEqual({ databaseUrl: POOLER })
     expect(indexerOptionsOf({})).toBeNull()
-    expect(indexerOptionsOf({ SUPABASE_URL: '', SUPABASE_SERVICE_ROLE_KEY: '' })).toBeNull()
+    expect(indexerOptionsOf({ INDEXER_DATABASE_URL: '  ' })).toBeNull()
+    // The old variables alone leave the indexer off.
+    expect(
+      indexerOptionsOf({ SUPABASE_URL: 'http://127.0.0.1:55321', SUPABASE_SERVICE_ROLE_KEY: 'key' }),
+    ).toBeNull()
   })
 
-  it('refuses one set alone with a sentence naming both variables, never a value', () => {
-    for (const env of [
-      { SUPABASE_URL: URL },
-      { SUPABASE_SERVICE_ROLE_KEY: KEY },
-      { SUPABASE_URL: URL, SUPABASE_SERVICE_ROLE_KEY: '' },
+  it('refuses each malformed URL with a sentence that carries no part of it', () => {
+    const cases: [string, string][] = [
+      ['https://127.0.0.1:55321', 'must be a postgres:// or postgresql:// connection string'],
+      ['not a url', 'must be a postgres:// or postgresql:// connection string'],
+      [
+        `mysql://cobweb_indexer:${PASSWORD}@db.example:3306/postgres`,
+        'must be a postgres:// or postgresql://',
+      ],
+      ['postgresql://cobweb_indexer@127.0.0.1:55322/postgres', 'has no password'],
+      [
+        `postgresql://postgres:${PASSWORD}@127.0.0.1:55322/postgres`,
+        'must connect as the cobweb_indexer role',
+      ],
+      [
+        `postgresql://service_role:${PASSWORD}@db.example:5432/postgres`,
+        'must connect as the cobweb_indexer role',
+      ],
+      [
+        `postgresql://cobweb_indexer_x:${PASSWORD}@db.example:5432/postgres`,
+        'must connect as the cobweb_indexer role',
+      ],
+      [
+        `postgresql://%E0%A4%A:${PASSWORD}@db.example:5432/postgres`,
+        'must connect as the cobweb_indexer role',
+      ],
+    ]
+    for (const [value, sentence] of cases) {
+      const line = errorLine(thrownBy(() => indexerOptionsOf({ INDEXER_DATABASE_URL: value })))
+      expect(line).toContain(`ConfigurationError: INDEXER_DATABASE_URL ${sentence}`)
+      for (const part of [PASSWORD, '127.0.0.1', 'db.example', '55322', 'service_role', 'mysql', '%E0'])
+        expect(line).not.toContain(part)
+    }
+  })
+
+  it('refuses a connection string that asks for unverified TLS to another machine, and lets this machine use plain TCP', () => {
+    for (const mode of ['verify-ca', 'verify-full'])
+      expect(indexerOptionsOf({ INDEXER_DATABASE_URL: `${POOLER}?sslmode=${mode}` })).toEqual({
+        databaseUrl: `${POOLER}?sslmode=${mode}`,
+      })
+    for (const weak of [
+      'sslmode=require',
+      'sslmode=prefer',
+      'sslmode=allow',
+      'sslmode=disable',
+      'ssl=false',
     ]) {
-      const line = errorLine(thrownBy(() => indexerOptionsOf(env)))
+      const line = errorLine(thrownBy(() => indexerOptionsOf({ INDEXER_DATABASE_URL: `${POOLER}?${weak}` })))
       expect(line).toBe(
-        'ConfigurationError: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are both needed to run the indexer; set both or neither.',
+        'ConfigurationError: INDEXER_DATABASE_URL must verify TLS for a database on another machine: leave sslmode out, or set it to verify-full.',
       )
-      expect(line).not.toContain(KEY)
+      expect(line).not.toContain(PASSWORD)
     }
-  })
-
-  it('refuses a SUPABASE_URL that is not an http or https URL, naming the variable, never the value', () => {
-    for (const supabaseUrl of [
-      'localhost:54321',
-      'ftp://127.0.0.1:54321',
-      // The URL parser reads it as http://127.0.0.1:54321/, but supabase-js refuses it without the slashes.
-      'http:127.0.0.1:54321',
-      'http://',
-      'not a url',
-    ]) {
-      const env = { SUPABASE_URL: supabaseUrl, SUPABASE_SERVICE_ROLE_KEY: KEY }
-      expect(errorLine(thrownBy(() => indexerOptionsOf(env)))).toBe(
-        'ConfigurationError: SUPABASE_URL must be an http or https URL.',
-      )
-    }
-    // A hosted project's URL, its scheme in any case.
-    const hosted = 'HTTPS://abcdefghijklmnopqrst.supabase.co'
-    expect(indexerOptionsOf({ SUPABASE_URL: hosted, SUPABASE_SERVICE_ROLE_KEY: KEY })).toEqual({
-      supabaseUrl: hosted,
-      serviceRoleKey: KEY,
+    expect(indexerOptionsOf({ INDEXER_DATABASE_URL: `${LOCAL}?sslmode=disable` })).toEqual({
+      databaseUrl: `${LOCAL}?sslmode=disable`,
     })
   })
 
-  it('refuses a SUPABASE_URL with a path, which a project URL never has, naming the variable, never the value', () => {
-    for (const supabaseUrl of [
-      'https://abcdefghijklmnopqrst.supabase.co/rest/v1',
-      'http://127.0.0.1:54321/secret-path',
-      'http://127.0.0.1:54321//',
-    ]) {
-      const line = errorLine(
-        thrownBy(() => indexerOptionsOf({ SUPABASE_URL: supabaseUrl, SUPABASE_SERVICE_ROLE_KEY: KEY })),
-      )
-      expect(line).toBe("ConfigurationError: SUPABASE_URL must be the project's URL, with no path.")
-      expect(line).not.toContain('secret-path')
-    }
-    // The root path, written or not, is the project URL.
-    for (const supabaseUrl of ['http://127.0.0.1:54321/', 'https://abcdefghijklmnopqrst.supabase.co'])
-      expect(indexerOptionsOf({ SUPABASE_URL: supabaseUrl, SUPABASE_SERVICE_ROLE_KEY: KEY })).toEqual({
-        supabaseUrl,
-        serviceRoleKey: KEY,
-      })
+  it("takes the path of the database's CA certificate from INDEXER_DATABASE_SSL_CA when it is set", () => {
+    const path = '/app/certs/supabase-ca.crt'
+    expect(indexerOptionsOf({ INDEXER_DATABASE_URL: POOLER, INDEXER_DATABASE_SSL_CA: ` ${path} ` })).toEqual({
+      databaseUrl: POOLER,
+      sslCaFile: path,
+    })
+    expect(indexerOptionsOf({ INDEXER_DATABASE_URL: POOLER, INDEXER_DATABASE_SSL_CA: ' ' })).toEqual({
+      databaseUrl: POOLER,
+    })
   })
 
   it("checks a caller's options by the same rules, the passes' pace kept", () => {
-    const options = { supabaseUrl: URL, serviceRoleKey: KEY, targetsEveryMs: 1_000 }
+    const options = { databaseUrl: LOCAL, targetsEveryMs: 1_000 }
     expect(checkIndexerOptions(options)).toBe(options)
-    for (const [refused, sentence] of [
-      [{ supabaseUrl: '', serviceRoleKey: '' }, 'are both needed'],
-      [{ supabaseUrl: URL, serviceRoleKey: '' }, 'are both needed'],
-      [{ supabaseUrl: 'not a url', serviceRoleKey: KEY }, 'must be an http or https URL'],
-      [{ supabaseUrl: `${URL}/rest/v1`, serviceRoleKey: KEY }, 'with no path'],
-    ] as const)
-      expect(errorLine(thrownBy(() => checkIndexerOptions(refused)))).toContain(sentence)
+    expect(errorLine(thrownBy(() => checkIndexerOptions({ databaseUrl: '' })))).toContain(
+      'must be a postgres://',
+    )
+  })
+})
+
+describe('unreadIndexerVariables', () => {
+  it('names the two old variables where they are still set', () => {
+    expect(unreadIndexerVariables({ SUPABASE_URL: 'http://x', SUPABASE_SERVICE_ROLE_KEY: 'key' })).toEqual([
+      'SUPABASE_URL',
+      'SUPABASE_SERVICE_ROLE_KEY',
+    ])
+    expect(unreadIndexerVariables({ SUPABASE_SERVICE_ROLE_KEY: 'key', SUPABASE_URL: ' ' })).toEqual([
+      'SUPABASE_SERVICE_ROLE_KEY',
+    ])
+    expect(unreadIndexerVariables({ INDEXER_DATABASE_URL: 'postgres://x' })).toEqual([])
   })
 })
