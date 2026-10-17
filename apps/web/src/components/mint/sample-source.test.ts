@@ -1,6 +1,7 @@
 import type { StateBody } from '@cobweb/shared'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DEMO_MINTER, DEMO_NOW, DEMO_TOKENS, DEMO_VAULT } from '@/lib/demo'
+import { getAddress } from 'viem'
+import { DEMO_ACTIVITY, DEMO_MINTER, DEMO_NOW, DEMO_TOKENS, DEMO_VAULT } from '@/lib/demo'
 import type { MintParams } from '@/lib/mint/mint-call'
 import { MintFailure, type MintFailureKind } from '@/lib/mint/mint-failure'
 import { runMint } from '@/lib/mint/mint-run'
@@ -80,6 +81,21 @@ describe('sampleMintSource (docs/specs/2026-10-16-mint-page-live-data.md, sectio
     expect([atStart.blockTimestamp, group(atStart)?.active]).toEqual([DEMO_NOW + 31, false])
     now = 1_000_000 + 32_000
     expect(group(await state(source))?.active).toBe(true)
+  })
+
+  it("carries the sample's 171 holders and its 10 latest mints at their times, and none for ?activity=none (docs/specs/2026-10-16-indexer-overview.md, section 8)", async () => {
+    const { activity } = await state(sampleMintSource(page, switches(), clock))
+    expect(activity?.holders).toBe(171)
+    expect(activity?.recentMints).toHaveLength(10)
+    expect(activity?.recentMints[0]).toEqual({
+      txHash: DEMO_ACTIVITY.recentMints[0]!.txHash,
+      recipient: getAddress(DEMO_ACTIVITY.recentMints[0]!.minter),
+      groupId: 1,
+      amount: 1,
+      firstTokenId: DEMO_ACTIVITY.recentMints[0]!.firstTokenId,
+      blockTimestamp: DEMO_NOW - 4 * 60,
+    })
+    expect((await state(sampleMintSource(page, switches('activity=none'), clock))).activity).toBeNull()
   })
 
   it('is revealed unless ?art=placeholder, and counts a confirmed mint from its block on', async () => {

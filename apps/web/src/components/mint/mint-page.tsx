@@ -6,6 +6,7 @@ import { MintPanel } from './mint-panel'
 import { DegradedBanner, MintTopBar } from './mint-top-bar'
 import { PageSections } from './page-sections'
 import { PhaseList } from './phase-list'
+import { RecentMints } from './recent-mints'
 import { StickyMintBar } from './sticky-mint-bar'
 import type { MintPageProps } from './types'
 
@@ -46,6 +47,7 @@ export function MintPage(props: MintPageProps) {
             <div className="lg:col-span-5">
               <MintPanel />
               <PhaseList />
+              <RecentMints />
             </div>
           </div>
         </main>

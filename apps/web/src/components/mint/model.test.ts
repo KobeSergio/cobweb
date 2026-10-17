@@ -56,6 +56,7 @@ const live = (groups: MintGroup[], overrides: Partial<MintLive> = {}): MintLive 
   mintOnBehalfActive: false,
   transfers: null,
   royaltyEnforced: false,
+  activity: null,
   ...overrides,
 })
 const wallet = (overrides: Partial<WalletView> = {}): WalletView => ({

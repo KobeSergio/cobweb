@@ -130,6 +130,15 @@ export function Details() {
       label: 'Supply',
       value: live ? <span className="numeric">{live.supply.max.toLocaleString('en-US')}</span> : pending,
     },
+    // The indexer's count (docs/specs/2026-10-16-indexer-overview.md, section 7.5); left out while it has none.
+    ...(live?.activity
+      ? [
+          {
+            label: 'Holders',
+            value: <span className="numeric">{live.activity.holders.toLocaleString('en-US')}</span>,
+          },
+        ]
+      : []),
     {
       label: 'Royalties',
       value: live ? (

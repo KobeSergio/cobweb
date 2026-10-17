@@ -1,7 +1,7 @@
-import type { StateBody, WalletBody } from '@cobweb/shared'
-import type { Address } from 'viem'
+import type { MintBody, StateBody, WalletBody } from '@cobweb/shared'
+import type { Address, Hex } from 'viem'
 import { describe, expect, it } from 'vitest'
-import { liveOf, revealedOf, transfersOf, walletViewOf } from './live-data'
+import { activityOfBody, liveOf, revealedOf, transfersOf, walletViewOf } from './live-data'
 import type { MintPageStatic } from './page-doc'
 
 const COLLECTION: Address = '0x0409454C375c8a6aB05383bFB6D9FcDe9ebB8F85'
@@ -88,6 +88,40 @@ describe('liveOf (docs/specs/2026-10-16-mint-page-live-data.md, section 7.4)', (
     expect(liveOf(page, body).royaltyEnforced).toBe(true)
     for (const level of [1, 9, 'none', 'unread'] as const)
       expect(liveOf(page, { ...body, transferLevel: level }).royaltyEnforced).toBe(false)
+  })
+})
+
+describe('activityOfBody (docs/specs/2026-10-16-indexer-overview.md, section 7.5)', () => {
+  const mint = (groupId: number, firstTokenId: number): MintBody => ({
+    txHash: `0x${firstTokenId.toString(16).padStart(64, '0')}` as Hex,
+    recipient: OWNER,
+    groupId,
+    amount: 1,
+    firstTokenId,
+    blockTimestamp: 990,
+  })
+
+  it("names each mint's phase as the phase list does, Group N for a group registered outside Cobweb, none for a hidden one", () => {
+    const live = liveOf(page, {
+      ...body,
+      activity: { holders: 4, recentMints: [mint(1, 4), mint(0, 3), mint(2, 2), mint(3, 1)] },
+    })
+    expect(live.activity?.holders).toBe(4)
+    expect(live.activity?.recentMints.map((entry) => [entry.firstTokenId, entry.phase])).toEqual([
+      [4, 'Holders'],
+      [3, 'Public'],
+      [2, null],
+      [1, 'Group 3'],
+    ])
+  })
+
+  it('carries no activity without one, at most 10 mints, and names a group the page does not list by its id', () => {
+    expect(liveOf(page, body).activity).toBeNull()
+    const many = Array.from({ length: 12 }, (_, index) => mint(0, index + 1))
+    expect(activityOfBody({ holders: 1, recentMints: many }, [])?.recentMints).toHaveLength(10)
+    expect(activityOfBody({ holders: 1, recentMints: [mint(7, 1)] }, [])?.recentMints[0]?.phase).toBe(
+      'Group 7',
+    )
   })
 })
 

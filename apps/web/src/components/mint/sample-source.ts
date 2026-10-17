@@ -6,6 +6,7 @@ import {
   ContractFunctionRevertedError,
   encodeErrorResult,
   encodeEventTopics,
+  getAddress,
   UserRejectedRequestError,
   WaitForTransactionReceiptTimeoutError,
   zeroAddress,
@@ -15,6 +16,7 @@ import {
   type TransactionReceipt,
 } from 'viem'
 import {
+  DEMO_ACTIVITY,
   DEMO_CREATOR,
   DEMO_DEPLOYMENT,
   DEMO_NOW,
@@ -68,6 +70,8 @@ export type SampleWalletMode = 'connected' | 'not-listed' | 'limit' | 'wrong-cha
  *                         server refuses the collection for the page load
  *   ?art=placeholder      before the reveal: the placeholder's art, no featured tokens, no tiers
  *   ?type=single_asset | one_of_one   every token's number of the supply in place of its tier
+ *   ?activity=none        the state carries no activity (docs/specs/2026-10-16-indexer-overview.md, section 8):
+ *                         no Holders row and no Recent mints
  */
 export type SampleSwitches = {
   variant: MintPageVariant
@@ -83,6 +87,8 @@ export type SampleSwitches = {
   art: 'placeholder' | null
   /** Another project type, for the rarity spot's alternative. */
   type: 'single_asset' | 'one_of_one' | null
+  /** The state carries no activity: no Holders row and no Recent mints. */
+  activity: 'none' | null
 }
 
 /** Every kind of the dialog; a kind added to `MintFailureKind` stops compiling here until it is listed. */
@@ -119,6 +125,7 @@ export function sampleSwitchesOf(query: URLSearchParams): SampleSwitches {
     refusal: REFUSALS.find((refusal) => refusal === query.get('refusal')) ?? null,
     art: query.get('art') === 'placeholder' ? 'placeholder' : null,
     type: TYPES.find((type) => type === query.get('type')) ?? null,
+    activity: query.get('activity') === 'none' ? 'none' : null,
   }
 }
 
@@ -366,7 +373,21 @@ export function sampleMintSource(
         baseUri: switches.art === 'placeholder' ? SAMPLE_PLACEHOLDER_URI : SAMPLE_REVEALED_URI,
         transferValidator: DEFAULT_TRANSFER_VALIDATOR,
         transferLevel: 0,
-        activity: null,
+        // The sample's holders and its 10 latest mints, at their times on the sample's clock.
+        activity:
+          switches.activity === 'none'
+            ? null
+            : {
+                holders: DEMO_ACTIVITY.holders,
+                recentMints: DEMO_ACTIVITY.recentMints.slice(0, 10).map((mint) => ({
+                  txHash: mint.txHash,
+                  recipient: getAddress(mint.minter),
+                  groupId: mint.groupId,
+                  amount: mint.amount,
+                  firstTokenId: mint.firstTokenId,
+                  blockTimestamp: mint.at,
+                })),
+              },
       }
       return { kind: 'body', body, ageSeconds: 0 }
     },
