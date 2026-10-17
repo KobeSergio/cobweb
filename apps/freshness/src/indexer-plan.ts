@@ -13,8 +13,8 @@ export const MAX_RANGE = 500n
  * request and the logs from another, so behind a load balancer the node answering `getLogs` can be a few
  * blocks behind and answer up to its own head without an error; the next pass reads those blocks again and
  * writes what the short answer left out. 32 blocks is about 8 s on Arbitrum and a minute on Base. The window
- * shrinks with the range, to one block fewer than it, so a scan at 1 block reads that block alone and no scan
- * reads more than its range.
+ * shrinks with the range, to half of it (rounded down), so a scan at 1 block reads that block alone, at least
+ * half of every scan is new, and no scan reads more than its range.
  */
 export const REREAD_BLOCKS = 32n
 /** The most collections one scan asks for, and a cursor's chunk until a block it cannot read halves it. */
@@ -76,10 +76,11 @@ export function safeBlockOf(head: bigint, confirmations: number): bigint {
  * `scanned`) is planned in full, one scan per chunk of addresses (100, or the group's smallest chunk); the
  * groups behind it take at most 10 scans in all, the closest to the front first, so they reach it and merge.
  * The group's smallest range (at least 1 block, at most 500) bounds each of its scans, the blocks read again
- * included: a scan starts the window (32 blocks, or one fewer than the range when that is smaller) below
- * `scanned + 1`, never below the lowest deploy block of its cursors, so the blocks near the head are read by
- * at least two passes; and the group's scans end together, at the lower of the safe block and the range's last
- * block from the group's lowest start. At 500 blocks a backfill reads 468 new blocks a scan.
+ * included: a scan starts the window (32 blocks, or half the range when that is smaller) below `scanned + 1`,
+ * never below the lowest deploy block of its cursors, so the blocks near the head are read by at least two
+ * passes; and the group's scans end together, at the lower of the safe block and the range's last block from
+ * the group's lowest start. At least half of every scan is new: at 500 blocks a backfill reads 468 new blocks
+ * a scan.
  */
 export function scansOf(cursors: readonly Cursor[], safe: bigint): Scan[] {
   const groups = new Map<bigint, Cursor[]>()
@@ -101,7 +102,8 @@ export function scansOf(cursors: readonly Cursor[], safe: bigint): Scan[] {
       (least, cursor) => Math.max(1, Math.min(least, cursor.chunk)),
       ADDRESSES_PER_SCAN,
     )
-    const window = range - 1n < REREAD_BLOCKS ? range - 1n : REREAD_BLOCKS
+    const half = range / 2n
+    const window = half < REREAD_BLOCKS ? half : REREAD_BLOCKS
     const reread = scanned + 1n - window
     /** Where a scan of these cursors starts: the window, never below their lowest deploy block. */
     const startOf = (some: readonly Cursor[]) => {

@@ -792,17 +792,17 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
       'logs 1-1 x1',
       // From 45 s to 100 s, a minute after the last failure, the range stays 1: one block a second, read alone.
       ...Array.from({ length: 56 }, (_, index) => `logs ${index + 1}-${index + 1} x1`),
-      // Then each success doubles it, up to 500, the blocks read again within it: one new block a scan up to a
-      // range of 32, then 32, 96, 224 and 468.
+      // Then each success doubles it, up to 500, the blocks read again within it: half of each scan new up to a
+      // range of 64, then 96, 224 and 468.
       'logs 56-57 x1',
-      'logs 55-58 x1',
-      'logs 52-59 x1',
-      'logs 45-60 x1',
-      'logs 30-61 x1',
-      'logs 30-93 x1',
-      'logs 62-189 x1',
-      'logs 158-413 x1',
-      'logs 382-881 x1',
+      'logs 56-59 x1',
+      'logs 56-63 x1',
+      'logs 56-71 x1',
+      'logs 56-87 x1',
+      'logs 56-119 x1',
+      'logs 88-215 x1',
+      'logs 184-439 x1',
+      'logs 408-907 x1',
     ])
     expect(indexer.health()).toMatchObject({ failedPasses: 9, lastError: 'HttpRequestError' })
     expect(errorLines()).toEqual([
@@ -820,9 +820,9 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     chain.logsCap = 100n
     const indexer = indexerOn(client, port)
     await settle()
-    // 500, 250 and 125 fail 5 s apart; 62 succeeds from 15 s, the 32 blocks read again among them, and a
-    // minute after each failure one scan of 124 probes the cap, fails and halves the range again: at 71 s,
-    // 132 s and 193 s. No scan spans more than its range.
+    // 500, 250 and 125 fail 5 s apart; 62 succeeds from 15 s, the 31 blocks read again among them (half of
+    // 62), and a minute after each failure one scan of 124 probes the cap, fails and halves the range again: at
+    // 71 s, 132 s and 193 s. No scan spans more than its range.
     await vi.advanceTimersByTimeAsync(193_000)
     const minute = Array<number>(56).fill(62)
     expect(spansOf(chain.calls)).toEqual([500, 250, 125, ...minute, 124, ...minute, 124, ...minute, 124])
@@ -848,8 +848,8 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
       chain.scans.filter((scan) => scan.addresses.includes(contract.toLowerCase()))
     const stuckLine = `The block 105 of ${ID_X} on Anvil cannot be read; the collection waits there: HttpRequestError: HTTP request failed.`
     await settle()
-    // The four fail together while the range halves to 1 block, then two scans of two, then X alone at 54 s.
-    await vi.advanceTimersByTimeAsync(54_000)
+    // The four fail together while the range halves to 1 block, then two scans of two, then X alone at 51 s.
+    await vi.advanceTimersByTimeAsync(51_000)
     expect(errorLines()).toEqual([
       'The index scan of blocks 69 to 110 on Anvil failed, so its range halves: HttpRequestError: HTTP request failed.',
       stuckLine,

@@ -76,18 +76,22 @@ describe('scansOf', () => {
     expect(shape(scansOf([cursorAt(1, 999n, 1_000n)], 5_000n))).toEqual(['968-1467 x1'])
   })
 
-  it('reads again one block fewer than the range when the range is under 33 blocks, so a scan at 1 block reads that block alone (Critical 1)', () => {
+  it('reads again half the range when that is under 32 blocks, so a scan at 1 block reads that block alone and at least half of every scan is new (Critical 1)', () => {
     expect(shape(scansOf([cursorAt(1, 999n, 2n)], 5_000n))).toEqual(['999-1000 x1'])
-    expect(shape(scansOf([cursorAt(1, 999n, 16n)], 5_000n))).toEqual(['985-1000 x1'])
-    expect(shape(scansOf([cursorAt(1, 999n, 33n)], 5_000n))).toEqual(['968-1000 x1'])
-    expect(shape(scansOf([cursorAt(1, 999n, 34n)], 5_000n))).toEqual(['968-1001 x1'])
+    expect(shape(scansOf([cursorAt(1, 999n, 3n)], 5_000n))).toEqual(['999-1001 x1'])
+    expect(shape(scansOf([cursorAt(1, 999n, 16n)], 5_000n))).toEqual(['992-1007 x1'])
+    expect(shape(scansOf([cursorAt(1, 999n, 33n)], 5_000n))).toEqual(['984-1016 x1'])
+    expect(shape(scansOf([cursorAt(1, 999n, 34n)], 5_000n))).toEqual(['983-1016 x1'])
     expect(shape(scansOf([cursorAt(1, 999n, 64n)], 5_000n))).toEqual(['968-1031 x1'])
-    // Every range spans exactly its blocks: the window, at most 32 and at most the range less one, then the rest
-    // new.
-    for (const range of [1n, 2n, 3n, 16n, 31n, 32n, 33n, 34n, 62n, 125n, 250n, 500n]) {
+    expect(shape(scansOf([cursorAt(1, 999n, 65n)], 5_000n))).toEqual(['968-1032 x1'])
+    // Every range spans exactly its blocks: the window, at most 32 and at most half the range, then the rest
+    // new, at least half of it.
+    for (const range of [1n, 2n, 3n, 16n, 31n, 32n, 33n, 34n, 62n, 63n, 64n, 125n, 250n, 500n]) {
       const [scan] = scansOf([cursorAt(1, 999n, range)], 5_000n)
-      const window = range - 1n < REREAD_BLOCKS ? range - 1n : REREAD_BLOCKS
-      expect([scan!.toBlock - scan!.fromBlock + 1n, scan!.toBlock - 999n]).toEqual([range, range - window])
+      const window = range / 2n < REREAD_BLOCKS ? range / 2n : REREAD_BLOCKS
+      const fresh = scan!.toBlock - 999n
+      expect([scan!.toBlock - scan!.fromBlock + 1n, fresh]).toEqual([range, range - window])
+      expect(2n * fresh >= range).toBe(true)
     }
   })
 
