@@ -24,7 +24,7 @@ import {
   type AirdropView,
   type RecipientRow,
 } from '@/lib/manage/airdrop-types'
-import { airdropViewOf, BURN_ADDRESS, recipientSearchOf } from '@/lib/manage/airdrop-view'
+import { airdropViewOf, BURN_ADDRESS, recipientRowOf, recipientSearchOf } from '@/lib/manage/airdrop-view'
 import { airdropCalls, type ManageCall } from '@/lib/manage/phase-calls'
 import type { AirdropServer } from './airdrop-server'
 
@@ -115,17 +115,12 @@ export function sampleApplyAirdrop(call: ManageCall, view: AirdropView, hash: He
   return { ...view, history, totalMinted, left: Math.max(0, view.maxSupply - totalMinted) }
 }
 
-/** The sample's recipients as By recipient reads them: newest first, wallets checksummed, the dead address a burn. */
+/**
+ * The sample's recipients as By recipient reads them, built by the server's own row builder: newest first,
+ * wallets checksummed, the dead address a burn.
+ */
 export function sampleRecipients(): RecipientRow[] {
-  return DEMO_AIRDROP_RECIPIENTS.map((record) => ({
-    txHash: record.txHash,
-    wallet: getAddress(record.wallet),
-    tokens: record.tokens,
-    firstTokenId: record.firstTokenId,
-    lastTokenId: record.firstTokenId + record.tokens - 1,
-    at: record.at,
-    burn: record.wallet.toLowerCase() === BURN_ADDRESS.toLowerCase(),
-  }))
+  return DEMO_AIRDROP_RECIPIENTS.map((record) => recipientRowOf(record))
 }
 
 /**
@@ -137,18 +132,15 @@ export function sampleAirdropServer(
   current: () => AirdropView,
   sent: Map<Hex, ManageCall> = new Map(),
 ): AirdropServer {
-  const answer = async <T>(data: () => T): Promise<ActionResult<T>> => {
-    await wait(900)
-    return { ok: true, data: data() }
-  }
-  const recipientsAnswer = async <T>(data: () => T): Promise<ActionResult<T>> => {
-    await wait(300)
+  /** An answer after `ms`: 900 for a view, 300 for By recipient. */
+  const answer = async <T>(data: () => T, ms = 900): Promise<ActionResult<T>> => {
+    await wait(ms)
     return { ok: true, data: data() }
   }
   return {
     read: () => answer(current),
     recipients: ({ search, page }) =>
-      recipientsAnswer(() => {
+      answer(() => {
         const digits = recipientSearchOf(search)
         const rows =
           digits === null ? [] : sampleRecipients().filter((row) => row.wallet.toLowerCase().includes(digits))
@@ -157,8 +149,8 @@ export function sampleAirdropServer(
           total: rows.length,
           page,
         }
-      }),
-    exportRecipients: () => recipientsAnswer(sampleRecipients),
+      }, 300),
+    exportRecipients: () => answer(sampleRecipients, 300),
     confirm: (hash) =>
       answer(() => {
         const view = current()

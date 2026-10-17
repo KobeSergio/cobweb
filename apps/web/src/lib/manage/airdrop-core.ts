@@ -46,11 +46,14 @@ import { phaseBase, type PhasesContext } from './phases-core'
 
 /**
  * Airdrop on the server (docs/specs/2026-10-15-airdrop-settings.md, section 6.3): the read of the contract's
- * fee, supply and owner, the view with Cobweb's records, and the confirm of a batch from its receipt and calldata,
- * on a Supabase client acting as the signed-in creator. The actions (app/actions/airdrop.ts) call these after the
- * session and ownership check; verify:airdrop calls them with a signed-in script client. No `server-only` marker,
- * so the script can import it; the browser never does. Records are written only by `airdrop_record`, from what a
- * proven transaction carried, never from browser values.
+ * fee, supply and owner, the view with the collection's airdrops (Cobweb's and the indexer's), By
+ * recipient's pages and its export (docs/specs/2026-10-16-indexer-overview.md, section 7.3), and the confirm
+ * of a batch from its receipt and calldata, on a Supabase client acting as the signed-in creator. The
+ * actions (app/actions/airdrop.ts) call these after the session and ownership check; verify:airdrop and
+ * verify:indexer call them with a signed-in script client. No `server-only` marker, so the scripts can
+ * import it; the browser never does. Cobweb writes a record only through `airdrop_record`, from what a proven
+ * transaction carried, never from browser values; the indexer writes its own through `indexer_record`, from
+ * the logs.
  */
 export type AirdropContext = PhasesContext
 

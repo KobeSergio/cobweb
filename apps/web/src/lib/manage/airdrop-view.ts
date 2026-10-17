@@ -3,7 +3,8 @@ import type { AirdropRow, AirdropState, AirdropView, BatchEntry, RecipientRow } 
 
 /**
  * The Airdrop view, pure (docs/specs/2026-10-15-airdrop-settings.md, section 6.1), for the browser and the
- * server: the batches a list is sent in, History's rows, and the view from a read or from Cobweb's record alone.
+ * server: the batches a list is sent in, History's rows, the view from a read or from the records alone, and
+ * By recipient's search, rows and CSV rows (docs/specs/2026-10-16-indexer-overview.md, section 7.3).
  */
 
 /** Wallets in one `airdropNFTs` transaction (provisional until the gas measurement, section 12). */
@@ -89,9 +90,9 @@ export function airdropRowsOf(rows: AirdropDbRow[]): AirdropRow[] {
 
 /**
  * The view from a read: the fee, the owner, minted and left at the read's block, its time as `readAt`. Without
- * one (the chain did not answer), Cobweb's record alone: the history, the collection's supply and the copy's time.
- * `countedAt` is the indexer's last read to the chain's depth, null before it has read every block since the
- * deploy, and `counted` says it has.
+ * one (the chain did not answer), the records alone: the history, the collection's supply and the copy's
+ * time. `countedAt` is the indexer's last read to the chain's depth, null before it has read every block
+ * since the deploy, and `counted` says it has.
  */
 export function airdropViewOf(
   base: { chainId: number; contract: Address; maxSupply: number; readAt: number; countedAt: number | null },
@@ -147,17 +148,38 @@ export function recipientSearchOf(input: string): string | null {
   return /^[0-9a-f]*$/.test(digits) ? digits : null
 }
 
+/** One run of an airdrop to one wallet as read: the wallet in any case, its block's time in Unix seconds. */
+export type RecipientRun = Pick<RecipientRow, 'txHash' | 'tokens' | 'firstTokenId' | 'at'> & {
+  wallet: string
+}
+
+/**
+ * A run as By recipient shows it, the one row builder of the server's rows and the sample's: the wallet
+ * checksummed, the run's last id after its first, and the dead address a burn.
+ */
+export function recipientRowOf(run: RecipientRun): RecipientRow {
+  return {
+    txHash: run.txHash,
+    wallet: getAddress(run.wallet),
+    tokens: run.tokens,
+    firstTokenId: run.firstTokenId,
+    lastTokenId: run.firstTokenId + run.tokens - 1,
+    at: run.at,
+    burn: run.wallet.toLowerCase() === BURN_ADDRESS.toLowerCase(),
+  }
+}
+
 /** The rows as By recipient shows them, in the order read: wallets checksummed, the dead address a burn. */
 export function recipientRowsOf(rows: RecipientDbRow[]): RecipientRow[] {
-  return rows.map((row) => ({
-    txHash: row.tx_hash as Hex,
-    wallet: getAddress(row.recipient),
-    tokens: row.tokens,
-    firstTokenId: row.first_token_id,
-    lastTokenId: row.first_token_id + row.tokens - 1,
-    at: Math.floor(Date.parse(row.block_time) / 1000),
-    burn: row.recipient.toLowerCase() === BURN_ADDRESS.toLowerCase(),
-  }))
+  return rows.map((row) =>
+    recipientRowOf({
+      txHash: row.tx_hash as Hex,
+      wallet: row.recipient,
+      tokens: row.tokens,
+      firstTokenId: row.first_token_id,
+      at: Math.floor(Date.parse(row.block_time) / 1000),
+    }),
+  )
 }
 
 /** By recipient as CSV rows, the header first, then one row per run in the order given. */

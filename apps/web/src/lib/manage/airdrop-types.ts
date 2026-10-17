@@ -27,7 +27,10 @@ export type AirdropRow = {
   confirmedAt: number
 }
 
-/** What the Airdrop tab shows: the contract's fee, supply and owner from one read, and Cobweb's records. */
+/**
+ * What the Airdrop tab shows: the contract's fee, supply and owner from one read, and the collection's
+ * airdrops, Cobweb's and the indexer's.
+ */
 export type AirdropView = {
   chainId: number
   contract: Address
@@ -45,7 +48,10 @@ export type AirdropView = {
   /** The chain's time at the read, for relative labels only. */
   blockTimestamp: number
   readAt: number
-  /** False: the history is Cobweb's record, and the fee, minted and left are not read. */
+  /**
+   * False: the chain did not answer, so the history is the records alone, and the fee, minted and left are
+   * not read.
+   */
   chainReachable: boolean
   /**
    * The indexer has read every block since the deploy, so the history lists the airdrops sent from outside Cobweb

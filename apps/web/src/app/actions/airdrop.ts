@@ -16,16 +16,21 @@ import type { AirdropView, RecipientPage, RecipientRow } from '@/lib/manage/aird
 import { phasesWrite } from '@/lib/manage/phases-write'
 
 /**
- * Airdrop's server actions (docs/specs/2026-10-15-airdrop-settings.md, section 6.5). Each checks its input first,
- * then runs through `phasesWrite`, which checks the session and the ownership (CLAUDE.md rule 4), with the record
- * functions' sentences for a database refusal. The browser sends only a batch's hash: the server proves the batch
- * from its receipt and calldata and records what the chain says.
+ * Airdrop's server actions (docs/specs/2026-10-15-airdrop-settings.md, section 6.5;
+ * docs/specs/2026-10-16-indexer-overview.md, section 7.3). Each runs through `phasesWrite`, which checks
+ * the session and the ownership (CLAUDE.md rule 4), with the record functions' sentences for a database
+ * refusal. A confirm checks its hash first; By recipient's core reads its query and refuses one it cannot
+ * read. The browser sends only a batch's hash: the server proves the batch from its receipt and calldata
+ * and records what the chain says.
  */
 
 /** One chain read per request, however many times a page asks (React's cache). */
 const readOnce = cache(readAirdropState)
 
-/** The contract's fee, supply and owner, with Cobweb's records of the batches it confirmed. */
+/**
+ * The contract's fee, supply and owner, with the collection's airdrops, Cobweb's and the indexer's, and
+ * when the indexer last read the collection.
+ */
 export async function getAirdrop(collectionId: string): Promise<ActionResult<AirdropView>> {
   return phasesWrite(collectionId, (ctx) => airdropViewCore(ctx, readOnce), manageRecordError)
 }
