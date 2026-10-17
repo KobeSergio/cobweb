@@ -10,17 +10,12 @@ import { hasSampleCollection, samplePageStatic } from './sample-data'
 
 /*
  * A collection's public mint page, at /<slug> (docs/specs/2026-10-16-mint-page-live-data.md, section 6.4). Public:
- * no session is needed. The content is the published page's document, read on the server and cached under the
- * link's tag; the chain's state comes from the browser's polls of the freshness server, never from the HTML. A
- * link renders on its first visit and is cached for 60 s, and the Mint page tab's actions expire it. The route
- * reads no query, which would make it dynamic: sample mode's switches are read by the browser.
+ * no session is needed. The page renders per request, so its scripts carry the response's nonce
+ * (docs/specs/2026-10-17-production-hardening.md, decision 9); its content is the published page's document, read
+ * through `readMintPage`'s 60 s cache under the link's tag `mint-page:<slug>`, which the Mint page tab's actions
+ * expire, so the database still sees one read per link a minute. The chain's state comes from the browser's polls
+ * of the freshness server, never from the HTML. Sample mode's switches are read by the browser.
  */
-export const revalidate = 60
-
-/** No link is rendered at build time: each renders on its first visit. */
-export function generateStaticParams(): { slug: string }[] {
-  return []
-}
 
 /** The page's content at a link, or null: a reserved word, an unknown or unpublished page, a chain not listed. */
 async function pageAt(slug: string): Promise<MintPageStatic | null> {
