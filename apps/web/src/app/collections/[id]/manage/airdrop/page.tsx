@@ -25,9 +25,11 @@ const DESCRIPTION =
 
 /**
  * Manage drop, Airdrop (docs/specs/2026-10-15-airdrop-settings.md, section 7.3): the contract's fee, supply and
- * owner read on the server, with Cobweb's records of the batches it confirmed. Sample mode only
- * (`NEXT_PUBLIC_DEMO_DATA=1`): the sample on any collection, `?chain=unreachable` shows the record alone with its
- * alert, `?owner=other` the owner check, `?batch=pending` a batch waiting to be confirmed.
+ * owner read on the server, with the collection's airdrops, Cobweb's and those the indexer read
+ * (docs/specs/2026-10-16-indexer-overview.md, section 7.3). Sample mode only (`NEXT_PUBLIC_DEMO_DATA=1`): the sample
+ * on any collection, `?chain=unreachable` shows the record alone with its alert, `?owner=other` the owner check,
+ * `?batch=pending` a batch waiting to be confirmed, `?activity=counting` the history before the indexer has read
+ * the contract.
  */
 export default async function Page({
   params,
@@ -48,6 +50,7 @@ export default async function Page({
     view = sampleAirdropView(collection, wallet, {
       chainReachable: (await searchParam(searchParams, 'chain')) !== 'unreachable',
       owner: (await searchParam(searchParams, 'owner')) === 'other' ? getAddress(DEMO_MINTER) : undefined,
+      counted: (await searchParam(searchParams, 'activity')) !== 'counting',
     })
   } else {
     const result = await getAirdrop(collection.id)

@@ -15,13 +15,33 @@ import {
   type Hex,
   type PublicClient,
 } from 'viem'
+import { z } from 'zod'
 import { errorSummary } from '@/lib/art/lock-core'
 import { readAll } from '@/lib/art/read-all'
-import { AIRDROP_NOT_CONFIRMED, CHAIN_NOT_READY, NOT_DEPLOYED, PHASE_REVERTED } from '@/lib/art/result'
+import {
+  AIRDROP_NOT_CONFIRMED,
+  CHAIN_NOT_READY,
+  NOT_DEPLOYED,
+  PHASE_REVERTED,
+  RECIPIENTS_NOT_READ,
+} from '@/lib/art/result'
 import { proveAirdrop } from '@/lib/chain/airdrop-batch'
 import type { DeployOutcome } from '@/lib/deploy/deploy-core'
-import type { AirdropReader, AirdropView } from './airdrop-types'
-import { airdropRowsOf, airdropViewOf, type AirdropDbRow } from './airdrop-view'
+import {
+  RECIPIENTS_PAGE,
+  type AirdropReader,
+  type AirdropView,
+  type RecipientPage,
+  type RecipientRow,
+} from './airdrop-types'
+import {
+  airdropRowsOf,
+  airdropViewOf,
+  recipientRowsOf,
+  recipientSearchOf,
+  type AirdropDbRow,
+  type RecipientDbRow,
+} from './airdrop-view'
 import { phaseBase, type PhasesContext } from './phases-core'
 
 /**
@@ -36,7 +56,29 @@ export type AirdropContext = PhasesContext
 
 /** The `airdrops` columns the view reads, the fee as text. */
 const AIRDROP_COLUMNS =
-  'tx_hash, kind, recipients, tokens, fee_paid_wei::text, first_token_id, last_token_id, block, confirmed_at'
+  'tx_hash, kind, recipients, tokens, fee_paid_wei::text, first_token_id, last_token_id, block, confirmed_at, block_time'
+/** The `airdrop_recipients` columns By recipient reads. */
+const RECIPIENT_COLUMNS = 'tx_hash, recipient, tokens, first_token_id, block_time'
+
+/** By recipient's query: up to 42 characters of search (an address with its 0x) and a page from 0 to 4,000. */
+const recipientsQuery = z.object({
+  search: z.string().max(42),
+  page: z.number().int().min(0).max(4_000),
+})
+
+/**
+ * Whether the indexer has read every block since the deploy, so the history is complete: the collection's cursor
+ * has a synced time (docs/specs/2026-10-16-indexer-overview.md, decision 21).
+ */
+async function countedOf(ctx: AirdropContext): Promise<boolean> {
+  const { data, error } = await ctx.supabase
+    .from('indexer_cursors')
+    .select('synced_at')
+    .eq('collection_id', ctx.collection.id)
+    .maybeSingle()
+  if (error) throw new Error(`The indexer's cursor could not be read: ${error.message}`)
+  return data?.synced_at != null
+}
 
 /**
  * `collectionState()`, `fees()` and `owner()` at one block, the latest or `atLeast` when the node is behind it.
@@ -78,8 +120,9 @@ export const readAirdropState: AirdropReader = async (chainId, address, atLeast)
 }
 
 /**
- * What the Airdrop tab shows (section 6.3): Cobweb's records of the collection, newest block first, with the
- * contract's fee, supply and owner, or the records alone when the chain does not answer. It refreshes nothing.
+ * What the Airdrop tab shows (section 6.3): the collection's airdrops, Cobweb's and the indexer's, newest block
+ * first, with the contract's fee, supply and owner, or the records alone when the chain does not answer, and
+ * whether the indexer has counted the collection. It refreshes nothing.
  */
 export async function airdropViewCore(
   ctx: AirdropContext,
@@ -96,6 +139,7 @@ export async function airdropViewCore(
       .order('tx_hash')
       .range(from, to),
   )
+  const counted = await countedOf(ctx)
   const state = await read(base.chainId, base.contract)
   return {
     data: airdropViewOf(
@@ -104,11 +148,65 @@ export async function airdropViewCore(
         contract: base.contract,
         maxSupply: ctx.collection.max_supply ?? 0,
         readAt: base.readAt,
+        counted,
       },
       airdropRowsOf(rows),
       state,
     ),
   }
+}
+
+/** By recipient's order: newest block first, then each transaction's runs by their first token id. */
+const RECIPIENTS_ORDER = { block: { ascending: false }, first_token_id: { ascending: true } } as const
+
+/**
+ * One page of By recipient (docs/specs/2026-10-16-indexer-overview.md, section 7.3): 25 rows of
+ * `airdrop_recipients`, newest first, with an exact count, filtered to the addresses holding the search's hex
+ * digits. A query it cannot read is refused with RECIPIENTS_NOT_READ; a page past the last answers no row with
+ * the count.
+ */
+export async function airdropRecipientsCore(
+  ctx: AirdropContext,
+  query: { search: string; page: number },
+): Promise<DeployOutcome<RecipientPage>> {
+  const parsed = recipientsQuery.safeParse(query)
+  if (!parsed.success) return { refused: RECIPIENTS_NOT_READ }
+  const { page } = parsed.data
+  const search = recipientSearchOf(parsed.data.search)
+  const matching = (head: boolean) => {
+    const select = ctx.supabase
+      .from('airdrop_recipients')
+      .select(RECIPIENT_COLUMNS, { count: 'exact', head })
+      .eq('collection_id', ctx.collection.id)
+    return search ? select.like('recipient', `%${search}%`) : select
+  }
+  const from = page * RECIPIENTS_PAGE
+  const { data, error, count } = await matching(false)
+    .order('block', RECIPIENTS_ORDER.block)
+    .order('first_token_id', RECIPIENTS_ORDER.first_token_id)
+    .range(from, from + RECIPIENTS_PAGE - 1)
+  if (error?.code === 'PGRST103') {
+    // A page past the last: PostgREST refuses its range (416), so the page is empty and the count read alone.
+    const total = await matching(true)
+    if (total.error) throw new Error(`The recipients could not be counted: ${total.error.message}`)
+    return { data: { rows: [], total: total.count ?? 0, page } }
+  }
+  if (error) throw new Error(`The recipients could not be read: ${error.message}`)
+  return { data: { rows: recipientRowsOf(data), total: count ?? 0, page } }
+}
+
+/** Every row of By recipient, for its export: read 1,000 at a time, in the page's order. */
+export async function airdropRecipientsAllCore(ctx: AirdropContext): Promise<DeployOutcome<RecipientRow[]>> {
+  const rows = await readAll<RecipientDbRow>((from, to) =>
+    ctx.supabase
+      .from('airdrop_recipients')
+      .select(RECIPIENT_COLUMNS)
+      .eq('collection_id', ctx.collection.id)
+      .order('block', RECIPIENTS_ORDER.block)
+      .order('first_token_id', RECIPIENTS_ORDER.first_token_id)
+      .range(from, to),
+  )
+  return { data: recipientRowsOf(rows) }
 }
 
 /**

@@ -423,6 +423,15 @@ export type DropActivity = {
   }
 }
 
+/** One wallet's run of a past airdrop, as By recipient lists it. Replaced by: the indexer's `airdrop_recipients`. */
+export type AirdropRecipientRecord = {
+  txHash: Hex
+  wallet: Address
+  tokens: number
+  firstTokenId: number
+  at: number
+}
+
 /** A past airdrop. Replaced by: indexed `NFTsAirdropped` events. */
 export type AirdropRecord = {
   txHash: Hex

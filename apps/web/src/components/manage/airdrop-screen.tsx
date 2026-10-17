@@ -1,6 +1,6 @@
 'use client'
 
-import { DownloadIcon, FlameIcon, RefreshCwIcon, SendIcon, TriangleAlertIcon, UserXIcon } from 'lucide-react'
+import { FlameIcon, RefreshCwIcon, SendIcon, TriangleAlertIcon, UserXIcon } from 'lucide-react'
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { Address, Hex } from 'viem'
@@ -22,18 +22,12 @@ import { AIRDROP_MAX_PER_ADDRESS, batchesOf, BURN_ADDRESS, tokensOf } from '@/li
 import type { ManageCall } from '@/lib/manage/phase-calls'
 import { batchRequest, PendingBatchPanel, tokensLabel, walletsLabel } from './airdrop-dialogs'
 import { burnJob, frozenJob, unsentTokens, waitsOn, withConfirmed, withPending } from './airdrop-job'
-import {
-  AirdropHistory,
-  airdropHistoryCsv,
-  BurnDialog,
-  burnError,
-  BurnQuantity,
-  SupplyNote,
-} from './airdrop-parts'
+import { HistoryPanel } from './airdrop-history'
+import { BurnDialog, burnError, BurnQuantity, SupplyNote } from './airdrop-parts'
 import { airdropServer, type AirdropServer } from './airdrop-server'
 import { sampleAirdropJob, sampleAirdropServer } from './airdrop-sim'
 import { Row } from './bits'
-import { count, downloadText, relativeTo } from './format'
+import { count, relativeTo } from './format'
 import { realManageActions } from './manage-actions'
 import { ManageActionsProvider, type ManageTarget } from './manage-context'
 import { airdropJob, airdropKey, forgetAirdropJob, rememberAirdropJob } from './manage-machine'
@@ -85,10 +79,10 @@ async function settled<T>(call: Promise<ActionResult<T>>): Promise<ActionResult<
 /**
  * Manage drop, Airdrop (docs/specs/2026-10-15-airdrop-settings.md, section 7.3): send tokens to a list of wallets
  * for the contract's airdrop fee or, with "Burn instead of sending" on, burn a quantity by airdrop to the dead
- * address; and History, Cobweb's record of the batches it confirmed. The list freezes into batches of at most 500
- * wallets and 1,000 tokens at the first send, and the job is kept in this browser until every batch is confirmed.
- * Each batch runs the manage machine from the sign-in wallet and answers the fresh view. Sample mode runs the same
- * code on the sample actions and server.
+ * address; and History, by transaction or by recipient (airdrop-history.tsx). The list freezes into batches of
+ * at most 500 wallets and 1,000 tokens at the first send, and the job is kept in this browser until every batch
+ * is confirmed. Each batch runs the manage machine from the sign-in wallet and answers the fresh view. Sample
+ * mode runs the same code on the sample actions and server.
  */
 export function AirdropScreen({
   collection,
@@ -629,24 +623,7 @@ export function AirdropScreen({
           </aside>
         </div>
 
-        <Panel
-          title="History"
-          description="Batches Cobweb confirmed. Airdrops sent from outside Cobweb are not listed."
-          bodyClassName="p-0 pb-2"
-          action={
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={view.history.length === 0}
-              onClick={() => downloadText('airdrop-history.csv', airdropHistoryCsv(view.history, chain))}
-            >
-              <DownloadIcon aria-hidden="true" />
-              Export CSV
-            </Button>
-          }
-        >
-          <AirdropHistory airdrops={view.history} chain={chain} readAt={view.readAt} />
-        </Panel>
+        <HistoryPanel collectionId={collection.id} view={view} chain={chain} server={server} />
 
         {burnDialog && (
           <BurnDialog

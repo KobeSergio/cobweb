@@ -2,14 +2,14 @@ import type { Address, Hex } from 'viem'
 
 /**
  * The shapes Airdrop moves between the chain, the database, the server and the screen
- * (docs/specs/2026-10-15-airdrop-settings.md, section 6.1). Types only, so the browser imports them without the
- * server module (airdrop-core.ts).
+ * (docs/specs/2026-10-15-airdrop-settings.md, section 6.1; docs/specs/2026-10-16-indexer-overview.md, section 7.3).
+ * Types and By recipient's page size only, so the browser imports them without the server module (airdrop-core.ts).
  */
 
 /** Tokens sent to wallets, or a burn: tokens minted to the dead address. */
 export type AirdropKind = 'airdrop' | 'burn'
 
-/** One transaction Cobweb proved and recorded, as History shows it. */
+/** One airdropNFTs transaction, proven by Cobweb or read by the indexer, as History shows it. */
 export type AirdropRow = {
   txHash: Hex
   kind: AirdropKind
@@ -20,7 +20,10 @@ export type AirdropRow = {
   firstTokenId: number
   lastTokenId: number
   block: number
-  /** When Cobweb recorded it (Unix seconds): later than its block when "Check again" came late. */
+  /**
+   * When it happened (Unix seconds): its block's time once the indexer has read it, else the time Cobweb recorded
+   * it, which is later than its block when "Check again" came late.
+   */
   confirmedAt: number
 }
 
@@ -44,7 +47,32 @@ export type AirdropView = {
   readAt: number
   /** False: the history is Cobweb's record, and the fee, minted and left are not read. */
   chainReachable: boolean
+  /**
+   * The indexer has read every block since the deploy, so the history lists the airdrops sent from outside Cobweb
+   * too, and By recipient every wallet an airdrop reached.
+   */
+  counted: boolean
 }
+
+/** One run of an airdrop to one wallet, as By recipient shows it. */
+export type RecipientRow = {
+  txHash: Hex
+  /** Checksummed. */
+  wallet: Address
+  tokens: number
+  firstTokenId: number
+  lastTokenId: number
+  /** The block's time (Unix seconds). */
+  at: number
+  /** Minted to the dead address. */
+  burn: boolean
+}
+
+/** One page of By recipient: its rows, how many match in all, and which page it is (from 0). */
+export type RecipientPage = { rows: RecipientRow[]; total: number; page: number }
+
+/** The rows of one page of By recipient. */
+export const RECIPIENTS_PAGE = 25
 
 /** One recipient of a batch: a checksummed address and its tokens (1 to 1,000). */
 export type BatchEntry = { address: Address; amount: number }

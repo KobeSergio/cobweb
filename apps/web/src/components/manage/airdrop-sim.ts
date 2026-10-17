@@ -7,6 +7,7 @@
 import { getAddress, type Address, type Hex } from 'viem'
 import type { ActionResult } from '@/lib/art/result'
 import {
+  DEMO_AIRDROP_RECIPIENTS,
   DEMO_AIRDROPS,
   DEMO_COLLECTION,
   DEMO_DEPLOYMENT,
@@ -16,8 +17,14 @@ import {
   sampleTxHash,
   scaleSampleToSupply,
 } from '@/lib/demo'
-import type { AirdropJob, AirdropRow, AirdropView } from '@/lib/manage/airdrop-types'
-import { airdropViewOf, BURN_ADDRESS } from '@/lib/manage/airdrop-view'
+import {
+  RECIPIENTS_PAGE,
+  type AirdropJob,
+  type AirdropRow,
+  type AirdropView,
+  type RecipientRow,
+} from '@/lib/manage/airdrop-types'
+import { airdropViewOf, BURN_ADDRESS, recipientSearchOf } from '@/lib/manage/airdrop-view'
 import { airdropCalls, type ManageCall } from '@/lib/manage/phase-calls'
 import type { AirdropServer } from './airdrop-server'
 
@@ -48,12 +55,13 @@ function sampleHistory(): AirdropRow[] {
  * The Base sample: the contract's airdrop fee of 0.00005 ETH a token, the sample's supply and minted count scaled
  * to the collection's supply, the two sample records (10 tokens to 4 wallets, then a burn of 2), and the session
  * wallet as the owner unless `owner` names another (`?owner=other`). With `chainReachable` false, the record alone,
- * as the core builds it (`?chain=unreachable`).
+ * as the core builds it (`?chain=unreachable`). Counted by the indexer unless `counted` is false
+ * (`?activity=counting`, docs/specs/2026-10-16-indexer-overview.md, section 8).
  */
 export function sampleAirdropView(
   collection: { max_supply: number | null },
   wallet: Address,
-  options: { chainReachable?: boolean; owner?: Address } = {},
+  options: { chainReachable?: boolean; owner?: Address; counted?: boolean } = {},
 ): AirdropView {
   const maxSupply = sampleSupply(collection.max_supply, DEMO_COLLECTION.maxSupply)
   const base = {
@@ -61,6 +69,7 @@ export function sampleAirdropView(
     contract: DEMO_DEPLOYMENT.contractAddress,
     maxSupply,
     readAt: DEMO_NOW,
+    counted: options.counted ?? true,
   }
   if (options.chainReachable === false) return airdropViewOf(base, sampleHistory(), null)
   return airdropViewOf(base, sampleHistory(), {
@@ -105,9 +114,23 @@ export function sampleApplyAirdrop(call: ManageCall, view: AirdropView, hash: He
   return { ...view, history, totalMinted, left: Math.max(0, view.maxSupply - totalMinted) }
 }
 
+/** The sample's recipients as By recipient reads them: newest first, wallets checksummed, the dead address a burn. */
+export function sampleRecipients(): RecipientRow[] {
+  return DEMO_AIRDROP_RECIPIENTS.map((record) => ({
+    txHash: record.txHash,
+    wallet: getAddress(record.wallet),
+    tokens: record.tokens,
+    firstTokenId: record.firstTokenId,
+    lastTokenId: record.firstTokenId + record.tokens - 1,
+    at: record.at,
+    burn: record.wallet.toLowerCase() === BURN_ADDRESS.toLowerCase(),
+  }))
+}
+
 /**
- * The sample server: every answer takes 900 ms. A confirm applies the call the simulated wallet sent with that
- * hash, or, for a hash it never sent (`?batch=pending`), the first unsent batch of `sampleAirdropJob`.
+ * The sample server: every view answer takes 900 ms. A confirm applies the call the simulated wallet sent with
+ * that hash, or, for a hash it never sent (`?batch=pending`), the first unsent batch of `sampleAirdropJob`. By
+ * recipient's pages and its export answer from `sampleRecipients` after 300 ms.
  */
 export function sampleAirdropServer(
   current: () => AirdropView,
@@ -117,8 +140,23 @@ export function sampleAirdropServer(
     await wait(900)
     return { ok: true, data: data() }
   }
+  const recipientsAnswer = async <T>(data: () => T): Promise<ActionResult<T>> => {
+    await wait(300)
+    return { ok: true, data: data() }
+  }
   return {
     read: () => answer(current),
+    recipients: ({ search, page }) =>
+      recipientsAnswer(() => {
+        const digits = recipientSearchOf(search)
+        const rows = sampleRecipients().filter((row) => row.wallet.toLowerCase().includes(digits))
+        return {
+          rows: rows.slice(page * RECIPIENTS_PAGE, (page + 1) * RECIPIENTS_PAGE),
+          total: rows.length,
+          page,
+        }
+      }),
+    exportRecipients: () => recipientsAnswer(sampleRecipients),
     confirm: (hash) =>
       answer(() => {
         const view = current()

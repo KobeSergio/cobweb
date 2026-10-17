@@ -6,7 +6,13 @@ import type { AirdropView } from '@/lib/manage/airdrop-types'
 import { tokensOf } from '@/lib/manage/airdrop-view'
 import { airdropCalls, type ManageCall } from '@/lib/manage/phase-calls'
 import { airdropJob, rememberAirdropJob } from './manage-machine'
-import { sampleAirdropJob, sampleAirdropServer, sampleAirdropView, sampleApplyAirdrop } from './airdrop-sim'
+import {
+  sampleAirdropJob,
+  sampleAirdropServer,
+  sampleAirdropView,
+  sampleApplyAirdrop,
+  sampleRecipients,
+} from './airdrop-sim'
 
 const WALLET: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
 const A: Address = '0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65'
@@ -35,6 +41,11 @@ describe('sampleAirdropView', () => {
       [12, DEMO_AIRDROPS[1]!.at],
       [10, DEMO_AIRDROPS[0]!.at],
     ])
+  })
+
+  it('reads counted, and not counted for ?activity=counting (docs/specs/2026-10-16-indexer-overview.md, section 8)', () => {
+    expect(view.counted).toBe(true)
+    expect(sampleAirdropView({ max_supply: 100 }, WALLET, { counted: false }).counted).toBe(false)
   })
 
   it('names another owner for ?owner=other, and keeps the records alone for ?chain=unreachable', () => {
@@ -146,5 +157,30 @@ describe('sampleAirdropServer', () => {
       recipients: 2,
       tokens: 3,
     })
+  })
+
+  it('answers By recipient from the sample after 300 ms: newest first, searched by part of an address, and the export', async () => {
+    const server = sampleAirdropServer(() => view)
+    const after300 = async <T>(answer: Promise<T>) => {
+      await vi.advanceTimersByTimeAsync(300)
+      return answer
+    }
+    const all = sampleRecipients()
+    expect(all.map((row) => [row.tokens, row.firstTokenId, row.lastTokenId, row.burn])).toEqual([
+      [2, 11, 12, true],
+      [4, 1, 4, false],
+      [3, 5, 7, false],
+      [2, 8, 9, false],
+      [1, 10, 10, false],
+    ])
+    expect(all.reduce((sum, row) => sum + row.tokens, 0)).toBe(
+      DEMO_AIRDROPS.reduce((sum, airdrop) => sum + airdrop.tokens, 0),
+    )
+    const first = await after300(server.recipients({ search: '', page: 0 }))
+    expect(first).toEqual({ ok: true, data: { rows: all, total: 5, page: 0 } })
+    const part = all[2]!.wallet.slice(10, 16)
+    const found = await after300(server.recipients({ search: `0x${part.toUpperCase()}`, page: 0 }))
+    expect(found.ok && found.data.rows.map((row) => row.wallet)).toEqual([all[2]!.wallet])
+    expect(await after300(server.exportRecipients())).toEqual({ ok: true, data: all })
   })
 })

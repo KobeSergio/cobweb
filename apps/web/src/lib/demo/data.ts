@@ -27,6 +27,7 @@ import {
 import { mulWei, sampleAddress, sampleHex, sampleTxHash, sumWei, toWei } from './helpers'
 import type {
   Address,
+  AirdropRecipientRecord,
   AirdropRecord,
   DeployDraft,
   Deployment,
@@ -559,6 +560,27 @@ export const DEMO_AIRDROPS: AirdropRecord[] = [
     burn: true,
     firstTokenId: 11,
   },
+]
+
+/**
+ * The sample airdrops' recipients, newest first (docs/specs/2026-10-16-indexer-overview.md, section 8): the burn's 2
+ * tokens from #11 at the dead address, then the first airdrop's four wallets with 4, 3, 2 and 1 tokens from #1.
+ */
+export const DEMO_AIRDROP_RECIPIENTS: AirdropRecipientRecord[] = [
+  {
+    txHash: DEMO_AIRDROPS[1]!.txHash,
+    wallet: '0x000000000000000000000000000000000000dEaD',
+    tokens: 2,
+    firstTokenId: 11,
+    at: DEMO_AIRDROPS[1]!.at,
+  },
+  ...[4, 3, 2, 1].map((tokens, index) => ({
+    txHash: DEMO_AIRDROPS[0]!.txHash,
+    wallet: sampleAddress(600 + index),
+    tokens,
+    firstTokenId: [1, 5, 8, 10][index]!,
+    at: DEMO_AIRDROPS[0]!.at,
+  })),
 ]
 
 /** Hourly mints for the last 48 hours: the whitelist opened 30 hours ago with a rush, then settled. */

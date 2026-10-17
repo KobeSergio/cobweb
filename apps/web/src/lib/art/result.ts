@@ -139,10 +139,14 @@ export const AIRDROP_TIMED_OUT =
 export const SETTINGS_NOT_CONFIRMED = 'The setting has not been confirmed on chain yet.'
 export const SETTINGS_TIMED_OUT =
   'The setting is not confirmed yet. Read the contract again in a minute to see it.'
-// A withdrawal is counted in Withdrawn so far only once Cobweb confirms it, so its wait says so.
+// A withdrawal is counted in Withdrawn so far once Cobweb confirms it or the indexer reads it at the chain's depth
+// (docs/specs/2026-10-16-indexer-overview.md, section 7.4), so its wait says so.
 export const WITHDRAWAL_NOT_CONFIRMED = 'The withdrawal has not been confirmed on chain yet.'
 export const WITHDRAWAL_TIMED_OUT =
-  'The withdrawal is not confirmed yet, and it may have landed. Check again in a minute: Withdrawn so far counts only the withdrawals Cobweb confirmed.'
+  'The withdrawal is not confirmed yet, and it may have landed. Check again in a minute: Withdrawn so far counts it once the chain has confirmed it.'
+// Airdrop's By recipient (docs/specs/2026-10-16-indexer-overview.md, section 7.3): said by the screen, and by the
+// server for a query it cannot read.
+export const RECIPIENTS_NOT_READ = 'The recipients could not be read. Try again in a moment.'
 export const NOT_OWNER = (owner: string) =>
   `This wallet is not the contract's owner. Changes on chain need ${owner}.`
 export const IPFS_LINK_INVALID = 'Enter a full ipfs:// link with its CID.'

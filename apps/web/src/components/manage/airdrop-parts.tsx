@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import type { ActionResult } from '@/lib/art/result'
 import { formatNative, mulWei, shortAddress, type SupportedChain } from '@/lib/demo'
 import type { AirdropRow, AirdropView } from '@/lib/manage/airdrop-types'
-import { AIRDROP_MAX_TOKENS, BURN_ADDRESS } from '@/lib/manage/airdrop-view'
+import { AIRDROP_MAX_TOKENS, BURN_ADDRESS, tokenIdsText } from '@/lib/manage/airdrop-view'
 import { burnRequest, tokensLabel } from './airdrop-dialogs'
 import { Row, TxLink } from './bits'
 import { count, relativeTo, shortUtc } from './format'
@@ -19,9 +19,7 @@ import { TransactionDialog } from './transaction-dialog'
 
 /** Token ids a recorded airdrop minted: `#41 to #50`, or `#41` for one. */
 export function tokenRange(airdrop: AirdropRow): string {
-  return airdrop.firstTokenId === airdrop.lastTokenId
-    ? `#${airdrop.firstTokenId}`
-    : `#${airdrop.firstTokenId} to #${airdrop.lastTokenId}`
+  return tokenIdsText(airdrop.firstTokenId, airdrop.lastTokenId)
 }
 
 /** History as CSV, one row per transaction in History's order (newest first), as legacy's "Export CSV". */
@@ -48,7 +46,10 @@ export function airdropHistoryCsv(airdrops: AirdropRow[], chain: SupportedChain)
   ])
 }
 
-/** The batches and burns Cobweb confirmed, newest first. When is when Cobweb recorded each. */
+/**
+ * The airdrops and burns, newest first: Cobweb's and, once the indexer has read the contract, those sent from
+ * outside Cobweb. When is the block's time once the indexer has read each, else when Cobweb recorded it.
+ */
 export function AirdropHistory({
   airdrops,
   chain,
