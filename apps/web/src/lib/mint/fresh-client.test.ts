@@ -437,13 +437,40 @@ describe("the state body's activity (docs/specs/2026-10-16-indexer-overview.md, 
     })
   })
 
+  it('reads every mint the server sends, past the 10 the page shows (decision 12)', async () => {
+    const eleven: StateActivity = {
+      holders: 9,
+      recentMints: Array.from({ length: 11 }, (_, index) => ({
+        // A hash in capitals is a hash too.
+        txHash: index === 0 ? `0x${'AB'.repeat(32)}` : `0x${(11 - index).toString(16).padStart(64, '0')}`,
+        recipient: index % 2 === 0 ? WALLET : OTHER,
+        groupId: 0,
+        amount: 1,
+        firstTokenId: 11 - index,
+        blockTimestamp: 1_791_039_590 - index * 12,
+      })),
+    }
+    const poll = await read({ ...body, activity: eleven })
+    expect(poll).toEqual<StatePoll>({ kind: 'body', body: { ...body, activity: eleven }, ageSeconds: 0 })
+    expect(poll.kind === 'body' && poll.body.activity?.recentMints.map((mint) => mint.firstTokenId)).toEqual([
+      11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1,
+    ])
+  })
+
   it('reads a body without activity, with null or with a malformed one as null, and keeps the body', async () => {
     const without = Object.fromEntries(Object.entries(body).filter(([key]) => key !== 'activity'))
+    const withHash = (txHash: string) => ({
+      ...body,
+      activity: { ...activity, recentMints: [{ ...activity.recentMints[0], txHash }] },
+    })
     for (const value of [
       without,
       { ...body, activity: null },
       { ...body, activity: { holders: -1, recentMints: [] } },
-      { ...body, activity: { ...activity, recentMints: [{ ...activity.recentMints[0], txHash: '0x12' }] } },
+      withHash('0x12'),
+      withHash(`0x${'a'.repeat(63)}`),
+      withHash(`0x${'a'.repeat(65)}`),
+      withHash(`0x${'g'.repeat(64)}`),
     ])
       expect(await read(value)).toEqual<StatePoll>({
         kind: 'body',

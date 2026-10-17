@@ -1,5 +1,5 @@
 import { statePath, walletPath, type StateActivity, type StateBody, type WalletBody } from '@cobweb/shared'
-import { isAddress, type Address, type Hex } from 'viem'
+import { isAddress, isHash, type Address, type Hex } from 'viem'
 import { z } from 'zod'
 import type { Phase } from '@/components/mint/model'
 
@@ -48,7 +48,8 @@ const count = z.number().int().min(0)
  */
 const start = z.number().min(0)
 const wei = z.string().regex(/^[0-9]+$/)
-const txHash = z.custom<Hex>((value) => typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value))
+/** A transaction hash: 0x and 64 hex digits in any case (viem's `isHash`). */
+const txHash = z.custom<Hex>((value) => typeof value === 'string' && isHash(value))
 
 /** The indexer's holders and latest mints (docs/specs/2026-10-16-indexer-overview.md, section 7.5). */
 const activitySchema: z.ZodType<StateActivity> = z.object({
