@@ -7425,7 +7425,7 @@ type IndexRecords = {
 }
 
 const recordWrite = (
-  collections: string[],
+  collections: (string | null)[],
   from: number,
   to: number,
   records: IndexRecords,
@@ -7710,7 +7710,7 @@ async function artIndexer(A: Creator, B: Creator): Promise<void> {
   )
 
   await check(
-    'indexer_record: the same write again changes no row and answers the same; a range that would skip blocks, a collection of another chain and a record naming a collection outside the write are refused',
+    'indexer_record: the same write again changes no recorded value and answers the same; a range that would skip blocks, a null among the collections, a collection of another chain, a record naming a collection outside the write and a record naming none are refused',
     async () => {
       const before = await indexedRows(first)
       const again = await indexer(admin, 'indexer_record', firstWrite)
@@ -7731,6 +7731,19 @@ async function artIndexer(A: Creator, B: Creator): Promise<void> {
           GAP_SENTENCE,
         ],
         [
+          // count(distinct) skips a null and = any never matches one, so only its own test refuses it.
+          'a null among the collections',
+          (
+            await indexer(
+              admin,
+              'indexer_record',
+              recordWrite([first, null], 121, 122, { mints: [mintRecord(second, 5, 121)] }),
+            )
+          ).error,
+          CHECK,
+          CHAIN_SENTENCE,
+        ],
+        [
           'a collection of another chain',
           (await indexer(admin, 'indexer_record', recordWrite([onBase], 101, 102, {}))).error,
           CHECK,
@@ -7748,6 +7761,18 @@ async function artIndexer(A: Creator, B: Creator): Promise<void> {
           CHECK,
           OUTSIDE_SENTENCE,
         ],
+        [
+          'a record naming no collection',
+          (
+            await indexer(
+              admin,
+              'indexer_record',
+              recordWrite([first], 121, 122, { mints: [mintRecord(first, 5, 121, { collectionId: null })] }),
+            )
+          ).error,
+          CHECK,
+          OUTSIDE_SENTENCE,
+        ],
       ])
       if (refused) return refused
       return (await indexedRows(first)) === before ? null : 'a refused write changed a row'
@@ -7755,7 +7780,7 @@ async function artIndexer(A: Creator, B: Creator): Promise<void> {
   )
 
   await check(
-    'token_owners: an older transfer of a token is ignored and a newer one wins; holders count distinct owners without the dead address',
+    'token_owners: an older transfer of a token is ignored and a newer one wins, within one block the later log index; holders count distinct owners without the dead address',
     async () => {
       const written = await indexer(
         admin,
@@ -7765,6 +7790,10 @@ async function artIndexer(A: Creator, B: Creator): Promise<void> {
             ownerRecord(first, 1, HOLDER(5), 125),
             ownerRecord(first, 2, HOLDER(6), 105),
             ownerRecord(first, 7, DEAD_ADDRESS, 126),
+            // Token 11 moved twice in block 128 (Decision 6): the later log index wins whatever the order of the
+            // records, and one write holding both does not touch the row twice.
+            ownerRecord(first, 11, HOLDER(5), 128, 1),
+            ownerRecord(first, 11, HOLDER(9), 128, 0),
           ],
         }),
       )
@@ -7776,9 +7805,12 @@ async function artIndexer(A: Creator, B: Creator): Promise<void> {
         .order('token_id')
       if (error) return describe(error as DbError)
       const owners = data.map((row) => `${row.token_id}:${row.owner}`).join(' ')
-      const want = [HOLDER(5), HOLDER(1), HOLDER(2), HOLDER(3), HOLDER(3), HOLDER(4), DEAD_ADDRESS]
-        .map((owner, index) => `${index + 1}:${owner}`)
-        .join(' ')
+      const want = [
+        ...[HOLDER(5), HOLDER(1), HOLDER(2), HOLDER(3), HOLDER(3), HOLDER(4), DEAD_ADDRESS].map(
+          (owner, index) => `${index + 1}:${owner}`,
+        ),
+        `11:${HOLDER(5)}`,
+      ].join(' ')
       if (owners !== want) return `owners ${owners}`
       const row = await cursorRow(first)
       // Five holders: the dead address is not one, and a write without a synced time keeps the last.
@@ -8008,6 +8040,57 @@ async function artIndexer(A: Creator, B: Creator): Promise<void> {
         JSON.stringify(two.recentMints.map((mint) => mint.tx)) === JSON.stringify(newest)
         ? null
         : `second ${JSON.stringify(two)}`
+    },
+  )
+
+  await check(
+    'withdrawals: a transaction that withdraws from two collections keeps a row for each, whether withdrawal_record or indexer_record lands first, and neither records a collection twice',
+    async () => {
+      // A Safe's MultiSend of two withdrawMintFunds calls: one transaction, a MintFundsWithdrawn log on each
+      // collection. Cobweb proves the first collection's, then one scan of both reads the two logs.
+      const tx = INDEX_TX(8)
+      const amounts: Record<string, string> = { [first]: '3000000000000000', [second]: '4000000000000000' }
+      const proven = await callArt(
+        admin,
+        'withdrawal_record',
+        withdrawArgs(A.userId, first, tx, payer, { p_amount_wei: amounts[first], p_block: 147 }),
+      )
+      if (proven.error || proven.data !== true)
+        return `withdrawal_record: ${proven.error ? describe(proven.error) : JSON.stringify(proven.data)}`
+      const withdrawal = (cid: string) => ({
+        collectionId: cid,
+        tx,
+        block: 147,
+        payoutAddress: payer,
+        amountWei: amounts[cid],
+      })
+      const written = await indexer(
+        admin,
+        'indexer_record',
+        recordWrite([first, second], 113, 150, { withdrawals: [withdrawal(first), withdrawal(second)] }),
+      )
+      if (written.error) return `indexer_record: ${describe(written.error)}`
+      const again = await callArt(
+        admin,
+        'withdrawal_record',
+        withdrawArgs(A.userId, second, tx, payer, { p_amount_wei: '5', p_block: 147 }),
+      )
+      if (again.error || again.data !== false)
+        return `withdrawal_record again: ${again.error ? describe(again.error) : JSON.stringify(again.data)}`
+      const { data, error } = await admin
+        .from('withdrawals')
+        .select('collection_id, amount_wei::text')
+        .eq('tx_hash', tx)
+      if (error) return describe(error as DbError)
+      const rows = data
+        .map((row) => `${row.collection_id}:${row.amount_wei}`)
+        .sort()
+        .join(' ')
+      const want = [first, second]
+        .map((cid) => `${cid}:${amounts[cid]}`)
+        .sort()
+        .join(' ')
+      return rows === want ? null : `rows ${rows}`
     },
   )
 }

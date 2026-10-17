@@ -1,7 +1,8 @@
 -- The indexer and the Overview (docs/specs/2026-10-16-indexer-overview.md, section 4): indexer_cursors, one row per
 -- deployed collection the freshness server's indexer reads, with how far every log is recorded and the holders;
 -- mints, token_owners and airdrop_recipients, what the indexer read from each collection's logs; airdrops and
--- withdrawals take the indexer's rows beside the ones Cobweb proves (airdrops.sent_by nullable, a new block_time);
+-- withdrawals take the indexer's rows beside the ones Cobweb proves (airdrops.sent_by nullable, a new block_time;
+-- withdrawals keyed by the transaction and the collection, with withdrawal_record's conflict target to match);
 -- and the four service-role functions indexer_targets, indexer_start, indexer_record and indexer_summaries, which
 -- answer jsonb since PostgREST caps a set of rows at max_rows. The owner reads indexer_cursors, mints and
 -- airdrop_recipients; token_owners is read by no client; no client writes any of them.
@@ -106,8 +107,52 @@ alter table public.airdrops add column block_time timestamptz;
 
 comment on table public.airdrops is
   'One row per airdropNFTs transaction: proven by Cobweb from its receipt and calldata (airdrop_record) or read from its logs by the indexer (indexer_record), whichever lands first. kind is burn when the only recipient is the dead address. sent_by is null for a row the indexer wrote, since logs do not name the sender; block_time is the block''s time, set by the indexer.';
+
+-- withdrawals: one row per transaction and collection, so a transaction that withdraws from two collections (a
+-- Safe's MultiSend of two withdrawMintFunds calls) keeps a row for each. The policy, the grants and the index on
+-- collection_id stay as they are.
+alter table public.withdrawals drop constraint withdrawals_pkey;
+alter table public.withdrawals add primary key (tx_hash, collection_id);
+
 comment on table public.withdrawals is
-  'One row per withdrawMintFunds transaction, with the amount and payout address of its MintFundsWithdrawn log: proven by Cobweb from its receipt (withdrawal_record) or read from the log by the indexer (indexer_record), whichever lands first.';
+  'One row per withdrawMintFunds transaction and collection, with the amount and payout address of its MintFundsWithdrawn log: proven by Cobweb from its receipt (withdrawal_record) or read from the log by the indexer (indexer_record), whichever lands first.';
+
+-- withdrawal_record as 20261016000000_airdrop_settings.sql wrote it, its conflict target now the new key; create
+-- or replace keeps its grants, which are stated again below.
+create or replace function public.withdrawal_record(
+  p_collection_id uuid,
+  p_owner uuid,
+  p_tx text,
+  p_amount_wei numeric,
+  p_payout_address text,
+  p_block bigint
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_collection public.collections;
+begin
+  v_collection := private.lock_owned_collection(p_collection_id, p_owner);
+  if not exists (select 1 from public.deployments d where d.collection_id = v_collection.id) then
+    raise exception 'The contract is not deployed yet.' using errcode = '23514';
+  end if;
+  if p_tx is null or p_tx !~ '^0x[0-9a-f]{64}$'
+    or p_payout_address is null or p_payout_address !~ '^0x[0-9a-f]{40}$' then
+    raise exception 'The transaction did not make this change.' using errcode = '23514';
+  end if;
+  insert into public.withdrawals (tx_hash, collection_id, amount_wei, payout_address, block)
+  values (p_tx, v_collection.id, p_amount_wei, p_payout_address, p_block)
+  on conflict (tx_hash, collection_id) do nothing;
+  return found;
+end;
+$$;
+
+revoke all on function public.withdrawal_record(uuid, uuid, text, numeric, text, bigint)
+  from public, anon, authenticated;
+grant execute on function public.withdrawal_record(uuid, uuid, text, numeric, text, bigint) to service_role;
 
 -- ---------------------------------------------------------------------------------------------
 -- What the functions answer, built once: a target and a summary
@@ -233,12 +278,14 @@ grant execute on function public.indexer_start(uuid, bigint) to service_role;
 -- ---------------------------------------------------------------------------------------------
 -- Service role only. p_records is { mints, owners, airdrops, withdrawals } (docs/specs/2026-10-16-indexer-overview.md,
 -- section 4.3), addresses lowercase, times in Unix seconds. The cursors are locked in id order, so two writers never
--- deadlock; a write that would leave a gap below p_from_block, or names a collection outside p_collections, is
--- refused. Every row is keyed so that a log read twice, a range read again and two writers at once leave one row
--- each: a mint by its transaction and log index, an airdrop and a withdrawal by their transaction (the first row
--- wins, Cobweb's or the indexer's; a transaction's first airdrop when it holds two), a recipient row by its
--- transaction and first token id, and a token's owner changes only for a later block and log index. Answers
--- { "<collection id>": <summary> } for each collection a record names.
+-- deadlock; a write that names a null collection or one not indexed on the chain, would leave a gap below
+-- p_from_block, or holds a record naming a collection outside p_collections, is refused. A range may start at or
+-- below a cursor's indexed_block: the indexer reads the blocks near the head again, and its records there land
+-- under their keys. Every row is keyed so that a log read twice, a range read again and two writers at once leave
+-- one row each: a mint by its transaction and log index, an airdrop by its transaction and a withdrawal by its
+-- transaction and collection (the first row wins, Cobweb's or the indexer's; a transaction's first airdrop when it
+-- holds two), a recipient row by its transaction and first token id, and a token's owner changes only for a later
+-- block and log index. Answers { "<collection id>": <summary> } for each collection a record names.
 create function public.indexer_record(
   p_chain_id integer,
   p_from_block bigint,
@@ -266,7 +313,9 @@ begin
   select count(*) into v_found
   from public.indexer_cursors k
   where k.collection_id = any(p_collections) and k.chain_id = p_chain_id;
-  if p_collections is null or v_found <> v_wanted then
+  -- A null element would pass both counts (count(distinct) skips it and = any never matches it), so it is
+  -- refused by name.
+  if p_collections is null or array_position(p_collections, null) is not null or v_found <> v_wanted then
     raise exception 'A collection is not indexed on this chain.' using errcode = '23514';
   end if;
   if p_from_block is null or p_to_block is null or p_to_block < p_from_block or exists (
@@ -275,9 +324,10 @@ begin
   ) then
     raise exception 'The indexer would skip blocks.' using errcode = '23514';
   end if;
+  -- A record's collection must be one of the write's: a null id, or a comparison that answers null, is outside.
   if exists (
     select 1 from jsonb_path_query(v_records, '$.*[*].collectionId') as r(id)
-    where (r.id #>> '{}')::uuid <> all(p_collections)
+    where not coalesce((r.id #>> '{}')::uuid = any(p_collections), false)
   ) then
     raise exception 'A record names a collection outside this write.' using errcode = '23514';
   end if;
@@ -333,7 +383,7 @@ begin
   from jsonb_to_recordset(coalesce(v_records->'withdrawals', '[]'::jsonb)) as w(
     tx text, "collectionId" uuid, block bigint, "payoutAddress" text, "amountWei" numeric
   )
-  on conflict do nothing;
+  on conflict (tx_hash, collection_id) do nothing;
 
   update public.indexer_cursors k
   set holders = (
