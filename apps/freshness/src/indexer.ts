@@ -9,6 +9,7 @@ import {
   MAX_RANGE,
   PASS_MS,
   passDelayMs,
+  RANGE_GROW_AFTER_MS,
   safeBlockOf,
   scansOf,
   segmentsOf,
@@ -80,16 +81,23 @@ export function chainIndexer(
     idByContract.set(cursor.contract.toLowerCase(), cursor.collectionId)
   }
 
-  /** A cursor at the database's block, as a new one or after a gap refusal; a known one keeps its range. */
-  const cursorOf = (target: Target, indexed: bigint, now: number): Cursor => ({
-    collectionId: target.collectionId,
-    contract: target.contract,
-    scanned: indexed,
-    written: indexed,
-    range: cursors.get(target.collectionId)?.range ?? MAX_RANGE,
-    syncedAt: target.syncedAt,
-    writtenAt: now,
-  })
+  /**
+   * A cursor at the database's block, as a new one or after a gap refusal; a known one keeps its range and
+   * when its last scan failed.
+   */
+  const cursorOf = (target: Target, indexed: bigint, now: number): Cursor => {
+    const known = cursors.get(target.collectionId)
+    return {
+      collectionId: target.collectionId,
+      contract: target.contract,
+      scanned: indexed,
+      written: indexed,
+      range: known?.range ?? MAX_RANGE,
+      syncedAt: target.syncedAt,
+      writtenAt: now,
+      failedAt: known?.failedAt,
+    }
+  }
 
   /** A target without a cursor: its deploy transaction's block, then its cursor there. */
   async function startTarget(target: Target, now: number): Promise<void> {
@@ -171,17 +179,25 @@ export function chainIndexer(
         strict: true,
       })) as unknown as IndexLog[]
     } catch (error) {
-      for (const cursor of scan.cursors) cursor.range = cursor.range > 1n ? cursor.range / 2n : 1n
+      const failedAt = Date.now()
+      for (const cursor of scan.cursors) {
+        cursor.range = cursor.range > 1n ? cursor.range / 2n : 1n
+        cursor.failedAt = failedAt
+      }
       failed(
         `The index scan of blocks ${scan.fromBlock} to ${scan.toBlock} on ${chain.name} failed, so its range halves`,
         error,
       )
       return { failed: true, recorded: false }
     }
-    // A success doubles the range, up to 500, rather than restoring 500 at once: on a provider whose getLogs
-    // cap is below 500 blocks, at most one scan then fails between successes, not one per halving.
-    for (const cursor of scan.cursors)
-      cursor.range = cursor.range * 2n > MAX_RANGE ? MAX_RANGE : cursor.range * 2n
+    // A success doubles the range, up to 500, once a minute has passed since the cursor's last failed scan
+    // (or when none has failed): a provider that caps a scan below 500 blocks keeps the range one halving
+    // under its cap, and while the cursor is behind it is probed once a minute rather than every other scan.
+    const scannedAt = Date.now()
+    for (const cursor of scan.cursors) {
+      const mayGrow = cursor.failedAt === undefined || scannedAt - cursor.failedAt >= RANGE_GROW_AFTER_MS
+      if (mayGrow) cursor.range = cursor.range * 2n > MAX_RANGE ? MAX_RANGE : cursor.range * 2n
+    }
     const collections = new Map(
       scan.cursors.map((cursor) => [cursor.contract.toLowerCase(), cursor.collectionId]),
     )

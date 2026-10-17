@@ -20,12 +20,17 @@ export const PASS_MS = { behind: 1_000, fast: 5_000, idle: 20_000 } as const
 export const TARGETS_EVERY_MS = 60_000
 /** How often a cursor with nothing to record is written anyway. */
 export const CURSOR_WRITE_EVERY_MS = 60_000
+/**
+ * How long after a cursor's last failed scan its range may double again: a provider that caps a scan below
+ * 500 blocks keeps the range one halving under its cap and is probed once a minute.
+ */
+export const RANGE_GROW_AFTER_MS = 60_000
 
 /**
  * A collection as a pass reads it. `scanned` is how far this process has read and `written` how far the
  * database's cursor has moved, both blocks; `range` is the blocks its next scan may read; `syncedAt` the
  * chain's time when a pass last read it to the safe block (Unix seconds); `writtenAt` when its cursor was
- * last written.
+ * last written; `failedAt` when its last scan failed, undefined until one does.
  */
 export type Cursor = {
   collectionId: string
@@ -35,6 +40,7 @@ export type Cursor = {
   range: bigint
   syncedAt: number | null
   writtenAt: number
+  failedAt?: number
 }
 
 /** One `getLogs` call: the cursors whose contracts it asks for, and its blocks, both ends included. */

@@ -61,6 +61,8 @@ function fakeChain() {
     calls: [] as string[],
     /** The next getLogs calls fail while this is above 0. */
     logsFailures: 0,
+    /** When set, a getLogs call over more blocks than this fails, as a provider's cap refuses it. */
+    logsCap: null as bigint | null,
     /** When set, every head read waits for it. */
     gate: null as Promise<void> | null,
   }
@@ -84,8 +86,9 @@ function fakeChain() {
       toBlock: bigint
     }) {
       chain.calls.push(`logs ${fromBlock}-${toBlock} x${address.length}`)
-      if (chain.logsFailures > 0) {
-        chain.logsFailures--
+      const overCap = chain.logsCap !== null && toBlock - fromBlock + 1n > chain.logsCap
+      if (overCap || chain.logsFailures > 0) {
+        if (!overCap) chain.logsFailures--
         // A provider refusing the range; viem's message carries the URL, with the provider's key.
         throw new HttpRequestError({ url: 'https://rpc.example/v2/secret-key', status: 413 })
       }
@@ -203,6 +206,12 @@ const settle = () => vi.advanceTimersByTimeAsync(0)
 const indexerOn = (client: PublicClient, port: IndexerDb, tier: Tier | null = 'idle') =>
   chainIndexer(ANVIL, client, port, { tier: () => tier })
 const logCalls = (calls: string[]) => calls.filter((call) => call.startsWith('logs'))
+/** The blocks each getLogs call spanned, in order. */
+const spansOf = (calls: string[]) =>
+  logCalls(calls).map((call) => {
+    const [from, to] = call.split(' ')[1]!.split('-').map(Number)
+    return to! - from! + 1
+  })
 
 describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)', () => {
   beforeEach(() => {
@@ -433,7 +442,7 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     await indexer.stop()
   })
 
-  it('keeps a halved range when a gap refusal takes the cursor again from the database (Decision 10)', async () => {
+  it('keeps a halved range and its last failure when a gap refusal takes the cursor again from the database (Decision 10)', async () => {
     const { chain, client } = fakeChain()
     const { db, port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 0n, false)])
     chain.head = 2_000n
@@ -442,33 +451,35 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     db.recordFailures = [new IndexerWriteError('indexer_record', '23514', true)]
     const indexer = indexerOn(client, port)
     await settle()
-    // Two failures halve the range to 125; the scan of 1 to 125 doubles it to 250 and its write is refused.
+    // Two failures halve the range to 125, which the scan of 1 to 125 keeps; its write is refused as a gap.
     await vi.advanceTimersByTimeAsync(10_000)
     expect(logCalls(chain.calls)).toEqual(['logs 1-500 x1', 'logs 1-250 x1', 'logs 1-125 x1'])
     expect(db.calls).toEqual(['summaries', 'targets', 'record 1-125'])
     // Another indexer recorded the blocks meanwhile.
     db.targets[0]!.indexedBlock = 125n
-    await vi.advanceTimersByTimeAsync(5_000)
+    await vi.advanceTimersByTimeAsync(6_000)
     expect(db.calls).toEqual(['summaries', 'targets', 'record 1-125', 'targets'])
-    // From the database's block, 250 blocks rather than 500.
+    // From the database's block, 125 blocks rather than 500, and still 125 after a success within the minute
+    // of the last failure, which the cursor taken again remembers.
     expect(logCalls(chain.calls)).toEqual([
       'logs 1-500 x1',
       'logs 1-250 x1',
       'logs 1-125 x1',
-      'logs 126-375 x1',
+      'logs 126-250 x1',
+      'logs 251-375 x1',
     ])
     await indexer.stop()
   })
 
-  it('halves a failed scan range down to 1 and never below, then doubles it back to 500 with no block skipped', async () => {
+  it('halves a failed scan range down to 1 and never below, keeps it for a minute after the last failure, then doubles it back to 500 with no block skipped', async () => {
     const { chain, client } = fakeChain()
     const { port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 0n, false)])
     chain.head = 2_000n
     chain.logsFailures = 9
     const indexer = indexerOn(client, port)
     await settle()
-    // Nine failures 5 s apart, then a scan each second while the cursor is behind.
-    await vi.advanceTimersByTimeAsync(9 * 5_000 + 9 * 1_000)
+    // Nine failures 5 s apart, the last at 40 s, then a scan each second while the cursor is behind.
+    await vi.advanceTimersByTimeAsync(9 * 5_000 + 64 * 1_000)
     expect(logCalls(chain.calls)).toEqual([
       'logs 1-500 x1',
       'logs 1-250 x1',
@@ -479,22 +490,41 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
       'logs 1-7 x1',
       'logs 1-3 x1',
       'logs 1-1 x1',
-      'logs 1-1 x1',
-      'logs 2-3 x1',
-      'logs 4-7 x1',
-      'logs 8-15 x1',
-      'logs 16-31 x1',
-      'logs 32-63 x1',
-      'logs 64-127 x1',
-      'logs 128-255 x1',
-      'logs 256-511 x1',
-      'logs 512-1011 x1',
+      // From 45 s to 100 s, a minute after the last failure, the range stays 1: one block a second.
+      ...Array.from({ length: 56 }, (_, index) => `logs ${index + 1}-${index + 1} x1`),
+      // Then each success doubles it, up to 500.
+      'logs 57-58 x1',
+      'logs 59-62 x1',
+      'logs 63-70 x1',
+      'logs 71-86 x1',
+      'logs 87-118 x1',
+      'logs 119-182 x1',
+      'logs 183-310 x1',
+      'logs 311-566 x1',
+      'logs 567-1066 x1',
     ])
     expect(indexer.health()).toMatchObject({ failedPasses: 9, lastError: 'HttpRequestError' })
     expect(console.error).toHaveBeenCalledWith(
       'The index scan of blocks 1 to 500 on Anvil failed, so its range halves: HttpRequestError: HTTP request failed.',
     )
     expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain('secret-key')
+    await indexer.stop()
+  })
+
+  it("keeps the range one halving under a provider's cap and probes the cap once a minute, not every other scan", async () => {
+    const { chain, client } = fakeChain()
+    const { port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 0n, false)])
+    chain.head = 100_000n
+    chain.logsCap = 100n
+    const indexer = indexerOn(client, port)
+    await settle()
+    // 500, 250 and 125 fail 5 s apart; 62 succeeds from 15 s, and a minute after each failure one scan of 124
+    // probes the cap, fails and halves the range again: at 71 s, 132 s and 193 s.
+    await vi.advanceTimersByTimeAsync(193_000)
+    const minute = Array<number>(56).fill(62)
+    expect(spansOf(chain.calls)).toEqual([500, 250, 125, ...minute, 124, ...minute, 124, ...minute, 124])
+    // Three failures to reach 62, then one probe a minute: 6 of 174 scans failed, not one in two.
+    expect(indexer.health().failedPasses).toBe(6)
     await indexer.stop()
   })
 
