@@ -207,6 +207,7 @@ export type Database = {
         Row: {
           art_deferred: boolean
           art_locked_at: string | null
+          art_sources_deleted_at: string | null
           canvas_height: number | null
           canvas_width: number | null
           chain_id: number | null
@@ -231,6 +232,7 @@ export type Database = {
         Insert: {
           art_deferred?: boolean
           art_locked_at?: string | null
+          art_sources_deleted_at?: string | null
           canvas_height?: number | null
           canvas_width?: number | null
           chain_id?: number | null
@@ -255,6 +257,7 @@ export type Database = {
         Update: {
           art_deferred?: boolean
           art_locked_at?: string | null
+          art_sources_deleted_at?: string | null
           canvas_height?: number | null
           canvas_width?: number | null
           chain_id?: number | null
@@ -618,16 +621,19 @@ export type Database = {
       profiles: {
         Row: {
           created_at: string
+          draft_cap: number
           id: string
           wallet_address: string
         }
         Insert: {
           created_at?: string
+          draft_cap?: number
           id: string
           wallet_address: string
         }
         Update: {
           created_at?: string
+          draft_cap?: number
           id?: string
           wallet_address?: string
         }
@@ -1774,6 +1780,11 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      collection_sources_deleted: {
+        Args: { p_collection_id: string }
+        Returns: boolean
+      }
+      collections_sources_due: { Args: { p_limit: number }; Returns: Json }
       indexer_record: {
         Args: {
           p_chain_id: number

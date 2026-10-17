@@ -5,6 +5,7 @@ legacy/
 .env
 .env.*
 !.env.example
+supabase/signing_keys.json
 
 # Dependencies and build output
 node_modules/

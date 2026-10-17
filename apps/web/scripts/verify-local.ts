@@ -11,6 +11,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createClient } from '@supabase/supabase-js'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import postgres from 'postgres'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import type { PrivateKeyAccount } from 'viem/accounts'
 import { createSiweMessage, generateSiweNonce } from 'viem/siwe'
@@ -374,6 +375,11 @@ async function main(): Promise<void> {
 
   const A: Creator = a
   const B: Creator = b
+  // Section 9p's cap: the sections below make about 42 collections for A, so both wallets may hold 1,000.
+  {
+    const { error } = await admin.from('profiles').update({ draft_cap: 1000 }).in('id', [A.userId, B.userId])
+    if (error) info(`the draft caps were not raised: ${describe(error)}`)
+  }
 
   await check('sign-in: tampered signature rejected', async () => {
     const account = privateKeyToAccount(generatePrivateKey())
@@ -1071,6 +1077,7 @@ async function main(): Promise<void> {
   await artAirdropSettings(A, B)
   await artMintPage(A, B)
   await artIndexer(A, B)
+  await artHardening()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -8091,6 +8098,374 @@ async function artIndexer(A: Creator, B: Creator): Promise<void> {
         .sort()
         .join(' ')
       return rows === want ? null : `rows ${rows}`
+    },
+  )
+}
+
+// ---------------------------------------------------------------------------------------------
+// 9p. Production hardening: the draft cap, the ES256 session key, the indexer's role, and the layer sources'
+// functions and guards (docs/specs/2026-10-17-production-hardening.md, section 4)
+// ---------------------------------------------------------------------------------------------
+const DRAFT_CAP_SENTENCE = 'This wallet holds its limit of collections that are not deployed.'
+const NOT_DUE_SENTENCE = "This collection's art files are not due for deletion."
+const SOURCES_GONE_SENTENCE =
+  "This collection's art files were deleted 90 days after its deploy, so its art cannot change."
+const INDEXER_FUNCTIONS = ['indexer_record', 'indexer_start', 'indexer_summaries', 'indexer_targets']
+
+/** The local database as its superuser, from `supabase status`'s DB_URL, for the catalog reads and the race. */
+function superuser(max = 1): postgres.Sql {
+  const dbUrl = config('SUPABASE_DB_URL', ['DB_URL'])
+  if (!['localhost', '127.0.0.1'].includes(new URL(dbUrl).hostname)) throw new Error('DB_URL is not local.')
+  return postgres(dbUrl, { max, onnotice: () => {} })
+}
+
+/**
+ * Two inserts for an owner's last place under its cap, the second sent while the first's transaction is open: null
+ * when the second waited on the first's lock and was then refused with the cap's message (Review Focus 5).
+ */
+async function raceForLastPlace(ownerId: string): Promise<string | null> {
+  const sql = superuser(2)
+  const first = await sql.reserve()
+  const second = await sql.reserve()
+  const row = () => ({ owner_id: ownerId, name: uniqueName(), symbol: 'RACE', project_type: 'generative' })
+  try {
+    await first`begin`
+    await first`insert into public.collections ${first(row())}`
+    let settled = false
+    const racing = second`insert into public.collections ${second(row())}`
+      .then(
+        () => null,
+        (error: { code?: string; message?: string }) => error,
+      )
+      .finally(() => {
+        settled = true
+      })
+    await pause(300)
+    if (settled) {
+      await first`rollback`
+      return 'the second insert did not wait for the first'
+    }
+    await first`commit`
+    const refused = await racing
+    return refused?.code === '23514' && refused.message === DRAFT_CAP_SENTENCE
+      ? null
+      : `the second insert: ${refused ? `${refused.code} ${refused.message}` : 'landed'}`
+  } finally {
+    first.release()
+    second.release()
+    await sql.end()
+  }
+}
+
+/**
+ * What `read` answers as cobweb_indexer, or the error it fails with. Inside a transaction that is rolled back, the
+ * local `postgres`, which is not a superuser and so may not take the role as it is, joins it for that transaction
+ * alone.
+ */
+async function asIndexerRole<T>(
+  sql: postgres.Sql,
+  read: (tx: postgres.TransactionSql) => Promise<T>,
+): Promise<{ value?: T; error?: { code?: string; message: string } }> {
+  const rolledBack = 'rolled back'
+  let value: T | undefined
+  try {
+    await sql.begin(async (tx) => {
+      await tx`grant cobweb_indexer to postgres`
+      await tx`set local role cobweb_indexer`
+      value = await read(tx)
+      throw new Error(rolledBack)
+    })
+  } catch (thrown) {
+    const failure = thrown as { code?: string; message: string }
+    if (failure.message !== rolledBack) return { error: failure }
+  }
+  return { value }
+}
+
+/** A creator's access token, as its session holds it. */
+async function accessToken(creator: Creator): Promise<string> {
+  const { data } = await creator.client.auth.getSession()
+  const token = data.session?.access_token
+  if (!token) throw new Error('no access token')
+  return token
+}
+
+/** A token's header, decoded. */
+const jwtHeader = (token: string) =>
+  JSON.parse(Buffer.from(token.split('.')[0] ?? '', 'base64url').toString('utf8')) as {
+    alg?: string
+    kid?: string
+  }
+
+async function artHardening(): Promise<void> {
+  const C = await signInCreator()
+
+  await check(
+    "draft cap: a wallet's profile reads draft_cap 20, which neither its owner nor anon can change",
+    async () => {
+      const own = await C.client.from('profiles').select('draft_cap').eq('id', C.userId).single()
+      if (own.error || own.data.draft_cap !== 20)
+        return `read: ${own.error ? describe(own.error) : own.data.draft_cap}`
+      const byOwner = await C.client.from('profiles').update({ draft_cap: 1000 }).eq('id', C.userId).select()
+      const owner = expectError(byOwner.error, PERMISSION, byOwner.data)
+      if (owner) return `owner: ${owner}`
+      const byAnon = await anon.from('profiles').update({ draft_cap: 1000 }).eq('id', C.userId).select()
+      const anonProblem = expectNothing(byAnon.error, byAnon.data)
+      if (anonProblem) return `anon: ${anonProblem}`
+      const { data } = await admin.from('profiles').select('draft_cap').eq('id', C.userId).single()
+      return data?.draft_cap === 20 ? null : `stored ${data?.draft_cap}`
+    },
+  )
+
+  await check(
+    "draft cap: a fresh wallet's 21st collection not deployed is refused with 23514, the cap's message and detail 20; once the service role marks one deployed the 21st lands; a cap raised to 22 admits one more, and of two inserts sent at once for its last place the second waits for the first and is refused",
+    async () => {
+      const D = await signInCreator()
+      const ids: string[] = []
+      for (let n = 1; n <= 20; n++) {
+        const made = await insertCollection(D.client)
+        if (!made.row) return `collection ${n}: ${describe(made.error)}`
+        ids.push(made.row.id)
+      }
+      const refused = await insertCollection(D.client)
+      const capped = expectSentence(refused.error, CHECK, DRAFT_CAP_SENTENCE)
+      if (capped) return `21st: ${capped}`
+      if (refused.error?.details !== '20') return `21st: detail ${refused.error?.details}`
+      const marked = await admin
+        .from('collections')
+        .update({
+          status: 'deployed',
+          max_supply: 100,
+          chain_id: 1,
+          contract_address: ADDRESS40(0x9e00_0001),
+        })
+        .eq('id', ids[0]!)
+      if (marked.error) return `mark: ${describe(marked.error)}`
+      const after = await insertCollection(D.client)
+      if (!after.row) return `21st after a deploy: ${describe(after.error)}`
+      const raised = await admin.from('profiles').update({ draft_cap: 22 }).eq('id', D.userId)
+      if (raised.error) return `raise: ${describe(raised.error)}`
+      const more = await insertCollection(D.client)
+      if (!more.row) return `22nd under a cap of 22: ${describe(more.error)}`
+      // 21 held under 22: one place left, asked for twice at once.
+      return raceForLastPlace(D.userId)
+    },
+  )
+
+  await check(
+    "sessions: a wallet's access token is signed with ES256 under a key id /auth/v1/.well-known/jwks.json lists",
+    async () => {
+      const header = jwtHeader(await accessToken(C))
+      if (header.alg !== 'ES256' || !header.kid) return `header ${JSON.stringify(header)}`
+      const response = await fetch(`${url}/auth/v1/.well-known/jwks.json`)
+      const set = (await response.json()) as { keys?: Record<string, unknown>[] }
+      const key = set.keys?.find((entry) => entry.kid === header.kid)
+      if (!key) return `key id ${header.kid} is not in the key set`
+      return key.alg === 'ES256' && !('d' in key)
+        ? null
+        : `listed as ${String(key.alg)}, private part ${'d' in key}`
+    },
+  )
+
+  await check(
+    'sessions: getClaims verifies that token five times with at most one key-set read and no call to /auth/v1/user, and refuses it with its signature altered',
+    async () => {
+      const token = await accessToken(C)
+      const paths: string[] = []
+      const counting = ((input: RequestInfo | URL, init?: RequestInit) => {
+        paths.push(new URL(input instanceof Request ? input.url : String(input)).pathname)
+        return fetch(input, init)
+      }) as typeof fetch
+      const client = createClient(url, publishableKey, { ...clientOptions, global: { fetch: counting } })
+      for (let n = 1; n <= 5; n++) {
+        const { data, error } = await client.auth.getClaims(token)
+        if (error || data?.claims.sub !== C.userId) return `read ${n}: ${error?.message ?? 'another subject'}`
+      }
+      const keyReads = paths.filter((path) => path === '/auth/v1/.well-known/jwks.json').length
+      const userCalls = paths.filter((path) => path === '/auth/v1/user').length
+      if (keyReads > 1 || userCalls > 0) return `${keyReads} key-set reads and ${userCalls} user calls`
+      const [head, body, signature = ''] = token.split('.')
+      const altered = `${head}.${body}.${signature.slice(0, 10)}${signature[10] === 'A' ? 'B' : 'A'}${signature.slice(11)}`
+      const refused = await client.auth.getClaims(altered)
+      if (!refused.error) return 'an altered signature was accepted'
+      return paths.includes('/auth/v1/user') ? 'the altered token was sent to /auth/v1/user' : null
+    },
+  )
+
+  await check(
+    'indexer role: cobweb_indexer can log in, neither inherits nor bypasses row-level security, and executes the four indexer functions',
+    async () => {
+      const sql = superuser()
+      try {
+        const [role] = await sql<
+          { rolcanlogin: boolean; rolinherit: boolean; rolbypassrls: boolean; rolsuper: boolean }[]
+        >`
+          select rolcanlogin, rolinherit, rolbypassrls, rolsuper from pg_catalog.pg_roles where rolname = 'cobweb_indexer'`
+        if (!role) return 'the role does not exist'
+        if (!role.rolcanlogin || role.rolinherit || role.rolbypassrls || role.rolsuper)
+          return `attributes ${JSON.stringify(role)}`
+        const [settings] = await sql<{ setconfig: string[] }[]>`
+          select s.setconfig from pg_catalog.pg_db_role_setting s
+          join pg_catalog.pg_roles r on r.oid = s.setrole where r.rolname = 'cobweb_indexer' and s.setdatabase = 0`
+        const wanted = ['idle_in_transaction_session_timeout=30s', 'statement_timeout=10s']
+        if (JSON.stringify([...(settings?.setconfig ?? [])].sort()) !== JSON.stringify(wanted))
+          return `settings ${JSON.stringify(settings?.setconfig)}`
+        const granted = await sql<{ proname: string }[]>`
+          select p.proname from pg_catalog.pg_proc p join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'public' and p.proname = any(${INDEXER_FUNCTIONS})
+            and has_function_privilege('cobweb_indexer', p.oid, 'execute')
+          order by p.proname`
+        if (granted.map((row) => row.proname).join() !== INDEXER_FUNCTIONS.join())
+          return `executes ${granted.map((row) => row.proname).join(', ')}`
+        const { value, error } = await asIndexerRole(sql, async (tx) => {
+          const [read] = await tx<{ targets: unknown; summaries: unknown }[]>`
+            select public.indexer_targets(1) as targets, public.indexer_summaries(1) as summaries`
+          return read
+        })
+        if (error) return `as the role: ${error.code} ${error.message}`
+        return Array.isArray(value?.targets) && Array.isArray(value?.summaries)
+          ? null
+          : `as the role: ${JSON.stringify(value)}`
+      } finally {
+        await sql.end()
+      }
+    },
+  )
+
+  await check(
+    'indexer role: it reads no table or view in public, private, auth or storage, and executes no other function anon cannot',
+    async () => {
+      const sql = superuser()
+      try {
+        const readable = await sql<{ name: string }[]>`
+          select n.nspname || '.' || c.relname as name from pg_catalog.pg_class c
+          join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+          where n.nspname in ('public', 'private', 'auth', 'storage') and c.relkind in ('r', 'v', 'm', 'p', 'f')
+            and has_table_privilege('cobweb_indexer', c.oid, 'select')`
+        if (readable.length) return `reads ${readable.map((row) => row.name).join(', ')}`
+        const extra = await sql<{ name: string }[]>`
+          select n.nspname || '.' || p.proname as name from pg_catalog.pg_proc p
+          join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+          where has_function_privilege('cobweb_indexer', p.oid, 'execute')
+            and not has_function_privilege('anon', p.oid, 'execute')
+          order by 1`
+        const want = INDEXER_FUNCTIONS.map((name) => `public.${name}`).join()
+        if (extra.map((row) => row.name).join() !== want)
+          return `executes ${extra.map((row) => row.name).join(', ')}`
+        // And in practice: a table read as the role is refused.
+        const { error } = await asIndexerRole(sql, (tx) => tx`select count(*) from public.collections`)
+        return error?.code === '42501' ? null : `public.collections: ${error ? error.code : 'read'}`
+      } finally {
+        await sql.end()
+      }
+    },
+  )
+
+  const col = await insertCollection(C.client)
+  if (!col.row) throw new Error(`setup: ${describe(col.error)}`)
+  const cid = col.row.id
+
+  await check(
+    'sources: collections_sources_due and collection_sources_deleted run for the service role only',
+    async () => {
+      const refused = refusedAll([
+        [
+          'anon due',
+          (await callArt(anon, 'collections_sources_due', { p_limit: 5 })).error,
+          PERMISSION,
+          'permission denied',
+        ],
+        [
+          'owner due',
+          (await callArt(C.client, 'collections_sources_due', { p_limit: 5 })).error,
+          PERMISSION,
+          'permission denied',
+        ],
+        [
+          'anon mark',
+          (await callArt(anon, 'collection_sources_deleted', { p_collection_id: cid })).error,
+          PERMISSION,
+          'permission denied',
+        ],
+        [
+          'owner mark',
+          (await callArt(C.client, 'collection_sources_deleted', { p_collection_id: cid })).error,
+          PERMISSION,
+          'permission denied',
+        ],
+      ])
+      if (refused) return refused
+      const due = await callArt(admin, 'collections_sources_due', { p_limit: 1000 })
+      if (due.error || !Array.isArray(due.data)) return `service due: ${describe(due.error)}`
+      if ((due.data as { collectionId: string }[]).some((entry) => entry.collectionId === cid))
+        return 'a draft is due'
+      const mark = await callArt(admin, 'collection_sources_deleted', { p_collection_id: cid })
+      return expectSentence(mark.error, CHECK, NOT_DUE_SENTENCE)
+    },
+  )
+
+  await check('sources: the owner reads art_sources_deleted_at and no client sets it', async () => {
+    const read = await C.client.from('collections').select('art_sources_deleted_at').eq('id', cid).single()
+    if (read.error || read.data.art_sources_deleted_at !== null)
+      return `read: ${read.error ? describe(read.error) : read.data.art_sources_deleted_at}`
+    const now = new Date().toISOString()
+    const updated = await C.client
+      .from('collections')
+      .update({ art_sources_deleted_at: now })
+      .eq('id', cid)
+      .select()
+    const update = expectError(updated.error, PERMISSION, updated.data)
+    if (update) return `update: ${update}`
+    const inserted = await C.client
+      .from('collections')
+      .insert(collectionInput({ art_sources_deleted_at: now }))
+      .select()
+    const insert = expectError(inserted.error, PERMISSION, inserted.data)
+    if (insert) return `insert: ${insert}`
+    const byAnon = await anon
+      .from('collections')
+      .update({ art_sources_deleted_at: now })
+      .eq('id', cid)
+      .select()
+    const anonProblem = expectNothing(byAnon.error, byAnon.data)
+    if (anonProblem) return `anon: ${anonProblem}`
+    return (await stored(cid))?.status === 'draft' &&
+      (await admin.from('collections').select('art_sources_deleted_at').eq('id', cid).single()).data
+        ?.art_sources_deleted_at === null
+      ? null
+      : 'the mark was set'
+  })
+
+  await check(
+    'sources: once a collection is marked, a new uploads row and a new render job for it are refused',
+    async () => {
+      // The sweep marks only a due collection; the guards stand for any marked one, so the service role marks a draft.
+      const mark = await admin
+        .from('collections')
+        .update({ art_sources_deleted_at: new Date().toISOString() })
+        .eq('id', cid)
+      if (mark.error) return `mark: ${describe(mark.error)}`
+      const upload = await recordUpload(C.client, cid)
+      const job = await admin
+        .from('render_jobs')
+        .insert({
+          collection_id: cid,
+          kind: 'real',
+          token_count: 1,
+          fee_per_token_wei: 0,
+          quote_total_wei: 0,
+        })
+        .select('id')
+      for (const row of (job.data ?? []) as { id: string }[]) createdJobIds.add(row.id)
+      const refused = refusedAll([
+        ['upload', upload.error, CHECK, SOURCES_GONE_SENTENCE],
+        ['render job', job.error as DbError, CHECK, SOURCES_GONE_SENTENCE],
+      ])
+      if (refused) return refused
+      const rows =
+        (await countRows('uploads', 'collection_id', cid)) +
+        (await countRows('render_jobs', 'collection_id', cid))
+      return rows === 0 ? null : `${rows} row(s) written`
     },
   )
 }

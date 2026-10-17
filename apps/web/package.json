@@ -36,6 +36,7 @@
     "@types/react-dom": "^19.3.0",
     "@wagmi/core": "2.22.1",
     "multiformats": "14.0.5",
+    "postgres": "3.4.9",
     "tailwindcss": "^4.3.3"
   },
   "dependencies": {
