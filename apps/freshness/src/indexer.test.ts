@@ -278,6 +278,28 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     await indexer.stop()
   })
 
+  it('logs an unreadable deploy at most once a minute, though it reads the targets every second (Decision 10)', async () => {
+    const { chain, client } = fakeChain()
+    const { port } = fakeDb([targetAt(ID_B, B, DEPLOY_B, null)])
+    const indexer = chainIndexer(ANVIL, client, port, {
+      tier: () => 'idle',
+      passMs: { behind: 1_000, fast: 1_000, idle: 1_000 },
+      targetsEveryMs: 1_000,
+    })
+    const deployLines = () =>
+      vi.mocked(console.error).mock.calls.filter(([line]) => String(line).includes('could not be read'))
+    await settle()
+    await vi.advanceTimersByTimeAsync(59_000)
+    // Its receipt is asked for at each of the minute's 60 reads, and logged at the first alone.
+    expect(chain.calls.filter((call) => call === `receipt ${DEPLOY_B}`)).toHaveLength(60)
+    expect(deployLines()).toEqual([
+      [`The deploy of ${ID_B} on Anvil could not be read; it is tried again in a minute.`],
+    ])
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(deployLines()).toHaveLength(2)
+    await indexer.stop()
+  })
+
   it('writes from one above the lowest written block of the scan, once groups merge', async () => {
     const { chain, client } = fakeChain()
     const { db, port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 100n), targetAt(ID_B, B, DEPLOY_B, 90n)])
@@ -411,14 +433,42 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     await indexer.stop()
   })
 
-  it('halves a failed scan range down to 1 and never below, then reads on with no block skipped', async () => {
+  it('keeps a halved range when a gap refusal takes the cursor again from the database (Decision 10)', async () => {
+    const { chain, client } = fakeChain()
+    const { db, port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 0n, false)])
+    chain.head = 2_000n
+    chain.logsFailures = 2
+    chain.logs = mintAt(50n, 1n)
+    db.recordFailures = [new IndexerWriteError('indexer_record', '23514', true)]
+    const indexer = indexerOn(client, port)
+    await settle()
+    // Two failures halve the range to 125; the scan of 1 to 125 doubles it to 250 and its write is refused.
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(logCalls(chain.calls)).toEqual(['logs 1-500 x1', 'logs 1-250 x1', 'logs 1-125 x1'])
+    expect(db.calls).toEqual(['summaries', 'targets', 'record 1-125'])
+    // Another indexer recorded the blocks meanwhile.
+    db.targets[0]!.indexedBlock = 125n
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(db.calls).toEqual(['summaries', 'targets', 'record 1-125', 'targets'])
+    // From the database's block, 250 blocks rather than 500.
+    expect(logCalls(chain.calls)).toEqual([
+      'logs 1-500 x1',
+      'logs 1-250 x1',
+      'logs 1-125 x1',
+      'logs 126-375 x1',
+    ])
+    await indexer.stop()
+  })
+
+  it('halves a failed scan range down to 1 and never below, then doubles it back to 500 with no block skipped', async () => {
     const { chain, client } = fakeChain()
     const { port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 0n, false)])
     chain.head = 2_000n
     chain.logsFailures = 9
     const indexer = indexerOn(client, port)
     await settle()
-    await vi.advanceTimersByTimeAsync(9 * 5_000 + 1_000)
+    // Nine failures 5 s apart, then a scan each second while the cursor is behind.
+    await vi.advanceTimersByTimeAsync(9 * 5_000 + 9 * 1_000)
     expect(logCalls(chain.calls)).toEqual([
       'logs 1-500 x1',
       'logs 1-250 x1',
@@ -430,7 +480,15 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
       'logs 1-3 x1',
       'logs 1-1 x1',
       'logs 1-1 x1',
-      'logs 2-501 x1',
+      'logs 2-3 x1',
+      'logs 4-7 x1',
+      'logs 8-15 x1',
+      'logs 16-31 x1',
+      'logs 32-63 x1',
+      'logs 64-127 x1',
+      'logs 128-255 x1',
+      'logs 256-511 x1',
+      'logs 512-1011 x1',
     ])
     expect(indexer.health()).toMatchObject({ failedPasses: 9, lastError: 'HttpRequestError' })
     expect(console.error).toHaveBeenCalledWith(

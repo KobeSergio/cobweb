@@ -51,10 +51,18 @@ export type IndexerOptions = {
 }
 
 /**
+ * Whether a value is a URL supabase-js takes: `http://` or `https://`, then a URL that parses. `createClient`
+ * throws on any other, and it runs once the server listens.
+ */
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value.trim()) && URL.canParse(value.trim())
+}
+
+/**
  * The indexer's options from `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, a blank one read as unset: null
- * when neither is set, so the indexer stays off. One set alone refuses the start, as a malformed factory
- * address does: a viem `BaseError` named `ConfigurationError` whose sentence names both variables, never a
- * value.
+ * when neither is set, so the indexer stays off. One set alone, or a `SUPABASE_URL` that is not an http or
+ * https URL, refuses the start, as a malformed factory address does: a viem `BaseError` named
+ * `ConfigurationError` whose sentence names the variables, never a value.
  */
 export function indexerOptionsOf(env: Record<string, string | undefined>): IndexerOptions | null {
   const supabaseUrl = env.SUPABASE_URL ?? ''
@@ -65,5 +73,7 @@ export function indexerOptionsOf(env: Record<string, string | undefined>): Index
       'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are both needed to run the indexer; set both or neither.',
       { name: 'ConfigurationError' },
     )
+  if (!isHttpUrl(supabaseUrl))
+    throw new BaseError('SUPABASE_URL must be an http or https URL.', { name: 'ConfigurationError' })
   return { supabaseUrl, serviceRoleKey }
 }

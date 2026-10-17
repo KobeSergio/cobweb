@@ -56,8 +56,10 @@ const GAP_SENTENCES: readonly string[] = [
 
 /**
  * A database call that failed: the function and the code, a Postgres code such as 23514, PostgREST's such as
- * PGRST202 (the migration is missing), or TIMEOUT or NETWORK when no answer came. `gap` when the refusal
- * means the cursors in memory no longer match the database's, so the targets are read again.
+ * PGRST202 (the migration is missing), `HTTP_<status>` for an answer without a code (the gateway's 401 for a
+ * wrong key, a proxy's 502 page, an answer with no data), TIMEOUT when the call was abandoned, or NETWORK
+ * when no answer came. `gap` when the refusal means the cursors in memory no longer match the database's, so
+ * the targets are read again.
  */
 export class IndexerWriteError extends Error {
   readonly code: string
@@ -121,10 +123,13 @@ export function supabaseIndexerDb(options: IndexerOptions, fetchImpl: typeof fet
     const timeout = new AbortController()
     const timer = setTimeout(() => timeout.abort(), DB_TIMEOUT_MS)
     try {
-      const { data, error } = await client.rpc(fn, args).abortSignal(timeout.signal)
-      if (error) {
-        const code = error.code || (timeout.signal.aborted ? 'TIMEOUT' : 'NETWORK')
-        throw new IndexerWriteError(fn, code, GAP_SENTENCES.includes(error.message))
+      const { data, error, status } = await client.rpc(fn, args).abortSignal(timeout.signal)
+      // Every function answers JSON, so an answer without data failed too: postgrest-js reads a 404 with an
+      // empty body as a 204 with no data and no error. A fetch that failed comes back with status 0.
+      if (error || data === null) {
+        const code =
+          error?.code || (timeout.signal.aborted ? 'TIMEOUT' : status > 0 ? `HTTP_${status}` : 'NETWORK')
+        throw new IndexerWriteError(fn, code, GAP_SENTENCES.includes(error?.message ?? ''))
       }
       return data as T
     } finally {

@@ -117,4 +117,26 @@ describe('indexerOptionsOf (docs/specs/2026-10-16-indexer-overview.md, section 6
       expect(line).not.toContain(KEY)
     }
   })
+
+  it('refuses a SUPABASE_URL that is not an http or https URL, naming the variable, never the value', () => {
+    for (const supabaseUrl of [
+      'localhost:54321',
+      'ftp://127.0.0.1:54321',
+      // The URL parser reads it as http://127.0.0.1:54321/, but supabase-js refuses it without the slashes.
+      'http:127.0.0.1:54321',
+      'http://',
+      'not a url',
+    ]) {
+      const env = { SUPABASE_URL: supabaseUrl, SUPABASE_SERVICE_ROLE_KEY: KEY }
+      expect(errorLine(thrownBy(() => indexerOptionsOf(env)))).toBe(
+        'ConfigurationError: SUPABASE_URL must be an http or https URL.',
+      )
+    }
+    // A hosted project's URL, its scheme in any case.
+    const hosted = 'HTTPS://abcdefghijklmnopqrst.supabase.co'
+    expect(indexerOptionsOf({ SUPABASE_URL: hosted, SUPABASE_SERVICE_ROLE_KEY: KEY })).toEqual({
+      supabaseUrl: hosted,
+      serviceRoleKey: KEY,
+    })
+  })
 })

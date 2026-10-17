@@ -178,7 +178,10 @@ export function chainIndexer(
       )
       return { failed: true, recorded: false }
     }
-    for (const cursor of scan.cursors) cursor.range = MAX_RANGE
+    // A success doubles the range, up to 500, rather than restoring 500 at once: on a provider whose getLogs
+    // cap is below 500 blocks, at most one scan then fails between successes, not one per halving.
+    for (const cursor of scan.cursors)
+      cursor.range = cursor.range * 2n > MAX_RANGE ? MAX_RANGE : cursor.range * 2n
     const collections = new Map(
       scan.cursors.map((cursor) => [cursor.contract.toLowerCase(), cursor.collectionId]),
     )

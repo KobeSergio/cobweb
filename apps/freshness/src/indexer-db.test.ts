@@ -218,6 +218,43 @@ describe('supabaseIndexerDb (docs/specs/2026-10-16-indexer-overview.md, section 
     expect(error instanceof IndexerWriteError && [error.code, error.gap]).toEqual(['NETWORK', false])
   })
 
+  it("names an answer without a database code by its HTTP status, never the gateway's message", async () => {
+    // The gateway's answer to a wrong service role key: a message and no code.
+    const { db } = fakeFetch(json({ message: 'Invalid API key' }, 401))
+    const error = await settled(db.targets(31337))
+    expect(error instanceof IndexerWriteError && [error.code, error.gap, error.message]).toEqual([
+      'HTTP_401',
+      false,
+      "The indexer's indexer_targets call failed (HTTP_401).",
+    ])
+    expect(failureLine(error)).toBe('IndexerWriteError (HTTP_401)')
+  })
+
+  it('names an answer with no data HTTP_204 in each function, as postgrest-js reads a 404 with an empty body', async () => {
+    const empty = () => new Response('', { status: 404 })
+    const { db } = fakeFetch(empty(), empty(), empty(), empty())
+    const write: RecordWrite = {
+      chainId: 31337,
+      fromBlock: 1n,
+      toBlock: 2n,
+      syncedAt: null,
+      collections: [ID],
+      records: { mints: [], owners: [], airdrops: [], withdrawals: [] },
+    }
+    const errors = [
+      await settled(db.targets(31337)),
+      await settled(db.start(ID, 50n)),
+      await settled(db.record(write)),
+      await settled(db.summaries(31337)),
+    ]
+    expect(errors.map((error) => error instanceof IndexerWriteError && [error.code, error.message])).toEqual([
+      ['HTTP_204', "The indexer's indexer_targets call failed (HTTP_204)."],
+      ['HTTP_204', "The indexer's indexer_start call failed (HTTP_204)."],
+      ['HTTP_204', "The indexer's indexer_record call failed (HTTP_204)."],
+      ['HTTP_204', "The indexer's indexer_summaries call failed (HTTP_204)."],
+    ])
+  })
+
   it('abandons a call that has not answered after 10 s, so it cannot hold a pass (Review Focus 1)', async () => {
     vi.useFakeTimers()
     const { db } = fakeFetch('hang')
