@@ -53,11 +53,12 @@ export function airdropHistoryCsv(airdrops: AirdropRow[], chain: SupportedChain)
 export function AirdropHistory({
   airdrops,
   chain,
-  readAt,
+  now,
 }: {
   airdrops: AirdropRow[]
   chain: SupportedChain
-  readAt: number
+  /** The time each When counts from: the later of the read's time and the indexer's count. */
+  now: number
 }) {
   if (airdrops.length === 0) {
     return (
@@ -85,7 +86,7 @@ export function AirdropHistory({
             <TableCell className="pl-6">
               <span className="numeric text-sm">{shortUtc(airdrop.confirmedAt)}</span>
               <span className="text-muted-foreground block text-[0.8125rem]">
-                {relativeTo(airdrop.confirmedAt, readAt)}
+                {relativeTo(airdrop.confirmedAt, now)}
               </span>
             </TableCell>
             <TableCell>

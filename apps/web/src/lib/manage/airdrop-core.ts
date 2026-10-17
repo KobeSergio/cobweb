@@ -67,17 +67,18 @@ const recipientsQuery = z.object({
 })
 
 /**
- * Whether the indexer has read every block since the deploy, so the history is complete: the collection's cursor
- * has a synced time (docs/specs/2026-10-16-indexer-overview.md, decision 21).
+ * The collection's cursor's synced time in Unix seconds, the chain's time at the indexer's last read to the
+ * confirmation depth; null before it has read every block since the deploy, so the history is not complete
+ * yet (docs/specs/2026-10-16-indexer-overview.md, decision 21).
  */
-async function countedOf(ctx: AirdropContext): Promise<boolean> {
+async function countedOf(ctx: AirdropContext): Promise<number | null> {
   const { data, error } = await ctx.supabase
     .from('indexer_cursors')
     .select('synced_at')
     .eq('collection_id', ctx.collection.id)
     .maybeSingle()
   if (error) throw new Error(`The indexer's cursor could not be read: ${error.message}`)
-  return data?.synced_at != null
+  return data?.synced_at ? Math.floor(Date.parse(data.synced_at) / 1000) : null
 }
 
 /**
@@ -122,7 +123,8 @@ export const readAirdropState: AirdropReader = async (chainId, address, atLeast)
 /**
  * What the Airdrop tab shows (section 6.3): the collection's airdrops, Cobweb's and the indexer's, newest block
  * first, with the contract's fee, supply and owner, or the records alone when the chain does not answer, and
- * whether the indexer has counted the collection. It refreshes nothing.
+ * when the indexer last read the collection to the chain's depth, null before it has counted it. It refreshes
+ * nothing.
  */
 export async function airdropViewCore(
   ctx: AirdropContext,
@@ -139,7 +141,7 @@ export async function airdropViewCore(
       .order('tx_hash')
       .range(from, to),
   )
-  const counted = await countedOf(ctx)
+  const countedAt = await countedOf(ctx)
   const state = await read(base.chainId, base.contract)
   return {
     data: airdropViewOf(
@@ -148,7 +150,7 @@ export async function airdropViewCore(
         contract: base.contract,
         maxSupply: ctx.collection.max_supply ?? 0,
         readAt: base.readAt,
-        counted,
+        countedAt,
       },
       airdropRowsOf(rows),
       state,

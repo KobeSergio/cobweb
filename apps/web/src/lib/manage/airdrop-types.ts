@@ -52,6 +52,12 @@ export type AirdropView = {
    * too, and By recipient every wallet an airdrop reached.
    */
   counted: boolean
+  /**
+   * The chain's time at the indexer's last read to the confirmation depth (Unix seconds), no earlier than any
+   * airdrop it recorded; null before it has read every block since the deploy. Relative labels count from the
+   * later of this and `readAt`.
+   */
+  countedAt: number | null
 }
 
 /** One run of an airdrop to one wallet, as By recipient shows it. */

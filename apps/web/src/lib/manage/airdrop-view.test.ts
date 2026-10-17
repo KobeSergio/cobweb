@@ -111,7 +111,15 @@ describe('airdropRowsOf', () => {
 })
 
 describe('airdropViewOf', () => {
-  const base = { chainId: 31337, contract: CONTRACT, maxSupply: 3, readAt: 1_791_000_000, counted: true }
+  /** The indexer's last read to the chain's depth: after the copy's time, before the chain read's. */
+  const COUNTED_AT = 1_791_039_570
+  const base = {
+    chainId: 31337,
+    contract: CONTRACT,
+    maxSupply: 3,
+    readAt: 1_791_000_000,
+    countedAt: COUNTED_AT,
+  }
   const history = airdropRowsOf(ROWS)
   const state: AirdropState = {
     block: 120n,
@@ -136,12 +144,21 @@ describe('airdropViewOf', () => {
       readAt: 1_791_039_600,
       chainReachable: true,
       counted: true,
+      countedAt: COUNTED_AT,
     })
     expect(airdropViewOf(base, history, { ...state, totalMinted: 13 }).left).toBe(0)
   })
 
+  it("keeps the indexer's count time beside the copy's when the chain does not answer", () => {
+    expect(airdropViewOf(base, history, null)).toMatchObject({
+      readAt: 1_791_000_000,
+      counted: true,
+      countedAt: COUNTED_AT,
+    })
+  })
+
   it("answers Cobweb's record alone when the chain does not answer", () => {
-    expect(airdropViewOf({ ...base, counted: false }, history, null)).toEqual<AirdropView>({
+    expect(airdropViewOf({ ...base, countedAt: null }, history, null)).toEqual<AirdropView>({
       chainId: 31337,
       contract: CONTRACT,
       owner: null,
@@ -154,6 +171,7 @@ describe('airdropViewOf', () => {
       readAt: 1_791_000_000,
       chainReachable: false,
       counted: false,
+      countedAt: null,
     })
   })
 })

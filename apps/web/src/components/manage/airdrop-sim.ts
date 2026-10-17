@@ -55,8 +55,9 @@ function sampleHistory(): AirdropRow[] {
  * The Base sample: the contract's airdrop fee of 0.00005 ETH a token, the sample's supply and minted count scaled
  * to the collection's supply, the two sample records (10 tokens to 4 wallets, then a burn of 2), and the session
  * wallet as the owner unless `owner` names another (`?owner=other`). With `chainReachable` false, the record alone,
- * as the core builds it (`?chain=unreachable`). Counted by the indexer unless `counted` is false
- * (`?activity=counting`, docs/specs/2026-10-16-indexer-overview.md, section 8).
+ * as the core builds it (`?chain=unreachable`). Counted by the indexer 30 s before the sample's now, as the
+ * Overview's sample is, unless `counted` is false (`?activity=counting`,
+ * docs/specs/2026-10-16-indexer-overview.md, section 8).
  */
 export function sampleAirdropView(
   collection: { max_supply: number | null },
@@ -69,7 +70,7 @@ export function sampleAirdropView(
     contract: DEMO_DEPLOYMENT.contractAddress,
     maxSupply,
     readAt: DEMO_NOW,
-    counted: options.counted ?? true,
+    countedAt: options.counted === false ? null : DEMO_NOW - 30,
   }
   if (options.chainReachable === false) return airdropViewOf(base, sampleHistory(), null)
   return airdropViewOf(base, sampleHistory(), {

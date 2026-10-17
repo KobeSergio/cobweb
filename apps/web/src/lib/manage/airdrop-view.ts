@@ -90,13 +90,15 @@ export function airdropRowsOf(rows: AirdropDbRow[]): AirdropRow[] {
 /**
  * The view from a read: the fee, the owner, minted and left at the read's block, its time as `readAt`. Without
  * one (the chain did not answer), Cobweb's record alone: the history, the collection's supply and the copy's time.
- * `counted` says whether the indexer has read every block since the deploy.
+ * `countedAt` is the indexer's last read to the chain's depth, null before it has read every block since the
+ * deploy, and `counted` says it has.
  */
 export function airdropViewOf(
-  base: { chainId: number; contract: Address; maxSupply: number; readAt: number; counted: boolean },
+  base: { chainId: number; contract: Address; maxSupply: number; readAt: number; countedAt: number | null },
   history: AirdropRow[],
   state: AirdropState | null,
 ): AirdropView {
+  const counted = { counted: base.countedAt !== null, countedAt: base.countedAt }
   if (!state)
     return {
       chainId: base.chainId,
@@ -110,7 +112,7 @@ export function airdropViewOf(
       blockTimestamp: base.readAt,
       readAt: base.readAt,
       chainReachable: false,
-      counted: base.counted,
+      ...counted,
     }
   return {
     chainId: base.chainId,
@@ -124,7 +126,7 @@ export function airdropViewOf(
     blockTimestamp: state.blockTimestamp,
     readAt: state.blockTimestamp,
     chainReachable: true,
-    counted: base.counted,
+    ...counted,
   }
 }
 

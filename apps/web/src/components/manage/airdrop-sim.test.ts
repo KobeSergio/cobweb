@@ -1,7 +1,14 @@
 import { getAddress, type Address, type Hex } from 'viem'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { KeyStore } from '@/components/deploy/deploy-machine'
-import { DEMO_AIRDROPS, DEMO_COLLECTION, DEMO_MINTER, DEMO_TOTAL_MINTED, sampleTxHash } from '@/lib/demo'
+import {
+  DEMO_AIRDROPS,
+  DEMO_COLLECTION,
+  DEMO_MINTER,
+  DEMO_NOW,
+  DEMO_TOTAL_MINTED,
+  sampleTxHash,
+} from '@/lib/demo'
 import type { AirdropView } from '@/lib/manage/airdrop-types'
 import { tokensOf } from '@/lib/manage/airdrop-view'
 import { airdropCalls, type ManageCall } from '@/lib/manage/phase-calls'
@@ -43,9 +50,12 @@ describe('sampleAirdropView', () => {
     ])
   })
 
-  it('reads counted, and not counted for ?activity=counting (docs/specs/2026-10-16-indexer-overview.md, section 8)', () => {
-    expect(view.counted).toBe(true)
-    expect(sampleAirdropView({ max_supply: 100 }, WALLET, { counted: false }).counted).toBe(false)
+  it('reads counted 30 s before the sample now, and not counted for ?activity=counting (section 8)', () => {
+    expect(view).toMatchObject({ counted: true, countedAt: DEMO_NOW - 30 })
+    expect(sampleAirdropView({ max_supply: 100 }, WALLET, { counted: false })).toMatchObject({
+      counted: false,
+      countedAt: null,
+    })
   })
 
   it('names another owner for ?owner=other, and keeps the records alone for ?chain=unreachable', () => {

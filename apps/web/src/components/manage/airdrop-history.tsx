@@ -54,6 +54,9 @@ export function HistoryPanel({
 }) {
   const [shown, setShown] = useState<HistoryView>('transaction')
   const [exporting, setExporting] = useState(false)
+  // Each When counts from the later of the read's time and the indexer's count: the copy's time can trail a
+  // recorded airdrop, which would read "in under a minute", and the count is no earlier than any it recorded.
+  const now = Math.max(view.readAt, view.countedAt ?? view.readAt)
 
   async function exportRecipients() {
     setExporting(true)
@@ -111,13 +114,13 @@ export function HistoryPanel({
         </ToggleGroup>
       </div>
       {shown === 'transaction' ? (
-        <AirdropHistory airdrops={view.history} chain={chain} readAt={view.readAt} />
+        <AirdropHistory airdrops={view.history} chain={chain} now={now} />
       ) : (
         <ByRecipient
           collectionId={collectionId}
           counted={view.counted}
           chain={chain}
-          readAt={view.readAt}
+          now={now}
           server={server}
         />
       )}
@@ -133,13 +136,14 @@ function ByRecipient({
   collectionId,
   counted,
   chain,
-  readAt,
+  now,
   server,
 }: {
   collectionId: string
   counted: boolean
   chain: SupportedChain
-  readAt: number
+  /** The time each When counts from: the later of the read's time and the indexer's count. */
+  now: number
   server: AirdropServer
 }) {
   const id = useId()
@@ -241,7 +245,7 @@ function ByRecipient({
                 <TableCell>
                   <span className="numeric text-sm">{shortUtc(row.at)}</span>
                   <span className="text-muted-foreground block text-[0.8125rem]">
-                    {relativeTo(row.at, readAt)}
+                    {relativeTo(row.at, now)}
                   </span>
                 </TableCell>
                 <TableCell className="pr-6 text-right">
