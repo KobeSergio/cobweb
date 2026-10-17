@@ -39,13 +39,13 @@ export function RecentMints() {
                   href={explorerTxUrl(chain, mint.txHash)}
                   target="_blank"
                   rel="noreferrer"
-                  className="min-w-0 underline-offset-4 hover:underline"
+                  className="min-w-0 break-words underline-offset-4 hover:underline"
                 >
                   {what}
                   <span className="sr-only">, view transaction</span>
                 </a>
               ) : (
-                <span className="min-w-0">{what}</span>
+                <span className="min-w-0 break-words">{what}</span>
               )}
               {chainNow !== null && (
                 <span className="shrink-0 text-[0.8125rem] text-muted-foreground">
