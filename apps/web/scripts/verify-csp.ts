@@ -28,6 +28,11 @@ const BASE = `http://127.0.0.1:${PORT}`
 const DEFAULT_FRESHNESS = 'http://127.0.0.1:3100'
 const RELAY = 'wss://relay.walletconnect.org'
 const START_TIMEOUT_MS = 60_000
+/** A client's own policy and nonce, which the proxy drops before Next reads either (Review Focus 3). */
+const CLIENT_CHOSEN: Record<string, string> = {
+  'content-security-policy': "script-src 'nonce-Y2hvc2Vu'",
+  'x-nonce': 'Y2hvc2Vu',
+}
 
 let passed = 0
 const failed: string[] = []
@@ -77,6 +82,9 @@ function portBusy(port: number): Promise<boolean> {
 type Server = { child: ChildProcess; output: string[] }
 let server: Server | null = null
 
+/** Whether the child has ended, by its own exit or by a signal. */
+const ended = (child: ChildProcess) => child.exitCode !== null || child.signalCode !== null
+
 /** `next start` on port 3210 in the given mode, VERCEL unset; resolves once / answers. */
 async function startServer(mode: 'enforce' | 'report-only'): Promise<Server> {
   const next = createRequire(import.meta.url).resolve('next/dist/bin/next')
@@ -95,7 +103,7 @@ async function startServer(mode: 'enforce' | 'report-only'): Promise<Server> {
   server = started
   const until = Date.now() + START_TIMEOUT_MS
   while (Date.now() < until) {
-    if (child.exitCode !== null) throw new Error(`next start exited with ${child.exitCode}`)
+    if (ended(child)) throw new Error(`next start ended with ${child.signalCode ?? child.exitCode}`)
     try {
       if ((await fetch(`${BASE}/`, { redirect: 'manual' })).status > 0) return started
     } catch {
@@ -110,17 +118,17 @@ async function startServer(mode: 'enforce' | 'report-only'): Promise<Server> {
 async function stopServer(): Promise<void> {
   const running = server
   server = null
-  if (!running || running.child.exitCode !== null) return
+  if (!running || ended(running.child)) return
   const exited = new Promise<void>((done) => running.child.once('exit', () => done()))
   running.child.kill('SIGTERM')
   await Promise.race([exited, new Promise((wait) => setTimeout(wait, 10_000))])
-  if (running.child.exitCode === null) running.child.kill('SIGKILL')
+  if (!ended(running.child)) running.child.kill('SIGKILL')
 }
 
 type Page = { status: number; headers: Headers; html: string }
 
-async function get(path: string): Promise<Page> {
-  const response = await fetch(`${BASE}${path}`, { redirect: 'manual' })
+async function get(path: string, headers: Record<string, string> = {}): Promise<Page> {
+  const response = await fetch(`${BASE}${path}`, { redirect: 'manual', headers })
   return { status: response.status, headers: response.headers, html: await response.text() }
 }
 
@@ -293,11 +301,13 @@ async function main(): Promise<void> {
   )
 
   await check(
-    "report-only: started again with CSP_MODE=report-only, / carries X-Frame-Options DENY and no enforced policy, and the full policy as Content-Security-Policy-Report-Only, its scripts on that policy's nonce, with Reporting-Endpoints naming /api/csp-report",
+    "report-only: started again with CSP_MODE=report-only, / asked with a client's own policy and nonce carries X-Frame-Options DENY and no enforced policy, and the full policy as Content-Security-Policy-Report-Only, its scripts on that policy's nonce, with Reporting-Endpoints naming /api/csp-report",
     async () => {
       await stopServer()
       await startServer('report-only')
-      const page = await get('/')
+      // In this mode the proxy sets no enforced policy on the request, so a client's own would be the one
+      // Next reads its nonce from if the proxy kept it.
+      const page = await get('/', CLIENT_CHOSEN)
       // Next copies the proxy's response headers into the request it renders, so an enforced framing policy would
       // hide the nonce: the framing block is X-Frame-Options in this mode.
       if (page.headers.get('content-security-policy') !== null)

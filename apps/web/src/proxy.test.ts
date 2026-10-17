@@ -4,10 +4,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FRAME_POLICY } from '@/lib/security/csp'
 import { config, proxy } from './proxy'
 
+/** The cookie writer the proxy hands Supabase's client, which `getClaims` calls on a refresh. */
+type SetAll = (
+  cookies: { name: string; value: string; options: Record<string, unknown> }[],
+  headers: Record<string, string>,
+) => void
+
 const mocks = vi.hoisted(() => ({
+  setAll: null as SetAll | null,
   getClaims: vi.fn(async () => ({ data: null, error: null })),
 }))
-vi.mock('@supabase/ssr', () => ({ createServerClient: () => ({ auth: { getClaims: mocks.getClaims } }) }))
+vi.mock('@supabase/ssr', () => ({
+  createServerClient: (_url: string, _key: string, options: { cookies: { setAll: SetAll } }) => {
+    mocks.setAll = options.cookies.setAll
+    return { auth: { getClaims: mocks.getClaims } }
+  },
+}))
 
 const ORIGIN = 'https://cobweb.test'
 const request = (path: string, headers: Record<string, string> = {}) =>
@@ -21,6 +33,8 @@ const forwarded = (response: Response, name: string) => response.headers.get(`x-
 
 describe('proxy (docs/specs/2026-10-17-production-hardening.md, section 5.3)', () => {
   beforeEach(() => {
+    // Unset whatever the shell says; each test that needs a mode stubs its own.
+    vi.stubEnv('CSP_MODE', '')
     vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://abcdefghijklmnopqrst.supabase.co')
     vi.stubEnv('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY', 'sb_publishable_test')
     vi.stubEnv('VERCEL', '1')
@@ -88,8 +102,10 @@ describe('proxy (docs/specs/2026-10-17-production-hardening.md, section 5.3)', (
     }
     vi.stubEnv('CSP_MODE', 'enforce')
     const page = await proxy(request('/', chosen))
-    expect(nonceOf(forwarded(page, 'content-security-policy'))).not.toBe('Y2hvc2Vu')
-    expect(forwarded(page, 'x-nonce')).not.toBe('Y2hvc2Vu')
+    const nonce = nonceOf(page.headers.get('Content-Security-Policy'))
+    expect(nonce).toMatch(/^[A-Za-z0-9+/]{22}==$/)
+    expect(nonceOf(forwarded(page, 'content-security-policy'))).toBe(nonce)
+    expect(forwarded(page, 'x-nonce')).toBe(nonce)
     expect(forwarded(page, 'content-security-policy-report-only')).toBeNull()
     const api = await proxy(request('/api/uploads/x', chosen))
     for (const name of Object.keys(chosen)) expect(forwarded(api, name)).toBeNull()
@@ -102,6 +118,27 @@ describe('proxy (docs/specs/2026-10-17-production-hardening.md, section 5.3)', (
     expect(first).not.toBe(second)
     expect(mocks.getClaims).toHaveBeenCalledTimes(2)
   })
+
+  it('keeps the policy and its nonce on the response that carries a refreshed session', async () => {
+    vi.stubEnv('CSP_MODE', 'enforce')
+    const cache = 'private, no-cache, no-store, must-revalidate, max-age=0'
+    mocks.getClaims.mockImplementationOnce(async () => {
+      mocks.setAll!([{ name: 'sb-test-auth-token', value: 'refreshed', options: { path: '/' } }], {
+        'Cache-Control': cache,
+      })
+      return { data: null, error: null }
+    })
+    const response = await proxy(request('/collections'))
+    const policy = response.headers.get('Content-Security-Policy')
+    const nonce = nonceOf(policy)
+    expect(nonce).toMatch(/^[A-Za-z0-9+/]{22}==$/)
+    expect(response.headers.get('Reporting-Endpoints')).toBe(`csp="${ORIGIN}/api/csp-report"`)
+    expect(forwarded(response, 'content-security-policy')).toBe(policy)
+    expect(forwarded(response, 'x-nonce')).toBe(nonce)
+    expect(forwarded(response, 'cookie')).toBe('sb-test-auth-token=refreshed')
+    expect(response.cookies.get('sb-test-auth-token')?.value).toBe('refreshed')
+    expect(response.headers.get('Cache-Control')).toBe(cache)
+  })
 })
 
 describe("the proxy's matcher", () => {
@@ -111,6 +148,12 @@ describe("the proxy's matcher", () => {
     for (const url of ['/', '/collections', '/night-owls', '/api/uploads/x'])
       expect(matches(url), url).toBe(true)
     for (const url of ['/_next/static/x.js', '/demo/tokens/1.svg', '/api/csp-report'])
+      expect(matches(url), url).toBe(false)
+  })
+
+  it('admits a page path ending in an image extension, and skips the demo art, the icon and the report endpoint', () => {
+    for (const url of ['/x.png', '/a/b.png']) expect(matches(url), url).toBe(true)
+    for (const url of ['/demo/tokens/1.svg', '/icon.svg', '/api/csp-report'])
       expect(matches(url), url).toBe(false)
   })
 })

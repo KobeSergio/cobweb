@@ -22,10 +22,12 @@ const nextConfig: NextConfig = {
       {
         source: '/:path*',
         headers: [
-          // The app asks wallets for signatures and transactions. It must never be shown inside another
-          // site's frame, where a click could be disguised: the proxy's Content-Security-Policy says
-          // `frame-ancestors 'none'` on every page and API route in every mode, and this header covers static
-          // files and older browsers (docs/specs/2026-10-17-production-hardening.md, decision 10).
+          // The app asks wallets for signatures and transactions. It must never be shown inside
+          // another site's frame, where a click could be disguised. In enforce and off modes the
+          // proxy's Content-Security-Policy says `frame-ancestors 'none'` on every page, and on API
+          // routes in every mode; in report-only mode a page carries no enforced policy (an
+          // enforced one would hide the nonce from Next, see `cspHeaders`), so this header is the
+          // framing block there, as it is for static files.
           { key: 'X-Frame-Options', value: 'DENY' },
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
