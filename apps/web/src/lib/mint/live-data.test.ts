@@ -118,7 +118,10 @@ describe('activityOfBody (docs/specs/2026-10-16-indexer-overview.md, section 7.5
   it('carries no activity without one, at most 10 mints, and names a group the page does not list by its id', () => {
     expect(liveOf(page, body).activity).toBeNull()
     const many = Array.from({ length: 12 }, (_, index) => mint(0, index + 1))
-    expect(activityOfBody({ holders: 1, recentMints: many }, [])?.recentMints).toHaveLength(10)
+    // The first 10 in the body's order (newest first), so the page keeps the 10 latest.
+    expect(
+      activityOfBody({ holders: 1, recentMints: many }, [])?.recentMints.map((entry) => entry.firstTokenId),
+    ).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
     expect(activityOfBody({ holders: 1, recentMints: [mint(7, 1)] }, [])?.recentMints[0]?.phase).toBe(
       'Group 7',
     )

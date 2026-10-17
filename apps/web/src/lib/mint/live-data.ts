@@ -4,18 +4,18 @@ import type { FeeSnapshot, MintGroup, WalletState } from '@/lib/demo/types'
 import { joinPhases } from '@/lib/manage/phases-view'
 import type { MintPageStatic } from './page-doc'
 
+/** The most mints the page's Recent mints shows (the Overview's shows 12, its own `RECENT_MINTS_SHOWN`). */
+const PAGE_RECENT_MINTS = 10
+
+/** The indexer's activity as the page shows it: each mint with its phase's name, null for a hidden phase. */
+export type MintActivity = { holders: number; recentMints: (MintBody & { phase: string | null })[] }
+
 /**
  * The chain's state as the mint page reads it (docs/specs/2026-10-16-mint-page-live-data.md, section 7.4), pure:
  * the freshness server's state body joined with the document's phases, the reveal and the transfer rows, the
  * indexer's holders and latest mints (docs/specs/2026-10-16-indexer-overview.md, section 7.5); the wallet answer
  * as allowances; and the mints this page saw land. Liveness is each group's `active`.
  */
-
-/** The most mints Recent mints shows. */
-const RECENT_MINTS_SHOWN = 10
-
-/** The indexer's activity as the page shows it: each mint with its phase's name, null for a hidden phase. */
-export type MintActivity = { holders: number; recentMints: (MintBody & { phase: string | null })[] }
 export type MintLive = {
   block: number
   blockTimestamp: number
@@ -75,7 +75,7 @@ export function activityOfBody(
   if (!activity) return null
   return {
     holders: activity.holders,
-    recentMints: activity.recentMints.slice(0, RECENT_MINTS_SHOWN).map((mint) => {
+    recentMints: activity.recentMints.slice(0, PAGE_RECENT_MINTS).map((mint) => {
       const group = groups.find((entry) => entry.id === mint.groupId)
       const phase = !group ? `Group ${mint.groupId}` : group.visible === false ? null : group.name
       return { ...mint, phase }
