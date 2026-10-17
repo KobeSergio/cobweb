@@ -14,6 +14,7 @@ import type { Summary } from './activity.ts'
 import { IndexerWriteError, type IndexerDb, type RecordWrite, type Target } from './indexer-db.ts'
 import type { IndexLog } from './indexer-records.ts'
 import { chainIndexer } from './indexer.ts'
+import { RECENT_WINDOW_MS } from './recent.ts'
 import type { Tier } from './tiers.ts'
 
 /** Anvil asks for 1 confirmation, so the safe block is the head. */
@@ -926,6 +927,9 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
       failedPasses: 0,
       lastError: null,
       unpaired: 1,
+      failedPassesRecent: 0,
+      lastGoodPassAt: new Date(1_000_000).toISOString(),
+      behindSince: null,
     })
     const unpairedLine = `A mint or airdrop in ${TX(102n)} on Anvil did not pair with its transfers and is not recorded.`
     expect(linesWith('did not pair')).toEqual([unpairedLine])
@@ -935,6 +939,42 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     expect(logCalls(chain.calls)).toEqual(['logs 69-103 x1', 'logs 72-104 x1'])
     expect(indexer.health().unpaired).toBe(1)
     expect(linesWith('did not pair')).toEqual([unpairedLine])
+    await indexer.stop()
+  })
+
+  it('sets its last good pass only after a pass without a failure, and counts the failures of the last 5 minutes (docs/specs/2026-10-17-production-hardening.md, section 8.2)', async () => {
+    const { chain, client } = fakeChain()
+    const { port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 100n)])
+    chain.headFailures = 1
+    const indexer = indexerOn(client, port)
+    await settle()
+    expect(indexer.health()).toMatchObject({ failedPasses: 1, failedPassesRecent: 1, lastGoodPassAt: null })
+    // The fast delay after a failed pass, then a good one.
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(indexer.health()).toMatchObject({
+      failedPasses: 1,
+      failedPassesRecent: 1,
+      lastGoodPassAt: new Date(1_005_000).toISOString(),
+    })
+    await vi.advanceTimersByTimeAsync(RECENT_WINDOW_MS)
+    expect(indexer.health()).toMatchObject({ failedPasses: 1, failedPassesRecent: 0 })
+    await indexer.stop()
+  })
+
+  it('notes since when its collections are behind at the end of each pass, and clears it once none is', async () => {
+    const { chain, client } = fakeChain()
+    const { port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 100n)])
+    // 500 blocks behind: more than one pass's scan of 500 from 32 blocks below the cursor.
+    chain.head = 600n
+    const indexer = indexerOn(client, port)
+    await settle()
+    expect(indexer.health()).toMatchObject({ behind: 1, behindSince: new Date(1_000_000).toISOString() })
+    // The backfill's next pass, 1 s later, reaches the safe block.
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(indexer.health()).toMatchObject({ behind: 0, behindSince: null })
+    chain.head = 1_200n
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(indexer.health()).toMatchObject({ behind: 1, behindSince: new Date(1_021_000).toISOString() })
     await indexer.stop()
   })
 

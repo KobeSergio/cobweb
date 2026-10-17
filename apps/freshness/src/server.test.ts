@@ -61,7 +61,8 @@ describe('startFreshness with the indexer (docs/specs/2026-10-17-production-hard
       indexer: { databaseUrl: 'postgresql://cobweb_indexer:pw@127.0.0.1:1/postgres' },
     })
     const health = await fetch(`${freshness.url}/health`)
-    expect([health.status, ((await health.json()) as { status: string }).status]).toEqual([200, 'ok'])
+    expect(health.status).toBe(200)
+    expect(await health.json()).toMatchObject({ status: 'ok', problems: [] })
     await freshness.close()
     expect(console.log).toHaveBeenCalledWith(
       expect.stringContaining('The indexer runs on no chain as cobweb_indexer.'),

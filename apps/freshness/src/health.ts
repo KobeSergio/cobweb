@@ -30,6 +30,8 @@ export type ReaderHealth = {
   lastError: string | null
   /** Log scans skipped or failed, whose collections were read in full instead. */
   logGaps: number
+  /** Failed ticks and noted factory failures in the last 5 minutes. */
+  failedTicksRecent: number
 }
 
 /** A chain's indexer on /health (docs/specs/2026-10-16-indexer-overview.md, section 6.7). */
@@ -53,6 +55,12 @@ export type IndexerHealth = {
   lastError: string | null
   /** Mints and airdrops that did not pair with their transfers, so are not recorded. */
   unpaired: number
+  /** Failures in the last 5 minutes. */
+  failedPassesRecent: number
+  /** When the last pass without a failure ended (ISO); null before one. */
+  lastGoodPassAt: string | null
+  /** Since when some collection has been behind, without a pass finding none since (ISO); null while none is. */
+  behindSince: string | null
 }
 
 /** A chain on /health: its reader's fields, then its indexer's, null while the indexer is off. */
@@ -64,11 +72,86 @@ export function chainHealth(reader: ReaderHealth, indexer: IndexerHealth | null)
 }
 
 export type HealthBody = {
-  status: 'ok'
+  status: 'ok' | 'degraded'
+  /** One sentence per threshold crossed, which an alert can show; empty while `status` is ok. */
+  problems: string[]
   startedAt: string
   hot: number
   chains: ChainHealth[]
   wallet: { windows: number; answered: number; waiting: number }
+}
+
+/**
+ * The thresholds /health answers `degraded` past (docs/specs/2026-10-17-production-hardening.md, section 8.2). It
+ * stays 200, so Railway's deploy check never refuses a deployment during an RPC outage; a monitor keys on the body:
+ * the keyword `"status":"ok"`, and the `problems` in its alert. Per chain:
+ * - readerStaleS: with hot collections, no good read for more than 60 s (counted from the start while there was
+ *   none): the chain's RPC is down or refusing;
+ * - readerLagS: with hot collections, the newest block read is more than 120 s old: the node is stuck, or a quiet
+ *   chain makes no block;
+ * - readerFailures: more than 10 failed reads (ticks and factory reads) in 5 minutes: the RPC is flapping;
+ * - indexerStaleS: with the indexer on, no pass without a failure for more than 120 s (from the start while there
+ *   was none): the database or the RPC fails every pass;
+ * - indexerBehindS: collections behind the safe block for more than 900 s: a backfill too slow, or a stuck one;
+ * - indexerFailures: more than 5 failed passes in 5 minutes.
+ */
+export const HEALTH_LIMITS = {
+  readerStaleS: 60,
+  readerLagS: 120,
+  readerFailures: 10,
+  indexerStaleS: 120,
+  indexerBehindS: 900,
+  indexerFailures: 5,
+} as const
+
+/** Whole seconds from an ISO time, or from the start while there is none, to `now`. */
+const secondsSince = (iso: string | null, startedAt: number, now: number) =>
+  Math.floor((now - (iso === null ? startedAt : Date.parse(iso))) / 1_000)
+
+/**
+ * One sentence per threshold crossed, per chain, in the order of `HEALTH_LIMITS`. A chain with no hot collection
+ * has no reader problem but its failures; an indexer that is off has none of its own.
+ */
+export function healthProblems(
+  chains: readonly ChainHealth[],
+  now: number,
+  startedAt: number,
+  limits: typeof HEALTH_LIMITS = HEALTH_LIMITS,
+): string[] {
+  return chains.flatMap((chain) => {
+    const problems: string[] = []
+    if (chain.hot > 0) {
+      const stale = secondsSince(chain.lastGoodTickAt, startedAt, now)
+      if (stale > limits.readerStaleS)
+        problems.push(`${chain.name}: no good read for ${stale} s (limit ${limits.readerStaleS} s).`)
+      if (chain.lagSeconds !== null && chain.lagSeconds > limits.readerLagS)
+        problems.push(
+          `${chain.name}: the newest block is ${chain.lagSeconds} s old (limit ${limits.readerLagS} s).`,
+        )
+    }
+    if (chain.failedTicksRecent > limits.readerFailures)
+      problems.push(
+        `${chain.name}: ${chain.failedTicksRecent} failed reads in 5 minutes (limit ${limits.readerFailures}).`,
+      )
+    const indexer = chain.indexer
+    if (indexer) {
+      const stale = secondsSince(indexer.lastGoodPassAt, startedAt, now)
+      if (stale > limits.indexerStaleS)
+        problems.push(`${chain.name}: no good index pass for ${stale} s (limit ${limits.indexerStaleS} s).`)
+      if (indexer.behindSince !== null) {
+        const behind = secondsSince(indexer.behindSince, startedAt, now)
+        if (behind > limits.indexerBehindS)
+          problems.push(
+            `${chain.name}: ${indexer.behind} collections behind for ${behind} s (limit ${limits.indexerBehindS} s).`,
+          )
+      }
+      if (indexer.failedPassesRecent > limits.indexerFailures)
+        problems.push(
+          `${chain.name}: ${indexer.failedPassesRecent} failed index passes in 5 minutes (limit ${limits.indexerFailures}).`,
+        )
+    }
+    return problems
+  })
 }
 
 /** How many causes deep the log line looks, so a cause that refers back to itself cannot loop. */

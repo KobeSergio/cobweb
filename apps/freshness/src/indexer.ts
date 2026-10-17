@@ -19,6 +19,7 @@ import {
   type Scan,
 } from './indexer-plan.ts'
 import { eventBlocksOf, INDEX_EVENTS, recordsOf, type IndexLog, type Records } from './indexer-records.ts'
+import { recentCounter } from './recent.ts'
 import type { Tier } from './tiers.ts'
 
 export type { IndexerHealth } from './health.ts'
@@ -109,6 +110,12 @@ export function chainIndexer(
   let failedPasses = 0
   let lastError: string | null = null
   let unpaired = 0
+  /** Each counted failure, for /health's 5-minute count. */
+  const recentFailures = recentCounter()
+  /** When the last pass without a failure ended; null before one. */
+  let lastGoodPassAt: number | null = null
+  /** Since when some collection has been behind, set at the end of a pass that finds one; null while none is. */
+  let behindSince: number | null = null
 
   /** Whether the line under `key` may be logged at `now`: at most once a minute. Notes it when it may. */
   function mayLog(key: string, now: number): boolean {
@@ -121,7 +128,27 @@ export function chainIndexer(
   /** Counts a failure for /health, as its name and codes, never its message. */
   function counted(error: unknown): void {
     failedPasses++
+    recentFailures.note(Date.now())
     lastError = failureName(error)
+  }
+
+  /** The collections not read to the safe block yet, or last read there more than 300 s of chain time before the head. */
+  const behindCount = () =>
+    [...cursors.values()].filter(
+      (cursor) =>
+        cursor.syncedAt === null || (headTime !== null && headTime - cursor.syncedAt > ACTIVITY_LAG_MAX_S),
+    ).length
+
+  /**
+   * The end of a pass that reached the chain: its time, its time as the last good pass when it had no failure, and
+   * since when some collection has been behind (now when the count rises from 0, null at 0).
+   */
+  function passEnded(failure: boolean): void {
+    const now = Date.now()
+    lastPassAt = now
+    if (!failure) lastGoodPassAt = now
+    if (behindCount() === 0) behindSince = null
+    else behindSince ??= now
   }
 
   /**
@@ -414,7 +441,7 @@ export function chainIndexer(
     } catch (error) {
       failed('head', `An index pass on ${chain.name} failed`, error)
       anyFailure = true
-      lastPassAt = Date.now()
+      passEnded(true)
       return wait(false)
     }
     const safe = safeBlockOf(head.number, chain.confirmations)
@@ -429,7 +456,7 @@ export function chainIndexer(
       // next pass, after the fast delay, reads again from the written blocks (Minor 5).
       if (outcome.writeFailed) break
     }
-    lastPassAt = Date.now()
+    passEnded(anyFailure)
     return wait([...cursors.values()].some((cursor) => cursor.scanned < safe))
   }
 
@@ -455,19 +482,18 @@ export function chainIndexer(
       return activityFrom(summaries.get(id), cursors.get(id)?.syncedAt ?? null, blockTimestamp)
     },
     health() {
-      const all = [...cursors.values()]
+      const iso = (at: number | null) => (at === null ? null : new Date(at).toISOString())
       return {
-        collections: all.length,
-        behind: all.filter(
-          (cursor) =>
-            cursor.syncedAt === null ||
-            (headTime !== null && headTime - cursor.syncedAt > ACTIVITY_LAG_MAX_S),
-        ).length,
+        collections: cursors.size,
+        behind: behindCount(),
         block: safeBlock === null ? null : Number(safeBlock),
-        lastPassAt: lastPassAt === null ? null : new Date(lastPassAt).toISOString(),
+        lastPassAt: iso(lastPassAt),
         failedPasses,
         lastError,
         unpaired,
+        failedPassesRecent: recentFailures.count(Date.now()),
+        lastGoodPassAt: iso(lastGoodPassAt),
+        behindSince: iso(behindSince),
       }
     },
     async stop() {

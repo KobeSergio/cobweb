@@ -20,6 +20,7 @@ import {
 import { errorLine, errorName, type ReaderHealth } from './health.ts'
 import type { HotEntry, HotSet } from './hot-set.ts'
 import { scanLogs, type GetLogs } from './logs.ts'
+import { recentCounter } from './recent.ts'
 import { chainTier, nextDelayMs, TIER_MS, windowOpen, type Tier } from './tiers.ts'
 
 /** The fees `collectionState()` carries, wei as decimal strings. */
@@ -85,6 +86,8 @@ export function chainReader(
   let failedTicks = 0
   let lastError: string | null = null
   let logGaps = 0
+  /** Failed ticks and noted factory failures, for /health's 5-minute count. */
+  const recentFailures = recentCounter()
   /** When a noted failure was last logged; null before the first. */
   let notedAt: number | null = null
 
@@ -104,6 +107,7 @@ export function chainReader(
   /** Counts a failed tick, named for /health and logged as its name and viem's short message, never more. */
   function failed(error: unknown): void {
     failedTicks++
+    recentFailures.note(Date.now())
     lastError = errorName(error)
     console.error(`A tick on ${chain.name} failed: ${errorLine(error)}`)
   }
@@ -354,6 +358,7 @@ export function chainReader(
         failedTicks,
         lastError,
         logGaps,
+        failedTicksRecent: recentFailures.count(Date.now()),
       }
     },
     /**
@@ -361,9 +366,10 @@ export function chainReader(
      * so /health shows the chain failing even while no tick runs, and logged at most once per 10 s.
      */
     noteFailure(error) {
-      failedTicks++
-      lastError = errorName(error)
       const now = Date.now()
+      failedTicks++
+      recentFailures.note(now)
+      lastError = errorName(error)
       if (notedAt !== null && now - notedAt < NOTE_LOG_EVERY_MS) return
       notedAt = now
       console.error(`The factory on ${chain.name} could not be read: ${errorLine(error)}`)

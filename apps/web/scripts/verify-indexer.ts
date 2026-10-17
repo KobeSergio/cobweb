@@ -702,7 +702,7 @@ async function main(): Promise<void> {
   )
 
   await check(
-    "14. health: /health reports chain 31337's indexer with every collection the database indexes there (this one among them), none behind, its block and last pass, no failed pass and nothing unpaired, its reader with no failure either, and no key, URL or host anywhere in the body",
+    "14. health: /health answers status ok with no problems and reports chain 31337's indexer with every collection the database indexes there (this one among them), none behind, its block, its last pass, its last good pass and no failed pass in the last 5 minutes, no failed pass at all and nothing unpaired, its reader with no failure either, and no key, URL or host anywhere in the body",
     async () => {
       const head = Number(await chain.getBlockNumber())
       const cursors = await admin.from('indexer_cursors').select('collection_id').eq('chain_id', 31337)
@@ -715,10 +715,14 @@ async function main(): Promise<void> {
       }, RECORDED_WITHIN_MS)
       if (!health) return `health ${JSON.stringify((await healthOf()).body.chains)}`
       const { indexer, text, body } = health
-      const recent = indexer.lastPassAt !== null && Date.now() - Date.parse(indexer.lastPassAt) < 5_000
+      if (body.status !== 'ok' || body.problems.length) return `${body.status}: ${body.problems.join(' ')}`
+      const within = (at: string | null) => at !== null && Date.now() - Date.parse(at) < 5_000
       if (
         indexer.collections !== cursors.data.length ||
-        !recent ||
+        !within(indexer.lastPassAt) ||
+        !within(indexer.lastGoodPassAt) ||
+        indexer.failedPassesRecent !== 0 ||
+        indexer.behindSince !== null ||
         indexer.failedPasses !== 0 ||
         indexer.lastError !== null ||
         indexer.unpaired !== 0

@@ -201,12 +201,13 @@ async function main(): Promise<void> {
   freshness = await startFreshness({ port: 0, host: '127.0.0.1', chainIds: [31337] })
 
   await check(
-    '2. at start: before any request, /health answers 200 with no-store, chain 31337 served with no hot collection and no block, and the switch has carried no request',
+    '2. at start: before any request, /health answers 200 with no-store and status ok with no problems, chain 31337 served with no hot collection and no block, and the switch has carried no request',
     async () => {
       const answer = await get('/health')
       const body = JSON.parse(answer.text) as HealthBody
       if (answer.status !== 200 || answer.headers.get('cache-control') !== 'no-store')
         return `${answer.status} ${answer.headers.get('cache-control')}`
+      if (body.status !== 'ok' || body.problems.length) return `${body.status}: ${body.problems.join(' ')}`
       const [anvilHealth] = body.chains
       if (body.chains.length !== 1 || anvilHealth?.chainId !== 31337) return JSON.stringify(body.chains)
       if (anvilHealth.hot !== 0 || anvilHealth.tier !== null || anvilHealth.block !== null)

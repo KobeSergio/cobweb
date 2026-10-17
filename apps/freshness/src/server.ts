@@ -6,7 +6,7 @@ import type { Address } from 'viem'
 import { chainReader } from './chain-reader.ts'
 import { collectionCheck } from './collection-check.ts'
 import { checkIndexerOptions, INDEXER_ROLE, servedChains, type IndexerOptions } from './config.ts'
-import { chainHealth, failureLine, type HealthBody } from './health.ts'
+import { chainHealth, failureLine, healthProblems, type HealthBody } from './health.ts'
 import { hotSet, JOIN_WAIT_MS, type HotEntry } from './hot-set.ts'
 import { chainIndexer, type ChainIndexer } from './indexer.ts'
 import { postgresIndexerDb } from './indexer-db.ts'
@@ -56,7 +56,8 @@ export type Freshness = { url: string; close(): Promise<void> }
 const JOIN_POLL_MS = 25
 
 export async function startFreshness(options: FreshnessOptions): Promise<Freshness> {
-  const startedAt = new Date().toISOString()
+  const startedMs = Date.now()
+  const startedAt = new Date(startedMs).toISOString()
   const indexing = options.indexer ?? null
   // Checked and built before the server listens, so options it refuses never leave a caller in process with a
   // listening server; postgres.js connects on the first call, and the indexers' passes start once it listens.
@@ -138,15 +139,24 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
     return walletAnswer(answer)
   }
 
+  /**
+   * /health: each chain's reader and indexer, the wallet windows, and `degraded` with one sentence per threshold
+   * crossed (docs/specs/2026-10-17-production-hardening.md, section 8.2). Always 200.
+   */
   function health(): HealthBody {
     const chains = [...served.values()]
     const stats = chains.map(({ windows }) => windows.stats())
     const total = (key: 'windows' | 'answered' | 'waiting') => stats.reduce((sum, stat) => sum + stat[key], 0)
+    const entries = chains.map(({ reader, indexer }) =>
+      chainHealth(reader.health(), indexer?.health() ?? null),
+    )
+    const problems = healthProblems(entries, Date.now(), startedMs)
     return {
-      status: 'ok',
+      status: problems.length ? 'degraded' : 'ok',
+      problems,
       startedAt,
       hot: hot.size(),
-      chains: chains.map(({ reader, indexer }) => chainHealth(reader.health(), indexer?.health() ?? null)),
+      chains: entries,
       wallet: { windows: total('windows'), answered: total('answered'), waiting: total('waiting') },
     }
   }

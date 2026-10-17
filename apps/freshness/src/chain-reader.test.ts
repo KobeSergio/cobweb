@@ -13,6 +13,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { chainReader, NOTE_LOG_EVERY_MS } from './chain-reader.ts'
 import { hotSet, type HotSet } from './hot-set.ts'
+import { RECENT_WINDOW_MS } from './recent.ts'
 
 const ANVIL: ChainConfig = chainById(31337, false)!
 const A: Address = '0x0409454C375c8a6aB05383bFB6D9FcDe9ebB8F85'
@@ -463,6 +464,22 @@ describe('chainReader (docs/specs/2026-10-16-freshness-server.md, section 6.4)',
       'The factory on Anvil could not be read: TypeError',
     ])
     await reader.stop()
+  })
+
+  it('counts failed ticks and the factory reads the server could not make over the last 5 minutes, for /health', async () => {
+    const { chain, client } = fakeChain()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const hot = hotSet()
+    const reader = chainReader(ANVIL, hot, client)
+    reader.noteFailure(rpcDown(429))
+    chain.failure = rpcDown(503)
+    hot.join(31337, A, Date.now())
+    reader.wake()
+    await settle()
+    expect(reader.health()).toMatchObject({ failedTicks: 2, failedTicksRecent: 2 })
+    await reader.stop()
+    vi.setSystemTime(Date.now() + RECENT_WINDOW_MS)
+    expect(reader.health()).toMatchObject({ failedTicks: 2, failedTicksRecent: 0 })
   })
 
   it("fails a tick whose head does not answer, keeping every read and logging the error's name, never the RPC URL", async () => {

@@ -6,6 +6,9 @@ import {
   errorName,
   failureLine,
   failureName,
+  HEALTH_LIMITS,
+  healthProblems,
+  type ChainHealth,
   type IndexerHealth,
   type ReaderHealth,
 } from './health.ts'
@@ -97,6 +100,7 @@ describe('chainHealth (docs/specs/2026-10-16-indexer-overview.md, section 6.7)',
     failedTicks: 0,
     lastError: null,
     logGaps: 0,
+    failedTicksRecent: 0,
   }
   const indexer: IndexerHealth = {
     collections: 2,
@@ -106,6 +110,9 @@ describe('chainHealth (docs/specs/2026-10-16-indexer-overview.md, section 6.7)',
     failedPasses: 3,
     lastError: 'IndexerWriteError',
     unpaired: 1,
+    failedPassesRecent: 0,
+    lastGoodPassAt: '2026-10-16T12:00:01.000Z',
+    behindSince: null,
   }
 
   it("keeps the reader's fields and adds the indexer's last, null while the indexer is off", () => {
@@ -121,6 +128,113 @@ describe('chainHealth (docs/specs/2026-10-16-indexer-overview.md, section 6.7)',
       'failedPasses',
       'lastError',
       'unpaired',
+      'failedPassesRecent',
+      'lastGoodPassAt',
+      'behindSince',
+    ])
+  })
+})
+
+describe('healthProblems (docs/specs/2026-10-17-production-hardening.md, section 8.2)', () => {
+  const START = Date.parse('2026-10-17T12:00:00.000Z')
+  /** ISO for `seconds` after the start. */
+  const at = (seconds: number) => new Date(START + seconds * 1_000).toISOString()
+  /** A chain read well and indexed well at 1,000 s past the start, with one hot collection. */
+  const healthy = (
+    changes: Partial<ReaderHealth> = {},
+    indexer: Partial<IndexerHealth> | null = {},
+  ): ChainHealth => ({
+    chainId: 31337,
+    name: 'Anvil',
+    hot: 1,
+    tier: 'live',
+    block: 120,
+    lagSeconds: 2,
+    lastGoodTickAt: at(1_000),
+    failedTicks: 40,
+    lastError: 'HttpRequestError',
+    logGaps: 0,
+    failedTicksRecent: 0,
+    ...changes,
+    indexer:
+      indexer === null
+        ? null
+        : {
+            collections: 2,
+            behind: 0,
+            block: 119,
+            lastPassAt: at(1_000),
+            failedPasses: 30,
+            lastError: 'IndexerWriteError (23514)',
+            unpaired: 0,
+            failedPassesRecent: 0,
+            lastGoodPassAt: at(1_000),
+            behindSince: null,
+            ...indexer,
+          },
+  })
+  const problemsAt = (seconds: number, chain: ChainHealth) =>
+    healthProblems([chain], START + seconds * 1_000, START)
+
+  it('reads ok at each limit, the cumulative counts aside', () => {
+    expect(HEALTH_LIMITS).toEqual({
+      readerStaleS: 60,
+      readerLagS: 120,
+      readerFailures: 10,
+      indexerStaleS: 120,
+      indexerBehindS: 900,
+      indexerFailures: 5,
+    })
+    const atLimits = healthy(
+      { lagSeconds: 120, failedTicksRecent: 10 },
+      { failedPassesRecent: 5, behind: 1, behindSince: at(160) },
+    )
+    expect(problemsAt(1_060, atLimits)).toEqual([])
+  })
+
+  it("says one sentence for each limit a chain's reader passes", () => {
+    expect(problemsAt(1_061, healthy())).toEqual(['Anvil: no good read for 61 s (limit 60 s).'])
+    expect(problemsAt(1_000, healthy({ lagSeconds: 121 }))).toEqual([
+      'Anvil: the newest block is 121 s old (limit 120 s).',
+    ])
+    expect(problemsAt(1_000, healthy({ failedTicksRecent: 11 }))).toEqual([
+      'Anvil: 11 failed reads in 5 minutes (limit 10).',
+    ])
+  })
+
+  it("says one sentence for each limit a chain's indexer passes", () => {
+    const fresh = { lastGoodTickAt: at(1_121) }
+    expect(problemsAt(1_121, healthy(fresh))).toEqual(['Anvil: no good index pass for 121 s (limit 120 s).'])
+    expect(problemsAt(1_000, healthy({}, { behind: 3, behindSince: at(99) }))).toEqual([
+      'Anvil: 3 collections behind for 901 s (limit 900 s).',
+    ])
+    expect(problemsAt(1_000, healthy({}, { failedPassesRecent: 6 }))).toEqual([
+      'Anvil: 6 failed index passes in 5 minutes (limit 5).',
+    ])
+  })
+
+  it('counts from the start while there was no good read or pass yet', () => {
+    const none = healthy({ lastGoodTickAt: null }, { lastGoodPassAt: null })
+    expect(problemsAt(60, none)).toEqual([])
+    expect(problemsAt(121, none)).toEqual([
+      'Anvil: no good read for 121 s (limit 60 s).',
+      'Anvil: no good index pass for 121 s (limit 120 s).',
+    ])
+  })
+
+  it('has no reader problem but its failures with no hot collection, and no indexer problem with the indexer off', () => {
+    const quiet = healthy({ hot: 0, lastGoodTickAt: null, lagSeconds: 500, failedTicksRecent: 11 }, null)
+    expect(problemsAt(10_000, quiet)).toEqual(['Anvil: 11 failed reads in 5 minutes (limit 10).'])
+  })
+
+  it('names each chain in the order served', () => {
+    const base = healthy({ chainId: 8453, name: 'Base', failedTicksRecent: 12 }, null)
+    expect(healthProblems([base, healthy({ lagSeconds: 200 })], START + 1_999_000, START)).toEqual([
+      'Base: no good read for 999 s (limit 60 s).',
+      'Base: 12 failed reads in 5 minutes (limit 10).',
+      'Anvil: no good read for 999 s (limit 60 s).',
+      'Anvil: the newest block is 200 s old (limit 120 s).',
+      'Anvil: no good index pass for 999 s (limit 120 s).',
     ])
   })
 })
