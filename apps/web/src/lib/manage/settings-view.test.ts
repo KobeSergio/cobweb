@@ -2,8 +2,14 @@ import { zeroAddress, type Address } from 'viem'
 import { describe, expect, it } from 'vitest'
 import type { PreparedArgs } from '@/lib/deploy/deploy-types'
 import type { ChainState } from './phases-types'
-import type { RevealTargets, SettingsCopyRow, SettingsState, SettingsView } from './settings-types'
-import { ipfsUriValid, settingsPayload, settingsViewOf, tokenUriOf } from './settings-view'
+import type {
+  RevealTargets,
+  SettingsCopyRow,
+  SettingsState,
+  SettingsView,
+  WithdrawalRow,
+} from './settings-types'
+import { ipfsUriValid, settingsPayload, settingsViewOf, tokenUriOf, withdrawalsOf } from './settings-view'
 
 const CONTRACT: Address = '0x0409454C375c8a6aB05383bFB6D9FcDe9ebB8F85'
 const OWNER: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
@@ -157,6 +163,22 @@ describe('settingsViewOf', () => {
     ).toMatchObject({
       transferValidator: zeroAddress,
     })
+  })
+})
+
+describe('withdrawalsOf (docs/specs/2026-10-16-indexer-overview.md, decision 15)', () => {
+  it("sums the recorded withdrawals to the wei and names the highest block as the read's atLeast", () => {
+    // Cobweb's and the indexer's rows alike, in the order read (by transaction), so not by block.
+    const rows: WithdrawalRow[] = [
+      { amount_wei: '1500000000000000000000', block: 120 },
+      { amount_wei: '2', block: 135 },
+      { amount_wei: '300', block: 128 },
+    ]
+    expect(withdrawalsOf(rows)).toEqual({ withdrawnWei: '1500000000000000000302', atLeast: 135n })
+  })
+
+  it('reads 0 and no atLeast without a withdrawal, so the read stays at the latest block', () => {
+    expect(withdrawalsOf([])).toEqual({ withdrawnWei: '0', atLeast: undefined })
   })
 })
 

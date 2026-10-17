@@ -29,7 +29,7 @@ export type SettingsView = {
   platformBalanceWei: string | null
   /** `pendingBalance(wallet)` for the session wallet; null while the chain does not answer. */
   pendingBalanceWei: string | null
-  /** The sum of the withdrawals Cobweb confirmed. */
+  /** The sum of the recorded withdrawals: those Cobweb confirmed and those the indexer read. */
   withdrawnWei: string
   /** `fees()`; null while the chain does not answer. */
   fees: FeeSnapshot | null
@@ -79,6 +79,9 @@ export type SettingsReader = (
   wallet: Address,
   atLeast?: bigint,
 ) => Promise<SettingsState | null>
+
+/** A `withdrawals` row as Settings reads it: the amount as text, so no wei is lost, and its block. */
+export type WithdrawalRow = { amount_wei: string; block: number }
 
 /** The deployments copies Settings shows while the chain does not answer, and the deploy-time arguments. */
 export type SettingsCopyRow = {

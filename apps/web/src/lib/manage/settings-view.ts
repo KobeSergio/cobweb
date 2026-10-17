@@ -1,12 +1,19 @@
 import { pointerOf } from '@cobweb/shared'
 import { getAddress, type Address } from 'viem'
-import type { RevealTargets, SettingsCopyRow, SettingsState, SettingsView } from './settings-types'
+import type {
+  RevealTargets,
+  SettingsCopyRow,
+  SettingsState,
+  SettingsView,
+  WithdrawalRow,
+} from './settings-types'
 
 /**
  * The Settings view, pure (docs/specs/2026-10-15-airdrop-settings.md, section 6.1), for the browser and the
- * server: the IPFS links Reveal takes, token 1's URI by the contract's rule, and the view from a read or the
- * copies. The transfer levels, `levelOf` and `pointerOf` live in the shared package
- * (docs/specs/2026-10-16-freshness-server.md, section 5.1).
+ * server: the IPFS links Reveal takes, token 1's URI by the contract's rule, the view from a read or the
+ * copies, and the recorded withdrawals' sum with the block the read must reach. The transfer levels,
+ * `levelOf` and `pointerOf` live in the shared package (docs/specs/2026-10-16-freshness-server.md,
+ * section 5.1).
  */
 
 /** The longest base URI Cobweb sends. */
@@ -81,6 +88,26 @@ export function settingsViewOf(
     readAt: state.blockTimestamp,
     chainReachable: true,
   }
+}
+
+/**
+ * The recorded withdrawals, those Cobweb confirmed and those the indexer read: their sum, wei as a decimal
+ * string, and the highest block one landed in (undefined without one). The chain read takes that block as
+ * its `atLeast`, so a node behind the last withdrawal answers nothing rather than the balance from before
+ * it, which "Paid by minters" would count beside the withdrawal.
+ */
+export function withdrawalsOf(rows: readonly WithdrawalRow[]): {
+  withdrawnWei: string
+  atLeast: bigint | undefined
+} {
+  let sum = 0n
+  let atLeast: bigint | undefined
+  for (const row of rows) {
+    sum += BigInt(row.amount_wei)
+    const block = BigInt(row.block)
+    if (atLeast === undefined || block > atLeast) atLeast = block
+  }
+  return { withdrawnWei: sum.toString(), atLeast }
 }
 
 /** What `settings_refresh` copies from a read, addresses lowercase. */

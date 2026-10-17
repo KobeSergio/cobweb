@@ -139,6 +139,9 @@ export function RecentMints({
       </Note>
     )
   const mints = activity.recentMints
+  // Each mint's time counts from the later of the read's time and the count's: the copy's time can trail a
+  // recorded mint, which would read "in under a minute", and the count is no earlier than any mint it holds.
+  const now = Math.max(readAt, activity.countedAt ?? readAt)
   const behind = behindOf(activity, readAt, chainReachable) && activity.countedAt !== null && (
     <p className="text-muted-foreground border-t px-6 pt-3 text-[0.8125rem]">
       Counted to the chain as it was {duration(readAt - activity.countedAt)} ago. Newer mints show once Cobweb
@@ -172,7 +175,7 @@ export function RecentMints({
                 {shortAddress(mint.minter)}
               </TableCell>
               <TableCell className="text-muted-foreground">
-                {groups.find((group) => group.id === mint.groupId)?.name ?? `Phase ${mint.groupId}`}
+                {groups.find((group) => group.id === mint.groupId)?.name ?? `Group ${mint.groupId}`}
               </TableCell>
               <TableCell className="numeric text-right">{mint.amount}</TableCell>
               <TableCell className="numeric text-muted-foreground text-right">
@@ -187,7 +190,7 @@ export function RecentMints({
                   rel="noreferrer"
                   className="text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex items-center gap-1 rounded-sm outline-none focus-visible:ring-2"
                 >
-                  {relativeTo(mint.at, readAt)}
+                  {relativeTo(mint.at, now)}
                   <ExternalLinkIcon aria-hidden="true" className="size-3" />
                   <span className="sr-only">, view transaction</span>
                 </a>

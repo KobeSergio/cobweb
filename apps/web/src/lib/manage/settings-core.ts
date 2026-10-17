@@ -43,17 +43,19 @@ import type {
   SettingsState,
   SettingsView,
   TransferLevelState,
+  WithdrawalRow,
 } from './settings-types'
-import { settingsPayload, settingsViewOf } from './settings-view'
+import { settingsPayload, settingsViewOf, withdrawalsOf } from './settings-view'
 
 /**
  * Settings on the server (docs/specs/2026-10-15-airdrop-settings.md, section 6.4): the read of the contract's
- * settings and balances at one block, the view with the reveal targets and the withdrawals Cobweb confirmed, and
- * the confirm of a change from its receipt, on a Supabase client acting as the signed-in creator. The actions
- * (app/actions/settings.ts) call these after the session and ownership check; verify:settings calls them with a
- * signed-in script client. No `server-only` marker, so the script can import it; the browser never does. The
- * copies are written only by `settings_refresh` from the server's own read, and withdrawals only by
- * `withdrawal_record` from a proven receipt.
+ * settings and balances at one block, the view with the reveal targets and the recorded withdrawals (those
+ * Cobweb confirmed and those the indexer read), and the confirm of a change from its receipt, on a Supabase
+ * client acting as the signed-in creator. The actions (app/actions/settings.ts) call these after the session
+ * and ownership check; verify:settings calls them with a signed-in script client. No `server-only` marker, so
+ * the script can import it; the browser never does. The copies are written only by `settings_refresh` from
+ * the server's own read; a withdrawal by `withdrawal_record` from a proven receipt, or by the indexer's
+ * `indexer_record` from its log.
  */
 export type SettingsContext = PhasesContext
 
@@ -153,17 +155,16 @@ export const readSettingsState: SettingsReader = async (chainId, address, wallet
   }
 }
 
-/** The sum of the withdrawals Cobweb confirmed for the collection, wei as a decimal string. */
-async function withdrawnWei(ctx: SettingsContext): Promise<string> {
-  const rows = await readAll<{ amount_wei: string }>((from, to) =>
+/** The collection's recorded withdrawals, Cobweb's and the indexer's, with their blocks. */
+async function withdrawalRows(ctx: SettingsContext): Promise<WithdrawalRow[]> {
+  return readAll<WithdrawalRow>((from, to) =>
     ctx.supabase
       .from('withdrawals')
-      .select('amount_wei::text')
+      .select('amount_wei::text, block')
       .eq('collection_id', ctx.collection.id)
       .order('tx_hash')
       .range(from, to),
   )
-  return rows.reduce((sum, row) => sum + BigInt(row.amount_wei), 0n).toString()
 }
 
 /**
@@ -198,8 +199,9 @@ async function refreshCopies(ctx: SettingsContext, state: SettingsState): Promis
 
 /**
  * What Settings and the Overview show (section 6.4): the contract's settings and balances read with the session
- * wallet, the copies refreshed from that read, the reveal targets (the latest done real and placeholder jobs'
- * base URIs and the deploy-time one) and the withdrawals Cobweb confirmed; the copies when the chain does not
+ * wallet, at the last recorded withdrawal's block or later, the copies refreshed from that read, the reveal
+ * targets (the latest done real and placeholder jobs' base URIs and the deploy-time one) and the sum of the
+ * recorded withdrawals, those Cobweb confirmed and those the indexer read; the copies when the chain does not
  * answer.
  */
 export async function settingsViewCore(
@@ -224,15 +226,18 @@ export async function settingsViewCore(
     placeholder: placeholder?.base_uri ?? null,
     start: copies.args.baseUri,
   }
-  const withdrawn = await withdrawnWei(ctx)
-  const state = await read(base.chainId, base.contract, getAddress(ctx.wallet))
+  const { withdrawnWei, atLeast } = withdrawalsOf(await withdrawalRows(ctx))
+  // A node behind the last recorded withdrawal would answer the balance from before it, which "Paid by
+  // minters" would count beside the withdrawal: the read is at its block or later, as a confirm's is at its
+  // receipt's.
+  const state = await read(base.chainId, base.contract, getAddress(ctx.wallet), atLeast)
   if (state) await refreshCopies(ctx, state)
   return {
     data: settingsViewOf(
       { chainId: base.chainId, contract: base.contract, readAt: base.readAt },
       copies,
       targets,
-      withdrawn,
+      withdrawnWei,
       state,
     ),
   }
@@ -255,7 +260,8 @@ function setsBaseUri(input: Hex, uri: string): boolean {
  * is PHASE_REVERTED. The level call must have gone to the collection's own validator at the receipt's block, for
  * this collection, and carry the validator's event; any other call the collection's event for it. A reveal is
  * also proven from its calldata, the URI being exactly the one sent; a withdrawal waits for the chain's depth and
- * is recorded from its event. Then the view is read at the receipt's block or later, which refreshes the copies.
+ * is recorded from its event. Then the view is read at the receipt's block or later (the last recorded
+ * withdrawal's when that is later), which refreshes the copies.
  * A second confirm of the same hash answers the view again; a withdrawal stays recorded once.
  */
 export async function confirmSettingsTxCore(
@@ -353,5 +359,8 @@ export async function confirmSettingsTxCore(
     if (recorded.error) return { error: recorded.error }
   }
   const block = receipt.blockNumber
-  return settingsViewCore(ctx, (chainId, address, wallet) => read(chainId, address, wallet, block))
+  // At the receipt's block, or at the last recorded withdrawal's when that is later.
+  return settingsViewCore(ctx, (chainId, address, wallet, atLeast) =>
+    read(chainId, address, wallet, atLeast !== undefined && atLeast > block ? atLeast : block),
+  )
 }
