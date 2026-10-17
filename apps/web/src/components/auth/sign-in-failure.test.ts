@@ -19,6 +19,12 @@ describe('signInFailureOf (docs/specs/2026-10-17-production-hardening.md, sectio
     ).toBe('captcha')
   })
 
+  it('reads captcha_failed before the rejection words, so a captcha message that says denied is still captcha', () => {
+    expect(signInFailureOf({ code: 'captcha_failed', message: 'captcha protection: request denied' })).toBe(
+      'captcha',
+    )
+  })
+
   it('reads anything else as other', () => {
     for (const error of [
       new Error('Signature verification failed'),

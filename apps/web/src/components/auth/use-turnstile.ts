@@ -7,8 +7,8 @@ import { loadTurnstile, type TurnstileApi } from '@/lib/turnstile'
  * The browser check on the sign-in button (docs/specs/2026-10-17-production-hardening.md, section 6.1). With a site
  * key it renders Turnstile's widget into its container and keeps the latest token, read through `token()` when the
  * signature returns, since a token can refresh while the wallet is open; `ready` while one is held, `failed` once
- * the check errs or its script cannot load; `reset()` asks for a new token. Without a site key it renders nothing
- * and is ready.
+ * the check errs or its script cannot load or render; `reset()` asks for a new token. Without a site key it
+ * renders nothing and is ready.
  */
 export function useTurnstile(siteKey: string | null): {
   container: RefCallback<HTMLDivElement>
@@ -29,29 +29,34 @@ export function useTurnstile(siteKey: string | null): {
     loadTurnstile().then(
       (api) => {
         if (gone) return
-        const id = api.render(element, {
-          sitekey: siteKey,
-          action: 'sign-in',
-          appearance: 'interaction-only',
-          size: 'flexible',
-          theme: 'dark',
-          'refresh-expired': 'auto',
-          callback: (token: string) => {
-            latest.current = token
-            setHeld(true)
-            setFailed(false)
-          },
-          'expired-callback': () => {
-            latest.current = null
-            setHeld(false)
-          },
-          'error-callback': () => {
-            latest.current = null
-            setHeld(false)
-            setFailed(true)
-          },
-        })
-        widget.current = { api, id }
+        try {
+          const id = api.render(element, {
+            sitekey: siteKey,
+            action: 'sign-in',
+            appearance: 'interaction-only',
+            size: 'flexible',
+            theme: 'dark',
+            'refresh-expired': 'auto',
+            callback: (token: string) => {
+              latest.current = token
+              setHeld(true)
+              setFailed(false)
+            },
+            'expired-callback': () => {
+              latest.current = null
+              setHeld(false)
+            },
+            'error-callback': () => {
+              latest.current = null
+              setHeld(false)
+              setFailed(true)
+            },
+          })
+          widget.current = { api, id }
+        } catch {
+          // Turnstile throws when it refuses a parameter, and this promise would swallow the error unseen.
+          setFailed(true)
+        }
       },
       () => {
         if (!gone) setFailed(true)
@@ -60,6 +65,8 @@ export function useTurnstile(siteKey: string | null): {
     return () => {
       gone = true
       latest.current = null
+      // The next container waits for a token of its own.
+      setHeld(false)
       if (widget.current) widget.current.api.remove(widget.current.id)
       widget.current = null
     }
