@@ -1,6 +1,6 @@
 import { availableChains } from '@cobweb/shared'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_PORT, indexerOptionsOf, portOf, servedChains } from './config.ts'
+import { checkIndexerOptions, DEFAULT_PORT, indexerOptionsOf, portOf, servedChains } from './config.ts'
 import { errorLine } from './health.ts'
 
 const FACTORY = '0x5FbDB2315678afecb367f032d93F642f64180aa3'
@@ -138,5 +138,37 @@ describe('indexerOptionsOf (docs/specs/2026-10-16-indexer-overview.md, section 6
       supabaseUrl: hosted,
       serviceRoleKey: KEY,
     })
+  })
+
+  it('refuses a SUPABASE_URL with a path, which a project URL never has, naming the variable, never the value', () => {
+    for (const supabaseUrl of [
+      'https://abcdefghijklmnopqrst.supabase.co/rest/v1',
+      'http://127.0.0.1:54321/secret-path',
+      'http://127.0.0.1:54321//',
+    ]) {
+      const line = errorLine(
+        thrownBy(() => indexerOptionsOf({ SUPABASE_URL: supabaseUrl, SUPABASE_SERVICE_ROLE_KEY: KEY })),
+      )
+      expect(line).toBe("ConfigurationError: SUPABASE_URL must be the project's URL, with no path.")
+      expect(line).not.toContain('secret-path')
+    }
+    // The root path, written or not, is the project URL.
+    for (const supabaseUrl of ['http://127.0.0.1:54321/', 'https://abcdefghijklmnopqrst.supabase.co'])
+      expect(indexerOptionsOf({ SUPABASE_URL: supabaseUrl, SUPABASE_SERVICE_ROLE_KEY: KEY })).toEqual({
+        supabaseUrl,
+        serviceRoleKey: KEY,
+      })
+  })
+
+  it("checks a caller's options by the same rules, the passes' pace kept", () => {
+    const options = { supabaseUrl: URL, serviceRoleKey: KEY, targetsEveryMs: 1_000 }
+    expect(checkIndexerOptions(options)).toBe(options)
+    for (const [refused, sentence] of [
+      [{ supabaseUrl: '', serviceRoleKey: '' }, 'are both needed'],
+      [{ supabaseUrl: URL, serviceRoleKey: '' }, 'are both needed'],
+      [{ supabaseUrl: 'not a url', serviceRoleKey: KEY }, 'must be an http or https URL'],
+      [{ supabaseUrl: `${URL}/rest/v1`, serviceRoleKey: KEY }, 'with no path'],
+    ] as const)
+      expect(errorLine(thrownBy(() => checkIndexerOptions(refused)))).toContain(sentence)
   })
 })

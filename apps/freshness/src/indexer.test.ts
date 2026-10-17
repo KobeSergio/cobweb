@@ -2,6 +2,7 @@ import { chainById, type ChainConfig } from '@cobweb/shared'
 import {
   getAddress,
   HttpRequestError,
+  RpcRequestError,
   TransactionReceiptNotFoundError,
   zeroAddress,
   type Address,
@@ -19,11 +20,19 @@ import type { Tier } from './tiers.ts'
 const ANVIL: ChainConfig = chainById(31337, false)!
 const A: Address = '0x0409454C375c8a6aB05383bFB6D9FcDe9ebB8F85'
 const B: Address = '0x5FbDB2315678afecb367f032d93F642f64180aa3'
+const C: Address = '0x00000000000000000000000000000000000000c3'
+const X: Address = '0x00000000000000000000000000000000000000e5'
 const MINTER: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
 const ID_A = '0a977c0b-7e53-476b-8c08-6c685315c3af'
 const ID_B = '7d2c9e10-5b44-4a6f-9c3e-2f1b8a7d6e5c'
+const ID_C = '3f6e1c2a-8b4d-4e5f-9a1b-2c3d4e5f6a7b'
+const ID_X = '9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d'
 const DEPLOY_A: Hex = `0x${'da'.repeat(32)}`
 const DEPLOY_B: Hex = `0x${'db'.repeat(32)}`
+const DEPLOY_C: Hex = `0x${'dc'.repeat(32)}`
+const DEPLOY_X: Hex = `0x${'de'.repeat(32)}`
+/** An RPC URL as a provider issues it, its key in the path. */
+const KEYED_URL: string = 'https://rpc.example/v2/secret-key'
 const TX = (n: bigint): Hex => `0x${n.toString(16).padStart(64, '0')}`
 /** Each block's time: 1,800,000,000 plus the block. */
 const timeOf = (block: bigint) => 1_800_000_000 + Number(block)
@@ -51,7 +60,8 @@ const mintAt = (block: bigint, tokenId: bigint, contract: Address = A, amount = 
 
 /**
  * A fake chain recording every call as `head`, `time <block>`, `logs <from>-<to> x<addresses>` or
- * `receipt <hash>`. Its getLogs answers the logs of the addresses and blocks asked for.
+ * `receipt <hash>`, and each getLogs call's blocks and addresses in `scans`. Its getLogs answers the logs of
+ * the addresses and blocks asked for.
  */
 function fakeChain() {
   const chain = {
@@ -59,10 +69,19 @@ function fakeChain() {
     logs: [] as IndexLog[],
     receipts: new Map<Hex, bigint>([[DEPLOY_A, 50n]]),
     calls: [] as string[],
+    scans: [] as { from: bigint; to: bigint; addresses: string[] }[],
     /** The next getLogs calls fail while this is above 0. */
     logsFailures: 0,
+    /** What a failed getLogs throws: a provider refusing the range, viem's message carrying the keyed URL. */
+    logsError: (): Error => new HttpRequestError({ url: KEYED_URL, status: 413 }),
     /** When set, a getLogs call over more blocks than this fails, as a provider's cap refuses it. */
     logsCap: null as bigint | null,
+    /** When set, a getLogs call naming the contract over a range holding the block fails, every time. */
+    failsAt: null as { contract: Address; block: bigint } | null,
+    /** When set, the next getLogs call answers only up to this block, as a node behind the head does. */
+    answersTo: null as bigint | null,
+    /** The next head reads fail while this is above 0. */
+    headFailures: 0,
     /** When set, every head read waits for it. */
     gate: null as Promise<void> | null,
   }
@@ -71,6 +90,10 @@ function fakeChain() {
       if (args.blockNumber === undefined) {
         chain.calls.push('head')
         if (chain.gate) await chain.gate
+        if (chain.headFailures > 0) {
+          chain.headFailures--
+          throw new HttpRequestError({ url: KEYED_URL, status: 503 })
+        }
         return { number: chain.head, timestamp: BigInt(timeOf(chain.head)) }
       }
       chain.calls.push(`time ${args.blockNumber}`)
@@ -86,16 +109,24 @@ function fakeChain() {
       toBlock: bigint
     }) {
       chain.calls.push(`logs ${fromBlock}-${toBlock} x${address.length}`)
-      const overCap = chain.logsCap !== null && toBlock - fromBlock + 1n > chain.logsCap
-      if (overCap || chain.logsFailures > 0) {
-        if (!overCap) chain.logsFailures--
-        // A provider refusing the range; viem's message carries the URL, with the provider's key.
-        throw new HttpRequestError({ url: 'https://rpc.example/v2/secret-key', status: 413 })
-      }
       const asked = new Set(address.map((contract) => contract.toLowerCase()))
+      chain.scans.push({ from: fromBlock, to: toBlock, addresses: [...asked] })
+      const overCap = chain.logsCap !== null && toBlock - fromBlock + 1n > chain.logsCap
+      const failing =
+        chain.failsAt !== null &&
+        asked.has(chain.failsAt.contract.toLowerCase()) &&
+        fromBlock <= chain.failsAt.block &&
+        chain.failsAt.block <= toBlock
+      if (overCap || failing) throw chain.logsError()
+      if (chain.logsFailures > 0) {
+        chain.logsFailures--
+        throw chain.logsError()
+      }
+      const answered = chain.answersTo !== null && chain.answersTo < toBlock ? chain.answersTo : toBlock
+      chain.answersTo = null
       return chain.logs.filter(
         (log) =>
-          asked.has(log.address.toLowerCase()) && log.blockNumber >= fromBlock && log.blockNumber <= toBlock,
+          asked.has(log.address.toLowerCase()) && log.blockNumber >= fromBlock && log.blockNumber <= answered,
       )
     },
     async getTransactionReceipt({ hash }: { hash: Hex }) {
@@ -108,18 +139,22 @@ function fakeChain() {
   return { chain, client }
 }
 
-/** A target with its cursor at a block, synced at that block's time unless `synced` is false. */
+/**
+ * A target with its cursor at a block (deployed at block 1 unless another is given), synced at that block's
+ * time unless `synced` is false.
+ */
 const targetAt = (
   collectionId: string,
   contract: Address,
   deployTx: Hex,
   indexed: bigint | null,
   synced = true,
+  fromBlock = 1n,
 ): Target => ({
   collectionId,
   contract: contract.toLowerCase() as Address,
   deployTx,
-  fromBlock: indexed === null ? null : 50n,
+  fromBlock: indexed === null ? null : fromBlock,
   indexedBlock: indexed,
   syncedAt: indexed !== null && synced ? timeOf(indexed) : null,
 })
@@ -159,6 +194,8 @@ function fakeDb(targets: Target[]) {
     summariesFailures: 0,
     /** The next writes throw these, in order. */
     recordFailures: [] as Error[],
+    /** The collections whose start fails, until they leave the set. */
+    startFailures: new Set<string>(),
     answer: (write: RecordWrite): Summary[] => {
       void write
       return []
@@ -171,6 +208,7 @@ function fakeDb(targets: Target[]) {
     },
     async start(collectionId, fromBlock) {
       db.calls.push(`start ${collectionId} ${fromBlock}`)
+      if (db.startFailures.has(collectionId)) throw new IndexerWriteError('indexer_start', 'NETWORK', false)
       const target = db.targets.find((entry) => entry.collectionId === collectionId)!
       target.fromBlock = fromBlock
       target.indexedBlock = fromBlock - 1n
@@ -212,6 +250,10 @@ const spansOf = (calls: string[]) =>
     const [from, to] = call.split(' ')[1]!.split('-').map(Number)
     return to! - from! + 1
   })
+/** The lines the indexer logged, each as one string. */
+const errorLines = () => vi.mocked(console.error).mock.calls.map((call) => call.map(String).join(' '))
+/** The lines that hold `words`. */
+const linesWith = (words: string) => errorLines().filter((line) => line.includes(words))
 
 describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)', () => {
   beforeEach(() => {
@@ -257,7 +299,7 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     const indexer = indexerOn(client, port)
     await settle()
     expect(indexer.activityOf(A, timeOf(100n))).toBeNull()
-    expect(indexer.health()).toMatchObject({ failedPasses: 1, lastError: 'IndexerWriteError' })
+    expect(indexer.health()).toMatchObject({ failedPasses: 1, lastError: 'IndexerWriteError (NETWORK)' })
     await vi.advanceTimersByTimeAsync(5_000)
     expect(db.calls.filter((call) => call === 'summaries')).toHaveLength(2)
     expect(indexer.activityOf(A, timeOf(100n))?.holders).toBe(3)
@@ -309,21 +351,71 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     await indexer.stop()
   })
 
-  it('writes from one above the lowest written block of the scan, once groups merge', async () => {
+  it('starts the other targets when one start fails, retries it at the next read and logs it once a minute (Minor 6)', async () => {
+    const { chain, client } = fakeChain()
+    chain.receipts.set(DEPLOY_B, 70n)
+    const { db, port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, null), targetAt(ID_B, B, DEPLOY_B, null)])
+    db.startFailures.add(ID_A)
+    const indexer = chainIndexer(ANVIL, client, port, {
+      tier: () => 'idle',
+      passMs: { behind: 1_000, fast: 1_000, idle: 1_000 },
+      targetsEveryMs: 1_000,
+    })
+    const startLine = `The cursor of ${ID_A} on Anvil could not be started; it is tried again in a minute: IndexerWriteError (NETWORK)`
+    await settle()
+    expect(db.calls).toEqual([
+      'summaries',
+      'targets',
+      `start ${ID_A} 50`,
+      `start ${ID_B} 70`,
+      'record 70-100',
+    ])
+    expect(indexer.health()).toMatchObject({
+      collections: 1,
+      failedPasses: 1,
+      lastError: 'IndexerWriteError (NETWORK)',
+    })
+    expect(errorLines()).toEqual([startLine])
+    // Tried at each read, every second, and logged once a minute.
+    await vi.advanceTimersByTimeAsync(59_000)
+    expect(db.calls.filter((call) => call === `start ${ID_A} 50`)).toHaveLength(60)
+    expect(indexer.health().failedPasses).toBe(60)
+    expect(errorLines()).toEqual([startLine])
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(errorLines()).toEqual([startLine, startLine])
+    db.startFailures.clear()
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(indexer.health().collections).toBe(2)
+    expect(db.calls.slice(-2)).toEqual([`start ${ID_A} 50`, 'record 50-100'])
+    await indexer.stop()
+  })
+
+  it('writes from the scan start, 32 blocks below the scanned one, or from one above the lowest written block when the blocks deferred since reach further back', async () => {
     const { chain, client } = fakeChain()
     const { db, port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 100n), targetAt(ID_B, B, DEPLOY_B, 90n)])
     const indexer = indexerOn(client, port)
     await settle()
-    // B reads 91 to 100 with nothing to record and defers its write; both cursors now read 100.
-    expect(logCalls(chain.calls)).toEqual(['logs 91-100 x1'])
+    // B reads 59 to 100 with nothing to record and defers its write; both cursors now read 100.
+    expect(logCalls(chain.calls)).toEqual(['logs 59-100 x1'])
     expect(db.writes).toEqual([])
     chain.head = 110n
     chain.logs = mintAt(105n, 1n, B)
     await vi.advanceTimersByTimeAsync(20_000)
-    expect(logCalls(chain.calls)).toEqual(['logs 91-100 x1', 'logs 101-110 x2'])
+    // One scan of both from 32 blocks below 101: the write starts there, below B's written 90 plus one.
+    expect(logCalls(chain.calls)).toEqual(['logs 59-100 x1', 'logs 69-110 x2'])
     expect(db.writes).toMatchObject([
-      { chainId: 31337, fromBlock: 91n, toBlock: 110n, syncedAt: timeOf(110n), collections: [ID_A, ID_B] },
+      { chainId: 31337, fromBlock: 69n, toBlock: 110n, syncedAt: timeOf(110n), collections: [ID_A, ID_B] },
     ])
+    // Blocks deferred for more than 32 past the written block: the write starts one above it, so the
+    // database sees no gap.
+    chain.head = 300n
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(db.writes).toHaveLength(1)
+    chain.head = 310n
+    chain.logs = [...chain.logs, ...mintAt(305n, 2n, B)]
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(logCalls(chain.calls).slice(-2)).toEqual(['logs 79-300 x2', 'logs 269-310 x2'])
+    expect(db.writes[1]).toMatchObject({ fromBlock: 111n, toBlock: 310n })
     await indexer.stop()
   })
 
@@ -346,7 +438,7 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     expect(db.writes).toEqual([
       {
         chainId: 31337,
-        fromBlock: 101n,
+        fromBlock: 71n,
         toBlock: 103n,
         syncedAt: timeOf(103n),
         collections: [ID_A],
@@ -356,16 +448,93 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     await indexer.stop()
   })
 
+  it('writes an idle synced cursor once a minute, though every pass reads again 32 blocks that hold records already written (Critical 1)', async () => {
+    const { chain, client } = fakeChain()
+    const { db, port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 100n)])
+    // A mint the database holds already: its cursor is at 100.
+    chain.logs = mintAt(95n, 1n)
+    const indexer = indexerOn(client, port)
+    await settle()
+    for (const head of [101n, 102n]) {
+      chain.head = head
+      await vi.advanceTimersByTimeAsync(20_000)
+      expect(db.writes).toEqual([])
+    }
+    chain.head = 103n
+    await vi.advanceTimersByTimeAsync(20_000)
+    // The minute's write carries the mint read again, which lands under its key.
+    expect(db.writes).toMatchObject([{ fromBlock: 71n, toBlock: 103n }])
+    expect(db.writes[0]!.records.mints).toMatchObject([{ block: 95, firstTokenId: 1 }])
+    chain.head = 104n
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(db.writes).toHaveLength(1)
+    expect(logCalls(chain.calls)).toEqual([
+      'logs 69-101 x1',
+      'logs 70-102 x1',
+      'logs 71-103 x1',
+      'logs 72-104 x1',
+    ])
+    // A record read again is not news, so the passes keep the idle pace: a head read every 20 s.
+    expect(chain.calls.filter((call) => call === 'head')).toHaveLength(5)
+    await indexer.stop()
+  })
+
+  it('writes a mint a lagging node left out of its first answer once the next pass reads its block again (Critical 1)', async () => {
+    const { chain, client } = fakeChain()
+    const { db, port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 100n)])
+    const owners = new Map<number, string>()
+    db.answer = (write) => {
+      for (const owner of write.records.owners) owners.set(owner.tokenId, owner.owner)
+      const mints = write.records.mints.map((mint) => BigInt(mint.block))
+      return [{ ...summaryOf(ID_A, A, new Set(owners.values()).size, mints), syncedAt: write.syncedAt }]
+    }
+    chain.head = 110n
+    chain.logs = mintAt(108n, 1n)
+    // The node answering getLogs is at block 105: its answer for 69 to 110 stops there, without an error.
+    chain.answersTo = 105n
+    const indexer = indexerOn(client, port, 'live')
+    await settle()
+    expect(logCalls(chain.calls)).toEqual(['logs 69-110 x1'])
+    expect(db.writes).toEqual([])
+    chain.head = 112n
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(logCalls(chain.calls)).toEqual(['logs 69-110 x1', 'logs 79-112 x1'])
+    expect(db.writes).toHaveLength(1)
+    expect(db.writes[0]).toMatchObject({ fromBlock: 79n, toBlock: 112n })
+    expect(db.writes[0]!.records.mints).toMatchObject([{ block: 108, firstTokenId: 1 }])
+    expect(indexer.activityOf(A, timeOf(112n))).toMatchObject({
+      holders: 1,
+      recentMints: [{ txHash: TX(108n), firstTokenId: 108 }],
+    })
+    await indexer.stop()
+  })
+
+  it("starts the first scan of a new cursor at its deploy block, and never reads below a cursor's deploy block (Critical 1)", async () => {
+    const { chain, client } = fakeChain()
+    chain.receipts.set(DEPLOY_B, 90n)
+    chain.head = 110n
+    // A was deployed at 95 and is indexed to 100; B is new, deployed at 90.
+    const { db, port } = fakeDb([
+      targetAt(ID_A, A, DEPLOY_A, 100n, true, 95n),
+      targetAt(ID_B, B, DEPLOY_B, null),
+    ])
+    const indexer = indexerOn(client, port)
+    await settle()
+    expect(logCalls(chain.calls)).toEqual(['logs 95-110 x1', 'logs 90-110 x1'])
+    expect(db.calls).toEqual(['summaries', 'targets', `start ${ID_B} 90`, 'record 90-110'])
+    await indexer.stop()
+  })
+
   it('writes a first read to the safe block at once', async () => {
     const { chain, client } = fakeChain()
     const { db, port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 90n, false)])
     const indexer = indexerOn(client, port)
     await settle()
-    expect(logCalls(chain.calls)).toEqual(['logs 91-100 x1'])
+    expect(logCalls(chain.calls)).toEqual(['logs 59-100 x1'])
     expect(db.writes).toEqual([
       {
         chainId: 31337,
-        fromBlock: 91n,
+        fromBlock: 59n,
         toBlock: 100n,
         syncedAt: timeOf(100n),
         collections: [ID_A],
@@ -392,15 +561,32 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     db.recordFailures = [new IndexerWriteError('indexer_record', 'NETWORK', false)]
     const indexer = indexerOn(client, port)
     await settle()
-    expect(db.calls).toContain('record 101-103')
+    expect(db.calls).toContain('record 69-103')
     expect(db.writes).toEqual([])
-    expect(indexer.health()).toMatchObject({ failedPasses: 1, lastError: 'IndexerWriteError' })
+    expect(indexer.health()).toMatchObject({ failedPasses: 1, lastError: 'IndexerWriteError (NETWORK)' })
     expect(console.error).toHaveBeenCalledWith('The index write on Anvil failed: IndexerWriteError (NETWORK)')
     await vi.advanceTimersByTimeAsync(5_000)
-    expect(logCalls(chain.calls)).toEqual(['logs 101-103 x1', 'logs 101-103 x1'])
+    expect(logCalls(chain.calls)).toEqual(['logs 69-103 x1', 'logs 69-103 x1'])
     expect(db.writes).toHaveLength(1)
-    expect(db.writes[0]).toMatchObject({ fromBlock: 101n, toBlock: 103n, syncedAt: timeOf(103n) })
+    expect(db.writes[0]).toMatchObject({ fromBlock: 69n, toBlock: 103n, syncedAt: timeOf(103n) })
     expect(db.writes[0]!.records.mints).toMatchObject([{ collectionId: ID_A, block: 102, firstTokenId: 1 }])
+    await indexer.stop()
+  })
+
+  it('ends a pass at a failed write, its other scans and writes left for the next pass (Minor 5)', async () => {
+    const { chain, client } = fakeChain()
+    const { db, port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 100n), targetAt(ID_B, B, DEPLOY_B, 90n)])
+    chain.head = 110n
+    chain.logs = [...mintAt(105n, 1n, A), ...mintAt(95n, 1n, B)]
+    db.recordFailures = [new IndexerWriteError('indexer_record', 'NETWORK', false)]
+    const indexer = indexerOn(client, port)
+    await settle()
+    // The front group's write fails, so B's scan waits for the next pass.
+    expect(logCalls(chain.calls)).toEqual(['logs 69-110 x1'])
+    expect(db.calls.filter((call) => call.startsWith('record'))).toEqual(['record 69-110'])
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(logCalls(chain.calls)).toEqual(['logs 69-110 x1', 'logs 69-110 x1', 'logs 59-110 x1'])
+    expect(db.writes.map((write) => write.collections)).toEqual([[ID_A], [ID_B]])
     await indexer.stop()
   })
 
@@ -417,9 +603,79 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     expect(logCalls(chain.calls)).toHaveLength(1)
     await vi.advanceTimersByTimeAsync(1)
     expect(logCalls(chain.calls)).toEqual(['logs 1-500 x1', 'logs 1-500 x1'])
-    // Written this time, so the backfill goes on 1 s later.
+    // Written this time, so the backfill goes on 1 s later, from 32 blocks below the next block.
     await vi.advanceTimersByTimeAsync(1_000)
-    expect(logCalls(chain.calls)).toEqual(['logs 1-500 x1', 'logs 1-500 x1', 'logs 501-1000 x1'])
+    expect(logCalls(chain.calls)).toEqual(['logs 1-500 x1', 'logs 1-500 x1', 'logs 469-1000 x1'])
+    await indexer.stop()
+  })
+
+  it('logs a failure said again on a chain once a minute for each kind, counting every one (Minor 5)', async () => {
+    const { chain, client } = fakeChain()
+    const { db, port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 100n)])
+    chain.head = 103n
+    chain.logs = mintAt(102n, 1n)
+    chain.logsFailures = 1
+    db.recordFailures = Array.from(
+      { length: 13 },
+      () => new IndexerWriteError('indexer_record', 'NETWORK', false),
+    )
+    const indexer = indexerOn(client, port)
+    const scanLine =
+      'The index scan of blocks 69 to 103 on Anvil failed, so its range halves: HttpRequestError: HTTP request failed.'
+    const writeLine = 'The index write on Anvil failed: IndexerWriteError (NETWORK)'
+    await settle()
+    // The scan fails at 0 s, then the write every 5 s from 5 s: a line for each kind, then each once a minute.
+    await vi.advanceTimersByTimeAsync(59_000)
+    expect(errorLines()).toEqual([scanLine, writeLine])
+    expect(indexer.health().failedPasses).toBe(1 + 11)
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(errorLines()).toEqual([scanLine, writeLine])
+    expect(indexer.health().failedPasses).toBe(1 + 12)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(errorLines()).toEqual([scanLine, writeLine, writeLine])
+    expect(indexer.health().failedPasses).toBe(1 + 13)
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(db.writes).toHaveLength(1)
+    await indexer.stop()
+  })
+
+  it('logs a failing head once a minute while it counts each pass it fails (Minor 5)', async () => {
+    const { chain, client } = fakeChain()
+    const { port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 100n)])
+    chain.headFailures = 13
+    const indexer = indexerOn(client, port)
+    await settle()
+    await vi.advanceTimersByTimeAsync(55_000)
+    expect(indexer.health().failedPasses).toBe(12)
+    expect(linesWith('An index pass on Anvil failed')).toEqual([
+      'An index pass on Anvil failed: HttpRequestError: HTTP request failed.',
+    ])
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(indexer.health().failedPasses).toBe(13)
+    expect(linesWith('An index pass on Anvil failed')).toHaveLength(2)
+    expect(JSON.stringify(errorLines())).not.toContain('secret-key')
+    await indexer.stop()
+  })
+
+  it('reports the last failure on /health by its name and codes, never its message (Minor 4)', async () => {
+    const { chain, client } = fakeChain()
+    const { db, port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 100n)])
+    chain.head = 103n
+    chain.logs = mintAt(102n, 1n)
+    chain.logsFailures = 1
+    chain.logsError = () =>
+      new RpcRequestError({
+        body: { method: 'eth_getLogs' },
+        error: { code: -32005, message: `Too many results from ${KEYED_URL}` },
+        url: KEYED_URL,
+      })
+    db.recordFailures = [new IndexerWriteError('indexer_record', 'PGRST202', false)]
+    const indexer = indexerOn(client, port)
+    await settle()
+    expect(indexer.health().lastError).toBe('RpcRequestError (-32005)')
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(indexer.health().lastError).toBe('IndexerWriteError (PGRST202)')
+    expect(JSON.stringify(indexer.health())).not.toMatch(/secret-key|:\/\//)
     await indexer.stop()
   })
 
@@ -465,8 +721,8 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
       'logs 1-500 x1',
       'logs 1-250 x1',
       'logs 1-125 x1',
-      'logs 126-250 x1',
-      'logs 251-375 x1',
+      'logs 94-250 x1',
+      'logs 219-375 x1',
     ])
     await indexer.stop()
   })
@@ -490,23 +746,25 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
       'logs 1-7 x1',
       'logs 1-3 x1',
       'logs 1-1 x1',
-      // From 45 s to 100 s, a minute after the last failure, the range stays 1: one block a second.
-      ...Array.from({ length: 56 }, (_, index) => `logs ${index + 1}-${index + 1} x1`),
+      // From 45 s to 100 s, a minute after the last failure, the range stays 1: one new block a second, read
+      // with the 32 before it.
+      ...Array.from({ length: 56 }, (_, index) => `logs ${Math.max(1, index + 1 - 32)}-${index + 1} x1`),
       // Then each success doubles it, up to 500.
-      'logs 57-58 x1',
-      'logs 59-62 x1',
-      'logs 63-70 x1',
-      'logs 71-86 x1',
-      'logs 87-118 x1',
-      'logs 119-182 x1',
-      'logs 183-310 x1',
-      'logs 311-566 x1',
-      'logs 567-1066 x1',
+      'logs 25-58 x1',
+      'logs 27-62 x1',
+      'logs 31-70 x1',
+      'logs 39-86 x1',
+      'logs 55-118 x1',
+      'logs 87-182 x1',
+      'logs 151-310 x1',
+      'logs 279-566 x1',
+      'logs 535-1066 x1',
     ])
     expect(indexer.health()).toMatchObject({ failedPasses: 9, lastError: 'HttpRequestError' })
-    expect(console.error).toHaveBeenCalledWith(
+    expect(errorLines()).toEqual([
       'The index scan of blocks 1 to 500 on Anvil failed, so its range halves: HttpRequestError: HTTP request failed.',
-    )
+      `The block 1 of ${ID_A} on Anvil cannot be read; the collection waits there: HttpRequestError: HTTP request failed.`,
+    ])
     expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain('secret-key')
     await indexer.stop()
   })
@@ -518,13 +776,76 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     chain.logsCap = 100n
     const indexer = indexerOn(client, port)
     await settle()
-    // 500, 250 and 125 fail 5 s apart; 62 succeeds from 15 s, and a minute after each failure one scan of 124
-    // probes the cap, fails and halves the range again: at 71 s, 132 s and 193 s.
+    // 500, 250 and 125 fail 5 s apart; 62 succeeds from 15 s, read with the 32 blocks before it (94 in all),
+    // and a minute after each failure one scan of 124 (156 with the 32) probes the cap, fails and halves the
+    // range again: at 71 s, 132 s and 193 s.
     await vi.advanceTimersByTimeAsync(193_000)
-    const minute = Array<number>(56).fill(62)
-    expect(spansOf(chain.calls)).toEqual([500, 250, 125, ...minute, 124, ...minute, 124, ...minute, 124])
+    const minute = Array<number>(56).fill(94)
+    expect(spansOf(chain.calls)).toEqual([
+      500,
+      250,
+      125,
+      62,
+      ...minute.slice(1),
+      156,
+      ...minute,
+      156,
+      ...minute,
+      156,
+    ])
     // Three failures to reach 62, then one probe a minute: 6 of 174 scans failed, not one in two.
     expect(indexer.health().failedPasses).toBe(6)
+    await indexer.stop()
+  })
+
+  it('scans half as many collections at a time after a failure at 1 block, so a block one collection cannot be read at stops that collection alone, logged once a minute (Important 2)', async () => {
+    const { chain, client } = fakeChain()
+    const { port } = fakeDb([
+      targetAt(ID_A, A, DEPLOY_A, 100n),
+      targetAt(ID_B, B, DEPLOY_B, 100n),
+      targetAt(ID_C, C, DEPLOY_C, 100n),
+      targetAt(ID_X, X, DEPLOY_X, 100n),
+    ])
+    chain.head = 110n
+    // Any scan asking for X over block 105 fails, as a provider refuses a block holding more logs than it
+    // answers.
+    chain.failsAt = { contract: X, block: 105n }
+    const indexer = indexerOn(client, port)
+    const scansOfContract = (contract: Address) =>
+      chain.scans.filter((scan) => scan.addresses.includes(contract.toLowerCase()))
+    const stuckLine = `The block 105 of ${ID_X} on Anvil cannot be read; the collection waits there: HttpRequestError: HTTP request failed.`
+    await settle()
+    // The four fail together while the range halves to 1 block, then two scans of two, then X alone at 52 s.
+    await vi.advanceTimersByTimeAsync(52_000)
+    expect(errorLines()).toEqual([
+      'The index scan of blocks 69 to 110 on Anvil failed, so its range halves: HttpRequestError: HTTP request failed.',
+      stuckLine,
+    ])
+    // One line a minute while X waits at its block, though its scan fails every 5 s.
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(errorLines().slice(1)).toEqual([stuckLine, stuckLine])
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(errorLines().slice(1)).toEqual([stuckLine, stuckLine, stuckLine])
+    // The other three read past block 105 to the safe block; X stays at 104, each of its scans alone.
+    for (const contract of [A, B, C]) expect(scansOfContract(contract).at(-1)!.to).toBe(110n)
+    const xs = scansOfContract(X).slice(-25)
+    expect(xs.every((scan) => scan.addresses.length === 1 && scan.from === 73n && scan.to === 105n)).toBe(
+      true,
+    )
+    expect(indexer.health().lastError).toBe('HttpRequestError')
+    // Once the block can be read, X catches up, and with each cursor's range back at 500 its chunk is the full
+    // 100 again: one scan asks for the four.
+    chain.failsAt = null
+    chain.head = 2_000n
+    await vi.advanceTimersByTimeAsync(80_000)
+    for (const contract of [A, B, C, X]) expect(scansOfContract(contract).at(-1)!.to).toBe(2_000n)
+    const before = chain.scans.length
+    chain.head = 3_000n
+    await vi.advanceTimersByTimeAsync(30_000)
+    const after = chain.scans.slice(before)
+    expect(after.length).toBeGreaterThan(0)
+    expect(after.every((scan) => scan.addresses.length === 4)).toBe(true)
+    expect(after[0]).toMatchObject({ from: 1_969n, to: 2_500n })
     await indexer.stop()
   })
 
@@ -556,7 +877,7 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     await indexer.stop()
   })
 
-  it('reports its collections, those behind, the safe block, the last pass, its failures and the unpaired mints', async () => {
+  it('reports its collections, those behind, the safe block, the last pass, its failures and the unpaired mints, each counted once though its block is read again', async () => {
     const { chain, client } = fakeChain()
     const { port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 100n), targetAt(ID_B, B, DEPLOY_B, null)])
     chain.head = 103n
@@ -573,9 +894,14 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
       lastError: null,
       unpaired: 1,
     })
-    expect(console.error).toHaveBeenCalledWith(
-      `A mint or airdrop in ${TX(102n)} on Anvil did not pair with its transfers and is not recorded.`,
-    )
+    const unpairedLine = `A mint or airdrop in ${TX(102n)} on Anvil did not pair with its transfers and is not recorded.`
+    expect(linesWith('did not pair')).toEqual([unpairedLine])
+    // The next pass reads block 102 again: the mint is still unpaired, and neither counted nor logged twice.
+    chain.head = 104n
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(logCalls(chain.calls)).toEqual(['logs 69-103 x1', 'logs 72-104 x1'])
+    expect(indexer.health().unpaired).toBe(1)
+    expect(linesWith('did not pair')).toEqual([unpairedLine])
     await indexer.stop()
   })
 

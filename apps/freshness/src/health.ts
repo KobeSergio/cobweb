@@ -44,9 +44,12 @@ export type IndexerHealth = {
   block: number | null
   /** When the last pass ended (ISO); null before one. */
   lastPassAt: string | null
-  /** Failures: each failed head, scan, block time, write or database read counts one. */
+  /** Failures: each failed head, scan, block time, write, start or database read counts one. */
   failedPasses: number
-  /** The last failure's error name, never its message. */
+  /**
+   * The last failure's error name and codes as `failureName` writes them (`IndexerWriteError (PGRST202)`),
+   * never its message.
+   */
   lastError: string | null
   /** Mints and airdrops that did not pair with their transfers, so are not recorded. */
   unpaired: number
@@ -98,6 +101,21 @@ function codeOf(error: unknown): number | undefined {
   return undefined
 }
 
+/** The innermost viem error's name with the first whole-number code on the chain of causes, if any. */
+function namedOf(error: unknown): string {
+  const code = codeOf(error)
+  return code === undefined ? errorName(error) : `${errorName(error)} (${code})`
+}
+
+/**
+ * The error's own code in parentheses where it is capitals, digits and underscores (` (ERR_INVALID_URL)`, a
+ * Postgres code, `HTTP_401`), else nothing: such a code carries no URL, key or message.
+ */
+function ownCodeOf(error: unknown): string {
+  const code = error instanceof Error && 'code' in error ? error.code : undefined
+  return typeof code === 'string' && /^[A-Z0-9_]+$/.test(code) ? ` (${code})` : ''
+}
+
 /**
  * A failure as the log writes it: the innermost viem error's name, the first whole-number code on its chain
  * of causes (a JSON-RPC error's, as `RpcRequestError (-32005)`) and viem's short message, or the name and
@@ -106,9 +124,7 @@ function codeOf(error: unknown): number | undefined {
  */
 export function errorLine(error: unknown): string {
   const inner = innermost(error)
-  const code = codeOf(error)
-  const named = code === undefined ? errorName(error) : `${errorName(error)} (${code})`
-  return inner instanceof BaseError ? `${named}: ${inner.shortMessage}` : named
+  return inner instanceof BaseError ? `${namedOf(error)}: ${inner.shortMessage}` : namedOf(error)
 }
 
 /**
@@ -117,8 +133,13 @@ export function errorLine(error: unknown): string {
  * message.
  */
 export function failureLine(error: unknown): string {
-  const code = error instanceof Error && 'code' in error ? error.code : undefined
-  return typeof code === 'string' && /^[A-Z0-9_]+$/.test(code)
-    ? `${errorLine(error)} (${code})`
-    : errorLine(error)
+  return `${errorLine(error)}${ownCodeOf(error)}`
+}
+
+/**
+ * A failure's name and codes as `failureLine` writes them, without viem's short message: what /health's
+ * indexer reports as its last error, as `IndexerWriteError (PGRST202)` or `RpcRequestError (-32005)`.
+ */
+export function failureName(error: unknown): string {
+  return `${namedOf(error)}${ownCodeOf(error)}`
 }

@@ -1,5 +1,6 @@
 import { collectionAbi } from '@cobweb/shared/collection-abi'
 import { getAbiItem, zeroAddress, type Address, type Hex } from 'viem'
+import { byBlock } from './indexer-plan.ts'
 
 /**
  * What a segment's logs record (docs/specs/2026-10-16-indexer-overview.md, section 6.4), pure, in the shape
@@ -99,7 +100,6 @@ const PAIRING: ReadonlySet<IndexEventName> = new Set([
 /** The largest group id `mints.group_id` takes: 2^53 - 1, the largest whole number JSON carries exactly. */
 const MAX_GROUP_ID = BigInt(Number.MAX_SAFE_INTEGER)
 
-const byBlock = (a: bigint, b: bigint) => (a < b ? -1 : a > b ? 1 : 0)
 const lower = (address: Address) => address.toLowerCase() as Address
 
 /** The blocks with a mint or an airdrop event, ascending: the blocks whose times `recordsOf` needs. */

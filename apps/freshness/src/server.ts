@@ -5,7 +5,7 @@ import { publicClientFor } from '@cobweb/shared/clients'
 import type { Address } from 'viem'
 import { chainReader } from './chain-reader.ts'
 import { collectionCheck } from './collection-check.ts'
-import { servedChains, type IndexerOptions } from './config.ts'
+import { checkIndexerOptions, servedChains, type IndexerOptions } from './config.ts'
 import { chainHealth, failureLine, type HealthBody } from './health.ts'
 import { hotSet, JOIN_WAIT_MS, type HotEntry } from './hot-set.ts'
 import { chainIndexer, type ChainIndexer } from './indexer.ts'
@@ -56,6 +56,10 @@ const JOIN_POLL_MS = 25
 
 export async function startFreshness(options: FreshnessOptions): Promise<Freshness> {
   const startedAt = new Date().toISOString()
+  const indexing = options.indexer ?? null
+  // Checked and built before the server listens, so options it refuses never leave a caller in process with a
+  // listening server; the indexers' passes start once it listens (Decision 11).
+  const db = indexing ? supabaseIndexerDb(checkIndexerOptions(indexing)) : null
   const hot = hotSet()
   const served = new Map(
     servedChains(options.chainIds).map((chain) => {
@@ -191,9 +195,7 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
     })
   })
   const { port } = server.address() as AddressInfo
-  const indexing = options.indexer ?? null
-  if (indexing) {
-    const db = supabaseIndexerDb(indexing)
+  if (indexing && db) {
     for (const entry of served.values())
       entry.indexer = chainIndexer(entry.chain, entry.client, db, {
         tier: () => entry.reader.health().tier,

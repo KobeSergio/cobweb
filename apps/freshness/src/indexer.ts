@@ -2,9 +2,10 @@ import type { ChainConfig, StateActivity } from '@cobweb/shared'
 import type { Address, PublicClient } from 'viem'
 import { ACTIVITY_LAG_MAX_S, activityOf as activityFrom, type Summary } from './activity.ts'
 import type { IndexerOptions } from './config.ts'
-import { errorName, failureLine, type IndexerHealth } from './health.ts'
+import { failureLine, failureName, type IndexerHealth } from './health.ts'
 import { IndexerWriteError, type IndexerDb, type Target } from './indexer-db.ts'
 import {
+  ADDRESSES_PER_SCAN,
   CURSOR_WRITE_EVERY_MS,
   MAX_RANGE,
   PASS_MS,
@@ -24,20 +25,48 @@ export type { IndexerHealth } from './health.ts'
 
 /** Block times read at once, at most. */
 const TIMES_AT_ONCE = 10
-/** An unreadable deploy is logged at most once a minute per collection, whatever the targets' pace. */
-const DEPLOY_LOG_EVERY_MS = 60_000
+/**
+ * A line said again is logged at most once a minute, whatever the passes' pace: a failure of one kind on a
+ * chain, and per collection a deploy that cannot be read, a start that failed or a block that cannot be read.
+ * Every failure still counts on /health.
+ */
+const LOG_EVERY_MS = 60_000
 
-const hasRecords = (records: Records) =>
-  records.mints.length + records.owners.length + records.airdrops.length + records.withdrawals.length > 0
+/** The steps whose failures share one log line a minute on a chain (Minor 5). */
+type FailureKind = 'summaries' | 'targets' | 'head' | 'scan' | 'times' | 'write' | 'pass'
+
+/**
+ * Whether a segment's records hold one above its collection's written block. The blocks a scan reads again
+ * hold records already written, which wait for the minute's write, so an idle cursor is not written every pass.
+ */
+function hasNewRecords(records: Records, cursors: readonly Cursor[]): boolean {
+  const written = new Map(cursors.map((cursor) => [cursor.collectionId, cursor.written]))
+  const isNew = (record: { collectionId: string; block: number }) => {
+    const block = written.get(record.collectionId)
+    return block === undefined || BigInt(record.block) > block
+  }
+  return (
+    records.mints.some(isNew) ||
+    records.owners.some(isNew) ||
+    records.airdrops.some(isNew) ||
+    records.withdrawals.some(isNew)
+  )
+}
+
+/** The lowest of the cursors' blocks that `blockOf` names. */
+const lowestOf = (cursors: readonly Cursor[], blockOf: (cursor: Cursor) => bigint): bigint =>
+  cursors.reduce((least, cursor) => (blockOf(cursor) < least ? blockOf(cursor) : least), blockOf(cursors[0]!))
 
 /**
  * The indexer of one chain (docs/specs/2026-10-16-indexer-overview.md, section 6.5). Each pass loads the
  * chain's summaries until they have loaded, reads the targets every minute (and after a gap refusal),
  * starting a new one at its deploy transaction's block, reads the head, then scans each cursor's logs up to
- * the safe block in the plan's scans and writes what they record, segment by segment. Passes never overlap;
- * the next starts the plan's delay after this one started, at once when it ran longer, and the fast delay
- * after a pass with any failure (Review Focus 2). `activityOf` answers from memory, for the state body; the
- * request path reads no database.
+ * the safe block in the plan's scans, each starting `REREAD_BLOCKS` below the cursor's scanned block, and
+ * writes what they record, segment by segment. A scan that fails halves its range, then at 1 block its
+ * chunk of collections, so a block one collection's logs make unreadable stops that collection alone. Passes
+ * never overlap; the next starts the plan's delay after this one started, at once when it ran longer, and the
+ * fast delay after a pass with any failure (Review Focus 2); a failed write ends its pass. `activityOf`
+ * answers from memory, for the state body; the request path reads no database.
  */
 export function chainIndexer(
   chain: ChainConfig,
@@ -58,7 +87,8 @@ export function chainIndexer(
   let summariesLoaded = false
   let targetsReadAt: number | null = null
   let targetsDue = false
-  const deployLoggedAt = new Map<string, number>()
+  /** When each line said again was last logged: a failure kind, or `deploy:` or `block:` and a collection id. */
+  const loggedAt = new Map<string, number>()
   let timer: ReturnType<typeof setTimeout> | null = null
   let running: Promise<void> | null = null
   let stopped = false
@@ -69,11 +99,27 @@ export function chainIndexer(
   let lastError: string | null = null
   let unpaired = 0
 
-  /** Counts a failure for /health and logs it as its name, its code and viem's short message, never more. */
-  function failed(line: string, error: unknown): void {
+  /** Whether the line under `key` may be logged at `now`: at most once a minute. Notes it when it may. */
+  function mayLog(key: string, now: number): boolean {
+    const logged = loggedAt.get(key)
+    if (logged !== undefined && now - logged < LOG_EVERY_MS) return false
+    loggedAt.set(key, now)
+    return true
+  }
+
+  /** Counts a failure for /health, as its name and codes, never its message. */
+  function counted(error: unknown): void {
     failedPasses++
-    lastError = errorName(error)
-    console.error(`${line}: ${failureLine(error)}`)
+    lastError = failureName(error)
+  }
+
+  /**
+   * Counts a failure and logs it as its name, its codes and viem's short message, never more: at most once a
+   * minute for each kind, so a lasting fault does not log every pass (Minor 5).
+   */
+  function failed(kind: FailureKind, line: string, error: unknown): void {
+    counted(error)
+    if (mayLog(kind, Date.now())) console.error(`${line}: ${failureLine(error)}`)
   }
 
   function setCursor(cursor: Cursor): void {
@@ -82,40 +128,53 @@ export function chainIndexer(
   }
 
   /**
-   * A cursor at the database's block, as a new one or after a gap refusal; a known one keeps its range and
-   * when its last scan failed.
+   * A cursor at the database's block, as a new one or after a gap refusal; a known one keeps its range, its
+   * chunk and when its last scan failed.
    */
   const cursorOf = (target: Target, indexed: bigint, now: number): Cursor => {
     const known = cursors.get(target.collectionId)
     return {
       collectionId: target.collectionId,
       contract: target.contract,
+      fromBlock: target.fromBlock ?? indexed + 1n,
       scanned: indexed,
       written: indexed,
       range: known?.range ?? MAX_RANGE,
+      chunk: known?.chunk ?? ADDRESSES_PER_SCAN,
       syncedAt: target.syncedAt,
       writtenAt: now,
       failedAt: known?.failedAt,
     }
   }
 
-  /** A target without a cursor: its deploy transaction's block, then its cursor there. */
-  async function startTarget(target: Target, now: number): Promise<void> {
+  /**
+   * A target without a cursor: its deploy transaction's block, then its cursor there. A receipt that cannot
+   * be read waits for the next targets read; a start that fails counts as a failure and is retried there too,
+   * while the other targets go on (Minor 6). Each is logged at most once a minute per collection. Answers
+   * whether the start failed.
+   */
+  async function startTarget(target: Target, now: number): Promise<boolean> {
     let block: bigint
     try {
       block = (await client.getTransactionReceipt({ hash: target.deployTx })).blockNumber
     } catch {
-      const logged = deployLoggedAt.get(target.collectionId)
-      if (logged === undefined || now - logged >= DEPLOY_LOG_EVERY_MS) {
-        deployLoggedAt.set(target.collectionId, now)
+      if (mayLog(`deploy:${target.collectionId}`, now))
         console.error(
           `The deploy of ${target.collectionId} on ${chain.name} could not be read; it is tried again in a minute.`,
         )
-      }
-      return
+      return false
     }
-    await db.start(target.collectionId, block)
-    deployLoggedAt.delete(target.collectionId)
+    try {
+      await db.start(target.collectionId, block)
+    } catch (error) {
+      counted(error)
+      if (mayLog(`deploy:${target.collectionId}`, now))
+        console.error(
+          `The cursor of ${target.collectionId} on ${chain.name} could not be started; it is tried again in a minute: ${failureLine(error)}`,
+        )
+      return true
+    }
+    loggedAt.delete(`deploy:${target.collectionId}`)
     setCursor({ ...cursorOf(target, block - 1n, now), syncedAt: null })
     // A cursor this process starts has no record yet: its summary is empty until a write answers one, so the
     // state body carries 0 holders once it reads synced rather than nothing until a mint (Review Focus 4).
@@ -127,10 +186,14 @@ export function chainIndexer(
         syncedAt: null,
         recentMints: [],
       })
+    return false
   }
 
-  /** The targets: a new one starts, the database's cursor is taken only when new or after a gap refusal. */
-  async function readTargets(now: number): Promise<void> {
+  /**
+   * The targets: a new one starts, the database's cursor is taken only when new or after a gap refusal.
+   * Answers whether a start failed.
+   */
+  async function readTargets(now: number): Promise<boolean> {
     const targets = await db.targets(chain.id)
     const listed = new Set(targets.map((target) => target.collectionId))
     for (const [id, cursor] of cursors)
@@ -139,14 +202,16 @@ export function chainIndexer(
         idByContract.delete(cursor.contract.toLowerCase())
       }
     for (const id of summaries.keys()) if (!listed.has(id)) summaries.delete(id)
+    let startFailed = false
     for (const target of targets) {
-      if (stopped) return
-      if (target.indexedBlock === null) await startTarget(target, now)
+      if (stopped) return startFailed
+      if (target.indexedBlock === null) startFailed = (await startTarget(target, now)) || startFailed
       else if (targetsDue || !cursors.has(target.collectionId))
         setCursor(cursorOf(target, target.indexedBlock, now))
     }
     targetsReadAt = now
     targetsDue = false
+    return startFailed
   }
 
   /** The times of the blocks not read yet, at most 10 at once. */
@@ -161,14 +226,51 @@ export function chainIndexer(
   }
 
   /**
-   * One scan: its logs, then each segment's records written or deferred. Answers whether it failed and
-   * recorded.
+   * A scan whose `getLogs` failed. Each cursor's range halves, down to 1 block; a cursor already at 1 block
+   * halves its chunk instead (Important 2), so the collections of its scan whose logs a provider answers pass a
+   * block whose logs it cannot. A collection scanned alone at 1 block waits at its next block, logged at most
+   * once a minute for that collection in place of the scan's line.
+   */
+  function scanFailed(scan: Scan, error: unknown): void {
+    const failedAt = Date.now()
+    const half = Math.max(1, Math.floor(scan.cursors.length / 2))
+    let chunked = false
+    for (const cursor of scan.cursors) {
+      if (cursor.range > 1n) cursor.range = cursor.range / 2n
+      else {
+        cursor.range = 1n
+        cursor.chunk = Math.min(cursor.chunk, half)
+        chunked = true
+      }
+      cursor.failedAt = failedAt
+    }
+    const [alone] = scan.cursors
+    if (alone && scan.cursors.length === 1 && chunked) {
+      counted(error)
+      if (mayLog(`block:${alone.collectionId}`, failedAt))
+        console.error(
+          `The block ${alone.scanned + 1n} of ${alone.collectionId} on ${chain.name} cannot be read; the collection waits there: ${failureLine(error)}`,
+        )
+      return
+    }
+    failed(
+      'scan',
+      `The index scan of blocks ${scan.fromBlock} to ${scan.toBlock} on ${chain.name} failed, so ${
+        chunked ? 'it scans half as many collections at a time' : 'its range halves'
+      }`,
+      error,
+    )
+  }
+
+  /**
+   * One scan: its logs, then each segment's records written or deferred. Answers whether it failed, whether
+   * its write failed, and whether it wrote a new record.
    */
   async function runScan(
     scan: Scan,
     safe: bigint,
     head: { timestamp: number },
-  ): Promise<{ failed: boolean; recorded: boolean }> {
+  ): Promise<{ failed: boolean; writeFailed: boolean; recorded: boolean }> {
     let logs: IndexLog[]
     try {
       logs = (await client.getLogs({
@@ -179,24 +281,18 @@ export function chainIndexer(
         strict: true,
       })) as unknown as IndexLog[]
     } catch (error) {
-      const failedAt = Date.now()
-      for (const cursor of scan.cursors) {
-        cursor.range = cursor.range > 1n ? cursor.range / 2n : 1n
-        cursor.failedAt = failedAt
-      }
-      failed(
-        `The index scan of blocks ${scan.fromBlock} to ${scan.toBlock} on ${chain.name} failed, so its range halves`,
-        error,
-      )
-      return { failed: true, recorded: false }
+      scanFailed(scan, error)
+      return { failed: true, writeFailed: false, recorded: false }
     }
     // A success doubles the range, up to 500, once a minute has passed since the cursor's last failed scan
     // (or when none has failed): a provider that caps a scan below 500 blocks keeps the range one halving
     // under its cap, and while the cursor is behind it is probed once a minute rather than every other scan.
+    // Back at 500 blocks, the cursor's chunk is the full 100 again.
     const scannedAt = Date.now()
     for (const cursor of scan.cursors) {
       const mayGrow = cursor.failedAt === undefined || scannedAt - cursor.failedAt >= RANGE_GROW_AFTER_MS
       if (mayGrow) cursor.range = cursor.range * 2n > MAX_RANGE ? MAX_RANGE : cursor.range * 2n
+      if (cursor.range === MAX_RANGE) cursor.chunk = ADDRESSES_PER_SCAN
     }
     const collections = new Map(
       scan.cursors.map((cursor) => [cursor.contract.toLowerCase(), cursor.collectionId]),
@@ -208,25 +304,29 @@ export function chainIndexer(
       try {
         await readTimes(eventBlocksOf(segment.logs), times)
       } catch (error) {
-        failed(`An index pass on ${chain.name} failed`, error)
-        return { failed: true, recorded }
+        failed('times', `An index pass on ${chain.name} failed`, error)
+        return { failed: true, writeFailed: false, recorded }
       }
       const { records, unpaired: missed } = recordsOf(segment.logs, collections, times)
+      // The blocks above this have not been read by this process: an unpaired event at or below it was
+      // counted when its block was first read.
+      const readBefore = lowestOf(scan.cursors, (cursor) => cursor.scanned)
+      const fresh = hasNewRecords(records, scan.cursors)
       const toSafe = segment.toBlock === safe
       const now = Date.now()
       const due =
-        hasRecords(records) ||
+        fresh ||
         (toSafe && scan.cursors.some((cursor) => cursor.syncedAt === null)) ||
         scan.cursors.some((cursor) => now - cursor.writtenAt >= CURSOR_WRITE_EVERY_MS)
       if (due) {
-        const lowest = scan.cursors.reduce(
-          (least, cursor) => (cursor.written < least ? cursor.written : least),
-          scan.cursors[0]!.written,
-        )
+        // From the segment's start, which reads blocks already written again (the gap check accepts the
+        // overlap, and every row is keyed), or from one above the lowest written block when blocks deferred
+        // since run further back than the re-read.
+        const above = lowestOf(scan.cursors, (cursor) => cursor.written) + 1n
         try {
           const answered = await db.record({
             chainId: chain.id,
-            fromBlock: lowest + 1n,
+            fromBlock: segment.fromBlock < above ? segment.fromBlock : above,
             toBlock: segment.toBlock,
             syncedAt: toSafe ? head.timestamp : null,
             collections: scan.cursors.map((cursor) => cursor.collectionId),
@@ -238,28 +338,34 @@ export function chainIndexer(
           // The scan's deferred blocks are read again from the database's cursor on the next pass.
           for (const cursor of scan.cursors) cursor.scanned = cursor.written
           if (error instanceof IndexerWriteError && error.gap) targetsDue = true
-          failed(`The index write on ${chain.name} failed`, error)
-          return { failed: true, recorded }
+          failed('write', `The index write on ${chain.name} failed`, error)
+          return { failed: true, writeFailed: true, recorded }
         }
         for (const cursor of scan.cursors) {
-          cursor.written = segment.toBlock
+          if (segment.toBlock > cursor.written) cursor.written = segment.toBlock
           cursor.writtenAt = now
         }
-        recorded ||= hasRecords(records)
+        recorded ||= fresh
       }
       for (const cursor of scan.cursors) {
-        cursor.scanned = segment.toBlock
+        if (segment.toBlock > cursor.scanned) cursor.scanned = segment.toBlock
         if (toSafe) cursor.syncedAt = head.timestamp
       }
-      // Counted once its segment is done, so a segment read again after a failed write is not counted twice.
+      // Counted once its segment is done, so a segment read again after a failed write is not counted twice,
+      // and once per event, at the first read of its block (Decision 4).
+      const blockOfTx = new Map(
+        segment.logs.map((log) => [log.transactionHash.toLowerCase(), log.blockNumber]),
+      )
       for (const tx of missed) {
+        const block = blockOfTx.get(tx)
+        if (block !== undefined && block <= readBefore) continue
         unpaired++
         console.error(
           `A mint or airdrop in ${tx} on ${chain.name} did not pair with its transfers and is not recorded.`,
         )
       }
     }
-    return { failed: false, recorded }
+    return { failed: false, writeFailed: false, recorded }
   }
 
   /** One pass; answers the wait to the next. */
@@ -279,14 +385,14 @@ export function chainIndexer(
         summariesLoaded = true
       } catch (error) {
         anyFailure = true
-        failed(`An index pass on ${chain.name} failed`, error)
+        failed('summaries', `An index pass on ${chain.name} failed`, error)
       }
     if (!stopped && (targetsDue || targetsReadAt === null || startedAt - targetsReadAt >= targetsEveryMs))
       try {
-        await readTargets(startedAt)
+        if (await readTargets(startedAt)) anyFailure = true
       } catch (error) {
         anyFailure = true
-        failed(`An index pass on ${chain.name} failed`, error)
+        failed('targets', `An index pass on ${chain.name} failed`, error)
       }
     if (stopped) return 0
     let head: { number: bigint; timestamp: number }
@@ -294,7 +400,7 @@ export function chainIndexer(
       const block = await client.getBlock({ blockTag: 'latest' })
       head = { number: block.number, timestamp: Number(block.timestamp) }
     } catch (error) {
-      failed(`An index pass on ${chain.name} failed`, error)
+      failed('head', `An index pass on ${chain.name} failed`, error)
       anyFailure = true
       lastPassAt = Date.now()
       return wait(false)
@@ -307,6 +413,9 @@ export function chainIndexer(
       const outcome = await runScan(scan, safe, head)
       anyFailure ||= outcome.failed
       recorded ||= outcome.recorded
+      // A failed write ends the pass: the scans left would write to a database that just failed, and the
+      // next pass, after the fast delay, reads again from the written blocks (Minor 5).
+      if (outcome.writeFailed) break
     }
     lastPassAt = Date.now()
     return wait([...cursors.values()].some((cursor) => cursor.scanned < safe))
@@ -317,7 +426,7 @@ export function chainIndexer(
     running = pass()
       .catch((error: unknown) => {
         // A pass that threw outside its own steps counts as failed, and the next comes after the idle delay.
-        failed(`An index pass on ${chain.name} failed`, error)
+        failed('pass', `An index pass on ${chain.name} failed`, error)
         return delays.idle
       })
       .then((delay) => {

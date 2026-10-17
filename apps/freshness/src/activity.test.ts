@@ -44,4 +44,9 @@ describe('activityOf (docs/specs/2026-10-16-indexer-overview.md, section 6.6)', 
     expect(activity?.recentMints.map((mint) => mint.firstTokenId)).toEqual([12, 11, 10, 9, 8, 7, 6, 5, 4, 3])
     expect(activity?.recentMints[0]).toEqual({ ...mints[0], recipient: CHECKSUMMED })
   })
+
+  it('carries the holders and no mint for a collection with none', () => {
+    const none: Summary = { ...summary, holders: 0, recentMints: [] }
+    expect(activityOf(none, 1_800_000_000, 1_800_000_010)).toEqual({ holders: 0, recentMints: [] })
+  })
 })

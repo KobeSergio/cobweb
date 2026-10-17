@@ -52,7 +52,7 @@ export type IndexerOptions = {
 
 /**
  * Whether a value is a URL supabase-js takes: `http://` or `https://`, then a URL that parses. `createClient`
- * throws on any other, and it runs once the server listens.
+ * throws on any other.
  */
 function isHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value.trim()) && URL.canParse(value.trim())
@@ -60,20 +60,33 @@ function isHttpUrl(value: string): boolean {
 
 /**
  * The indexer's options from `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, a blank one read as unset: null
- * when neither is set, so the indexer stays off. One set alone, or a `SUPABASE_URL` that is not an http or
- * https URL, refuses the start, as a malformed factory address does: a viem `BaseError` named
- * `ConfigurationError` whose sentence names the variables, never a value.
+ * when neither is set, so the indexer stays off. Otherwise they are checked as `checkIndexerOptions` checks
+ * them, which refuses the start as a malformed factory address does.
  */
 export function indexerOptionsOf(env: Record<string, string | undefined>): IndexerOptions | null {
   const supabaseUrl = env.SUPABASE_URL ?? ''
   const serviceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY ?? ''
   if (!supabaseUrl && !serviceRoleKey) return null
-  if (!supabaseUrl || !serviceRoleKey)
+  return checkIndexerOptions({ supabaseUrl, serviceRoleKey })
+}
+
+/**
+ * The indexer's options, answered as they are once checked: both values set, and `SUPABASE_URL` an http or
+ * https URL with no path, as a project's API URL is (a path would send every call to the wrong place). A
+ * refusal is a viem `BaseError` named `ConfigurationError` whose sentence names the variables, never a value.
+ * `startFreshness` checks its options with it before it listens.
+ */
+export function checkIndexerOptions(options: IndexerOptions): IndexerOptions {
+  if (!options.supabaseUrl || !options.serviceRoleKey)
     throw new BaseError(
       'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are both needed to run the indexer; set both or neither.',
       { name: 'ConfigurationError' },
     )
-  if (!isHttpUrl(supabaseUrl))
+  if (!isHttpUrl(options.supabaseUrl))
     throw new BaseError('SUPABASE_URL must be an http or https URL.', { name: 'ConfigurationError' })
-  return { supabaseUrl, serviceRoleKey }
+  if (new URL(options.supabaseUrl.trim()).pathname !== '/')
+    throw new BaseError("SUPABASE_URL must be the project's URL, with no path.", {
+      name: 'ConfigurationError',
+    })
+  return options
 }

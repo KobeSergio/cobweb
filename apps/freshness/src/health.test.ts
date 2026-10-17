@@ -5,9 +5,11 @@ import {
   errorLine,
   errorName,
   failureLine,
+  failureName,
   type IndexerHealth,
   type ReaderHealth,
 } from './health.ts'
+import { IndexerWriteError } from './indexer-db.ts'
 
 /** An RPC URL as a provider issues it, its key in the path. */
 const KEYED_URL: string = 'https://rpc.example/v2/secret-key'
@@ -52,6 +54,23 @@ describe('the log lines (docs/specs/2026-10-16-freshness-server.md, section 6.1)
     expect(failureLine(new LimitExceededRpcError(rateLimit()))).toBe(
       'RpcRequestError (-32005): RPC Request failed.',
     )
+  })
+
+  it("name a failure for /health by its name and codes as the log line does, without viem's short message", () => {
+    expect(failureName(new IndexerWriteError('indexer_targets', 'PGRST202', false))).toBe(
+      'IndexerWriteError (PGRST202)',
+    )
+    expect(failureName(new IndexerWriteError('indexer_record', 'HTTP_401', false))).toBe(
+      'IndexerWriteError (HTTP_401)',
+    )
+    const inner = new BaseError(`The call to ${KEYED_URL} failed.`, { cause: rateLimit() })
+    expect(failureName(inner)).toBe('RpcRequestError (-32005)')
+    expect(failureName(new HttpRequestError({ url: KEYED_URL, status: 503 }))).toBe('HttpRequestError')
+    const invalid = Object.assign(new TypeError(`Invalid URL: ${KEYED_URL}`), { code: 'ERR_INVALID_URL' })
+    expect(failureName(invalid)).toBe('TypeError (ERR_INVALID_URL)')
+    // A code that is not capitals, digits and underscores is left out, as the log line leaves it out.
+    expect(failureName(Object.assign(new Error('boom'), { code: `see ${KEYED_URL}` }))).toBe('Error')
+    for (const error of [inner, invalid]) expect(failureName(error)).not.toContain('secret-key')
   })
 
   it('stop walking a chain of causes that refers back to itself', () => {

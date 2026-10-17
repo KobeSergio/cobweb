@@ -137,6 +137,10 @@ describe('eventBlocksOf', () => {
     )
     expect(eventBlocksOf(logs)).toEqual([100n, 102n])
   })
+
+  it('names no block for no log', () => {
+    expect(eventBlocksOf([])).toEqual([])
+  })
 })
 
 describe('recordsOf (docs/specs/2026-10-16-indexer-overview.md, section 6.4)', () => {
@@ -238,6 +242,7 @@ describe('recordsOf (docs/specs/2026-10-16-indexer-overview.md, section 6.4)', (
   })
 
   it('records an airdrop of A 2, B 1 and A 1 as three runs in order, with its counts and fee', () => {
+    // The call names three recipients, A twice, and the event counts them as the call does.
     const { records } = recordsFor(
       logsOf([
         101n,
@@ -246,7 +251,7 @@ describe('recordsOf (docs/specs/2026-10-16-indexer-overview.md, section 6.4)', (
           ...mintedTo(A, 11n, 12n),
           transfer(zeroAddress, B, 13n),
           transfer(zeroAddress, A, 14n),
-          airdropped(2n, 4n, 400_000_000_000_000n),
+          airdropped(3n, 4n, 400_000_000_000_000n),
         ],
       ]),
     )
@@ -257,7 +262,7 @@ describe('recordsOf (docs/specs/2026-10-16-indexer-overview.md, section 6.4)', (
         block: 101,
         blockTime: 1_800_000_101,
         kind: 'airdrop',
-        recipients: 2,
+        recipients: 3,
         tokens: 4,
         feePaidWei: '400000000000000',
         firstTokenId: 11,
@@ -295,6 +300,48 @@ describe('recordsOf (docs/specs/2026-10-16-indexer-overview.md, section 6.4)', (
     const { records, unpaired } = recordsFor(logsOf([101n, 2, [...mintedTo(A, 1n), airdropped(1n, 2n, 0n)]]))
     expect(records.airdrops).toEqual([])
     expect(unpaired).toEqual([TX(2)])
+  })
+
+  it('names an airdrop of 0 tokens after transfers from the zero address unpaired once, and records nothing for it', () => {
+    const { records, unpaired } = recordsFor(
+      logsOf([101n, 2, [...mintedTo(A, 1n, 2n), airdropped(1n, 0n, 0n)]]),
+    )
+    expect(records.airdrops).toEqual([])
+    // The event takes the transfers, so the end of the transaction names nothing more; they still move owners.
+    expect(unpaired).toEqual([TX(2)])
+    expect(records.owners.map((owner) => [owner.tokenId, owner.owner])).toEqual([
+      [1, lower(A)],
+      [2, lower(A)],
+    ])
+  })
+
+  it('does not record a delegated mint with fewer transfers than its amount, and names it unpaired', () => {
+    const { records, unpaired } = recordsFor(
+      logsOf([100n, 1, [...mintedTo(A, 8n), delegateMinted(VAULT, A, 2n, 1n)]]),
+    )
+    expect(records.mints).toEqual([])
+    expect(unpaired).toEqual([TX(1)])
+    expect(records.owners).toMatchObject([{ tokenId: 8, owner: lower(A) }])
+  })
+
+  it('throws when the time of a block with a mint or an airdrop was not read', () => {
+    expect(() => recordsFor(logsOf([104n, 5, [...mintedTo(A, 1n), minted(A, 1n, 0n)]]))).toThrow(
+      'The time of block 104 was not read.',
+    )
+    // A block of transfers and withdrawals alone needs no time.
+    const { records } = recordsFor(logsOf([104n, 5, [transfer(A, B, 1n), withdrawn(A, 5n)]]))
+    expect([records.owners.length, records.withdrawals.length]).toEqual([1, 1])
+  })
+
+  it('answers nothing for no log', () => {
+    expect(recordsOf([], COLLECTIONS, TIMES)).toEqual({
+      records: { mints: [], owners: [], airdrops: [], withdrawals: [] },
+      unpaired: [],
+    })
+    expect(recordsOf([], new Map(), new Map())).toEqual({
+      records: { mints: [], owners: [], airdrops: [], withdrawals: [] },
+      unpaired: [],
+    })
   })
 
   it("keeps a withdrawal's amount and payout address", () => {

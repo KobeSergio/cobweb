@@ -6,9 +6,16 @@ import type { Tier } from './tiers.ts'
  * logs each pass asks for, how a scan's logs are cut into writes, and when the next pass runs.
  */
 
-/** The most blocks one scan reads. */
+/** The most blocks past its cursor one scan reads. */
 export const MAX_RANGE = 500n
-/** The most collections one scan asks for. */
+/**
+ * The blocks at and below a cursor's scanned block that each scan reads again. The head comes from one request
+ * and the logs from another, so behind a load balancer the node answering `getLogs` can be a few blocks behind
+ * and answer up to its own head without an error; the next pass reads those blocks again and writes what the
+ * short answer left out. 32 blocks is about 8 s on Arbitrum and a minute on Base.
+ */
+export const REREAD_BLOCKS = 32n
+/** The most collections one scan asks for, and a cursor's chunk until a block it cannot read halves it. */
 export const ADDRESSES_PER_SCAN = 100
 /** The most scans the groups behind the front take in one pass. */
 export const LAGGING_SCANS_PER_PASS = 10
@@ -27,17 +34,21 @@ export const CURSOR_WRITE_EVERY_MS = 60_000
 export const RANGE_GROW_AFTER_MS = 60_000
 
 /**
- * A collection as a pass reads it. `scanned` is how far this process has read and `written` how far the
- * database's cursor has moved, both blocks; `range` is the blocks its next scan may read; `syncedAt` the
- * chain's time when a pass last read it to the safe block (Unix seconds); `writtenAt` when its cursor was
- * last written; `failedAt` when its last scan failed, undefined until one does.
+ * A collection as a pass reads it. `fromBlock` is its deploy block, below which no scan of it starts;
+ * `scanned` is how far this process has read and `written` how far the database's cursor has moved, both
+ * blocks; `range` is the blocks past `scanned` its next scan may read; `chunk` the most collections a scan
+ * of it asks for, halved by a scan that fails at a range of 1 block; `syncedAt` the chain's time when a pass
+ * last read it to the safe block (Unix seconds); `writtenAt` when its cursor was last written; `failedAt` when
+ * its last scan failed, undefined until one does.
  */
 export type Cursor = {
   collectionId: string
   contract: Address
+  fromBlock: bigint
   scanned: bigint
   written: bigint
   range: bigint
+  chunk: number
   syncedAt: number | null
   writtenAt: number
   failedAt?: number
@@ -45,6 +56,9 @@ export type Cursor = {
 
 /** One `getLogs` call: the cursors whose contracts it asks for, and its blocks, both ends included. */
 export type Scan = { cursors: Cursor[]; fromBlock: bigint; toBlock: bigint }
+
+/** Two blocks in ascending order, for a sort. */
+export const byBlock = (a: bigint, b: bigint): number => (a < b ? -1 : a > b ? 1 : 0)
 
 /**
  * The highest block buried under the chain's confirmations (the head counted): `head - confirmations + 1`,
@@ -57,9 +71,11 @@ export function safeBlockOf(head: bigint, confirmations: number): bigint {
 
 /**
  * The scans of a pass: the cursors below the safe block grouped by `scanned`. The front group (the highest
- * `scanned`) is planned in full, one scan per 100 addresses; the groups behind it take at most 10 scans in
- * all, the closest to the front first, so they reach it and merge. Each scan runs from `scanned + 1` to the
- * lower of the safe block and `scanned` plus the group's smallest range.
+ * `scanned`) is planned in full, one scan per chunk of addresses (100, or the group's smallest chunk); the
+ * groups behind it take at most 10 scans in all, the closest to the front first, so they reach it and merge.
+ * Each scan ends at the lower of the safe block and `scanned` plus the group's smallest range (at least 1
+ * block, at most 500), and starts `REREAD_BLOCKS` below `scanned + 1`, never below the lowest deploy block of
+ * its cursors, so the blocks near the head are read by at least two passes.
  */
 export function scansOf(cursors: readonly Cursor[], safe: bigint): Scan[] {
   const groups = new Map<bigint, Cursor[]>()
@@ -69,23 +85,32 @@ export function scansOf(cursors: readonly Cursor[], safe: bigint): Scan[] {
     if (group) group.push(cursor)
     else groups.set(cursor.scanned, [cursor])
   }
-  const ordered = [...groups.entries()].sort(([a], [b]) => (a > b ? -1 : a < b ? 1 : 0))
+  const ordered = [...groups.entries()].sort(([a], [b]) => byBlock(b, a))
   const scans: Scan[] = []
   let lagging = 0
   for (const [index, [scanned, group]] of ordered.entries()) {
-    const range = group.reduce((least, cursor) => (cursor.range < least ? cursor.range : least), MAX_RANGE)
+    const range = group.reduce((least, cursor) => {
+      const own = cursor.range < 1n ? 1n : cursor.range
+      return own < least ? own : least
+    }, MAX_RANGE)
+    const chunk = group.reduce(
+      (least, cursor) => Math.max(1, Math.min(least, cursor.chunk)),
+      ADDRESSES_PER_SCAN,
+    )
     const end = scanned + range
     const toBlock = end < safe ? end : safe
-    for (let start = 0; start < group.length; start += ADDRESSES_PER_SCAN) {
+    const reread = scanned + 1n - REREAD_BLOCKS
+    for (let start = 0; start < group.length; start += chunk) {
       if (index > 0) {
         if (lagging === LAGGING_SCANS_PER_PASS) return scans
         lagging++
       }
-      scans.push({
-        cursors: group.slice(start, start + ADDRESSES_PER_SCAN),
-        fromBlock: scanned + 1n,
-        toBlock,
-      })
+      const slice = group.slice(start, start + chunk)
+      const deployed = slice.reduce(
+        (least, cursor) => (cursor.fromBlock < least ? cursor.fromBlock : least),
+        slice[0]!.fromBlock,
+      )
+      scans.push({ cursors: slice, fromBlock: deployed > reread ? deployed : reread, toBlock })
     }
   }
   return scans
@@ -102,9 +127,7 @@ export function segmentsOf<T extends { blockNumber: bigint }>(
   max: number = MAX_LOGS_PER_WRITE,
 ): { fromBlock: bigint; toBlock: bigint; logs: T[] }[] {
   // A stable sort: the logs of one block keep the order the node answered them in.
-  const sorted = [...logs].sort((a, b) =>
-    a.blockNumber < b.blockNumber ? -1 : a.blockNumber > b.blockNumber ? 1 : 0,
-  )
+  const sorted = [...logs].sort((a, b) => byBlock(a.blockNumber, b.blockNumber))
   const segments: { fromBlock: bigint; toBlock: bigint; logs: T[] }[] = []
   let current: T[] = []
   let from = scan.fromBlock
