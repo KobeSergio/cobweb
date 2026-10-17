@@ -1,7 +1,8 @@
 // The chain half of the local fixture (docs/specs/2026-10-16-freshness-server.md, section 7.3), so the
 // scripts that send to Anvil cannot drift: the local chain settings with a non-local endpoint refused (from
-// chain-settings.ts, re-exported), the Anvil client, the PASS and FAIL lines, the payment and the factory
-// call, a simulated request sent as it is, a manage call simulated and sent as the manage machine does, and
+// chain-settings.ts, re-exported), the Anvil client, the PASS and FAIL lines, the payment, the platform
+// admin's airdrop fee and the factory call, a simulated request sent as it is, a manage call simulated and
+// sent as the manage machine does, and
 // the mint page's wallet: a wagmi config with the mock connector on an impersonated address, and its release
 // (docs/specs/2026-10-16-mint-page-live-data.md, section 10). deploy-fixture.ts re-exports it with the
 // Supabase half; verify:freshness imports it alone, so it needs Anvil and nothing else. Never prints a key.
@@ -108,6 +109,27 @@ export async function pay(account: PrivateKeyAccount, jobId: Hex, value: bigint)
   })
   const receipt = await chain.waitForTransactionReceipt({ hash })
   if (receipt.status !== 'success') throw new Error(`payForArt reverted: ${hash}`)
+  return hash
+}
+
+/** Anvil's first account: the local factory's admin and treasury, unlocked on the node, so no key is needed. */
+export const PLATFORM_ADMIN: Address = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
+
+/**
+ * Sets a collection's airdrop fee per token (its mint fees 0) from the platform admin, sent as an unlocked
+ * JSON-RPC account, and waits for the receipt: the local factory's fees are 0, so a script that pays one sets
+ * it here.
+ */
+export async function setAirdropFee(collection: Address, feePerToken: bigint): Promise<Hex> {
+  const platform = createWalletClient({ account: PLATFORM_ADMIN, chain: anvil, transport: http(rpc) })
+  const hash = await platform.writeContract({
+    address: collection,
+    abi: collectionAbi,
+    functionName: 'setFees',
+    args: [0n, 0n, feePerToken],
+  })
+  const receipt = await chain.waitForTransactionReceipt({ hash })
+  if (receipt.status !== 'success') throw new Error(`setFees reverted: ${hash}`)
   return hash
 }
 

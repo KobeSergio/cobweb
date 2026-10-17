@@ -16,18 +16,8 @@
 // creates. Runs under `node --conditions=react-server --import ./scripts/resolve-ts.mjs`.
 
 import { randomUUID } from 'node:crypto'
-import {
-  createWalletClient,
-  getAddress,
-  http,
-  keccak256,
-  parseEther,
-  toHex,
-  type Address,
-  type Hex,
-} from 'viem'
+import { getAddress, keccak256, parseEther, toHex, type Address, type Hex } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
-import { anvil } from 'viem/chains'
 import { collectionAbi } from '@cobweb/shared/collection-abi'
 import {
   admin,
@@ -48,6 +38,7 @@ import {
   rpc,
   runChecks,
   sendCall,
+  setAirdropFee,
   settings,
   signIn,
   simulationSentence,
@@ -65,9 +56,7 @@ const { NOT_DEPLOYED, NOT_FROM_WALLET, NOT_THIS_CHANGE, NOT_THIS_CONTRACT } =
 type AirdropContext = import('../src/lib/manage/airdrop-core.ts').AirdropContext
 type AirdropView = import('../src/lib/manage/airdrop-types.ts').AirdropView
 
-/** Anvil's first account: the local factory's admin and treasury, unlocked on the node, so no key is needed. */
-const PLATFORM_ADMIN: Address = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
-/** The airdrop fee the admin sets: 0.0001 ETH a token. */
+/** The airdrop fee the platform admin sets (`setAirdropFee`): 0.0001 ETH a token. */
 const FEE = 100_000_000_000_000n
 /** The per-transaction gas cap some chains apply. */
 const TX_GAS_CAP = 16_777_216n
@@ -75,20 +64,6 @@ const TX_GAS_CAP = 16_777_216n
 /** A fresh wallet for each tag and index, from their keccak. */
 const wallet = (tag: string, index: number): Address =>
   getAddress(`0x${keccak256(toHex(`${tag} ${index}`)).slice(26)}`)
-
-/** Sets a collection's fees from the platform admin, sent as an unlocked JSON-RPC account, and waits. */
-async function setFees(collection: Address, airdropFeePerToken: bigint): Promise<Hex> {
-  const platform = createWalletClient({ account: PLATFORM_ADMIN, chain: anvil, transport: http(rpc) })
-  const hash = await platform.writeContract({
-    address: collection,
-    abi: collectionAbi,
-    functionName: 'setFees',
-    args: [0n, 0n, airdropFeePerToken],
-  })
-  const receipt = await chain.waitForTransactionReceipt({ hash })
-  if (receipt.status !== 'success') throw new Error(`setFees reverted: ${hash}`)
-  return hash
-}
 
 /** The collection's airdrop rows, newest block first, as the service role reads them. */
 async function airdropRows(cid: string) {
@@ -175,7 +150,7 @@ async function main(): Promise<void> {
     "3. fee: the platform admin's setFees(0, 0, 100000000000000) lands and the view reads the fee as 100000000000000 wei",
     async () => {
       const { ctx, record } = subject()
-      feesHash = await setFees(record.contractAddress, FEE)
+      feesHash = await setAirdropFee(record.contractAddress, FEE)
       const outcome = await airdropViewCore(ctx)
       if (!('data' in outcome)) return refusal(outcome)
       return outcome.data.feePerTokenWei === FEE.toString() ? null : JSON.stringify(outcome.data)
@@ -448,7 +423,7 @@ async function main(): Promise<void> {
         args: encoded,
       })
       await deploy(creatorKey, encoded, salt)
-      await setFees(collection, FEE)
+      await setAirdropFee(collection, FEE)
       const entries = Array.from({ length: 500 }, (_, index) => ({
         address: wallet('gas', index),
         amount: 2,

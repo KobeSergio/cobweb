@@ -249,7 +249,7 @@ async function main(): Promise<void> {
   let etag = ''
 
   await check(
-    "4. first read: with Holders open and Public scheduled at T, 600 s after the latest block, A's first request answers 200 within the join wait; its collectionState fields equal a direct read at its block; the owner, a royalty of 500 bps to the creator, the base URI and the default validator are A's; transferLevel is none, degraded false and readAt within 2 s; with the state's cache headers, a weak ETag and Access-Control-Allow-Origin *",
+    "4. first read: with Holders open and Public scheduled at T, 600 s after the latest block, A's first request answers 200 within the join wait; its collectionState fields equal a direct read at its block; the owner, a royalty of 500 bps to the creator, the base URI and the default validator are A's; transferLevel is none, degraded false, activity null (no indexer runs) and readAt within 2 s; with the state's cache headers, a weak ETag and Access-Control-Allow-Origin *",
     async () => {
       const startedAt = Date.now()
       const answer = await stateOf(A)
@@ -307,6 +307,9 @@ async function main(): Promise<void> {
         Math.abs(Date.now() - body.readAt * 1_000) > 2_000
       )
         return `level ${body.transferLevel}, degraded ${body.degraded}, readAt ${body.readAt}`
+      // The server runs without the indexer, so the body carries the key with null, never leaves it out.
+      if (!('activity' in body) || body.activity !== null)
+        return `activity ${'activity' in body ? JSON.stringify(body.activity) : 'missing'}`
       etag = answer.headers.get('etag') ?? ''
       return answer.headers.get('cache-control') === STATE_CACHE &&
         /^W\/"[0-9a-f]{32}"$/.test(etag) &&

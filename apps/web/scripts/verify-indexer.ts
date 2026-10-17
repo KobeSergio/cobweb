@@ -13,16 +13,17 @@
 // The fixture (scripts/deploy-fixture.ts) reads the settings from the environment, `supabase status -o env` and
 // apps/web/.env.local, and refuses non-local endpoints. The server's database is the local one, with the service
 // role key the fixture read; the script prints no key and no URL, and a thrown error prints viem's short message
-// or its first line (chain-fixture.ts). The indexer reads every collection deployed on Anvil the database lists,
-// the earlier walks' among them, and logs once a minute each one whose deploy is not on this chain. The cleanup
-// closes the server and deletes every row the run created, the indexer's with its collection. What stays is on
-// Anvil: the collection with its mint, airdrop, burn, transfer and withdrawal, the three fresh accounts, 1,200
-// more blocks and the chain's clock about 1,200 s ahead. Runs under
+// or its first line (chain-fixture.ts). Stop any other indexer on the same database first (a running
+// `pnpm --filter @cobweb/freshness dev` with the two variables set): it would race checks 11, 13 and 15. The
+// indexer reads every collection deployed on Anvil the database lists, the earlier walks' among them, so each
+// server start logs once each one whose deploy is not on this chain, and the cursors it starts or moves for them
+// stay. The cleanup closes the server and deletes the run's own rows: its collection's, with the indexer's for
+// it. What stays is on Anvil: the collection with its mint, airdrop, burn, withdrawal and two transfers, the three
+// fresh accounts, 1,200 more blocks and the chain's clock about 1,200 s ahead. Runs under
 // `node --conditions=react-server --import ./scripts/resolve-ts.mjs`.
 
-import { createWalletClient, http, parseEther, type Address, type Hex } from 'viem'
+import { isAddressEqual, parseEther, type Address, type Hex } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
-import { anvil } from 'viem/chains'
 import { statePath, type StateBody } from '@cobweb/shared'
 import { collectionAbi } from '@cobweb/shared/collection-abi'
 import {
@@ -31,6 +32,7 @@ import {
   type HealthBody,
   type IndexerOptions,
 } from '@cobweb/freshness/server'
+import type { PhasesContext } from '../src/lib/manage/phases-core.ts'
 import {
   admin,
   chain,
@@ -44,6 +46,7 @@ import {
   runChecks,
   sendCall,
   sendRequest,
+  setAirdropFee,
   settings,
   signIn,
   type Creator,
@@ -60,14 +63,11 @@ const { airdropCalls, phaseCalls, settingsCalls } = await import('../src/lib/man
 const { phasesViewCore } = await import('../src/lib/manage/phases-core.ts')
 const { settingsViewCore } = await import('../src/lib/manage/settings-core.ts')
 const { NOT_FOUND } = await import('../src/lib/art/result.ts')
-type PhasesContext = import('../src/lib/manage/phases-core.ts').PhasesContext
 
 /** The launch groups: Public (id 0) and Holders (id 1). */
 const PUBLIC = 0
 const PUBLIC_PRICE = 1_000_000_000_000_000n
-/** Anvil's first account: the local factory's admin, unlocked on the node, so no key is needed. */
-const PLATFORM_ADMIN: Address = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
-/** The airdrop fee the admin sets: 0.0001 ETH a token, so the burn pays one. */
+/** The airdrop fee the platform admin sets (`setAirdropFee`): 0.0001 ETH a token, so the burn pays one. */
 const FEE = 100_000_000_000_000n
 /** The indexer on fast intervals, so each change is read within about a second. */
 const INDEXER: IndexerOptions = {
@@ -150,7 +150,11 @@ async function cursorOf(cid: string): Promise<CursorRow | null> {
   return data
 }
 
-/** Every row the indexer keeps for the collection, and its cursor's start and holders, as one string to compare. */
+/**
+ * Every row the indexer keeps for the collection, and its cursor's start and holders, as one string to compare.
+ * The airdrops' and withdrawals' confirmed_at, set when a row is inserted, show a row kept rather than written
+ * again.
+ */
 async function indexedRows(cid: string): Promise<string> {
   const reads = await Promise.all([
     admin
@@ -166,7 +170,7 @@ async function indexedRows(cid: string): Promise<string> {
     admin
       .from('airdrops')
       .select(
-        'tx_hash, kind, recipients, tokens, fee_paid_wei::text, first_token_id, last_token_id, block, sent_by, block_time',
+        'tx_hash, kind, recipients, tokens, fee_paid_wei::text, first_token_id, last_token_id, block, sent_by, block_time, confirmed_at',
       )
       .eq('collection_id', cid)
       .order('tx_hash'),
@@ -177,7 +181,7 @@ async function indexedRows(cid: string): Promise<string> {
       .order('first_token_id'),
     admin
       .from('withdrawals')
-      .select('tx_hash, amount_wei::text, payout_address, block')
+      .select('tx_hash, amount_wei::text, payout_address, block, confirmed_at')
       .eq('collection_id', cid)
       .order('tx_hash'),
     admin.from('indexer_cursors').select('from_block, holders').eq('collection_id', cid),
@@ -190,19 +194,6 @@ async function indexedRows(cid: string): Promise<string> {
 async function blockTimeOf(hash: Hex): Promise<number> {
   const receipt = await chain.getTransactionReceipt({ hash })
   return Number((await chain.getBlock({ blockNumber: receipt.blockNumber })).timestamp)
-}
-
-/** Sets the collection's fees from the platform admin, sent as an unlocked JSON-RPC account, and waits. */
-async function setAirdropFee(contract: Address): Promise<void> {
-  const platform = createWalletClient({ account: PLATFORM_ADMIN, chain: anvil, transport: http(rpc) })
-  const hash = await platform.writeContract({
-    address: contract,
-    abi: collectionAbi,
-    functionName: 'setFees',
-    args: [0n, 0n, FEE],
-  })
-  const receipt = await chain.waitForTransactionReceipt({ hash })
-  if (receipt.status !== 'success') throw new Error(`setFees reverted: ${hash}`)
 }
 
 /** The owner check the actions run first (`ownedCollection`): the collection's owner, else not found. */
@@ -245,7 +236,7 @@ async function main(): Promise<void> {
       if (cursors.error) return `Supabase: ${cursors.error.message}; run supabase migration up --local`
       deployed = await deployedCollection(creator, form, 'indexer')
       subject = { deployed }
-      await setAirdropFee(deployed.record.contractAddress)
+      await setAirdropFee(deployed.record.contractAddress, FEE)
       // The Overview's view before any indexer has read the collection, for check 2.
       const view = await activityViewCore(deployed.ctx)
       if (!('data' in view)) return `the view before: ${JSON.stringify(view)}`
@@ -395,11 +386,11 @@ async function main(): Promise<void> {
       if (row?.sent_by !== lower(creatorKey.address) || !sameTime(row.block_time, airdropTime))
         return `airdrop ${JSON.stringify(row)}`
       const { data } = await admin.from('airdrop_recipients').select('*').eq('tx_hash', airdropHash)
-      const [run] = data ?? []
+      const [recipientRow] = data ?? []
       return data?.length === 1 &&
-        run?.recipient === lower(strangerKey.address) &&
-        run.tokens === 1 &&
-        run.first_token_id === 2
+        recipientRow?.recipient === lower(strangerKey.address) &&
+        recipientRow.tokens === 1 &&
+        recipientRow.first_token_id === 2
         ? null
         : `recipients ${JSON.stringify(data)}`
     },
@@ -485,10 +476,12 @@ async function main(): Promise<void> {
     "8. withdrawal outside Cobweb: withdrawMintFunds sent straight from the creator's wallet is recorded with the event's amount, the settings view's withdrawn sum includes it, and Paid by minters equals Public's price",
     async () => {
       const row = await until(async () => {
+        // Keyed by the transaction and the collection: this collection's row of the transaction.
         const { data } = await admin
           .from('withdrawals')
           .select('amount_wei::text, payout_address')
           .eq('tx_hash', withdrawHash)
+          .eq('collection_id', cid)
           .maybeSingle()
         return data
       }, RECORDED_WITHIN_MS)
@@ -563,11 +556,11 @@ async function main(): Promise<void> {
         if (!DEAD.includes(digits.slice(at, at + 4))) part = digits.slice(at, at + 4)
       const found = await airdropRecipientsCore(ctx, { search: part.toUpperCase(), page: 0 })
       if (!('data' in found)) return `search ${JSON.stringify(found)}`
-      const stranger = found.data.rows.find((row) => row.wallet === strangerKey.address)
+      const strangerRow = found.data.rows.find((row) => row.wallet === strangerKey.address)
       if (
-        !stranger ||
-        stranger.tokens !== 1 ||
-        stranger.firstTokenId !== 2 ||
+        !strangerRow ||
+        strangerRow.tokens !== 1 ||
+        strangerRow.firstTokenId !== 2 ||
         !found.data.rows.every((row) => lower(row.wallet).includes(part))
       )
         return `search ${part}: ${JSON.stringify(found.data)}`
@@ -643,29 +636,42 @@ async function main(): Promise<void> {
     async () => {
       const rows = await indexedRows(cid)
       await stopServer()
-      for (const table of ['indexer_cursors', 'mints', 'token_owners', 'airdrop_recipients'] as const) {
-        const removed = await admin.from(table).delete().eq('collection_id', cid)
-        if (removed.error) return `removing ${table}: ${removed.error.message}`
+      try {
+        // The rows checks 3 to 8 left: the cursor, the mint, tokens 1 to 3, and the airdrop's and the burn's
+        // recipient rows.
+        for (const [table, want] of [
+          ['indexer_cursors', 1],
+          ['mints', 1],
+          ['token_owners', 3],
+          ['airdrop_recipients', 2],
+        ] as const) {
+          const removed = await admin.from(table).delete({ count: 'exact' }).eq('collection_id', cid)
+          if (removed.error) return `removing ${table}: ${removed.error.message}`
+          if (removed.count !== want) return `removed ${removed.count} ${table} rows, not ${want}`
+        }
+        // In steps of 100, each well under viem's 10 s request timeout: a local Anvil can take 25 ms a block.
+        for (let mined = 0; mined < 1_200; mined += 100) await chain.mine({ blocks: 100 })
+        const head = Number(await chain.getBlockNumber())
+        await startServer()
+        const cursor = await until(async () => {
+          const row = await cursorOf(cid)
+          return row?.synced_at && row.indexed_block >= head ? row : null
+        }, RECORDED_WITHIN_MS * 2)
+        if (cursor?.from_block !== deployBlock) return `the cursor ${JSON.stringify(await cursorOf(cid))}`
+        if ((await indexedRows(cid)) !== rows) return 'the rows rebuilt differ'
+        const view = await activityViewCore(ctx)
+        return 'data' in view && view.data.counted && view.data.holders === 1
+          ? null
+          : `view ${JSON.stringify(view)}`
+      } finally {
+        // Check 14 reads the server: a failure here that left it stopped would fail that check for this reason.
+        if (!freshness) await startServer()
       }
-      // In steps of 100, each well under viem's 10 s request timeout: a local Anvil can take 25 ms a block.
-      for (let mined = 0; mined < 1_200; mined += 100) await chain.mine({ blocks: 100 })
-      const head = Number(await chain.getBlockNumber())
-      await startServer()
-      const cursor = await until(async () => {
-        const row = await cursorOf(cid)
-        return row?.synced_at && row.indexed_block >= head ? row : null
-      }, RECORDED_WITHIN_MS * 2)
-      if (cursor?.from_block !== deployBlock) return `the cursor ${JSON.stringify(await cursorOf(cid))}`
-      if ((await indexedRows(cid)) !== rows) return 'the rows rebuilt differ'
-      const view = await activityViewCore(ctx)
-      return 'data' in view && view.data.counted && view.data.holders === 1
-        ? null
-        : `view ${JSON.stringify(view)}`
     },
   )
 
   await check(
-    "14. health: /health reports chain 31337's indexer with every collection the database indexes there (this one among them), none behind, its block and last pass, no failed pass and nothing unpaired, and neither a URL nor a key",
+    "14. health: /health reports chain 31337's indexer with every collection the database indexes there (this one among them), none behind, its block and last pass, no failed pass and nothing unpaired, its reader with no failure either, and no key, URL or host anywhere in the body",
     async () => {
       const head = Number(await chain.getBlockNumber())
       const cursors = await admin.from('indexer_cursors').select('collection_id').eq('chain_id', 31337)
@@ -677,7 +683,7 @@ async function main(): Promise<void> {
         return indexer && indexer.block === head && indexer.behind === 0 ? { ...read, indexer } : null
       }, RECORDED_WITHIN_MS)
       if (!health) return `health ${JSON.stringify((await healthOf()).body.chains)}`
-      const { indexer, text } = health
+      const { indexer, text, body } = health
       const recent = indexer.lastPassAt !== null && Date.now() - Date.parse(indexer.lastPassAt) < 5_000
       if (
         indexer.collections !== cursors.data.length ||
@@ -687,8 +693,18 @@ async function main(): Promise<void> {
         indexer.unpaired !== 0
       )
         return `indexer ${JSON.stringify(indexer)} for ${cursors.data.length} cursors`
-      const leaked = [settings.serviceKey, settings.url, rpc].filter((secret) => text.includes(secret))
-      return leaked.length ? `/health carries ${leaked.length} of the URLs and the key` : null
+      const reader = body.chains.find((entry) => entry.chainId === 31337)
+      if (reader?.lastError !== null) return `the reader's last error ${reader?.lastError}`
+      // Neither the key nor either URL, nor a scheme or either host, anywhere in the body.
+      const leaked = [
+        settings.serviceKey,
+        settings.url,
+        rpc,
+        '://',
+        new URL(settings.url).host,
+        new URL(rpc).host,
+      ].filter((secret) => text.includes(secret))
+      return leaked.length ? `/health carries ${leaked.length} of the key, the URLs and their hosts` : null
     },
   )
 }
@@ -729,16 +745,41 @@ async function cursorWrites(): Promise<string> {
 
 async function cleanup(): Promise<void> {
   await check(
-    '15. stop: close() ends the indexer, no write lands for 3 s after it, and the fixtures are removed',
+    '15. stop: close() ends the indexer: a transfer sent after it changes no row and no cursor is written for 3 s; and the fixtures are removed',
     async () => {
       const run = subject
       const problems: (string | null)[] = [
         await attempt('closing the freshness server', async () => {
-          if (!freshness) return null
+          // A server already down cannot show that close() stops its indexer.
+          if (!freshness) return 'the freshness server was not running at the stop'
           await stopServer()
           const writes = await cursorWrites()
+          const rows = run ? await indexedRows(run.deployed.cid) : null
+          if (run) {
+            // A change a running indexer records within a pass: token 1 handed on by whichever of the holder and
+            // the stranger holds it (the stranger, since check 7).
+            const contract = run.deployed.record.contractAddress
+            const owner = await chain.readContract({
+              address: contract,
+              abi: collectionAbi,
+              functionName: 'ownerOf',
+              args: [1n],
+            })
+            const [from, to] = isAddressEqual(owner, strangerKey.address)
+              ? [strangerKey, holderKey]
+              : [holderKey, strangerKey]
+            const { request } = await chain.simulateContract({
+              address: contract,
+              abi: collectionAbi,
+              functionName: 'transferFrom',
+              args: [from.address, to.address, 1n],
+              account: from,
+            })
+            await sendRequest(from, request)
+          }
           await wait(3_000)
-          return (await cursorWrites()) === writes ? null : 'a cursor was written after close()'
+          if ((await cursorWrites()) !== writes) return 'a cursor was written after close()'
+          return run && (await indexedRows(run.deployed.cid)) !== rows ? 'a row changed after close()' : null
         }),
         await attempt('removing the fixtures', removeFixtures),
       ]
