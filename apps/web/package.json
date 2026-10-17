@@ -24,7 +24,8 @@
     "verify:airdrop": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-airdrop.ts",
     "verify:settings": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-settings.ts",
     "verify:freshness": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-freshness.ts",
-    "verify:mint-page": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-mint-page.ts"
+    "verify:mint-page": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-mint-page.ts",
+    "verify:indexer": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-indexer.ts"
   },
   "devDependencies": {
     "@cobweb/freshness": "workspace:^",
