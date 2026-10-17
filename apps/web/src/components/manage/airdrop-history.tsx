@@ -54,6 +54,9 @@ export function HistoryPanel({
 }) {
   const [shown, setShown] = useState<HistoryView>('transaction')
   const [exporting, setExporting] = useState(false)
+  // Every recipient's count, from By recipient's reads with no search: its "Export CSV" is off while it is 0,
+  // since the file would hold the header alone. Null until such a read answers.
+  const [recipientsTotal, setRecipientsTotal] = useState<number | null>(null)
   // Each When counts from the later of the read's time and the indexer's count: the copy's time can trail a
   // recorded airdrop, which would read "in under a minute", and the count is no earlier than any it recorded.
   const now = Math.max(view.readAt, view.countedAt ?? view.readAt)
@@ -88,7 +91,12 @@ export function HistoryPanel({
             Export CSV
           </Button>
         ) : (
-          <Button variant="ghost" size="sm" disabled={!view.counted || exporting} onClick={exportRecipients}>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={!view.counted || exporting || recipientsTotal === 0}
+            onClick={exportRecipients}
+          >
             <DownloadIcon aria-hidden="true" />
             Export CSV
           </Button>
@@ -122,6 +130,7 @@ export function HistoryPanel({
           chain={chain}
           now={now}
           server={server}
+          onTotal={setRecipientsTotal}
         />
       )}
     </Panel>
@@ -130,7 +139,8 @@ export function HistoryPanel({
 
 /**
  * By recipient: 25 rows at a time, newest first, read on the server; the search goes to the server 300 ms after
- * the last keystroke and back to the first page.
+ * the last keystroke and back to the first page. Each read with no search tells the panel how many rows there
+ * are in all.
  */
 function ByRecipient({
   collectionId,
@@ -138,6 +148,7 @@ function ByRecipient({
   chain,
   now,
   server,
+  onTotal,
 }: {
   collectionId: string
   counted: boolean
@@ -145,13 +156,17 @@ function ByRecipient({
   /** The time each When counts from: the later of the read's time and the indexer's count. */
   now: number
   server: AirdropServer
+  /** Told every row's count each time a read with no search answers. */
+  onTotal: (total: number) => void
 }) {
   const id = useId()
   const [typed, setTyped] = useState('')
+  // The search as typed, trimmed: the server reads it (`recipientSearchOf`), and one holding a character no
+  // address holds matches no row.
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(0)
   useEffect(() => {
-    const next = recipientSearchOf(typed)
+    const next = typed.trim()
     if (next === search) return
     const timer = setTimeout(() => {
       setSearch(next)
@@ -164,15 +179,21 @@ function ByRecipient({
     queryFn: async () => {
       const result = await server.recipients({ search, page })
       if (!result.ok) throw new Error(result.error)
-      return result.data
+      // With the search it was read for: a page kept on screen while the next loads keeps its own sentence.
+      return { ...result.data, search }
     },
     enabled: counted,
     placeholderData: keepPreviousData,
     retry: false,
   })
+  const data = recipients.data
+  // Rows read with no search (nothing typed, or a 0x alone) count every recipient.
+  const total = data && recipientSearchOf(data.search) === '' ? data.total : null
+  useEffect(() => {
+    if (total !== null) onTotal(total)
+  }, [total, onTotal])
 
   if (!counted) return <Note>Recipients show once Cobweb has read the contract&apos;s history.</Note>
-  const data = recipients.data
   return (
     <div className="grid gap-4">
       <div className="px-5 pt-2 lg:px-6">
@@ -207,7 +228,11 @@ function ByRecipient({
           <Skeleton className="h-8 w-full" />
         </div>
       ) : data.total === 0 ? (
-        <Note>{search ? 'No address matches that search.' : 'No wallet has received an airdrop yet.'}</Note>
+        <Note>
+          {recipientSearchOf(data.search) === ''
+            ? 'No wallet has received an airdrop yet.'
+            : 'No address matches that search.'}
+        </Note>
       ) : (
         <Table>
           <TableHeader>

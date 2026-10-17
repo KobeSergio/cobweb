@@ -137,12 +137,14 @@ export function tokenIdsText(first: number, last: number): string {
 
 /**
  * By recipient's search as the server applies it (docs/specs/2026-10-16-indexer-overview.md, section 7.3): the
- * hex digits typed, lowercase, a leading 0x dropped, so it matches any part of a stored address and carries no
- * LIKE wildcard.
+ * input trimmed and lowercase, a leading 0x dropped. Hex digits alone match any part of a stored address and
+ * carry no LIKE wildcard; none at all filters nothing. Null when any other character is left: no address
+ * holds one, so the search matches no row, as the Whitelist table's does.
  */
-export function recipientSearchOf(input: string): string {
+export function recipientSearchOf(input: string): string | null {
   const text = input.trim().toLowerCase()
-  return (text.startsWith('0x') ? text.slice(2) : text).replace(/[^0-9a-f]/g, '')
+  const digits = text.startsWith('0x') ? text.slice(2) : text
+  return /^[0-9a-f]*$/.test(digits) ? digits : null
 }
 
 /** The rows as By recipient shows them, in the order read: wallets checksummed, the dead address a burn. */

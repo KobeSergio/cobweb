@@ -150,7 +150,8 @@ export function sampleAirdropServer(
     recipients: ({ search, page }) =>
       recipientsAnswer(() => {
         const digits = recipientSearchOf(search)
-        const rows = sampleRecipients().filter((row) => row.wallet.toLowerCase().includes(digits))
+        const rows =
+          digits === null ? [] : sampleRecipients().filter((row) => row.wallet.toLowerCase().includes(digits))
         return {
           rows: rows.slice(page * RECIPIENTS_PAGE, (page + 1) * RECIPIENTS_PAGE),
           total: rows.length,

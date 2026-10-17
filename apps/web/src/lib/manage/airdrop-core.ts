@@ -164,8 +164,8 @@ const RECIPIENTS_ORDER = { block: { ascending: false }, first_token_id: { ascend
 /**
  * One page of By recipient (docs/specs/2026-10-16-indexer-overview.md, section 7.3): 25 rows of
  * `airdrop_recipients`, newest first, with an exact count, filtered to the addresses holding the search's hex
- * digits. A query it cannot read is refused with RECIPIENTS_NOT_READ; a page past the last answers no row with
- * the count.
+ * digits. A search with any other character matches no row and reads nothing. A query it cannot read is
+ * refused with RECIPIENTS_NOT_READ; a page past the last answers no row with the count.
  */
 export async function airdropRecipientsCore(
   ctx: AirdropContext,
@@ -175,6 +175,8 @@ export async function airdropRecipientsCore(
   if (!parsed.success) return { refused: RECIPIENTS_NOT_READ }
   const { page } = parsed.data
   const search = recipientSearchOf(parsed.data.search)
+  // A character no address holds: no row matches, and only hex digits ever reach `like`.
+  if (search === null) return { data: { rows: [], total: 0, page } }
   const matching = (head: boolean) => {
     const select = ctx.supabase
       .from('airdrop_recipients')

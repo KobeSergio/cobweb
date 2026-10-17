@@ -188,9 +188,23 @@ describe('sampleAirdropServer', () => {
     )
     const first = await after300(server.recipients({ search: '', page: 0 }))
     expect(first).toEqual({ ok: true, data: { rows: all, total: 5, page: 0 } })
+    // A page past 0, here past the last: no row, with the count.
+    expect(await after300(server.recipients({ search: '', page: 1 }))).toEqual({
+      ok: true,
+      data: { rows: [], total: 5, page: 1 },
+    })
     const part = all[2]!.wallet.slice(10, 16)
     const found = await after300(server.recipients({ search: `0x${part.toUpperCase()}`, page: 0 }))
-    expect(found.ok && found.data.rows.map((row) => row.wallet)).toEqual([all[2]!.wallet])
+    expect(found).toEqual({ ok: true, data: { rows: [all[2]], total: 1, page: 0 } })
     expect(await after300(server.exportRecipients())).toEqual({ ok: true, data: all })
+  })
+
+  it('answers no row for a search with a character no address holds, as the Whitelist does', async () => {
+    const server = sampleAirdropServer(() => view)
+    for (const search of ['zz%_', '%', '0x12-34']) {
+      const answer = server.recipients({ search, page: 0 })
+      await vi.advanceTimersByTimeAsync(300)
+      expect(await answer).toEqual({ ok: true, data: { rows: [], total: 0, page: 0 } })
+    }
   })
 })

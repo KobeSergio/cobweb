@@ -238,13 +238,17 @@ describe('recipientSearchOf', () => {
   it('keeps the hex digits typed, lowercase, and drops a leading 0x', () => {
     expect(recipientSearchOf('0xAbC1')).toBe('abc1')
     expect(recipientSearchOf('  0X12dEaD ')).toBe('12dead')
+  })
+
+  it('filters nothing for no digit at all: nothing typed, spaces, or a 0x alone', () => {
+    expect(recipientSearchOf('')).toBe('')
+    expect(recipientSearchOf('   ')).toBe('')
     expect(recipientSearchOf('0x')).toBe('')
   })
 
-  it('drops anything else, so the search carries no LIKE wildcard', () => {
-    expect(recipientSearchOf('12-34_%')).toBe('1234')
-    expect(recipientSearchOf('%')).toBe('')
-    expect(recipientSearchOf('x1y')).toBe('1')
+  it('answers null for any other character, which no address matches, so no LIKE wildcard is sent', () => {
+    for (const input of ['zz%_', '%', '_', '12-34', 'x1y', '0x0x12', 'ab cd', '0x12g'])
+      expect(recipientSearchOf(input)).toBeNull()
   })
 })
 
