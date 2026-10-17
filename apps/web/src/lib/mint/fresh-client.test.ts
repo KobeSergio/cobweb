@@ -1,4 +1,4 @@
-import type { StateBody, WalletBody } from '@cobweb/shared'
+import type { StateActivity, StateBody, WalletBody } from '@cobweb/shared'
 import type { Address } from 'viem'
 import { describe, expect, it, vi } from 'vitest'
 import { derivePhases } from '@/components/mint/model'
@@ -54,6 +54,7 @@ const body: StateBody = {
   baseUri: 'ipfs://bafybeiexample/',
   transferValidator: '0x0000000000000000000000000000000000000000',
   transferLevel: 'none',
+  activity: null,
 }
 const wallet: WalletBody = {
   chainId: 31337,
@@ -406,5 +407,48 @@ describe('cadenceMs and ownDegraded', () => {
     expect(readingLong(EMPTY_TRACK, 31_000, 0, 30_000)).toBe(false)
     expect(readingLong(EMPTY_TRACK, 40_000, 0, 30_000)).toBe(true)
     expect(readingLong(shown, 60_000, 0)).toBe(false)
+  })
+})
+
+describe("the state body's activity (docs/specs/2026-10-16-indexer-overview.md, section 7.5)", () => {
+  const activity: StateActivity = {
+    holders: 2,
+    recentMints: [
+      {
+        txHash: `0x${'ab'.repeat(32)}`,
+        recipient: WALLET,
+        groupId: 0,
+        amount: 1,
+        firstTokenId: 1,
+        blockTimestamp: 1_791_039_590,
+      },
+    ],
+  }
+  const read = async (value: unknown) => {
+    const { fetchImpl } = fakeFetch([json(value)])
+    return pollState(BASE, 31337, COLLECTION, fetchImpl)
+  }
+
+  it('reads the holders and the latest mints', async () => {
+    expect(await read({ ...body, activity })).toEqual<StatePoll>({
+      kind: 'body',
+      body: { ...body, activity },
+      ageSeconds: 0,
+    })
+  })
+
+  it('reads a body without activity, with null or with a malformed one as null, and keeps the body', async () => {
+    const without = Object.fromEntries(Object.entries(body).filter(([key]) => key !== 'activity'))
+    for (const value of [
+      without,
+      { ...body, activity: null },
+      { ...body, activity: { holders: -1, recentMints: [] } },
+      { ...body, activity: { ...activity, recentMints: [{ ...activity.recentMints[0], txHash: '0x12' }] } },
+    ])
+      expect(await read(value)).toEqual<StatePoll>({
+        kind: 'body',
+        body: { ...body, activity: null },
+        ageSeconds: 0,
+      })
   })
 })

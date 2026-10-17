@@ -112,13 +112,14 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
   async function state(chainId: number, address: Address, ifNoneMatch: string | undefined): Promise<Answer> {
     const refusedAnswer = await refused(chainId, address)
     if (refusedAnswer) return refusedAnswer
-    const { reader } = served.get(chainId)!
+    const { reader, indexer } = served.get(chainId)!
     const { entry, joined } = hot.join(chainId, address, Date.now())
     if (joined) reader.wake()
     await firstRead(entry)
     if (entry.read === null || entry.readAt === null) return refusal(503, 'not-read-yet')
     const degraded = isDegraded(entry.readAt, Date.now(), reader.health().tier ?? 'live')
-    const body = stateBody(chainId, entry, degraded)
+    const activity = indexer?.activityOf(entry.address, entry.read.state.blockTimestamp) ?? null
+    const body = stateBody(chainId, entry, degraded, activity)
     const etag = etagOf(body)
     return stateAnswer(body, etag, etagMatches(ifNoneMatch, etag))
   }

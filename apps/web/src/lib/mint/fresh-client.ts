@@ -1,5 +1,5 @@
-import { statePath, walletPath, type StateBody, type WalletBody } from '@cobweb/shared'
-import { isAddress, type Address } from 'viem'
+import { statePath, walletPath, type StateActivity, type StateBody, type WalletBody } from '@cobweb/shared'
+import { isAddress, type Address, type Hex } from 'viem'
 import { z } from 'zod'
 import type { Phase } from '@/components/mint/model'
 
@@ -48,6 +48,22 @@ const count = z.number().int().min(0)
  */
 const start = z.number().min(0)
 const wei = z.string().regex(/^[0-9]+$/)
+const txHash = z.custom<Hex>((value) => typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value))
+
+/** The indexer's holders and latest mints (docs/specs/2026-10-16-indexer-overview.md, section 7.5). */
+const activitySchema: z.ZodType<StateActivity> = z.object({
+  holders: count,
+  recentMints: z.array(
+    z.object({
+      txHash,
+      recipient: addressShape,
+      groupId: count,
+      amount: count,
+      firstTokenId: count,
+      blockTimestamp: count,
+    }),
+  ),
+})
 
 const stateBodySchema: z.ZodType<StateBody> = z.object({
   chainId: count,
@@ -79,6 +95,9 @@ const stateBodySchema: z.ZodType<StateBody> = z.object({
   baseUri: z.string(),
   transferValidator: addressShape,
   transferLevel: z.union([z.literal('none'), z.literal('unread'), count]),
+  // A body without it (a server before the indexer), with null or with a malformed one is kept, its activity
+  // null: the page then shows neither Holders nor Recent mints.
+  activity: activitySchema.nullable().catch(null),
 })
 
 const quotaSchema = z.object({ id: count, quota: count, claimed: count })

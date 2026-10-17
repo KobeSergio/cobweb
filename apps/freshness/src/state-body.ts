@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { StateBody } from '@cobweb/shared'
+import type { StateActivity, StateBody } from '@cobweb/shared'
 import type { HotEntry } from './hot-set.ts'
 
 /**
@@ -9,8 +9,16 @@ import type { HotEntry } from './hot-set.ts'
  */
 export type { StateBody }
 
-/** The body of an entry with a read, keys in this order and the groups in the contract's. */
-export function stateBody(chainId: number, entry: HotEntry, degraded: boolean): StateBody {
+/**
+ * The body of an entry with a read, keys in this order and the groups in the contract's, with the indexer's
+ * activity last (docs/specs/2026-10-16-indexer-overview.md, section 6.6).
+ */
+export function stateBody(
+  chainId: number,
+  entry: HotEntry,
+  degraded: boolean,
+  activity: StateActivity | null,
+): StateBody {
   const { read, readAt } = entry
   if (!read || readAt === null) throw new Error('A state body needs a read.')
   const { state, fees, extras } = read
@@ -43,6 +51,7 @@ export function stateBody(chainId: number, entry: HotEntry, degraded: boolean): 
     baseUri: extras.baseUri,
     transferValidator: extras.transferValidator,
     transferLevel: level.kind === 'level' ? level.level : level.kind,
+    activity,
   }
 }
 
@@ -51,7 +60,8 @@ const UNTAGGED: ReadonlySet<string> = new Set(['readAt', 'block', 'blockTimestam
 
 /**
  * A weak tag over the body without `readAt`, `block` and `blockTimestamp`: a tick that changes nothing else
- * keeps it, so a poll with `If-None-Match` answers 304. `degraded` is inside it.
+ * keeps it, so a poll with `If-None-Match` answers 304. `degraded` and `activity` are inside it: a new mint,
+ * a new holder count or a flip to or from null answers 200, a pass that only moves cursors keeps the tag.
  */
 export function etagOf(body: StateBody): string {
   const tagged = Object.fromEntries(Object.entries(body).filter(([key]) => !UNTAGGED.has(key)))

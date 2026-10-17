@@ -35,6 +35,12 @@ export type StateBody = {
   baseUri: string
   transferValidator: Address
   transferLevel: 'none' | 'unread' | number
+  /**
+   * The holders and the latest mints, from the indexer's memory (docs/specs/2026-10-16-indexer-overview.md,
+   * section 6.6): null while the indexer is off, has not read the collection to the chain's confirmation
+   * depth, or trails the state by more than 300 s of chain time.
+   */
+  activity: StateActivity | null
 }
 
 /**

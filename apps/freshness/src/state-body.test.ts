@@ -1,4 +1,5 @@
-import type { Address } from 'viem'
+import type { StateActivity } from '@cobweb/shared'
+import type { Address, Hex } from 'viem'
 import { describe, expect, it } from 'vitest'
 import type { CollectionRead } from './chain-reader.ts'
 import type { HotEntry } from './hot-set.ts'
@@ -7,6 +8,21 @@ import { etagMatches, etagOf, stateBody, type StateBody } from './state-body.ts'
 const A: Address = '0x0409454C375c8a6aB05383bFB6D9FcDe9ebB8F85'
 const OWNER: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
 const VALIDATOR: Address = '0x721C008fdff27BF06E7E123956E2Fe03B63342e3'
+const MINT_TX: Hex = `0x${'0b'.repeat(32)}`
+/** Two holders and their one mint, as the indexer's memory answers them. */
+const ACTIVITY: StateActivity = {
+  holders: 2,
+  recentMints: [
+    {
+      txHash: MINT_TX,
+      recipient: OWNER,
+      groupId: 1,
+      amount: 1,
+      firstTokenId: 1,
+      blockTimestamp: 1_799_999_990,
+    },
+  ],
+}
 
 const read: CollectionRead = {
   state: {
@@ -51,8 +67,8 @@ const entry = (overrides: Partial<CollectionRead> = {}, readAt = 1_800_000_001_5
 })
 
 describe('stateBody (docs/specs/2026-10-16-freshness-server.md, section 6.7)', () => {
-  it('answers every field from a read, in order, readAt in Unix seconds', () => {
-    const body = stateBody(31337, entry(), false)
+  it('answers every field from a read, in order, readAt in Unix seconds, the activity last', () => {
+    const body = stateBody(31337, entry(), false, ACTIVITY)
     expect(body).toEqual<StateBody>({
       chainId: 31337,
       address: A,
@@ -73,6 +89,7 @@ describe('stateBody (docs/specs/2026-10-16-freshness-server.md, section 6.7)', (
       baseUri: 'ipfs://first/',
       transferValidator: VALIDATOR,
       transferLevel: 'none',
+      activity: ACTIVITY,
     })
     expect(Object.keys(body)).toEqual([
       'chainId',
@@ -94,6 +111,7 @@ describe('stateBody (docs/specs/2026-10-16-freshness-server.md, section 6.7)', (
       'baseUri',
       'transferValidator',
       'transferLevel',
+      'activity',
     ])
     expect(Object.keys(body.groups[0]!)).toEqual([
       'id',
@@ -108,7 +126,7 @@ describe('stateBody (docs/specs/2026-10-16-freshness-server.md, section 6.7)', (
 
   it('answers the transfer level as none, unread or its number', () => {
     const level = (transferLevel: CollectionRead['extras']['transferLevel']) =>
-      stateBody(31337, entry({ extras: { ...read.extras, transferLevel } }), false).transferLevel
+      stateBody(31337, entry({ extras: { ...read.extras, transferLevel } }), false, null).transferLevel
     expect(level({ kind: 'none', reason: 'zero' })).toBe('none')
     expect(level({ kind: 'unread' })).toBe('unread')
     expect(level({ kind: 'level', level: 0 })).toBe(0)
@@ -118,11 +136,11 @@ describe('stateBody (docs/specs/2026-10-16-freshness-server.md, section 6.7)', (
 
 describe('etagOf', () => {
   const tag = (body: StateBody) => etagOf(body)
-  const base = stateBody(31337, entry(), false)
+  const base = stateBody(31337, entry(), false, ACTIVITY)
 
   it('is weak, 32 hex digits, and equal for equal reads', () => {
     expect(tag(base)).toMatch(/^W\/"[0-9a-f]{32}"$/)
-    expect(tag(stateBody(31337, entry(), false))).toBe(tag(base))
+    expect(tag(stateBody(31337, entry(), false, ACTIVITY))).toBe(tag(base))
   })
 
   it('leaves out readAt, block and blockTimestamp, each in turn and together', () => {
@@ -154,6 +172,7 @@ describe('etagOf', () => {
       baseUri: 'ipfs://second/',
       transferValidator: OWNER,
       transferLevel: 'unread',
+      activity: null,
     }
     const untagged: string[] = ['readAt', 'block', 'blockTimestamp']
     expect(Object.keys(tagged).sort()).toEqual(
@@ -163,6 +182,27 @@ describe('etagOf', () => {
     )
     for (const [key, value] of Object.entries(tagged))
       expect(tag({ ...base, [key]: value }), key).not.toBe(tag(base))
+  })
+
+  it('changes with the holders, a new mint and a flip to or from null, and not when only a cursor moved (docs/specs/2026-10-16-indexer-overview.md, section 6.6)', () => {
+    const newer = { ...ACTIVITY.recentMints[0]!, txHash: `0x${'0c'.repeat(32)}` as Hex, firstTokenId: 2 }
+    const changed: (StateActivity | null)[] = [
+      { ...ACTIVITY, holders: 3 },
+      { ...ACTIVITY, recentMints: [newer, ...ACTIVITY.recentMints] },
+      null,
+    ]
+    for (const activity of changed) expect(tag({ ...base, activity })).not.toBe(tag(base))
+    expect(tag({ ...base, activity: null })).not.toBe(
+      tag({ ...base, activity: { holders: 0, recentMints: [] } }),
+    )
+    // A pass that only moved the cursors: a later block with the same activity.
+    const later = {
+      ...base,
+      block: base.block + 5,
+      blockTimestamp: base.blockTimestamp + 5,
+      readAt: base.readAt + 5,
+    }
+    expect(tag({ ...later, activity: structuredClone(ACTIVITY) })).toBe(tag(base))
   })
 })
 

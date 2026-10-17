@@ -62,6 +62,7 @@ const body: StateBody = {
   baseUri: REAL,
   transferValidator: '0x721C008fdff27BF06E7E123956E2Fe03B63342e3',
   transferLevel: 0,
+  activity: null,
 }
 
 describe('liveOf (docs/specs/2026-10-16-mint-page-live-data.md, section 7.4)', () => {

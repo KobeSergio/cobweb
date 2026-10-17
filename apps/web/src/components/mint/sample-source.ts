@@ -366,6 +366,7 @@ export function sampleMintSource(
         baseUri: switches.art === 'placeholder' ? SAMPLE_PLACEHOLDER_URI : SAMPLE_REVEALED_URI,
         transferValidator: DEFAULT_TRANSFER_VALIDATOR,
         transferLevel: 0,
+        activity: null,
       }
       return { kind: 'body', body, ageSeconds: 0 }
     },

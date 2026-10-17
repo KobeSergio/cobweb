@@ -113,6 +113,7 @@ describe('liveMintSource pollState (fix round 1, item 1)', () => {
     baseUri: '',
     transferValidator: '0x0000000000000000000000000000000000000000',
     transferLevel: 'none',
+    activity: null,
   }
   const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status })
 
