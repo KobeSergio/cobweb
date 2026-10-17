@@ -13,7 +13,7 @@ A no-code NFT launchpad with one linear flow: Details, Art (Layers, Rules, Gener
 
 ```
 apps/web           Next.js app: creator dashboard, mint page, and the render queue consumer and sweep cron (Vercel)
-apps/freshness     Railway service that reads chain state for mint pages: the state and wallet endpoints, run from source on Node 24
+apps/freshness     Railway service that reads chain state for mint pages and indexes Cobweb's collections: the state and wallet endpoints and the indexer, run from source on Node 24
 services/render    Render library: layers to images, CARs and CIDs (pure; no network)
 services/worker    Render worker: ports, steps, adapters, queue consumer, local runner. Runs inside apps/web on Vercel
 contracts/         Foundry: factory and collection
@@ -52,6 +52,7 @@ pnpm --filter @cobweb/freshness dev       # the freshness server on port 3100 ag
 pnpm --filter @cobweb/freshness test      # the freshness server: tiers, the hot set, the ETag, degraded, the delegation filter, the wallet windows
 pnpm --filter @cobweb/web verify:freshness   # the freshness server in process against Anvil: liveness at T-1 and at T, the ETag, the refusals, the wallet endpoint and degraded
 pnpm --filter @cobweb/web verify:mint-page   # the public page against local Supabase, local storage, Anvil and the freshness server in process: save, media and publish, liveness at T-1 and T, a mint through the page's path and the state after it, the tiers
+pnpm --filter @cobweb/web verify:indexer   # the indexer in the freshness server against local Supabase and Anvil: mints, owners, airdrops and withdrawals once each, a replay, a restart and a backfill, the Overview, Airdrop and the state body
 pnpm --filter @cobweb/web render:local <collectionId>   # renders the collection's paid jobs on the laptop against local Supabase, local storage and Anvil; CARs go to a temp folder
 ```
 

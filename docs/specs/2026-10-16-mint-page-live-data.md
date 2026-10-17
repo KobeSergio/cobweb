@@ -877,6 +877,8 @@ shows where, by the state's `revealed`:
   calls the contract; the first visit to a link after a revalidation costs one function and one database read; the
   verify's collection has three tokens, so its tiers cover three ranks.
 
+> **17 October 2026:** The third sub-project's items landed ([2026-10-16-indexer-overview.md](2026-10-16-indexer-overview.md)): the state body carries `activity`, the holders and the 10 latest mints from the indexer's memory, so the page shows a Holders row in Details and Recent mints under the phases, and neither while `activity` is null; the Overview shows holders, recent mints and "Paid by minters" on real data.
+
 ## 13. Acceptance criteria
 
 - [x] The migration applies and `verify:local` passes (379): `mint_pages` and `token_ranks` are closed to `anon`, the

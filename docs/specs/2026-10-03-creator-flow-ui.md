@@ -230,6 +230,8 @@ done, with failure at any step and a way forward.
 
 > **16 October 2026:** The Mint page tab runs on real data ([2026-10-16-mint-page-live-data.md](2026-10-16-mint-page-live-data.md)). What changed from the sample: the five sections are saved with the page and shown on it, each when its switch is on and it has content; the files go to a public bucket with tighter caps (the banner, the About banner and slides 5 MB, the avatar and team photos 2 MB, an MP4 slide or the music 20 MB) and SVG is no longer taken, since a file on a public origin can carry script; an About banner joins the About panel; the token avatar the audit listed stays out; the public switch saves with the page, and Preview opens the owner's view at `/<slug>/preview` under a banner, public or not.
 
+> **17 October 2026:** The Overview and History run on the indexer's data ([2026-10-16-indexer-overview.md](2026-10-16-indexer-overview.md)). What changed from the sample: holders, recent mints and "Paid by minters" come from the chain's logs, with "Counting" until Cobweb has read every block since the deploy and a line when its count trails the chain by more than 5 minutes; the mints-over-time chart, the platform fees line and the checklist stay out (review round 1). Airdrop's History lists every airdrop and burn on the contract with its block's time and gains a By recipient view, each wallet a row with its tokens and token ids, searched by any part of the address, 25 a page, with its own CSV export; legacy's Import Type is not kept, since Cobweb stores no list.
+
 ### 4.7 Public mint page (`/[slug]`)
 
 - Stands alone: slim top bar with identity and wallet button, no app sidebar, "Powered by Cobweb"

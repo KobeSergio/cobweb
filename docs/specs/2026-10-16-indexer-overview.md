@@ -831,25 +831,27 @@ carries `activity` for any collection the indexer reads, published or not, since
 
 ## 13. Acceptance criteria
 
-- [ ] The migration applies and `verify:local` passes (394): the four tables are under row-level security and closed
+- [x] The migration applies and `verify:local` passes (394): the four tables are under row-level security and closed
       to `anon`, `token_owners` is read by no client, and the four indexer functions run for the service role only.
-- [ ] With `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` set, the freshness server indexes every collection Cobweb
+- [x] With `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` set, the freshness server indexes every collection Cobweb
       deployed on each served chain from its deploy block to the chain's confirmation depth, in scans of at most 500
       blocks; without them it runs as before with `activity` null, and one alone refuses the start.
-- [ ] Mints, token owners, airdrops with their recipients and withdrawals are recorded once per log, also when a range
+- [x] Mints, token owners, airdrops with their recipients and withdrawals are recorded once per log, also when a range
       is read again, after a restart and in a backfill; a write that would skip blocks is refused.
-- [ ] The state body carries `activity` (holders and up to 10 mints) only while the indexer has the collection within
+- [x] The state body carries `activity` (holders and up to 10 mints) only while the indexer has the collection within
       300 s of the state's block time, the request path reads no database, and `verify:freshness` keeps its 16 checks.
-- [ ] The Overview shows holders, recent mints and "Paid by minters" on real data with the Counting, behind and Not
+- [x] The Overview shows holders, recent mints and "Paid by minters" on real data with the Counting, behind and Not
       read states of 7.2, and Already withdrawn counts withdrawals made outside Cobweb.
-- [ ] Airdrop's History lists airdrops sent outside Cobweb with their block times, and By recipient finds, pages and
+- [x] Airdrop's History lists airdrops sent outside Cobweb with their block times, and By recipient finds, pages and
       exports every recipient.
-- [ ] The mint page shows Holders in Details and Recent mints under the phases from the state body, and neither while
+- [x] The mint page shows Holders in Details and Recent mints under the phases from the state body, and neither while
       `activity` is null.
-- [ ] `verify:indexer` passes its 15 checks; every other verify script, `pnpm typecheck`, `lint`, `test`,
+- [x] `verify:indexer` passes its 15 checks; every other verify script, `pnpm typecheck`, `lint`, `test`,
       `format:check` and `build` pass.
-- [ ] Sample mode renders every state of section 8; the walk is recorded in the landing note.
-- [ ] Section 11's docs are written, and the landing note lists the owner's hosted steps.
+- [x] Sample mode renders every state of section 8; the walk is recorded in the landing note.
+- [x] Section 11's docs are written, and the landing note lists the owner's hosted steps.
+
+Checked on 17 October 2026 on Anvil, local Supabase and the freshness server with its indexer: the root checks pass (web 902 tests in 94 files, shared 105, freshness 198, dna 60, render 117, worker 282; typecheck, lint and format:check clean); both builds list `● /[slug]` and `ƒ /[slug]/preview`; `verify:local` 395, `verify:chain` 12, `verify:storage` 15, `verify:sweep` 8, `verify:render` 22, `verify:deploy` 15, `verify:phases` 20, `verify:whitelist` 18, `verify:airdrop` 15, `verify:settings` 17, `verify:freshness` 16, `verify:mint-page` 17 and `verify:indexer` 15, each with 0 failed; the list ran on 97f9e8b, and the one commit after it (6a0ca70) changes a style rule on the page's Recent mints only and re-ran typecheck, lint and the page's tests. The browser walk (Playwright with a fresh dev wallet, the web app on live data, the freshness server with its indexer on Anvil) passed its eight items: a collection deployed through the flow with the server stopped read Holders, Recent mints and "Paid by minters" as "Counting", then Holders 0, "No mints yet" and 0 ETH within seconds of the server's start; a mint from the page showed Holders 1 in Details and "0x…7038 minted 1 in Public, under a minute ago" within about 30 s, and the Overview the same row; two transfers by cast moved Holders to 2; an airdrop of 2 through the tab and a burn by cast listed in History newest first with their block times, By recipient with the Burn badge, a four-character search, "No address matches that search." and both CSV exports; a withdrawal by cast moved Already withdrawn to 0.002 ETH while "Paid by minters" held; a server restart answered the page's Holders and Recent mints with its first body; 390 px fits with no sideways scroll; sample mode renders every switch. Departures from the spec's letter, each in the plan's Decisions (2 to 9, 12, 14 and 18) or ruled while executing: a database answer without a Postgres code fails as `HTTP_<status>` and NETWORK is kept for a call with no answer (an empty-body 404 reads `HTTP_204`); a halved range doubles back toward 500 only once a minute has passed since the cursor's last failed scan, instead of restoring 500 at once; `indexerOptionsOf` refuses a `SUPABASE_URL` that is not an http or https project URL before the server listens; every scan re-reads at most half its range (up to 32 blocks) below its cursor, a segment with any record writes at once, and a scan that still fails at one block halves its collections, so a lagging node's short answer and a block a provider cannot answer no longer move a cursor past unread logs or stall a chunk; `withdrawals` is keyed by transaction and collection; `/health`'s `lastError` carries the error's name and code; a `null` inside `p_collections` is refused. Defects found and fixed before the merge: the Task 3 review's NETWORK label (6d3ef5e and f9116d0); the Task 8 review's stop proof and the whole-branch review's lagging node, unreadable block and two-collection transaction (2836049, f00327b, 44b5c32, c1cac12 and d18db04); the walk's "in under a minute" labels on the Overview and History, the search that widened on non-hex input and the rest of the parked minors (a090a71, bb828c9, bdfa260, ff43a11, 2cfe456, 97f9e8b and 6a0ca70). Still owed to the owner (section 12): `supabase db push` for this migration before `NEXT_PUBLIC_DEMO_DATA=0` (the Airdrop tab reads `block_time` and the cursor), then `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` on Railway's `freshness` service and a redeploy; a testnet check of each provider's `eth_getLogs` limits (a cap under about 7 blocks never catches up on Arbitrum), a backfill's pace, a lagging node behind a load balancer and delegated mints.
 
 ## 14. Reconciliations with the rulings
 

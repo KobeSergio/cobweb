@@ -1249,6 +1249,8 @@ pnpm --filter @cobweb/web verify:settings   # the read, each setting sent and co
 - Next runs a tab's server actions one at a time (the Whitelist's landing note), so an airdrop confirm's polls wait
   behind a running holder snapshot.
 
+> **17 October 2026:** The indexer reads `NFTsAirdropped`, `Transfer` and `MintFundsWithdrawn` ([2026-10-16-indexer-overview.md](2026-10-16-indexer-overview.md)): airdrops and withdrawals made outside Cobweb are listed and counted (`airdrops.sent_by` is null for a row the indexer wrote), "Paid by minters" shows on the Overview as `creatorBalance()` plus every withdrawal, History's When is the block's time once the indexer has read the airdrop, and By recipient lists every wallet an airdrop reached. Withdrawn so far counts a withdrawal once the chain has confirmed it, however it was sent.
+
 ## 13. Acceptance criteria
 
 - [x] The migration applies and `verify:local` passes (363); `airdrops` and `withdrawals` are read by the owner and

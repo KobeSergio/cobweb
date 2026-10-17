@@ -750,6 +750,8 @@ Owed to the third sub-project: the indexer runs in `apps/freshness` beside the r
 clients; its scan covers every deployed collection at each chain's depth with `Transfer`, the mint events,
 `NFTsAirdropped` and `MintFundsWithdrawn`, which the reader's scan leaves out.
 
+> **17 October 2026:** Closed by [2026-10-16-indexer-overview.md](2026-10-16-indexer-overview.md): the indexer runs in `apps/freshness`, one per served chain beside its reader, sharing the clients, the chain list and the RPC variables; `logs.ts` stays the reader's, since the indexer reads decoded logs through viem's `getLogs` at each chain's confirmation depth. Decision 20 changes: the process now holds a database client for the indexer, from `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, while the request path still reads none, since the state body's `activity` comes from the indexer's memory.
+
 Owed before launch, on a testnet with the registry and the validator deployed:
 
 - A wallet with a whole-wallet and a contract delegation reads its vaults, which Anvil cannot show; the registry's code
