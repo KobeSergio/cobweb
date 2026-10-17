@@ -36,7 +36,9 @@ type RevealProps = {
 /**
  * The top of the overview, one compact row: the artwork, minted of supply, the contract, what the
  * contract points at right now (with Reveal), and holders. Minted reads "Not read" while the contract
- * cannot be read (`totalMinted` null); "deployed" is relative to the read's time (`readAt`).
+ * cannot be read (`totalMinted` null); "deployed" is relative to the read's time (`readAt`). Holders is the
+ * indexer's count, "Counting" until it has read every block since the deploy, and "Not read" when its view
+ * could not be read (docs/specs/2026-10-16-indexer-overview.md, section 7.2).
  */
 export function OverviewHeader({
   collectionId,
@@ -62,7 +64,7 @@ export function OverviewHeader({
   totalMinted: number | null
   maxSupply: number
   readAt: number
-  holders: number
+  holders: number | 'counting' | null
   settings: SettingsView
 } & RevealProps) {
   return (
@@ -113,7 +115,13 @@ export function OverviewHeader({
       </Fact>
       <ContractPointer settings={settings} chain={chain} {...reveal} />
       <Fact label="Holders">
-        <p className="numeric text-lg leading-tight">{count(holders)}</p>
+        {typeof holders === 'number' ? (
+          <p className="numeric text-lg leading-tight">{count(holders)}</p>
+        ) : (
+          <p className="text-muted-foreground text-lg leading-tight">
+            {holders === 'counting' ? 'Counting' : 'Not read'}
+          </p>
+        )}
       </Fact>
     </section>
   )

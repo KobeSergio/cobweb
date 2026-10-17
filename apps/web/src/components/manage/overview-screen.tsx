@@ -9,7 +9,8 @@ import { Panel } from '@cobweb/ui/components/panel'
 import { cn } from '@cobweb/ui/lib/utils'
 import { NOT_OWNER } from '@/lib/art/result'
 import type { Tables } from '@/lib/database.types'
-import { formatNative, type DropActivity, type MintGroup, type SupportedChain } from '@/lib/demo'
+import { formatNative, type MintGroup, type SupportedChain } from '@/lib/demo'
+import { paidByMintersOf, type ActivityView } from '@/lib/manage/activity-view'
 import type { ManageCall } from '@/lib/manage/phase-calls'
 import type { SettingsView } from '@/lib/manage/settings-types'
 import { manageTabHref } from '@/lib/steps'
@@ -30,8 +31,11 @@ export type OverviewScreenProps = {
   chain: SupportedChain
   /** Phases as the chain reports them; `active` comes from `mintGroupActive`. */
   groups: MintGroup[]
-  /** Holders and recent mints: the sample's, on real data too, until the indexer. */
-  activity: DropActivity
+  /**
+   * Holders and recent mints from the indexer, and whether it has counted every block since the deploy
+   * (docs/specs/2026-10-16-indexer-overview.md, section 7.2); null when the view could not be read.
+   */
+  activity: ActivityView | null
   /** Everything minted, from the chain read; null while the contract cannot be read. */
   totalMinted: number | null
   maxSupply: number
@@ -46,8 +50,6 @@ export type OverviewScreenProps = {
   /** The sign-in wallet: Reveal is sent from it, and the owner check compares it with the contract's owner. */
   wallet: Address
   sample: boolean
-  /** "Paid by minters": the sample's in sample mode, null on real data until the indexer. */
-  paidByMintersWei: string | null
   /**
    * The mint page's row: its avatar and whether it is public; null when it could not be read, so the header shows
    * the artwork pattern and the switch waits for a reload.
@@ -59,7 +61,8 @@ export type OverviewScreenProps = {
  * Manage drop, overview (docs/specs/2026-10-15-airdrop-settings.md, section 7.5): a compact header (art, minted of
  * supply, the contract, what it points at with Reveal, holders), the mint page link, then live phases, proceeds
  * and recent mints. Reveal runs on its own manage actions and answers a fresh settings view. Tradability lives in
- * Settings, Advanced.
+ * Settings, Advanced. Holders, recent mints and "Paid by minters" come from the indexer
+ * (docs/specs/2026-10-16-indexer-overview.md, section 7.2).
  */
 export function OverviewScreen({
   collection,
@@ -76,7 +79,6 @@ export function OverviewScreen({
   settings: initial,
   wallet,
   sample,
-  paidByMintersWei,
   mintPage,
 }: OverviewScreenProps) {
   const config = useConfig()
@@ -109,6 +111,7 @@ export function OverviewScreen({
   )
   const owner = settings.owner
   const blocked = owner !== null && owner.toLowerCase() !== wallet.toLowerCase() ? NOT_OWNER(owner) : null
+  const paid = paidByMintersOf(settings, activity)
 
   return (
     <ManageActionsProvider value={target}>
@@ -123,7 +126,7 @@ export function OverviewScreen({
           totalMinted={totalMinted}
           maxSupply={maxSupply}
           readAt={readAt}
-          holders={activity.holders}
+          holders={activity === null ? null : activity.counted ? activity.holders : 'counting'}
           settings={settings}
           blocked={blocked}
           confirm={(hash, call) => server.confirm(hash, call)}
@@ -162,9 +165,15 @@ export function OverviewScreen({
                 </p>
               </div>
               <dl className="divide-y border-t">
-                {paidByMintersWei !== null && (
-                  <Row label="Paid by minters">{formatNative(paidByMintersWei, symbol)}</Row>
-                )}
+                <Row label="Paid by minters">
+                  {paid.kind === 'wei' ? (
+                    formatNative(paid.wei, symbol)
+                  ) : (
+                    <span className="text-muted-foreground font-sans">
+                      {paid.kind === 'counting' ? 'Counting' : 'Not read'}
+                    </span>
+                  )}
+                </Row>
                 <Row label="Already withdrawn">{formatNative(settings.withdrawnWei, symbol)}</Row>
               </dl>
               <Button variant="secondary" asChild className="w-full">
@@ -174,7 +183,13 @@ export function OverviewScreen({
           </div>
 
           <Panel title="Recent mints" className="lg:col-span-2" bodyClassName="p-0 pb-2">
-            <RecentMints mints={activity.recentMints} groups={groups} chain={chain} readAt={readAt} />
+            <RecentMints
+              activity={activity}
+              groups={groups}
+              chain={chain}
+              readAt={readAt}
+              chainReachable={chainReachable}
+            />
           </Panel>
         </div>
       </div>

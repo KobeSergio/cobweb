@@ -1,10 +1,12 @@
 import type { Address, Hex } from 'viem'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { classifyError } from '@/components/deploy/tx-errors'
-import { DEMO_COLLECTION, DEMO_MINT_GROUPS, DEMO_NOW, DEMO_TOTAL_MINTED } from '@/lib/demo'
+import { DEMO_ACTIVITY, DEMO_COLLECTION, DEMO_MINT_GROUPS, DEMO_NOW, DEMO_TOTAL_MINTED } from '@/lib/demo'
+import { behindOf, paidByMintersOf } from '@/lib/manage/activity-view'
 import { airdropCalls, phaseCalls, settingsCalls, type ManageCall } from '@/lib/manage/phase-calls'
 import type { PhasesView } from '@/lib/manage/phases-types'
 import {
+  sampleActivityView,
   sampleApply,
   sampleManageActions,
   samplePhasesServer,
@@ -237,5 +239,31 @@ describe('Airdrop and Settings on the sample (docs/specs/2026-10-15-airdrop-sett
     await vi.advanceTimersByTimeAsync(650)
     await expectation
     vi.useRealTimers()
+  })
+})
+
+describe('the Overview activity on the sample (docs/specs/2026-10-16-indexer-overview.md, section 8)', () => {
+  it('reads counted with 171 holders and 12 mints 30 s before the sample now, not counted or 20 minutes behind on its switches', () => {
+    expect(sampleActivityView(undefined)).toEqual({
+      counted: true,
+      holders: 171,
+      countedAt: DEMO_NOW - 30,
+      recentMints: DEMO_ACTIVITY.recentMints,
+    })
+    expect(sampleActivityView('counting')).toMatchObject({ counted: false, countedAt: null })
+    const behind = sampleActivityView('behind')
+    expect(behind).toMatchObject({ counted: true, countedAt: DEMO_NOW - 1_200 })
+    expect(behindOf(behind, DEMO_NOW, true)).toBe(true)
+    expect(behindOf(sampleActivityView(undefined), DEMO_NOW, true)).toBe(false)
+  })
+
+  it("pays minters the sample's gross through paidByMintersOf, and reads counting before the count", () => {
+    const wallet: Address = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
+    const settings = sampleSettingsView({ max_supply: DEMO_COLLECTION.maxSupply }, wallet)
+    expect(paidByMintersOf(settings, sampleActivityView(undefined))).toEqual({
+      kind: 'wei',
+      wei: DEMO_ACTIVITY.proceeds.grossWei,
+    })
+    expect(paidByMintersOf(settings, sampleActivityView('counting'))).toEqual({ kind: 'counting' })
   })
 })

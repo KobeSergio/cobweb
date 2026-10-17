@@ -5,15 +5,9 @@ import Link from 'next/link'
 import { Progress } from '@cobweb/ui/components/progress'
 import { StatusBadge } from '@cobweb/ui/components/status-badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@cobweb/ui/components/table'
-import {
-  explorerTxUrl,
-  formatNative,
-  shortAddress,
-  type DropActivity,
-  type MintGroup,
-  type SupportedChain,
-} from '@/lib/demo'
-import { count, localDateTime, percent, relativeTo, shortUtc, useTimeZone } from './format'
+import { explorerTxUrl, formatNative, shortAddress, type MintGroup, type SupportedChain } from '@/lib/demo'
+import { behindOf, type ActivityView } from '@/lib/manage/activity-view'
+import { count, duration, localDateTime, percent, relativeTo, shortUtc, useTimeZone } from './format'
 
 /**
  * The phases the chain reports as live, and the next one scheduled. Live comes from each
@@ -112,66 +106,97 @@ export function LiveNow({
   )
 }
 
-/** The latest mints, newest first. */
+/** A sentence in place of the table. */
+function Note({ children }: { children: React.ReactNode }) {
+  return <p className="text-muted-foreground px-6 py-10 text-center text-sm">{children}</p>
+}
+
+/**
+ * The latest mints the indexer recorded, newest first (docs/specs/2026-10-16-indexer-overview.md, section 7.2):
+ * "Counting" until it has read every block since the deploy, and under the table a line when its count trails
+ * the chain read by more than 5 minutes.
+ */
 export function RecentMints({
-  mints,
+  activity,
   groups,
   chain,
   readAt,
+  chainReachable,
 }: {
-  mints: DropActivity['recentMints']
+  /** Null when the view could not be read. */
+  activity: ActivityView | null
   groups: MintGroup[]
   chain: SupportedChain
+  /** The chain read's time (the copy's while it is not reachable). */
   readAt: number
+  chainReachable: boolean
 }) {
-  if (mints.length === 0) {
+  if (!activity) return <Note>The mint history could not be read. Reload the page to try again.</Note>
+  if (!activity.counted)
     return (
-      <p className="text-muted-foreground px-6 py-10 text-center text-sm">
-        No mints yet. They appear here as they land.
-      </p>
+      <Note>
+        Counting the mints from the chain. They show here once Cobweb has read every block since the deploy.
+      </Note>
     )
-  }
+  const mints = activity.recentMints
+  const behind = behindOf(activity, readAt, chainReachable) && activity.countedAt !== null && (
+    <p className="text-muted-foreground border-t px-6 pt-3 text-[0.8125rem]">
+      Counted to the chain as it was {duration(readAt - activity.countedAt)} ago. Newer mints show once Cobweb
+      catches up.
+    </p>
+  )
+  if (mints.length === 0)
+    return (
+      <>
+        <Note>No mints yet. Each one shows here a few blocks after it lands.</Note>
+        {behind}
+      </>
+    )
   return (
-    <Table>
-      <TableHeader>
-        <TableRow className="hover:bg-transparent">
-          <TableHead className="pl-6">Minter</TableHead>
-          <TableHead>Phase</TableHead>
-          <TableHead className="text-right">Tokens</TableHead>
-          <TableHead className="text-right">Token ids</TableHead>
-          <TableHead className="pr-6 text-right">When</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {mints.map((mint) => (
-          <TableRow key={mint.txHash}>
-            <TableCell className="numeric pl-6" title={mint.minter}>
-              {shortAddress(mint.minter)}
-            </TableCell>
-            <TableCell className="text-muted-foreground">
-              {groups.find((group) => group.id === mint.groupId)?.name ?? `Phase ${mint.groupId}`}
-            </TableCell>
-            <TableCell className="numeric text-right">{mint.amount}</TableCell>
-            <TableCell className="numeric text-muted-foreground text-right">
-              {mint.amount === 1
-                ? `#${mint.firstTokenId}`
-                : `#${mint.firstTokenId} to #${mint.firstTokenId + mint.amount - 1}`}
-            </TableCell>
-            <TableCell className="pr-6 text-right">
-              <a
-                href={explorerTxUrl(chain, mint.txHash)}
-                target="_blank"
-                rel="noreferrer"
-                className="text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex items-center gap-1 rounded-sm outline-none focus-visible:ring-2"
-              >
-                {relativeTo(mint.at, readAt)}
-                <ExternalLinkIcon aria-hidden="true" className="size-3" />
-                <span className="sr-only">, view transaction</span>
-              </a>
-            </TableCell>
+    <>
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className="pl-6">Minter</TableHead>
+            <TableHead>Phase</TableHead>
+            <TableHead className="text-right">Tokens</TableHead>
+            <TableHead className="text-right">Token ids</TableHead>
+            <TableHead className="pr-6 text-right">When</TableHead>
           </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+        </TableHeader>
+        <TableBody>
+          {mints.map((mint) => (
+            // Two mints in one transaction share its hash; their first token ids differ.
+            <TableRow key={`${mint.txHash}:${mint.firstTokenId}`}>
+              <TableCell className="numeric pl-6" title={mint.minter}>
+                {shortAddress(mint.minter)}
+              </TableCell>
+              <TableCell className="text-muted-foreground">
+                {groups.find((group) => group.id === mint.groupId)?.name ?? `Phase ${mint.groupId}`}
+              </TableCell>
+              <TableCell className="numeric text-right">{mint.amount}</TableCell>
+              <TableCell className="numeric text-muted-foreground text-right">
+                {mint.amount === 1
+                  ? `#${mint.firstTokenId}`
+                  : `#${mint.firstTokenId} to #${mint.firstTokenId + mint.amount - 1}`}
+              </TableCell>
+              <TableCell className="pr-6 text-right">
+                <a
+                  href={explorerTxUrl(chain, mint.txHash)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex items-center gap-1 rounded-sm outline-none focus-visible:ring-2"
+                >
+                  {relativeTo(mint.at, readAt)}
+                  <ExternalLinkIcon aria-hidden="true" className="size-3" />
+                  <span className="sr-only">, view transaction</span>
+                </a>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      {behind}
+    </>
   )
 }

@@ -1,18 +1,18 @@
 import { getAddress } from 'viem'
+import { getActivity } from '@/app/actions/activity'
 import { getDeployment } from '@/app/actions/deploy'
 import { getMintPageSettings } from '@/app/actions/mint-page'
 import { getPhases } from '@/app/actions/phases'
 import { getSettings } from '@/app/actions/settings'
 import { ManageUnavailable } from '@/components/manage/manage-unavailable'
 import { OverviewScreen } from '@/components/manage/overview-screen'
-import { SAMPLE } from '@/components/manage/manage-sim'
+import { SAMPLE, sampleActivityView } from '@/components/manage/manage-sim'
 import { sampleSettingsView } from '@/components/manage/settings-sim'
 import { StagePage } from '@/components/shell/stage-page'
 import { NOT_DEPLOYED } from '@/lib/art/result'
 import { requireOwnedCollection, requireUser } from '@/lib/auth'
 import { chainView } from '@/lib/chain/chain-view'
 import {
-  DEMO_ACTIVITY,
   DEMO_COLLECTION,
   DEMO_DEPLOYMENT,
   DEMO_NOW,
@@ -36,10 +36,11 @@ const DESCRIPTION =
  * Manage drop, overview (docs/specs/2026-10-15-airdrop-settings.md, section 7.5). The header's chain, contract and
  * deploy time come from the deployment record; minted and the live phases from the server's read of the chain;
  * what the base URI points at, Reveal and proceeds from the settings read; the avatar and the mint page bar's public
- * switch from the mint page's row (docs/specs/2026-10-16-mint-page-live-data.md, section 7.9). Holders and recent
- * mints keep their sample values until the indexer, and "Paid by minters" shows in sample mode only.
- * In sample mode `?art=deferred` shows the deferred-art scenario, whose real set is not rendered yet, and
- * `?art=revealed` a collection already revealed.
+ * switch from the mint page's row (docs/specs/2026-10-16-mint-page-live-data.md, section 7.9); holders, recent mints
+ * and "Paid by minters" from the indexer's tables (docs/specs/2026-10-16-indexer-overview.md, section 7.2), "Not
+ * read" when they could not be read. In sample mode `?art=deferred` shows the deferred-art scenario, whose real set
+ * is not rendered yet, `?art=revealed` a collection already revealed, `?activity=counting` the indexer not counted
+ * yet and `?activity=behind` its count 20 minutes behind the chain.
  */
 export default async function Page({
   params,
@@ -69,7 +70,7 @@ export default async function Page({
           deployedAt={DEMO_DEPLOYMENT.deployedAt}
           chain={getChain(DEMO_DEPLOYMENT.chainId)!}
           groups={sample.groups}
-          activity={DEMO_ACTIVITY}
+          activity={sampleActivityView(await searchParam(searchParams, 'activity'))}
           totalMinted={sample.totalMinted}
           maxSupply={maxSupply}
           readAt={DEMO_NOW}
@@ -78,18 +79,18 @@ export default async function Page({
           settings={sampleSettingsView(collection, wallet, { art })}
           wallet={wallet}
           sample
-          paidByMintersWei={DEMO_ACTIVITY.proceeds.grossWei}
           mintPage={{ avatarUrl: SAMPLE.mintPage.avatarUrl, published: SAMPLE.mintPage.published }}
         />
       </StagePage>
     )
   }
 
-  const [record, phases, settings, mintPage] = await Promise.all([
+  const [record, phases, settings, mintPage, activity] = await Promise.all([
     getDeployment(collection.id),
     getPhases(collection.id),
     getSettings(collection.id),
     getMintPageSettings(collection.id),
+    getActivity(collection.id),
   ])
   if (!record.ok || !record.data || !phases.ok || !settings.ok) {
     const message = !record.ok
@@ -114,7 +115,8 @@ export default async function Page({
         deployedAt={record.data.deployedAt}
         chain={chainView(view.chainId)}
         groups={view.groups}
-        activity={DEMO_ACTIVITY}
+        // A refused read does not stop the page: holders, recent mints and "Paid by minters" read "Not read".
+        activity={activity.ok ? activity.data : null}
         totalMinted={view.chainReachable ? view.totalMinted : null}
         maxSupply={view.maxSupply}
         readAt={view.readAt}
@@ -123,7 +125,6 @@ export default async function Page({
         settings={settings.data}
         wallet={wallet}
         sample={false}
-        paidByMintersWei={null}
         // The row only dresses the header and the switch: unread, they show the pattern and wait for a reload.
         mintPage={
           mintPage.ok

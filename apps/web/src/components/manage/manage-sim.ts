@@ -10,6 +10,7 @@ import { ContractFunctionRevertedError, encodeErrorResult } from 'viem'
 import { SAMPLE_REVEALED_URI } from '@/components/mint/sample-source'
 import type { Tables } from '@/lib/database.types'
 import {
+  DEMO_ACTIVITY,
   DEMO_COLLECTION,
   DEMO_DEPLOYMENT,
   DEMO_MINT_PAGE_SECTIONS,
@@ -22,6 +23,7 @@ import {
 } from '@/lib/demo'
 import type { Hex, MintGroup } from '@/lib/demo'
 import type { ActionResult } from '@/lib/art/result'
+import type { ActivityView } from '@/lib/manage/activity-view'
 import { phaseCalls, type ManageCall } from '@/lib/manage/phase-calls'
 import type { PhaseAdd, PhasesView } from '@/lib/manage/phases-types'
 import type { SettingsView } from '@/lib/manage/settings-types'
@@ -112,6 +114,23 @@ export function sampleMintPageView(
     // Sample mode writes no row, so nothing stamps one.
     updatedAt: null,
   }
+}
+
+/**
+ * The Overview's activity in sample mode (docs/specs/2026-10-16-indexer-overview.md, section 8): the sample's 171
+ * holders and its 12 mints, counted 30 s before the sample's now; `?activity=counting` not counted yet, and
+ * `?activity=behind` counted 20 minutes before the sample's now.
+ */
+export function sampleActivityView(variant: string | undefined): ActivityView {
+  const counted: ActivityView = {
+    counted: true,
+    holders: DEMO_ACTIVITY.holders,
+    countedAt: DEMO_NOW - 30,
+    recentMints: DEMO_ACTIVITY.recentMints,
+  }
+  if (variant === 'counting') return { ...counted, counted: false, countedAt: null }
+  if (variant === 'behind') return { ...counted, countedAt: DEMO_NOW - 20 * 60 }
+  return counted
 }
 
 /**
