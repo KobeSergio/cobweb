@@ -3,10 +3,11 @@ import type { Tier } from './tiers.ts'
 
 /**
  * `/health` (docs/specs/2026-10-16-freshness-server.md, section 6.9), pure: what it reports per served chain
- * and for the server, and how a failure is named. It never carries an RPC URL or an error's message.
+ * and for the server, and how a failure is named. It never carries an RPC URL, a key or an error's message.
  */
 
-export type ChainHealth = {
+/** A chain's reader on /health. */
+export type ReaderHealth = {
   chainId: number
   name: string
   hot: number
@@ -29,6 +30,34 @@ export type ChainHealth = {
   lastError: string | null
   /** Log scans skipped or failed, whose collections were read in full instead. */
   logGaps: number
+}
+
+/** A chain's indexer on /health (docs/specs/2026-10-16-indexer-overview.md, section 6.7). */
+export type IndexerHealth = {
+  /** The collections with a cursor in this process. */
+  collections: number
+  /**
+   * Those not read to the safe block yet, or last read there more than 300 s of chain time before the head.
+   */
+  behind: number
+  /** The last safe block a pass reached; null before one. */
+  block: number | null
+  /** When the last pass ended (ISO); null before one. */
+  lastPassAt: string | null
+  /** Failures: each failed head, scan, block time, write or database read counts one. */
+  failedPasses: number
+  /** The last failure's error name, never its message. */
+  lastError: string | null
+  /** Mints and airdrops that did not pair with their transfers, so are not recorded. */
+  unpaired: number
+}
+
+/** A chain on /health: its reader's fields, then its indexer's, null while the indexer is off. */
+export type ChainHealth = ReaderHealth & { indexer: IndexerHealth | null }
+
+/** A chain's /health entry from its reader and its indexer (null while the indexer is off). */
+export function chainHealth(reader: ReaderHealth, indexer: IndexerHealth | null): ChainHealth {
+  return { ...reader, indexer }
 }
 
 export type HealthBody = {

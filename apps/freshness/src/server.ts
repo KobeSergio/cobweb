@@ -5,9 +5,11 @@ import { publicClientFor } from '@cobweb/shared/clients'
 import type { Address } from 'viem'
 import { chainReader } from './chain-reader.ts'
 import { collectionCheck } from './collection-check.ts'
-import { servedChains } from './config.ts'
-import { failureLine, type HealthBody } from './health.ts'
+import { servedChains, type IndexerOptions } from './config.ts'
+import { chainHealth, failureLine, type HealthBody } from './health.ts'
 import { hotSet, JOIN_WAIT_MS, type HotEntry } from './hot-set.ts'
+import { chainIndexer, type ChainIndexer } from './indexer.ts'
+import { supabaseIndexerDb } from './indexer-db.ts'
 import {
   healthAnswer,
   PREFLIGHT,
@@ -21,6 +23,7 @@ import { etagMatches, etagOf, stateBody } from './state-body.ts'
 import { isDegraded } from './tiers.ts'
 import { walletWindows } from './wallet.ts'
 
+export type { IndexerOptions } from './config.ts'
 export type { HealthBody } from './health.ts'
 export type { StateBody } from './state-body.ts'
 export { TIER_MS } from './tiers.ts'
@@ -28,8 +31,11 @@ export type { WalletBody } from './wallet.ts'
 
 /**
  * The freshness server (docs/specs/2026-10-16-freshness-server.md, section 6): one `node:http` server over
- * the chains whose two variables are set. It makes no call until a request arrives, reads no database, and
- * never computes liveness. `index.ts` starts it on Railway; `verify:freshness` starts it in process.
+ * the chains whose two variables are set. Without the indexer it makes no call until a request arrives; with
+ * it, each served chain's indexer reads the chain's collections into the database from the start
+ * (docs/specs/2026-10-16-indexer-overview.md, section 6.1), while the request path still reads no database.
+ * It never computes liveness. `index.ts` starts it on Railway; `verify:freshness` and `verify:indexer` start
+ * it in process.
  */
 
 export type FreshnessOptions = {
@@ -37,6 +43,10 @@ export type FreshnessOptions = {
   host?: string
   /** Limits the chains served; the verify serves Anvil alone. */
   chainIds?: number[]
+  /**
+   * The indexer's database and pace; without them the indexer is off and the state body's activity is null.
+   */
+  indexer?: IndexerOptions | null
 }
 
 export type Freshness = { url: string; close(): Promise<void> }
@@ -52,7 +62,14 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
       const client = publicClientFor(chain.id)
       return [
         chain.id,
-        { chain, client, reader: chainReader(chain, hot, client), windows: walletWindows(chain, client) },
+        {
+          chain,
+          client,
+          reader: chainReader(chain, hot, client),
+          windows: walletWindows(chain, client),
+          // Started once the server listens, so a start that fails leaves no indexer running.
+          indexer: null as ChainIndexer | null,
+        },
       ]
     }),
   )
@@ -123,7 +140,7 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
       status: 'ok',
       startedAt,
       hot: hot.size(),
-      chains: chains.map(({ reader }) => reader.health()),
+      chains: chains.map(({ reader, indexer }) => chainHealth(reader.health(), indexer?.health() ?? null)),
       wallet: { windows: total('windows'), answered: total('answered'), waiting: total('waiting') },
     }
   }
@@ -173,20 +190,39 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
     })
   })
   const { port } = server.address() as AddressInfo
+  const indexing = options.indexer ?? null
+  if (indexing) {
+    const db = supabaseIndexerDb(indexing)
+    for (const entry of served.values())
+      entry.indexer = chainIndexer(entry.chain, entry.client, db, {
+        tier: () => entry.reader.health().tier,
+        passMs: indexing.passMs,
+        targetsEveryMs: indexing.targetsEveryMs,
+      })
+  }
   const names = [...served.values()].map(({ chain }) => `${chain.name} (${chain.id})`)
+  const listed = names.length ? names.join(', ') : 'no chain'
   console.log(
-    `The freshness server listens on port ${port}, serving ${names.length ? names.join(', ') : 'no chain'}.`,
+    `The freshness server listens on port ${port}, serving ${listed}. ${
+      indexing
+        ? `The indexer runs on ${listed}.`
+        : 'The indexer is off: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to run it.'
+    }`,
   )
 
   /**
-   * Stops accepting connections, waits for every reader, window and request in flight, then closes the
-   * connections left and waits for any request a kept-alive connection carried meanwhile, so the server makes
-   * no call once it resolves (Decision 3). The first failure is thrown once everything has settled.
+   * Stops accepting connections, waits for every reader, window, indexer and request in flight, then closes
+   * the connections left and waits for any request a kept-alive connection carried meanwhile, so the server
+   * makes no call once it resolves (Decision 3). The first failure is thrown once everything has settled.
    */
   async function shutDown(): Promise<void> {
     const closed = new Promise<Error | undefined>((resolve) => server.close((error) => resolve(error)))
     const settled = await Promise.allSettled([
-      ...[...served.values()].flatMap(({ reader, windows }) => [reader.stop(), windows.stop()]),
+      ...[...served.values()].flatMap(({ reader, windows, indexer }) => [
+        reader.stop(),
+        windows.stop(),
+        ...(indexer ? [indexer.stop()] : []),
+      ]),
       ...answering,
     ])
     server.closeAllConnections()

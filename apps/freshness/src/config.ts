@@ -35,3 +35,35 @@ export function servedChains(chainIds?: number[]): ChainConfig[] {
   }
   return chains
 }
+
+/**
+ * The indexer's settings (docs/specs/2026-10-16-indexer-overview.md, section 6.1): its database, the
+ * project's API URL and service role key, the names and the client the render worker uses; and the passes'
+ * delays and the targets' read, which `verify:indexer` shortens.
+ */
+export type IndexerOptions = {
+  supabaseUrl: string
+  serviceRoleKey: string
+  /** The wait from a pass's start to the next: during a backfill, while a chain is busy, otherwise. */
+  passMs?: { behind: number; fast: number; idle: number }
+  /** How often the deployed collections are read again. */
+  targetsEveryMs?: number
+}
+
+/**
+ * The indexer's options from `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, a blank one read as unset: null
+ * when neither is set, so the indexer stays off. One set alone refuses the start, as a malformed factory
+ * address does: a viem `BaseError` named `ConfigurationError` whose sentence names both variables, never a
+ * value.
+ */
+export function indexerOptionsOf(env: Record<string, string | undefined>): IndexerOptions | null {
+  const supabaseUrl = env.SUPABASE_URL ?? ''
+  const serviceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY ?? ''
+  if (!supabaseUrl && !serviceRoleKey) return null
+  if (!supabaseUrl || !serviceRoleKey)
+    throw new BaseError(
+      'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are both needed to run the indexer; set both or neither.',
+      { name: 'ConfigurationError' },
+    )
+  return { supabaseUrl, serviceRoleKey }
+}

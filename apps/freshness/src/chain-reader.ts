@@ -17,7 +17,7 @@ import {
   type ContractFunctionParameters,
   type PublicClient,
 } from 'viem'
-import { errorLine, errorName, type ChainHealth } from './health.ts'
+import { errorLine, errorName, type ReaderHealth } from './health.ts'
 import type { HotEntry, HotSet } from './hot-set.ts'
 import { scanLogs, type GetLogs } from './logs.ts'
 import { chainTier, nextDelayMs, TIER_MS, windowOpen, type Tier } from './tiers.ts'
@@ -70,7 +70,7 @@ export function chainReader(
   chain: ChainConfig,
   hot: HotSet,
   client: PublicClient,
-): { wake(): void; stop(): Promise<void>; health(): ChainHealth; noteFailure(error: unknown): void } {
+): { wake(): void; stop(): Promise<void>; health(): ReaderHealth; noteFailure(error: unknown): void } {
   /** The last block the logs were scanned to; null before the chain's first tick. */
   let scanned: bigint | null = null
   /** Validators found with code on this chain, lowercase. */

@@ -1,6 +1,6 @@
 import { availableChains } from '@cobweb/shared'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_PORT, portOf, servedChains } from './config.ts'
+import { DEFAULT_PORT, indexerOptionsOf, portOf, servedChains } from './config.ts'
 import { errorLine } from './health.ts'
 
 const FACTORY = '0x5FbDB2315678afecb367f032d93F642f64180aa3'
@@ -88,5 +88,33 @@ describe('portOf (docs/specs/2026-10-16-freshness-server.md, section 6.2)', () =
   it('defaults the port to 3100 when PORT is unset or blank', () => {
     expect(DEFAULT_PORT).toBe(3100)
     expect([portOf(undefined), portOf(''), portOf('4000')]).toEqual([3100, 3100, 4000])
+  })
+})
+
+describe('indexerOptionsOf (docs/specs/2026-10-16-indexer-overview.md, section 6.1)', () => {
+  const URL = 'http://127.0.0.1:54321'
+  const KEY = 'service-role-key-value'
+
+  it('answers the options from both variables, and null from neither or from blanks', () => {
+    expect(indexerOptionsOf({ SUPABASE_URL: URL, SUPABASE_SERVICE_ROLE_KEY: KEY })).toEqual({
+      supabaseUrl: URL,
+      serviceRoleKey: KEY,
+    })
+    expect(indexerOptionsOf({})).toBeNull()
+    expect(indexerOptionsOf({ SUPABASE_URL: '', SUPABASE_SERVICE_ROLE_KEY: '' })).toBeNull()
+  })
+
+  it('refuses one set alone with a sentence naming both variables, never a value', () => {
+    for (const env of [
+      { SUPABASE_URL: URL },
+      { SUPABASE_SERVICE_ROLE_KEY: KEY },
+      { SUPABASE_URL: URL, SUPABASE_SERVICE_ROLE_KEY: '' },
+    ]) {
+      const line = errorLine(thrownBy(() => indexerOptionsOf(env)))
+      expect(line).toBe(
+        'ConfigurationError: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are both needed to run the indexer; set both or neither.',
+      )
+      expect(line).not.toContain(KEY)
+    }
   })
 })

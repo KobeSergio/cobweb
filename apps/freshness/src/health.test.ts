@@ -1,6 +1,13 @@
 import { BaseError, HttpRequestError, LimitExceededRpcError, RpcRequestError } from 'viem'
 import { describe, expect, it } from 'vitest'
-import { errorLine, errorName, failureLine } from './health.ts'
+import {
+  chainHealth,
+  errorLine,
+  errorName,
+  failureLine,
+  type IndexerHealth,
+  type ReaderHealth,
+} from './health.ts'
 
 /** An RPC URL as a provider issues it, its key in the path. */
 const KEYED_URL: string = 'https://rpc.example/v2/secret-key'
@@ -56,5 +63,45 @@ describe('the log lines (docs/specs/2026-10-16-freshness-server.md, section 6.1)
     call.cause = call
     expect(errorLine(call)).toBe('BaseError: The call failed.')
     expect(errorName(call)).toBe('BaseError')
+  })
+})
+
+describe('chainHealth (docs/specs/2026-10-16-indexer-overview.md, section 6.7)', () => {
+  const reader: ReaderHealth = {
+    chainId: 31337,
+    name: 'Anvil',
+    hot: 1,
+    tier: 'live',
+    block: 120,
+    lagSeconds: 2,
+    lastGoodTickAt: '2026-10-16T12:00:00.000Z',
+    failedTicks: 0,
+    lastError: null,
+    logGaps: 0,
+  }
+  const indexer: IndexerHealth = {
+    collections: 2,
+    behind: 1,
+    block: 119,
+    lastPassAt: '2026-10-16T12:00:01.000Z',
+    failedPasses: 3,
+    lastError: 'IndexerWriteError',
+    unpaired: 1,
+  }
+
+  it("keeps the reader's fields and adds the indexer's last, null while the indexer is off", () => {
+    expect(chainHealth(reader, null)).toEqual({ ...reader, indexer: null })
+    const on = chainHealth(reader, indexer)
+    expect(Object.keys(on)).toEqual([...Object.keys(reader), 'indexer'])
+    expect(on.indexer).toEqual(indexer)
+    expect(Object.keys(on.indexer!)).toEqual([
+      'collections',
+      'behind',
+      'block',
+      'lastPassAt',
+      'failedPasses',
+      'lastError',
+      'unpaired',
+    ])
   })
 })
