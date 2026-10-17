@@ -70,6 +70,32 @@ export const slugSchema = z
 /** How long a mint page link stays reserved before the contract must be deployed. */
 export const RESERVATION_DAYS = 3
 
+/**
+ * The most collections that are not deployed a wallet holds unless support raised its `profiles.draft_cap`
+ * (docs/specs/2026-10-17-production-hardening.md, section 6.4), so mint page links cannot be squatted in bulk.
+ */
+export const DRAFT_CAP_DEFAULT = 20
+
+/** The database's refusal of an insert past the cap, its `detail` the cap. */
+export const DRAFT_CAP_REFUSAL = 'This wallet holds its limit of collections that are not deployed.'
+
+/** What the Create collection dialog says at the cap. */
+export function draftCapSentence(cap: number): string {
+  return `This wallet already has ${cap} collections that are not deployed, the most it can hold. Delete a draft or deploy one, then create this one.`
+}
+
+/**
+ * The cap an insert refusal names: the trigger's 23514 with its message, its `details` the cap (the default when
+ * a detail is missing); null for any other error.
+ */
+export function draftCapOf(
+  error: { code?: string; message?: string; details?: string } | null,
+): number | null {
+  if (error?.code !== '23514' || error.message !== DRAFT_CAP_REFUSAL) return null
+  const cap = Number(error.details)
+  return error.details && Number.isInteger(cap) && cap >= 0 ? cap : DRAFT_CAP_DEFAULT
+}
+
 export type SlugState =
   | { kind: 'none' }
   | { kind: 'reserved'; slug: string; until: Date }

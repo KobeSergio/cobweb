@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { getVerifiedUser } from '@/lib/auth'
-import { createCollectionSchema } from '@/lib/collections'
+import { createCollectionSchema, DRAFT_CAP_DEFAULT, draftCapOf, draftCapSentence } from '@/lib/collections'
 import { stageHref } from '@/lib/steps'
 import { createClient } from '@/lib/supabase/server'
 
@@ -25,6 +25,10 @@ function text(formData: FormData, name: string): string {
  *
  * Where each type lands (`stageHref(id, 'art', type)`): Generative on Layers, which opens as the
  * folder upload while there are no layers; 1/1s and Single asset on the asset upload.
+ *
+ * A wallet holds at most its `profiles.draft_cap` collections that are not deployed
+ * (docs/specs/2026-10-17-production-hardening.md, section 6.4): the count is read first so the dialog
+ * words the refusal, and the database's trigger refuses the same insert under a lock, worded the same.
  */
 export async function createCollection(
   _previous: CreateCollectionState,
@@ -49,6 +53,18 @@ export async function createCollection(
   }
 
   const supabase = await createClient()
+  // Row-level security limits both reads to the creator's own rows.
+  const [profile, held] = await Promise.all([
+    supabase.from('profiles').select('draft_cap').eq('id', user.id).maybeSingle(),
+    supabase
+      .from('collections')
+      .select('id', { count: 'exact', head: true })
+      .eq('owner_id', user.id)
+      .neq('status', 'deployed'),
+  ])
+  const cap = profile.data?.draft_cap ?? DRAFT_CAP_DEFAULT
+  if ((held.count ?? 0) >= cap) return { formError: draftCapSentence(cap) }
+
   const { data, error } = await supabase
     .from('collections')
     .insert({
@@ -59,7 +75,13 @@ export async function createCollection(
     .select('id')
     .single()
 
-  if (error) return { formError: 'The collection could not be created. Try again.' }
+  if (error) {
+    const refusedAt = draftCapOf(error)
+    return {
+      formError:
+        refusedAt === null ? 'The collection could not be created. Try again.' : draftCapSentence(refusedAt),
+    }
+  }
 
   redirect(stageHref(data.id, 'art', parsed.data.projectType))
 }
