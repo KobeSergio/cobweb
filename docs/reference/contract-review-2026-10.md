@@ -29,11 +29,12 @@ external look, which is the owner's decision.
   triaged.
 - CI: the `slither` job runs the same analyzer through `crytic/slither-action` v0.4.2 on every push to `main` and every
   pull request, reading the triage database, and fails on a medium or high finding the database does not hold. It runs
-  on the action's own toolchain, not on the nightly the `contracts` job pins: Python 3.10, the latest stable Foundry the
-  action installs, and crytic-compile unpinned (Slither 0.11.6 asks for `>=0.4.2,<0.5.0`, and 0.4.2 is the only release
-  in that range). It reads the syntax tree of the same solc 0.8.30, and run from the repository root it gives every
-  finding the same id as the local run from `contracts/`, because an id is built from each file's short name, which
-  reads `src/...` in both. The job has not run on GitHub yet (section 7).
+  on the action's own toolchain, not on the nightly the `contracts` job pins: Python 3.10 and the latest stable Foundry,
+  as the action's v0.4.2 source reads, and crytic-compile unpinned (Slither 0.11.6 asks for `>=0.4.2,<0.5.0`, and 0.4.2
+  was the only release in that range on 18 October 2026). It reads the syntax tree of the same solc 0.8.30. The root
+  form the job runs (`slither contracts ...`, from the repository root) gives every finding the same id locally as the
+  run from `contracts/`, because an id is built from each file's short name, which reads `src/...` in both; so the job
+  should hide the same findings. The job has not run on GitHub yet (section 7).
 - Foundry: forge 1.4.0-nightly at `6f49a62`, locally and in CI's `contracts` job
   (`nightly-6f49a622bd1c2219f918752b372d401aeeb8e851`).
 
@@ -66,17 +67,19 @@ the informational findings is `unimplemented-functions`, since `ERC721AC._tokenT
 
 ## 4. A reading of six areas
 
-**Value flows.** The native token enters in five places: the three mints (`batchMint`, `mintOnBehalf`, `delegateMint`),
-`airdropNFTs` and the factory's `payForArt`; neither contract has a `receive` or `fallback`. A mint quotes its cost from
-the group's price and the collection's fees (`quoteBatchMint`), refuses less, credits the creator the price and the
-platform the fee before it mints, and then pushes the excess back to the caller, holding it in the caller's pending
-balance when the push fails, so a minter whose wallet rejects ether still mints and claims later. An airdrop charges the
-per-token fee the same way. Every balance leaves through one function, each reverting on a failed transfer and, in a
-collection, zeroing its balance before the transfer: `withdrawMintFunds` sends the creator's balance to the payout
-address, `withdrawPlatformFees` the platform's to the factory's current treasury, `withdrawPendingBalance` and
-`withdrawPendingBalanceTo` a caller's own held refunds, and the factory's `withdraw` its whole balance to the treasury.
+**Value flows.** The native token enters in five places that account for it: the three mints (`batchMint`,
+`mintOnBehalf`, `delegateMint`), `airdropNFTs` and the factory's `payForArt`. Neither contract has a `receive` or
+`fallback`, but four functions ERC721A 4.2.3 makes payable, as ERC-721 declares them (`approve`, `transferFrom` and both
+`safeTransferFrom`), take it and credit no one. A mint quotes its cost from the group's price and the collection's fees
+(`quoteBatchMint`), refuses less, credits the creator the price and the platform the fee before it mints, and then
+pushes the excess back to the caller, holding it in the caller's pending balance when the push fails, so a minter whose
+wallet rejects ether still mints and claims later. An airdrop charges the per-token fee the same way. Every balance
+leaves through a withdrawal of its own, each reverting on a failed transfer and, in a collection, zeroing its balance
+before the transfer: `withdrawMintFunds` sends the creator's balance to the payout address, `withdrawPlatformFees` the
+platform's to the factory's current treasury, `withdrawPendingBalance` and `withdrawPendingBalanceTo` (two entry points
+to one internal function) a caller's own held refunds, and the factory's `withdraw` its whole balance to the treasury.
 So the collection holds exactly the creator's balance, the platform's and the held refunds, which invariant 1 holds;
-ether forced in from outside (a selfdestruct) is owed to no one and stays.
+ether forced in from outside (a selfdestruct) or sent with a transfer or an approval is owed to no one and stays.
 
 **Access.** The owner (the creator) controls the sale: groups, prices, supplies, schedules, quotas, the public cap, the
 on-behalf switch, the base URI, the payout address, royalties, airdrops and the transfer validator. The payout address
@@ -85,30 +88,36 @@ admin, an account holding the factory's admin role, sets a collection's fees up 
 10,000 bps) and, on the factory, the approved creation code, the default fees, the art rate, the treasury, the art
 withdrawal and the role itself; the factory refuses to revoke its last admin (`LastAdmin`). Anyone may deploy approved
 code, mint within the rules, pay for art and send the platform's balance to the treasury, whose destination the factory
-fixes. Invariants 4 and 6 hold the fee and admin rules over random callers.
+fixes. Invariant 4 holds the fee rule over random callers, the creator among them; invariant 6 holds the last-admin rule
+over random grants and revokes, each sent by an admin, and that a stranger cannot grant or revoke the role rests on
+OpenZeppelin's `AccessControl`, since no test has a stranger try.
 
-**Reentrancy.** Every function of a collection that moves value is `nonReentrant`: the three mints, the airdrop and the
-four withdrawals. Inside a mint the order is checks, then every counter and balance written, then the mint, which the
-collection runs as ERC721A `_safeMint` calls of at most 20 tokens each (`MINT_CHUNK`). The receiver's `onERC721Received`
-callback, run for each token of a chunk once the chunk is written, is the only call before the refund that can change
-state (a delegated mint's question to the registry is a view). A receiver that calls back finds every guarded entry
-point locked and the collection's counts and balances final; ERC721A has finished the chunk's writes before the call and
-reverts the mint if the call moves its `_currentIndex`, and the next chunk reads its state afresh. What the receiver can
-still call, its own transfers and approvals or the settings if it is the owner, finds every finished chunk whole
-(Slither's `reentrancy-no-eth` on the chunked `_safeMint` and a `reentrancy-benign` on the next chunk's first ownership
-slot, both accepted). The refund push comes last, and the one write after it credits a pending balance only when the
-push failed (the other `reentrancy-benign`, accepted). The factory's `withdraw` is the admins' alone and sends its whole
-balance, so a treasury that calls back finds nothing left (`reentrancy-events`, accepted). Deploying runs the
-collection's constructor, which only reads the factory's fees.
+**Reentrancy.** Every function of a collection that credits or pays out the native token is `nonReentrant`: the three
+mints, the airdrop and the four withdrawals. Inside a mint the order is checks, then every counter and balance written,
+then the mint, which the collection runs as ERC721A `_safeMint` calls of at most 20 tokens each (`MINT_CHUNK`). The
+receiver's `onERC721Received` callback, run for each token of a chunk once the chunk is written, is the only call before
+the refund that can change state (a delegated mint's question to the registry is a view). A receiver that calls back
+finds every guarded entry point locked and the collection's counts and balances final; ERC721A has finished the chunk's
+writes before the call and reverts the mint if the call moves its `_currentIndex`, and the next chunk reads its state
+afresh. What the receiver can still call, its own transfers and approvals or the settings if it is the owner, finds
+every finished chunk whole (Slither's `reentrancy-no-eth` on the chunked `_safeMint` and a `reentrancy-benign` on the
+next chunk's first ownership slot, both accepted). The refund push comes last, and the one write after it credits a
+pending balance only when the push failed (the other `reentrancy-benign`, accepted). The factory's `withdraw` is the
+admins' alone and sends its whole balance, so a treasury that calls back finds nothing left (`reentrancy-events`,
+accepted). Deploying runs the collection's constructor, which reads the factory's fees and, where Limit Break's default
+validator has code, registers the collection's token type with it in a try that ignores a failure; the collection has no
+runtime code yet for that call to re-enter.
 
 **External trust.** A collection trusts three contracts. The factory that deployed it, recorded in the constructor: its
 default fees are read once there (so no deployer supplies its own), and its `isAdmin` and `treasury` at each admin
 check and each platform withdrawal, so a treasury rotation reaches every collection. The delegate.xyz v2 registry at its
 fixed address, asked by `delegateMint` whether the caller may act for the vault; on a chain without it the call
-reverts, so delegated mints there fail closed. Limit Break's transfer validator: transfers are checked only where the
-configured validator has code, and the collection's `isApprovedForAll` honours the automatic approval for Limit Break's
-default validator alone, so a validator the creator installs gets no approval a holder did not give. A collection
-deployed by any other contract is not one the factory records, and the app and the freshness server refuse it.
+reverts, so delegated mints there fail closed. Limit Break's transfer validator: at deployment the constructor registers
+the collection's token type with the default validator, where it has code, in a try that ignores a failure; transfers
+are checked only where the configured validator has code, and the collection's `isApprovedForAll` honours the automatic
+approval for Limit Break's default validator alone, so a validator the creator installs gets no approval a holder did
+not give. A collection deployed by any other contract is not one the factory records, and the app and the freshness
+server refuse it.
 
 **CREATE2 and the approved hash.** `deployCollection` refuses creation code whose keccak256 an admin has not approved,
 salts each deploy with the deployer's address (`keccak256(abi.encode(deployer, salt))`), so no one can take another
@@ -131,28 +140,32 @@ live exactly at its start (`>=`), and closing a group clears its schedule.
 `contracts/test/Invariants.t.sol` drives 31 actions: the factory handler's art payments (a repeat refused), their
 withdrawal and the admin role among three accounts (the last admin's revoke refused), and the collection handler's mints
 of each kind (public, from a list, on behalf, delegated through the registry mock, and by `EtherRejecter`, whose refund
-is held and later claimed to another account), airdrops, burns, every withdrawal, the admin's fee changes and a
-stranger's refused attempt, the factory's defaults, the treasury, the payout address, group registration, prices,
-supplies, a group opened or closed and all of them at once, schedules with time moving, whitelist chunks written and
-written again, the public cap, the on-behalf switch, delegations and transfers between holders. Time moves 1 to 3,600 s
-at a time, and an eighth of the moves go exactly to the next scheduled start of a group whose flag is off and an eighth
-to the second before it (a group whose flag is on is live whatever its start, and a flag turned off resets the start
-to 0). Its collection has 200 tokens (Public 120, Allowlist 60), so most runs sell it out and the supply bounds are
-reached.
+is held and later claimed to another account), airdrops, burns, every withdrawal but `withdrawPendingBalance` (which the
+unit suite calls only to see it refused, `CobwebCollection.t.sol:631`), the admin's fee changes and a stranger's refused
+attempt, the factory's defaults, the treasury, the payout address, group registration, prices, supplies, a group opened
+or closed and all of them at once, schedules with time moving, whitelist chunks written and written again, the public
+cap, the on-behalf switch, delegations and transfers between holders. Time moves 1 to 3,600 s at a time, and an eighth
+of the moves go exactly to the next scheduled start of a group whose flag is off and an eighth to the second before it
+(a group whose flag is on is live whatever its start, and a flag turned off resets the start to 0). Its collection has
+200 tokens (Public 120, Allowlist 60), so most runs sell it out and the supply bounds are reached.
 
-Both handlers keep ghost totals and a flag for each thing that must never happen, and catch every refusal a contract
-gives. The flags are a stranger's fee change landing, a mint in a group that was not live when it was sent, a cap or
-quota passed (a mint on behalf with the switch off, or a delegated mint without a delegation, counts as passing one), a
-claimed count going down, a payment other than the quote, a repeated art payment landing, the last admin removed, and a
-withdrawal refused while something was owed: one flag for each of the collection's three withdrawals
-(`heldClaimRefused`, `feesWithdrawalRefused` and `proceedsWithdrawalRefused`, read by invariants 1, 2 and 3) and the
-factory's, read by invariant 5. Payments are compared by addition, so a payout larger than the payment sets
-`chargedOtherThanQuote`, which fails invariant 1, instead of reverting a handler; a refund held for `EtherRejecter` is
-the excess the model expects to be held (what `_refundExcessEther` credits, `msg.value - totalCost`, from the same
-quote the handler read), and any other credit sets the same flag. Two things depart from the spec's section 7.5: mints
-on behalf and delegated mints overpay the quote as the public mint does, which the spec's action table does not list for
-them, and invariant 11 also holds that no mint lands without the right to its cap or quota (the on-behalf switch on, or
-the vault's delegation to the caller).
+Both handlers keep ghost totals and a flag for each thing that must never happen, and catch the refusals a contract may
+give (a stranger's or a minter's call, a withdrawal, a repeated payment, a group or a supply the collection refuses, the
+last admin's revoke). Thirteen of the 31 actions (`grantAdmin`, `setTreasury`, `setPayout`, `setFees`, `setFactoryFees`,
+`setPrice`, `setStatus`, `schedule`, `setAll`, `writeChunk`, `setPublicCap`, `setMintOnBehalf` and `transfer`) call the
+contracts without a `try`, since a contract must accept them. The flags are a stranger's fee change landing, a mint in a
+group that was not live when it was sent, a cap or quota passed (a mint on behalf with the switch off, or a delegated
+mint without a delegation, counts as passing one), a claimed count going down, a payment other than the quote, a
+repeated art payment landing, the last admin removed, and a withdrawal refused while something was owed: one flag for
+each of the collection's three withdrawals (`heldClaimRefused`, `feesWithdrawalRefused` and
+`proceedsWithdrawalRefused`, read by invariants 1, 2 and 3) and the factory's, read by invariant 5. Payments are
+compared by addition, so a payout larger than the payment sets `chargedOtherThanQuote`, which fails invariant 1,
+instead of reverting a handler; a refund held for `EtherRejecter` is the excess the model expects to be held (what
+`_refundExcessEther` credits, `msg.value - totalCost`, from the same quote the handler read), and any other credit sets
+the same flag. Beyond [the plan's](../plans/2026-10-18-load-run-contract-review-and-cloudflare.md) decisions 18 to 21,
+two things depart from the spec's section 7.5: mints on behalf and delegated mints overpay the quote as the public mint
+does, which the spec's action table does not list for them, and invariant 11 also holds that no mint lands without the
+right to its cap or quota (the on-behalf switch on, or the vault's delegation to the caller).
 
 The thirteen invariants, in four groups:
 
@@ -173,8 +186,10 @@ Results:
   1,000, 1,000,000 calls per invariant, every action between 31,669 and 32,720 of them, no call reverting, and the one
   fuzz test (`testFuzz_quoteBatchMint`) at 10,000 runs; all 100 tests pass, in 661 s (about 11 minutes) on a 12-core
   laptop.
-- `reverts: 0` holds by construction, since every refusal by a contract is caught inside the handlers: it measures the
-  handlers' health, and the evidence that each invariant holds over real states is the mutations below.
+- `reverts: 0` holds by construction for the calls the handlers catch; for the thirteen actions that call without a
+  `try` it shows that every call the handlers made was accepted. Either way it measures the handlers' health, not the
+  contracts'. What shows an invariant at work is the mutations below: one that fails it shows the campaigns reach the
+  states it guards, and the passing runs show it holds there.
 
 Each invariant was checked against a mutation of the contracts that breaks what it holds, seventeen in all, applied by
 a script one at a time on 64 runs of depth 500 with a fixed seed and then undone, and each failed the invariant it
@@ -234,3 +249,6 @@ owes a new approval.
     creator drops that recipient and sends again.
   - The collection's views are briefly inconsistent during a receiver callback (a group's count is final before the
     first chunk is minted, the token count grows chunk by chunk), and no on-chain decision reads them.
+  - `approve`, `transferFrom` and both `safeTransferFrom` are `payable` in ERC721A 4.2.3, as ERC-721 declares them:
+    ether sent with one credits no one, reaches no ledger, and no withdrawal sends it out. No handler sends ether with
+    them.
