@@ -29,6 +29,8 @@ function text(formData: FormData, name: string): string {
  * A wallet holds at most its `profiles.draft_cap` collections that are not deployed
  * (docs/specs/2026-10-17-production-hardening.md, section 6.4): the count is read first so the dialog
  * words the refusal, and the database's trigger refuses the same insert under a lock, worded the same.
+ * The action refuses only when both reads answered; when either fails, the insert goes on and the
+ * trigger decides, so a cap support raised is never read as the default.
  */
 export async function createCollection(
   _previous: CreateCollectionState,
@@ -63,7 +65,7 @@ export async function createCollection(
       .neq('status', 'deployed'),
   ])
   const cap = profile.data?.draft_cap ?? DRAFT_CAP_DEFAULT
-  if ((held.count ?? 0) >= cap) return { formError: draftCapSentence(cap) }
+  if (!profile.error && !held.error && (held.count ?? 0) >= cap) return { formError: draftCapSentence(cap) }
 
   const { data, error } = await supabase
     .from('collections')

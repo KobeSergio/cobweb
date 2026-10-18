@@ -83,21 +83,26 @@ export const DRAFT_CAP_DEFAULT = 20
 /** The database's refusal of an insert past the cap, its `detail` the cap. */
 export const DRAFT_CAP_REFUSAL = 'This wallet holds its limit of collections that are not deployed.'
 
-/** What the Create collection dialog says at the cap. */
+/**
+ * What the Create collection dialog says at the cap: in the singular for a cap of 1, and for a cap of 0, which
+ * support sets, that the wallet can hold none at all.
+ */
 export function draftCapSentence(cap: number): string {
-  return `This wallet already has ${cap} collections that are not deployed, the most it can hold. Delete a draft or deploy one, then create this one.`
+  if (cap < 1)
+    return 'This wallet cannot hold a collection that is not deployed. Ask support to raise its limit.'
+  const held = cap === 1 ? '1 collection that is not deployed' : `${cap} collections that are not deployed`
+  return `This wallet already has ${held}, the most it can hold. Delete a draft or deploy one, then create this one.`
 }
 
 /**
- * The cap an insert refusal names: the trigger's 23514 with its message, its `details` the cap (the default when
- * a detail is missing); null for any other error.
+ * The cap an insert refusal names: the trigger's 23514 with its message, its `details` the cap when it is digits
+ * alone (the default otherwise: `Number` reads a blank detail as 0); null for any other error.
  */
 export function draftCapOf(
   error: { code?: string; message?: string; details?: string } | null,
 ): number | null {
   if (error?.code !== '23514' || error.message !== DRAFT_CAP_REFUSAL) return null
-  const cap = Number(error.details)
-  return error.details && Number.isInteger(cap) && cap >= 0 ? cap : DRAFT_CAP_DEFAULT
+  return /^\d+$/.test(error.details ?? '') ? Number(error.details) : DRAFT_CAP_DEFAULT
 }
 
 export type SlugState =
