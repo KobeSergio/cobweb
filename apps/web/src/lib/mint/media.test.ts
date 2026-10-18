@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { FileFacts } from '@/lib/storage/admission'
-import { keyBelongs, mimeOfKey, mintPageKey, mintPageMediaProblem, type MediaSlot } from './media'
+import {
+  keyBelongs,
+  mediaKeysOf,
+  mimeOfKey,
+  mintPageKey,
+  mintPageMediaProblem,
+  type MediaSlot,
+} from './media'
 
 const MB = 1024 * 1024
 const COLLECTION = '0a977c0b-7e53-476b-8c08-6c685315c3af'
@@ -105,5 +112,34 @@ describe('mintPageKey and keyBelongs', () => {
     expect(mimeOfKey(`${COLLECTION}/${HASH}.webp`)).toBe('image/webp')
     expect(mimeOfKey(`${COLLECTION}/${HASH}.mp4`)).toBe('video/mp4')
     expect(mimeOfKey(`${COLLECTION}/${HASH}.svg`)).toBeNull()
+  })
+})
+
+describe('mediaKeysOf (docs/specs/2026-10-17-production-hardening.md, section 14, point 8)', () => {
+  const key = (n: number, extension = 'png') =>
+    `${COLLECTION}/${n.toString(16).padStart(64, '0')}.${extension}`
+
+  it("names a page's three images, its team's photos, its carousel's uploads and its music", () => {
+    const sections = {
+      team: { enabled: true, members: [{ imageKey: key(4) }, { imageKey: null }, { imageKey: key(5) }] },
+      carousel: {
+        enabled: true,
+        items: [
+          { kind: 'upload', key: key(6, 'mp4') },
+          { kind: 'token', tokenId: 3 },
+        ],
+      },
+      music: { enabled: false, key: key(7, 'mp3'), fileName: 'theme.mp3' },
+      roadmap: { enabled: true, items: [] },
+    }
+    expect(mediaKeysOf({ banner_key: key(1), avatar_key: null, about_banner_key: key(3), sections })).toEqual(
+      [key(1), key(3), key(4), key(5), key(6, 'mp4'), key(7, 'mp3')],
+    )
+  })
+
+  it('names nothing for an empty page or sections of another shape', () => {
+    const empty = { banner_key: null, avatar_key: null, about_banner_key: null }
+    for (const sections of [{}, null, 'x', { team: { members: 'x' } }, { carousel: { items: [null] } }])
+      expect(mediaKeysOf({ ...empty, sections })).toEqual([])
   })
 })

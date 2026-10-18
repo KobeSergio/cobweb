@@ -72,11 +72,15 @@ export async function deleteObjects(keys: string[], options: { bucket?: string }
   }
 }
 
-/** The bucket's objects under a prefix with their last-modified time, a page of up to 1,000 at a time. */
+/**
+ * The objects under a prefix with their last-modified time, a page of up to 1,000 at a time, on the art bucket
+ * unless another is named.
+ */
 export async function* listObjectPages(
   prefix: string,
+  options: { bucket?: string } = {},
 ): AsyncGenerator<{ key: string; lastModified: Date }[]> {
-  const { bucket } = storageConfig()
+  const bucket = options.bucket ?? storageConfig().bucket
   let token: string | undefined
   do {
     const page = await s3().send(

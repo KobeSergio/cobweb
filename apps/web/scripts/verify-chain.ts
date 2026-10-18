@@ -148,7 +148,7 @@ async function seededCollection(client: ReturnType<typeof createClient<Database>
   const { data: col, error } = await client
     .from('collections')
     .insert({ name: `Chain check ${Date.now()} ${++fileCount}`, symbol: 'CHK', project_type: 'generative' })
-    .select('id')
+    .select('id, owner_id')
     .single()
   if (error || !col) throw new Error(`collection: ${error?.message ?? 'no row'}`)
   const cid = col.id
@@ -171,7 +171,9 @@ async function seededCollection(client: ReturnType<typeof createClient<Database>
     const ids: string[] = []
     for (const [index, traitName] of ['One', 'Two'].entries()) {
       const hash = HEX64(++fileCount)
-      const upload = await client.rpc('record_upload', {
+      // As the upload action records it: through the service role, for the collection's owner.
+      const upload = await admin.rpc('record_upload', {
+        p_owner_id: col.owner_id,
         p_collection_id: cid,
         p_kind: 'layer_image',
         p_storage_key: `${cid}/layers/${hash}.png`,

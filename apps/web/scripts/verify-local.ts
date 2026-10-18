@@ -116,6 +116,8 @@ const UNIQUE = ['23505']
 // ---------------------------------------------------------------------------------------------
 type Creator = { client: SupabaseClient; account: PrivateKeyAccount; userId: string }
 const createdUserIds = new Set<string>()
+/** Each signed-in creator's user id by its client: the upload action records a file for the owner it checked. */
+const ownerOf = new Map<SupabaseClient, string>()
 
 function siweMessage(address: Hex, domain = 'localhost:3000', uri = 'http://localhost:3000'): string {
   return createSiweMessage({
@@ -143,6 +145,7 @@ async function signInCreator(): Promise<Creator> {
   const signature = await account.signMessage({ message })
   const { user, error } = await web3SignIn(client, message, signature)
   if (error || !user) throw new Error(`sign-in failed: ${error?.message ?? 'no user'}`)
+  ownerOf.set(client, user.id)
   return { client, account, userId: user.id }
 }
 
@@ -234,14 +237,19 @@ function uploadInput(collectionId: string, overrides: Record<string, unknown> = 
   }
 }
 
-/** Records an upload through the RPC, as the upload server action will; returns the new row id. */
+/**
+ * Records an upload through the RPC as the upload server action does: through the service role, for the
+ * client's creator as its owner (docs/specs/2026-10-17-production-hardening.md, section 14, point 8); returns the
+ * new row id.
+ */
 async function recordUpload(
   client: SupabaseClient,
   collectionId: string,
   overrides: Record<string, unknown> = {},
 ) {
   const input = uploadInput(collectionId, overrides)
-  const { data, error } = await client.rpc('record_upload', {
+  const { data, error } = await admin.rpc('record_upload', {
+    p_owner_id: ownerOf.get(client) ?? null,
     p_collection_id: collectionId,
     p_kind: input.kind,
     p_storage_key: input.storage_key,
@@ -1078,6 +1086,7 @@ async function main(): Promise<void> {
   await artMintPage(A, B)
   await artIndexer(A, B)
   await artHardening()
+  await artUploadHardening(A)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -8466,6 +8475,54 @@ async function artHardening(): Promise<void> {
         (await countRows('uploads', 'collection_id', cid)) +
         (await countRows('render_jobs', 'collection_id', cid))
       return rows === 0 ? null : `${rows} row(s) written`
+    },
+  )
+}
+
+// ---------------------------------------------------------------------------------------------
+// 9q. Hardening owed by earlier phases: record_upload for the service role alone, which the upload action calls
+// for the owner it checked, with the size it read from storage (docs/specs/2026-10-17-production-hardening.md,
+// section 14, point 8)
+// ---------------------------------------------------------------------------------------------
+async function artUploadHardening(A: Creator): Promise<void> {
+  const E = await signInCreator()
+  const col = await insertCollection(E.client)
+  if (!col.row) throw new Error(`setup: ${describe(col.error)}`)
+  const cid = col.row.id
+  await check(
+    "uploads: record_upload runs for the service role alone and for the collection's owner only: the owner's own call and anon's are refused, as is the service role's for another owner",
+    async () => {
+      const input = uploadInput(cid)
+      const args = {
+        p_owner_id: E.userId,
+        p_collection_id: cid,
+        p_kind: input.kind,
+        p_storage_key: input.storage_key,
+        p_content_hash: input.content_hash,
+        p_mime: input.mime,
+        p_media_type: input.media_type,
+        p_bytes: input.bytes,
+        p_width: input.width,
+        p_height: input.height,
+        p_file_name: input.file_name,
+      }
+      const refused = refusedAll([
+        ['owner', (await callArt(E.client, 'record_upload', args)).error, PERMISSION, 'permission denied'],
+        ['anon', (await callArt(anon, 'record_upload', args)).error, PERMISSION, 'permission denied'],
+        [
+          'another owner',
+          (await callArt(admin, 'record_upload', { ...args, p_owner_id: A.userId })).error,
+          PERMISSION,
+          'collection not found',
+        ],
+      ])
+      if (refused) return refused
+      if ((await countRows('uploads', 'collection_id', cid)) !== 0) return 'a refused call wrote a row'
+      const recorded = await callArt(admin, 'record_upload', args)
+      if (recorded.error || typeof recorded.data !== 'string')
+        return `the owner's record: ${describe(recorded.error)}`
+      const { data } = await admin.from('uploads').select('bytes').eq('id', recorded.data).single()
+      return data?.bytes === input.bytes ? null : `recorded ${data?.bytes} bytes`
     },
   )
 }

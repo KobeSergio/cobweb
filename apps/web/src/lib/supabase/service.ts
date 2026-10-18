@@ -9,7 +9,9 @@ import type { Database } from '@/lib/database.types'
  * read or a write a creator's session can do. No session is kept. The daily source sweep's port
  * (lib/storage/source-sweep-deps.ts) also calls `collections_sources_due` and
  * `collection_sources_deleted` with it, for no creator (docs/specs/2026-10-17-production-hardening.md,
- * section 7.2).
+ * section 7.2); `confirmUpload` (app/actions/uploads.ts) calls `record_upload` with it for the owner it
+ * checked, with the size it read from storage; and the daily upload sweep's port
+ * (lib/storage/upload-sweep-deps.ts) reads which keys are recorded or saved.
  */
 export function createServiceClient(): SupabaseClient<Database> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL

@@ -132,8 +132,8 @@ await check('storage: delete removes the object', async () => {
   return (await headObject(key)) === null ? null : 'still there'
 })
 
-// Rows: record_upload as the actions call it, the duplicate that the action turns into reuse, and
-// the project cap, with a throwaway wallet that is deleted at the end.
+// Rows: record_upload as the actions call it (through the service role, for the owner), the duplicate that
+// the action turns into reuse, and the project cap, with a throwaway wallet that is deleted at the end.
 type Hex = `0x${string}`
 const account = privateKeyToAccount(generatePrivateKey())
 const creator = createClient(url, publishableKey, clientOptions)
@@ -167,7 +167,9 @@ await check('collections: the creator makes a collection for this run', async ()
   return error || !collectionId ? `insert failed: ${error?.message ?? 'no row'}` : null
 })
 
+// As the upload action records a file: through the service role, for the collection's owner.
 const recordInput = (cid: string, storage_key: string) => ({
+  p_owner_id: userId as string,
   p_collection_id: cid,
   p_kind: 'layer_image' as const,
   p_storage_key: storage_key,
@@ -190,21 +192,21 @@ await check('uploads: record_upload stores a row for a stored object', async () 
     headers: { 'Content-Type': 'image/png' },
   })
   if (!put.ok) return `PUT ${put.status}`
-  const { data, error } = await creator.rpc('record_upload', recordInput(collectionId, recorded))
+  const { data, error } = await admin.rpc('record_upload', recordInput(collectionId, recorded))
   return error ? `${error.code} ${error.message}` : data ? null : 'no id'
 })
 await check(
   'uploads: the same hash recorded twice is a 23505, which confirmUpload turns into reuse',
   async () => {
     if (!collectionId || !recorded) return 'no row'
-    const { error } = await creator.rpc('record_upload', recordInput(collectionId, recorded))
+    const { error } = await admin.rpc('record_upload', recordInput(collectionId, recorded))
     return error?.code === '23505' ? null : `expected 23505, got ${error?.code ?? 'success'}`
   },
 )
 await check('uploads: a layer image of another size is refused with the canvas sentence', async () => {
   if (!collectionId) return 'no collection'
   const otherHash = 'b'.repeat(64)
-  const { error } = await creator.rpc('record_upload', {
+  const { error } = await admin.rpc('record_upload', {
     ...recordInput(collectionId, storageKey(collectionId, 'layer_image', otherHash, 'image/png')),
     p_content_hash: otherHash,
     p_width: 2,
@@ -218,7 +220,7 @@ await check('uploads: a layer image of another size is refused with the canvas s
 await check('uploads: record_upload accepts a video asset with no size', async () => {
   if (!collectionId) return 'no collection'
   const videoHash = 'e'.repeat(64)
-  const { data, error } = await creator.rpc('record_upload', {
+  const { data, error } = await admin.rpc('record_upload', {
     ...recordInput(collectionId, `${collectionId}/assets/${videoHash}.mp4`),
     p_kind: 'asset' as const,
     p_content_hash: videoHash,
@@ -253,7 +255,7 @@ await check('uploads: the cap refuses a file once the project holds 5 GB', async
   const usedBytes = (used ?? []).reduce((sum, row) => sum + Number(row.bytes), 0)
   if (!capProblem(usedBytes, 1)) return `cap not reached at ${usedBytes} bytes`
   const smallHash = 'd'.repeat(64)
-  const { error: refused } = await creator.rpc('record_upload', {
+  const { error: refused } = await admin.rpc('record_upload', {
     ...recordInput(collectionId as string, `${collectionId}/assets/${smallHash}.png`),
     p_kind: 'asset' as const,
     p_content_hash: smallHash,

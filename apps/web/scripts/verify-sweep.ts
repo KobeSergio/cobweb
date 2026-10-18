@@ -2,7 +2,10 @@
 // scratch collection; the sweep script, run as a child process on that collection's prefix, lists
 // only the unrecorded one in a dry run, keeps it while it is younger than the minimum age, deletes
 // it with a minimum age of 0, and never touches the recorded one. Also checks the script refuses a
-// remote Supabase. Anything unset is discovered with `supabase status -o env`. Never prints a key.
+// remote Supabase. Then the daily cron's two ports (docs/specs/2026-10-17-production-hardening.md,
+// section 14, point 8) on the same collection's prefix: the art bucket's, and the mint-page bucket's
+// against the collection's page. Anything unset is discovered with `supabase status -o env`. Never
+// prints a key. Runs under `node --conditions=react-server --import ./scripts/resolve-ts.mjs`.
 //
 //   pnpm --filter @cobweb/web verify:sweep
 
@@ -64,6 +67,10 @@ for (const endpoint of [url, process.env.ART_S3_ENDPOINT])
 const clientOptions = { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } }
 const admin = createClient(url, serviceKey, clientOptions)
 const { deleteObjects, headObject, presignPut } = await import('../src/lib/storage/objects.ts')
+const { sweepOrphans } = await import('../src/lib/storage/sweep.ts')
+const { uploadSweepDeps } = await import('../src/lib/storage/upload-sweep-deps.ts')
+const { mintPageBucket } = await import('../src/lib/storage/config.ts')
+const { mintPageKey } = await import('../src/lib/mint/media.ts')
 
 let passed = 0
 const failed: string[] = []
@@ -101,8 +108,8 @@ const PNG = Buffer.from(
 const OTHER = Buffer.concat([PNG, Buffer.from([0])])
 const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex')
 
-async function put(key: string, body: Buffer): Promise<void> {
-  const res = await fetch(await presignPut(key, 'image/png', body.byteLength), {
+async function put(key: string, body: Buffer, bucket?: string): Promise<void> {
+  const res = await fetch(await presignPut(key, 'image/png', body.byteLength, 900, { bucket }), {
     method: 'PUT',
     body: new Uint8Array(body),
     headers: { 'Content-Type': 'image/png' },
@@ -144,7 +151,9 @@ await check('setup: a creator, a collection, a recorded object and an unrecorded
   orphanKey = storageKey(collectionId, 'asset', sha(OTHER), 'image/png')
   await put(recordedKey, PNG)
   await put(orphanKey, OTHER)
-  const recorded = await creator.rpc('record_upload', {
+  // As the upload action records it: through the service role, for the collection's owner.
+  const recorded = await admin.rpc('record_upload', {
+    p_owner_id: userId,
     p_collection_id: collectionId,
     p_kind: 'asset',
     p_storage_key: recordedKey,
@@ -206,8 +215,53 @@ await check('sweep: --allow-remote takes nothing from the local stack', async ()
     : `exit ${status}: ${out.replace(serviceKey, '[key]')}`
 })
 
+/** The cron's sweep of one port on this run's collection alone, past a minimum age of 0. */
+const swept = (port: 'art' | 'media') =>
+  sweepOrphans(uploadSweepDeps()[port], {
+    prefix: `${collectionId}/`,
+    minAgeMs: 0,
+    now: Date.now(),
+    dryRun: false,
+  })
+
+let lateKey = ''
+await check(
+  "upload sweep: the cron's art port deletes an unrecorded object and keeps the recorded one",
+  async () => {
+    lateKey = storageKey(collectionId!, 'placeholder', sha(Buffer.from('late')), 'image/png')
+    await put(lateKey, OTHER)
+    const report = await swept('art')
+    if (report.deleted !== 1 || report.orphaned[0] !== lateKey) return `report ${JSON.stringify(report)}`
+    if ((await headObject(lateKey)) !== null) return 'the unrecorded object is still there'
+    return (await headObject(recordedKey)) ? null : 'the recorded object was deleted'
+  },
+)
+
+const mediaBucket = mintPageBucket()
+let savedMedia = ''
+let unsavedMedia = ''
+await check(
+  "media sweep: the cron's mint page port deletes a file no page names and keeps the one the page names",
+  async () => {
+    savedMedia = mintPageKey(collectionId!, sha(PNG), 'image/png')
+    unsavedMedia = mintPageKey(collectionId!, sha(OTHER), 'image/png')
+    await put(savedMedia, PNG, mediaBucket)
+    await put(unsavedMedia, OTHER, mediaBucket)
+    const page = await creator
+      .from('mint_pages')
+      .insert({ collection_id: collectionId, banner_key: savedMedia })
+    if (page.error) return `page: ${page.error.message}`
+    const report = await swept('media')
+    if (report.deleted !== 1 || report.orphaned[0] !== unsavedMedia) return `report ${JSON.stringify(report)}`
+    if ((await headObject(unsavedMedia, { bucket: mediaBucket })) !== null)
+      return 'the unsaved file is still there'
+    return (await headObject(savedMedia, { bucket: mediaBucket })) ? null : 'the saved file was deleted'
+  },
+)
+
 await check('cleanup: the run leaves no object, row or user behind', async () => {
-  await deleteObjects([recordedKey, orphanKey].filter(Boolean))
+  await deleteObjects([recordedKey, orphanKey, lateKey].filter(Boolean))
+  await deleteObjects([savedMedia, unsavedMedia].filter(Boolean), { bucket: mediaBucket })
   if (collectionId) {
     const { error } = await admin.from('collections').delete().eq('id', collectionId)
     if (error) return `collection: ${error.message}`

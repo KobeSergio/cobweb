@@ -84,3 +84,33 @@ export function mimeOfKey(key: string): string | null {
   const extension = key.slice(key.lastIndexOf('.') + 1)
   return Object.keys(EXTENSION).find((type) => EXTENSION[type] === extension) ?? null
 }
+
+/** The media a mint page's row names, as `mint_pages` stores them. */
+export type MintPageMediaRow = {
+  banner_key: string | null
+  avatar_key: string | null
+  about_banner_key: string | null
+  sections: unknown
+}
+
+/**
+ * Every key a mint page's row names in the mint-page bucket: its three images, its team's photos, its carousel's
+ * uploads and its music. The upload sweep keeps these and deletes the collection's other files once a day old
+ * (docs/specs/2026-10-17-production-hardening.md, section 14, point 8).
+ */
+export function mediaKeysOf(row: MintPageMediaRow): string[] {
+  const sections = (row.sections ?? {}) as {
+    team?: { members?: { imageKey?: unknown }[] }
+    carousel?: { items?: { key?: unknown }[] }
+    music?: { key?: unknown }
+  }
+  const listed = <T>(items: T[] | undefined) => (Array.isArray(items) ? items : [])
+  return [
+    row.banner_key,
+    row.avatar_key,
+    row.about_banner_key,
+    ...listed(sections.team?.members).map((member) => member?.imageKey),
+    ...listed(sections.carousel?.items).map((item) => item?.key),
+    sections.music?.key,
+  ].filter((key): key is string => typeof key === 'string' && key.length > 0)
+}

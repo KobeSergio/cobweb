@@ -7,6 +7,7 @@ const app = (path: string) => new URL(`../../../${path}`, import.meta.url)
 const CONSUMER = 'src/app/api/queues/render/route.ts'
 const SWEEP = 'src/app/api/cron/render-sweep/route.ts'
 const SOURCE_SWEEP = 'src/app/api/cron/source-sweep/route.ts'
+const UPLOAD_SWEEP = 'src/app/api/cron/upload-sweep/route.ts'
 
 type VercelConfig = {
   regions: string[]
@@ -38,14 +39,16 @@ describe('vercel.json', () => {
     expect(readFileSync(app(CONSUMER), 'utf8')).toContain('export const maxDuration = 800')
   })
 
-  it('runs the render sweep every 15 minutes and the source sweep daily, on routes that exist', () => {
+  it('runs the render sweep every 15 minutes and the source and upload sweeps daily, on routes that exist', () => {
     expect(config.crons).toEqual([
       { path: '/api/cron/render-sweep', schedule: '*/15 * * * *' },
       { path: '/api/cron/source-sweep', schedule: '30 7 * * *' },
+      { path: '/api/cron/upload-sweep', schedule: '0 7 * * *' },
     ])
     expect(existsSync(app(SWEEP))).toBe(true)
     expect(existsSync(app(SOURCE_SWEEP))).toBe(true)
     expect(readFileSync(app(SOURCE_SWEEP), 'utf8')).toContain('export const maxDuration = 300')
+    expect(readFileSync(app(UPLOAD_SWEEP), 'utf8')).toContain('export const maxDuration = 800')
   })
 })
 

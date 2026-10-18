@@ -4,6 +4,7 @@ import { getVerifiedUser } from '@/lib/auth'
 import { ownedUnlocked } from '@/lib/art/owned'
 import { LOCKED, NOT_FOUND, SIGNED_OUT } from '@/lib/art/result'
 import { createClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/service'
 import { admissionProblem, capProblem } from '@/lib/storage/admission'
 import { mediaTypeFor, storageKey } from '@/lib/storage/keys'
 import { deleteObjects, headObject, presignPut } from '@/lib/storage/objects'
@@ -97,8 +98,10 @@ function recordError(error: { code?: string; message: string }): string {
 /**
  * Records an upload after its PUT. The server checks what it can see (the object exists with the
  * declared size and type); the content hash is the client's word, which only affects dedupe inside
- * this creator's own project. A row is written only through `record_upload`, which also enforces
- * the 5 GB cap and the shared canvas size under the collection's row lock.
+ * this creator's own project. A row is written only through `record_upload`, which runs for the
+ * service role alone, so the size it records is the one read here, never a caller's word
+ * (docs/specs/2026-10-17-production-hardening.md, section 14, point 8); it takes the owner this
+ * action checked, and enforces the 5 GB cap and the shared canvas size under the collection's row lock.
  */
 export async function confirmUpload(
   input: ConfirmInput,
@@ -107,7 +110,7 @@ export async function confirmUpload(
   if (shape) return { error: shape }
   const ctx = await ownedUnlocked(input.collectionId)
   if (ctx.error !== undefined) return { error: ctx.error }
-  const { supabase, canvas } = ctx
+  const { supabase, canvas, userId } = ctx
   const problem = admissionProblem(input.kind, input, canvas)
   if (problem) return { error: problem }
 
@@ -136,6 +139,7 @@ export async function confirmUpload(
   const cap = capProblem(usedBytes, input.bytes)
   if (cap) return { error: cap }
 
+  const service = createServiceClient()
   const record = (
     kind: AdmitInput['kind'] | 'thumbnail',
     key: string,
@@ -144,7 +148,8 @@ export async function confirmUpload(
     width: number | null,
     height: number | null,
   ) =>
-    supabase.rpc('record_upload', {
+    service.rpc('record_upload', {
+      p_owner_id: userId,
       p_collection_id: input.collectionId,
       p_kind: kind,
       p_storage_key: key,

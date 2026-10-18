@@ -22,6 +22,7 @@ import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { anvil } from 'viem/chains'
 import { collectionAbi } from '@cobweb/shared/collection-abi'
 import {
+  admin,
   CID,
   COLLECTION_CODE_HASH,
   COLLECTION_CREATION_CODE,
@@ -328,7 +329,9 @@ async function main(): Promise<void> {
         .eq('id', deferred)
       if (set.error) return `deferred: ${set.error.message}`
       const hash = nextFileHash()
-      const upload = await client.rpc('record_upload', {
+      // As the upload action records it: through the service role, for the collection's owner.
+      const upload = await admin.rpc('record_upload', {
+        p_owner_id: userId,
         p_collection_id: deferred,
         p_kind: 'placeholder',
         p_storage_key: `${deferred}/placeholder/${hash}.png`,

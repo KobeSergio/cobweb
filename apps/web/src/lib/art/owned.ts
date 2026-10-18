@@ -21,14 +21,15 @@ export type OwnedCollection = Pick<
 >
 
 export type Owned =
-  { error: string } | { error?: undefined; supabase: ArtClient; canvas: Canvas; collection: OwnedCollection }
+  | { error: string }
+  | { error?: undefined; supabase: ArtClient; canvas: Canvas; collection: OwnedCollection; userId: string }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
- * The collection, only if the signed-in creator owns it and its art is not locked. The session is
- * confirmed with the auth server, the row is read under row-level security, and the explicit owner
- * test is a second line of defence. The database checks both again on every write.
+ * The collection, only if the signed-in creator owns it and its art is not locked, with the creator's
+ * id. The session is confirmed with the auth server, the row is read under row-level security, and the
+ * explicit owner test is a second line of defence. The database checks both again on every write.
  */
 export async function ownedUnlocked(collectionId: string): Promise<Owned> {
   const user = await getVerifiedUser()
@@ -55,7 +56,7 @@ export async function ownedUnlocked(collectionId: string): Promise<Owned> {
     generation_seed: data.generation_seed,
     art_deferred: data.art_deferred,
   }
-  return { supabase, canvas, collection }
+  return { supabase, canvas, collection, userId: user.id }
 }
 
 export type OwnedAny =

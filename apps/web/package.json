@@ -15,7 +15,7 @@
     "chain:local": "node scripts/chain-local.ts",
     "verify:chain": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-chain.ts",
     "sweep:uploads": "node --conditions=react-server scripts/sweep-uploads.ts",
-    "verify:sweep": "node --conditions=react-server scripts/verify-sweep.ts",
+    "verify:sweep": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-sweep.ts",
     "verify:render": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-render.ts",
     "render:local": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/render-local.ts",
     "verify:deploy": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-deploy.ts",

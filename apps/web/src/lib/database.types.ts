@@ -1875,6 +1875,7 @@ export type Database = {
           p_kind: Database['public']['Enums']['upload_kind']
           p_media_type: Database['public']['Enums']['media_type']
           p_mime: string
+          p_owner_id: string
           p_storage_key: string
           p_width: number
         }

@@ -2,7 +2,8 @@
  * The sweep of unrecorded uploads (docs/specs/2026-10-09-lock-and-pay.md, section 9): an object in
  * the art bucket older than the minimum age with no `uploads.storage_key` row was uploaded but never
  * recorded (the browser closed between the PUT and the confirm). The project cap counts rows only,
- * so these would take storage for good. Pure: the script wires S3 and the service role in.
+ * so these would take storage for good. The same core sweeps the mint page's files no page names. Pure:
+ * the script and the daily cron wire S3 and the service role in.
  */
 export type StoredObject = { key: string; lastModified: Date }
 
@@ -52,6 +53,53 @@ export async function sweepOrphans(
     options.onPage?.({ listed: page.length, old: old.length, orphaned: orphans }, report)
   }
   return report
+}
+
+/** A day: an object this young may be between its PUT and its record, or its page's save. */
+export const UPLOAD_SWEEP_MIN_AGE_MS = 86_400_000
+
+/** True unless UPLOAD_SWEEP_DELETE is 1: the daily upload sweep logs what it would delete and deletes nothing. */
+export function uploadSweepDryRun(env: Record<string, string | undefined>): boolean {
+  return env.UPLOAD_SWEEP_DELETE !== '1'
+}
+
+export type SweepCounts = { listed: number; old: number; orphaned: number; deleted: number }
+export type UploadSweepReport = { dryRun: boolean; art: SweepCounts; media: SweepCounts }
+
+/**
+ * The daily upload sweep (docs/specs/2026-10-17-production-hardening.md, section 14, point 8): the art bucket's
+ * objects no `uploads` row records, and the mint-page bucket's files no page names, each over a day old. One line
+ * per bucket; the report counts, and names no key.
+ */
+export async function sweepUploads(
+  deps: { art: SweepDeps; media: SweepDeps },
+  options: { dryRun: boolean; now: number; log?: (line: string) => void },
+): Promise<UploadSweepReport> {
+  const log = options.log ?? ((line: string) => console.log(line))
+  const swept = async (port: SweepDeps, what: string): Promise<SweepCounts> => {
+    const report = await sweepOrphans(port, {
+      prefix: '',
+      minAgeMs: UPLOAD_SWEEP_MIN_AGE_MS,
+      now: options.now,
+      dryRun: options.dryRun,
+    })
+    log(
+      options.dryRun
+        ? `Upload sweep (dry run): ${report.orphaned.length} ${what} over a day old would be deleted, of ${report.listed} listed; nothing was deleted.`
+        : `Upload sweep: deleted ${report.deleted} ${what} over a day old, of ${report.listed} listed.`,
+    )
+    return {
+      listed: report.listed,
+      old: report.old,
+      orphaned: report.orphaned.length,
+      deleted: report.deleted,
+    }
+  }
+  return {
+    dryRun: options.dryRun,
+    art: await swept(deps.art, 'unrecorded art files'),
+    media: await swept(deps.media, 'mint page files no page names'),
+  }
 }
 
 export type SweepArgs = { dryRun: boolean; allowRemote: boolean; minAgeHours: number; prefix: string }

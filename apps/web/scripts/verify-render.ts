@@ -136,7 +136,10 @@ async function signIn(account: PrivateKeyAccount) {
   return { client, userId: data.user.id }
 }
 
-/** Stores a drawn PNG in the art bucket under an upload key and records it as the creator would. */
+/**
+ * Stores a drawn PNG in the art bucket under an upload key and records it as the upload action does: through the
+ * service role, for the collection's owner as the creator's session reads it.
+ */
 async function upload(
   client: Client,
   cid: string,
@@ -150,7 +153,10 @@ async function upload(
   const key = `${cid}/${folder}/${hash}.png`
   await s3.send(new PutObjectCommand({ Bucket: ART_BUCKET, Key: key, Body: png, ContentType: 'image/png' }))
   artKeys.push(key)
-  const recorded = await client.rpc('record_upload', {
+  const owned = await client.from('collections').select('owner_id').eq('id', cid).single()
+  if (owned.error) throw new Error(`owner: ${owned.error.message}`)
+  const recorded = await admin.rpc('record_upload', {
+    p_owner_id: owned.data.owner_id,
     p_collection_id: cid,
     p_kind: kind,
     p_storage_key: key,
