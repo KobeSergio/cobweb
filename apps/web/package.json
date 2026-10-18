@@ -28,7 +28,8 @@
     "verify:indexer": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-indexer.ts",
     "verify:csp": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-csp.ts",
     "verify:sources": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-sources.ts",
-    "verify:load": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-load.ts"
+    "verify:load": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/verify-load.ts",
+    "check:edge": "node --conditions=react-server --import ./scripts/resolve-ts.mjs scripts/check-edge.ts"
   },
   "devDependencies": {
     "@cobweb/freshness": "workspace:^",
