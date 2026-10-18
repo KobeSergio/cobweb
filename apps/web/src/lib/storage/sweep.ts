@@ -64,35 +64,53 @@ export function uploadSweepDryRun(env: Record<string, string | undefined>): bool
 }
 
 export type SweepCounts = { listed: number; old: number; orphaned: number; deleted: number }
-export type UploadSweepReport = { dryRun: boolean; art: SweepCounts; media: SweepCounts }
+/** A bucket's outcome: its counts, or its failure as `describe` words it. */
+export type SweepOutcome = SweepCounts | { failed: string }
+export type UploadSweepReport = { dryRun: boolean; art: SweepOutcome; media: SweepOutcome }
+
+/** A failure by its name alone, the default: a message can carry a URL or a key, so none reaches the report. */
+const failureName = (error: unknown): string => (error instanceof Error ? error.name : 'Unknown error')
 
 /**
  * The daily upload sweep (docs/specs/2026-10-17-production-hardening.md, section 14, point 8): the art bucket's
- * objects no `uploads` row records, and the mint-page bucket's files no page names, each over a day old. One line
- * per bucket; the report counts, and names no key.
+ * objects no `uploads` row records, and the mint-page bucket's files no page names, each over a day old. Each
+ * bucket is swept in its own try, so a failure in one still sweeps the other; `describe` words a failure (the cron
+ * passes its masked summary). One line per bucket; the report counts, and names no key.
  */
 export async function sweepUploads(
   deps: { art: SweepDeps; media: SweepDeps },
-  options: { dryRun: boolean; now: number; log?: (line: string) => void },
+  options: {
+    dryRun: boolean
+    now: number
+    log?: (line: string) => void
+    describe?: (error: unknown) => string
+  },
 ): Promise<UploadSweepReport> {
   const log = options.log ?? ((line: string) => console.log(line))
-  const swept = async (port: SweepDeps, what: string): Promise<SweepCounts> => {
-    const report = await sweepOrphans(port, {
-      prefix: '',
-      minAgeMs: UPLOAD_SWEEP_MIN_AGE_MS,
-      now: options.now,
-      dryRun: options.dryRun,
-    })
-    log(
-      options.dryRun
-        ? `Upload sweep (dry run): ${report.orphaned.length} ${what} over a day old would be deleted, of ${report.listed} listed; nothing was deleted.`
-        : `Upload sweep: deleted ${report.deleted} ${what} over a day old, of ${report.listed} listed.`,
-    )
-    return {
-      listed: report.listed,
-      old: report.old,
-      orphaned: report.orphaned.length,
-      deleted: report.deleted,
+  const describe = options.describe ?? failureName
+  const swept = async (port: SweepDeps, what: string): Promise<SweepOutcome> => {
+    try {
+      const report = await sweepOrphans(port, {
+        prefix: '',
+        minAgeMs: UPLOAD_SWEEP_MIN_AGE_MS,
+        now: options.now,
+        dryRun: options.dryRun,
+      })
+      log(
+        options.dryRun
+          ? `Upload sweep (dry run): ${report.orphaned.length} ${what} over a day old would be deleted, of ${report.listed} listed; nothing was deleted.`
+          : `Upload sweep: deleted ${report.deleted} ${what} over a day old, of ${report.listed} listed.`,
+      )
+      return {
+        listed: report.listed,
+        old: report.old,
+        orphaned: report.orphaned.length,
+        deleted: report.deleted,
+      }
+    } catch (error) {
+      const failed = describe(error)
+      log(`Upload sweep: the ${what} could not be swept and are tried again tomorrow: ${failed}`)
+      return { failed }
     }
   }
   return {

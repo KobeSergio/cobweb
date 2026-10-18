@@ -123,8 +123,11 @@ const admin = createClient(url, serviceKey, {
 // Imported after the environment is set, so the storage client sees these values.
 const { deleteObjects, listObjectPages } = await import('../src/lib/storage/objects.ts')
 
-/** Keys per uploads lookup, so the query string stays short. */
-const RECORDED_CHUNK = 100
+/**
+ * Keys per uploads lookup. The lookup is a GET whose query string names each key: 50 keys of the longest shape make
+ * about 6,400 characters, under the API gateway's 8 KB request line, which refuses a longer one with 414.
+ */
+const RECORDED_CHUNK = 50
 
 let totals: SweepReport | null = null
 const summary = (report: SweepReport) =>

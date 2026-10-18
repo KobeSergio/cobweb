@@ -153,4 +153,45 @@ describe('sweepUploads (docs/specs/2026-10-17-production-hardening.md, section 1
       'Upload sweep (dry run): 3 unrecorded art files over a day old would be deleted, of 4 listed; nothing was deleted.',
     )
   })
+
+  it("sweeps the mint page files when the art bucket fails, and reports each bucket's outcome", async () => {
+    const art = fake(pages, [])
+    art.deps.recorded = () => Promise.reject(new Error('The uploads could not be read (HTTP 414).'))
+    const media = fake([[object('c1/ab.png', 30), object('c1/cd.png', 30)]], ['c1/ab.png'])
+    const lines: string[] = []
+    const report = await sweepUploads(
+      { art: art.deps, media: media.deps },
+      {
+        dryRun: false,
+        now: NOW,
+        log: (line) => lines.push(line),
+        describe: (error) => `masked ${(error as Error).message}`,
+      },
+    )
+    expect(report).toEqual({
+      dryRun: false,
+      art: { failed: 'masked The uploads could not be read (HTTP 414).' },
+      media: { listed: 2, old: 2, orphaned: 1, deleted: 1 },
+    })
+    expect([art.removed, media.removed]).toEqual([[], [['c1/cd.png']]])
+    expect(lines).toEqual([
+      'Upload sweep: the unrecorded art files could not be swept and are tried again tomorrow: masked The uploads could not be read (HTTP 414).',
+      'Upload sweep: deleted 1 mint page files no page names over a day old, of 2 listed.',
+    ])
+  })
+
+  it('describes a failure by its name alone unless told otherwise, so no message reaches the report', async () => {
+    const art = fake(pages, [])
+    const media = fake([[object('c1/ab.png', 30)]], [])
+    media.deps.recorded = () => Promise.reject(new TypeError('https://storage.example/?key=abc'))
+    const report = await sweepUploads(
+      { art: art.deps, media: media.deps },
+      { dryRun: true, now: NOW, log: () => {} },
+    )
+    expect(report).toEqual({
+      dryRun: true,
+      art: { listed: 4, old: 3, orphaned: 3, deleted: 0 },
+      media: { failed: 'TypeError' },
+    })
+  })
 })
