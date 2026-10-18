@@ -26,7 +26,8 @@ export default async function ArtLayout({ children, params }: Props) {
       deployed={isDeployed(collection.status)}
       demo={demo}
       artDeferred={artDeferred}
-      sourcesDeleted={collection.art_sources_deleted_at !== null}
+      // `!= null`, as the uploads route reads it: a row read before the column exists carries no field at all.
+      sourcesDeleted={collection.art_sources_deleted_at != null}
     />
   )
   // A real generative project seeds the browser store from its rows; sample mode seeds each screen
