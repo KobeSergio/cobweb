@@ -187,7 +187,6 @@ describe('pagePolicy (section 5.2)', () => {
         "frame-ancestors 'none'",
         'upgrade-insecure-requests',
         `report-uri ${CSP_REPORT_PATH}`,
-        'report-to csp',
       ].join('; '),
     )
   })
@@ -260,8 +259,8 @@ describe('pagePolicy (section 5.2)', () => {
 
 describe('cspHeaders (section 5.2)', () => {
   const input = { nonce: NONCE, sources: PRODUCTION, reportOrigin: 'https://cobweb.example' }
-  const policy = pagePolicy(NONCE, PRODUCTION, 'enforce')
-  const reportOnly = pagePolicy(NONCE, PRODUCTION, 'report-only')
+  const policy = `${pagePolicy(NONCE, PRODUCTION, 'enforce')}; report-to csp`
+  const reportOnly = `${pagePolicy(NONCE, PRODUCTION, 'report-only')}; report-to csp`
   const reporting = `csp="https://cobweb.example${CSP_REPORT_PATH}"`
 
   it('puts the enforced policy on a page request and its response', () => {
@@ -283,6 +282,35 @@ describe('cspHeaders (section 5.2)', () => {
     expect(cspHeaders({ ...input, mode: 'off', routeClass: 'page' })).toEqual(framing)
     for (const mode of ['enforce', 'report-only', 'off'] as const)
       expect(cspHeaders({ ...input, mode, routeClass: 'api' })).toEqual(framing)
+  })
+
+  it('names report-to and Reporting-Endpoints for an https report origin, beside report-uri', () => {
+    for (const mode of ['enforce', 'report-only'] as const) {
+      const { request, response } = cspHeaders({ ...input, mode, routeClass: 'page' })
+      const header = mode === 'enforce' ? 'Content-Security-Policy' : 'Content-Security-Policy-Report-Only'
+      const sent = directives(response[header]!)
+      expect(sent.get('report-uri')).toEqual([CSP_REPORT_PATH])
+      expect(sent.get('report-to')).toEqual(['csp'])
+      expect(response['Reporting-Endpoints']).toBe(reporting)
+      expect(request[header.toLowerCase()]).toBe(response[header])
+    }
+  })
+
+  it('names neither for an http report origin, so the browser reports through report-uri alone', () => {
+    // Chrome reads Reporting-Endpoints only on https, and sends no report-uri report while report-to is named.
+    for (const mode of ['enforce', 'report-only'] as const) {
+      const { request, response } = cspHeaders({
+        ...input,
+        reportOrigin: 'http://localhost:3210',
+        mode,
+        routeClass: 'page',
+      })
+      const header = mode === 'enforce' ? 'Content-Security-Policy' : 'Content-Security-Policy-Report-Only'
+      expect(response).toEqual({ [header]: pagePolicy(NONCE, PRODUCTION, mode) })
+      expect(directives(response[header]!).get('report-uri')).toEqual([CSP_REPORT_PATH])
+      expect(directives(response[header]!).has('report-to')).toBe(false)
+      expect(request).toEqual({ [header.toLowerCase()]: response[header], 'x-nonce': NONCE })
+    }
   })
 
   it('never carries the framing policy alone on the request, where Next would find no nonce', () => {

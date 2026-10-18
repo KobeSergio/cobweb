@@ -27,7 +27,8 @@ const nextConfig: NextConfig = {
           // proxy's Content-Security-Policy says `frame-ancestors 'none'` on every page, and on API
           // routes in every mode; in report-only mode a page carries no enforced policy (an
           // enforced one would hide the nonce from Next, see `cspHeaders`), so this header is the
-          // framing block there, as it is for static files.
+          // framing block there. On the paths the proxy's matcher skips (the files in public/, the
+          // icon, the favicon and the report endpoint) this header is the only block in every mode.
           { key: 'X-Frame-Options', value: 'DENY' },
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },

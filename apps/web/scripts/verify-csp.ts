@@ -301,7 +301,7 @@ async function main(): Promise<void> {
   )
 
   await check(
-    "report-only: started again with CSP_MODE=report-only, / asked with a client's own policy and nonce carries X-Frame-Options DENY and no enforced policy, and the full policy as Content-Security-Policy-Report-Only, its scripts on that policy's nonce, with Reporting-Endpoints naming /api/csp-report",
+    "report-only: started again with CSP_MODE=report-only, / asked with a client's own policy and nonce carries X-Frame-Options DENY and no enforced policy, and the full policy as Content-Security-Policy-Report-Only, its scripts on that policy's nonce, reporting through report-uri /api/csp-report with no report-to and no Reporting-Endpoints on this http server",
     async () => {
       await stopServer()
       await startServer('report-only')
@@ -317,10 +317,15 @@ async function main(): Promise<void> {
       const reportOnly = page.headers.get('content-security-policy-report-only')
       const nonce = nonceOf(reportOnly)
       if (!nonce) return `no nonce in the report-only policy: ${reportOnly?.slice(0, 120)}`
-      // The endpoint is on the origin Next reads for the request: localhost for a local `next start`.
-      const endpoint = page.headers.get('reporting-endpoints')?.match(/^csp="(http[^"]+)"$/)?.[1]
-      if (!endpoint || new URL(endpoint).pathname !== CSP_REPORT_PATH)
-        return `Reporting-Endpoints: ${page.headers.get('reporting-endpoints')}`
+      // The report origin is the one Next reads for the request, http://localhost:3210 for a local `next start`:
+      // on http the policy names no report-to and the response no Reporting-Endpoints, which Chrome reads only on
+      // https (and with report-to named it sends no report-uri report), so the browser reports through report-uri.
+      const reporting = directives(reportOnly)
+      if (reporting.get('report-uri')?.join(' ') !== CSP_REPORT_PATH)
+        return `report-uri: ${reporting.get('report-uri')?.join(' ')}`
+      if (reporting.has('report-to')) return `report-to on http: ${reporting.get('report-to')?.join(' ')}`
+      if (page.headers.get('reporting-endpoints') !== null)
+        return `Reporting-Endpoints on http: ${page.headers.get('reporting-endpoints')}`
       return scriptsOn(page, nonce)
     },
   )

@@ -60,8 +60,12 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
 }
 
 export const config = {
-  // Static files are skipped by their folders (public/ holds assets/ and demo/) and the icon by its name,
-  // never by an extension, so a page at a path ending in one (the not-found page at /x.png) still gets its
-  // policy. The report endpoint is skipped too: its posts need no session and carry no page.
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|assets/|demo/|icon\\.svg$|api/csp-report$).*)'],
+  // Static files are skipped by their folders (public/ holds assets/ and demo/), each only for a path that ends
+  // in a file extension, and the icon and the favicon by their full names, never by an extension alone: a page
+  // at a path ending in one (the not-found page at /x.png) still gets its policy, and so does every mint page
+  // link, since a link holds no dot or slash (/favicon-icons, /demo-drop). The report endpoint is skipped too,
+  // by its full path: its posts need no session and carry no page.
+  matcher: [
+    '/((?!_next/static|_next/image|favicon\\.ico$|assets/.*\\.[a-z0-9]+$|demo/.*\\.[a-z0-9]+$|icon\\.svg$|api/csp-report$).*)',
+  ],
 }

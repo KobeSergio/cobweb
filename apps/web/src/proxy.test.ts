@@ -56,6 +56,19 @@ describe('proxy (docs/specs/2026-10-17-production-hardening.md, section 5.3)', (
     expect(forwarded(response, 'content-security-policy-report-only')).toBeNull()
   })
 
+  it('names report-to and Reporting-Endpoints only on https, so a local http server reports through report-uri', async () => {
+    vi.stubEnv('CSP_MODE', 'enforce')
+    expect((await proxy(request('/night-owls'))).headers.get('Content-Security-Policy')).toContain(
+      '; report-to csp',
+    )
+    const plain = await proxy(new NextRequest('http://localhost:3210/night-owls'))
+    const policy = plain.headers.get('Content-Security-Policy')
+    expect(policy).toContain('report-uri /api/csp-report')
+    expect(policy).not.toContain('report-to')
+    expect(plain.headers.get('Reporting-Endpoints')).toBeNull()
+    expect(forwarded(plain, 'content-security-policy')).toBe(policy)
+  })
+
   it('reports in report-only mode with no enforced policy, which Next would copy into the request', async () => {
     vi.stubEnv('CSP_MODE', 'report-only')
     const response = await proxy(request('/'))
@@ -154,6 +167,21 @@ describe("the proxy's matcher", () => {
   it('admits a page path ending in an image extension, and skips the demo art, the icon and the report endpoint', () => {
     for (const url of ['/x.png', '/a/b.png']) expect(matches(url), url).toBe(true)
     for (const url of ['/demo/tokens/1.svg', '/icon.svg', '/api/csp-report'])
+      expect(matches(url), url).toBe(false)
+  })
+
+  it('admits a mint page link or a path that only starts like a skipped file, and skips each file by its full name', () => {
+    for (const url of [
+      '/favicon-icons',
+      '/favicon-ico',
+      '/icon-svg',
+      '/api/csp-reports',
+      '/demo/preview',
+      '/assets',
+      '/assets/x',
+    ])
+      expect(matches(url), url).toBe(true)
+    for (const url of ['/favicon.ico', '/assets/logo.png', '/assets/icon.svg', '/demo/sample.png'])
       expect(matches(url), url).toBe(false)
   })
 })

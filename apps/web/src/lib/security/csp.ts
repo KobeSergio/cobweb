@@ -113,10 +113,11 @@ function directive(name: string, sources: readonly (string | null | false)[]): s
 }
 
 /**
- * The page policy, its directives in the spec's order. Images may come from any https host (the ruling on the
- * spec's section 14, point 4: an image cannot run script, and a creator's metadata may put token art on any host),
- * and from the storage, media and gateway origins when one answers over http, as the local services do. Styles
- * allow inline, since RainbowKit, sonner and AppKit write style elements without a nonce (decision 11).
+ * The page policy, its directives in the spec's order, ending with `report-uri` (`cspHeaders` adds `report-to`
+ * after it on https). Images may come from any https host (the ruling on the spec's section 14, point 4: an image
+ * cannot run script, and a creator's metadata may put token art on any host), and from the storage, media and
+ * gateway origins when one answers over http, as the local services do. Styles allow inline, since RainbowKit,
+ * sonner and AppKit write style elements without a nonce (decision 11).
  */
 export function pagePolicy(nonce: string, sources: CspSources, mode: 'enforce' | 'report-only'): string {
   const plain = [sources.storage, sources.media, sources.gateway].filter(
@@ -158,7 +159,6 @@ export function pagePolicy(nonce: string, sources: CspSources, mode: 'enforce' |
     FRAME_POLICY,
     ...(mode === 'enforce' && !sources.local ? ['upgrade-insecure-requests'] : []),
     `report-uri ${CSP_REPORT_PATH}`,
-    'report-to csp',
   ].join('; ')
 }
 
@@ -175,7 +175,9 @@ export function newNonce(): string {
  * before the report-only header: an enforced `frame-ancestors 'none'` there would leave every script without its
  * nonce. `X-Frame-Options: DENY`, which next.config.ts sets on every path, keeps the framing block in that mode.
  * Off, and for every API route: the framing policy alone. The request never carries the framing policy, where
- * Next would find no nonce.
+ * Next would find no nonce. The policy names `report-to csp`, and the response its `Reporting-Endpoints`, only
+ * when the report origin is https: Chrome reads Reporting-Endpoints only on a secure origin and sends no
+ * report-uri report while report-to is named, so on http (a local server) the browser reports through report-uri.
  */
 export function cspHeaders(input: {
   mode: CspMode
@@ -187,8 +189,11 @@ export function cspHeaders(input: {
   const { mode, routeClass, nonce, sources, reportOrigin } = input
   if (routeClass === 'api' || mode === 'off')
     return { request: {}, response: { 'Content-Security-Policy': FRAME_POLICY } }
-  const policy = pagePolicy(nonce, sources, mode)
-  const reporting = { 'Reporting-Endpoints': `csp="${reportOrigin}${CSP_REPORT_PATH}"` }
+  const reportTo = reportOrigin.startsWith('https:')
+  const policy = `${pagePolicy(nonce, sources, mode)}${reportTo ? '; report-to csp' : ''}`
+  const reporting: Record<string, string> = reportTo
+    ? { 'Reporting-Endpoints': `csp="${reportOrigin}${CSP_REPORT_PATH}"` }
+    : {}
   if (mode === 'enforce')
     return {
       request: { 'content-security-policy': policy, 'x-nonce': nonce },
