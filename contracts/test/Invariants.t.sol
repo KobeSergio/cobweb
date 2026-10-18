@@ -167,7 +167,10 @@ contract CollectionHandler is Reach {
     bool public capOrQuotaPassed;
     bool public claimedWentDown;
     bool public chargedOtherThanQuote;
-    bool public withdrawalRefused;
+    /// @dev A withdrawal refused while something was owed, one flag for each kind, read by the invariant named for it.
+    bool public heldClaimRefused;
+    bool public feesWithdrawalRefused;
+    bool public proceedsWithdrawalRefused;
 
     address[] internal lastChunk;
     uint256[] internal lastQuotas;
@@ -217,20 +220,28 @@ contract CollectionHandler is Reach {
         _mint(Kind.Batch, actor, actor, group, bound(amount, 1, 10), 0);
     }
 
-    /// @dev A payer mints for a receiver's cap or quota; refused while the switch is off.
-    function mintOnBehalf(uint256 payerSeed, uint256 receiverSeed, uint256 group, uint256 amount)
+    /// @dev A payer mints for a receiver's cap or quota, paying the quote and up to 1 ether more; refused while the
+    ///      switch is off.
+    function mintOnBehalf(uint256 payerSeed, uint256 receiverSeed, uint256 group, uint256 amount, uint256 overpay)
         external
         notingClaims
     {
-        _mint(Kind.OnBehalf, _actor(payerSeed), _actor(receiverSeed), _groupOf(group), bound(amount, 1, 10), 0);
+        address payer = _actor(payerSeed);
+        address receiver = _actor(receiverSeed);
+        _mint(Kind.OnBehalf, payer, receiver, _groupOf(group), bound(amount, 1, 10), bound(overpay, 0, 1 ether));
     }
 
-    /// @dev A caller mints on a vault's cap or quota: three times in four the caller the vault last delegated to, else
-    ///      any account, which the registry mock refuses unless the vault delegated to it.
-    function delegateMint(uint256 callerSeed, uint256 vaultSeed, uint256 group, uint256 amount) external notingClaims {
+    /// @dev A caller mints on a vault's cap or quota, paying the quote and up to 1 ether more: three times in four the
+    ///      caller the vault last delegated to, else any account, which the registry mock refuses unless the vault
+    ///      delegated to it.
+    function delegateMint(uint256 callerSeed, uint256 vaultSeed, uint256 group, uint256 amount, uint256 overpay)
+        external
+        notingClaims
+    {
         address vault = _actor(vaultSeed);
-        address caller = callerSeed % 4 == 0 || delegateOf[vault] == address(0) ? _actor(callerSeed) : delegateOf[vault];
-        _mint(Kind.Delegate, caller, vault, _groupOf(group), bound(amount, 1, 10), 0);
+        address caller = delegateOf[vault];
+        if (callerSeed % 4 == 0 || caller == address(0)) caller = _actor(callerSeed);
+        _mint(Kind.Delegate, caller, vault, _groupOf(group), bound(amount, 1, 10), bound(overpay, 0, 1 ether));
     }
 
     /// @dev EtherRejecter mints from Public with an excess its refund cannot reach, so the excess is held for it.
@@ -249,11 +260,13 @@ contract CollectionHandler is Reach {
         }
         if (!live) mintedWhileNotLive = true;
         if (passes) capOrQuotaPassed = true;
-        uint256 held = collection.pendingBalance(holder) - heldBefore;
-        if (held != overpay || address(collection).balance - balanceBefore != cost + overpay) {
+        if (
+            collection.pendingBalance(holder) != heldBefore + overpay
+                || address(collection).balance != balanceBefore + cost + overpay
+        ) {
             chargedOtherThanQuote = true;
         }
-        heldCredited += held;
+        heldCredited += overpay;
         platformCharged += fee;
         proceedsCharged += cost - fee;
         publicMintsOf[holder] += amount;
@@ -268,7 +281,7 @@ contract CollectionHandler is Reach {
             heldClaimed += claimed;
             heldReceived += to.balance - before;
         } catch {
-            if (held > 0) withdrawalRefused = true;
+            if (held > 0) heldClaimRefused = true;
         }
     }
 
@@ -306,7 +319,7 @@ contract CollectionHandler is Reach {
             proceedsWithdrawn += paidOut;
             proceedsReceived += payout.balance - before;
         } catch {
-            if (owed > 0) withdrawalRefused = true;
+            if (owed > 0) proceedsWithdrawalRefused = true;
         }
     }
 
@@ -320,7 +333,7 @@ contract CollectionHandler is Reach {
             feesWithdrawn += paidOut;
             feesReceived += _treasuryBalances() - before;
         } catch {
-            if (owed > 0) withdrawalRefused = true;
+            if (owed > 0) feesWithdrawalRefused = true;
         }
     }
 
@@ -425,16 +438,18 @@ contract CollectionHandler is Reach {
         }
     }
 
-    /// @dev Time moves 1 to 3,600 s, with a block; a quarter of the time exactly to the next scheduled start, the
-    ///      second a phase turns live (Review Focus 5).
+    /// @dev Time moves 1 to 3,600 s, with a block. A quarter of the time it moves instead to the next start of a group
+    ///      whose flag is off, the only kind a start can turn live: half of those moves exactly to that second, the
+    ///      second the phase turns live, and half to the second before it, the last one it is not (Review Focus 5).
     function warp(uint256 seconds_) external notingClaims {
         uint256 next = type(uint256).max;
         for (uint256 group = 0; group < groupCount; group++) {
             uint256 start = collection.mintGroupStartTimestamp(group);
-            if (start > block.timestamp && start < next) next = start;
+            if (!collection.mintGroupActiveFlag(group) && start > block.timestamp && start < next) next = start;
         }
-        bool toStart = seconds_ % 4 == 0 && next != type(uint256).max;
-        vm.warp(toStart ? next : block.timestamp + bound(seconds_, 1, 3_600));
+        uint256 to = block.timestamp + bound(seconds_, 1, 3_600);
+        if (seconds_ % 4 == 0 && next != type(uint256).max) to = seconds_ % 8 == 0 ? next : next - 1;
+        vm.warp(to);
         vm.roll(block.number + 1);
     }
 
@@ -496,14 +511,19 @@ contract CollectionHandler is Reach {
         return seed % groupCount;
     }
 
-    /// @dev A mint judged against the rules as they stood when it was sent: the group live, `holder`'s cap or quota,
-    ///      and the quote taken exactly from `payer`, the excess returned.
+    /// @dev A mint judged against the rules as they stood when it was sent: the group live; `holder`'s cap or quota,
+    ///      and the right to spend it (the on-behalf switch on, or the vault's delegation to `payer`), spending one
+    ///      without that right counting as passing it; and the quote taken exactly from `payer`, the excess returned.
     function _mint(Kind kind, address payer, address holder, uint256 group, uint256 amount, uint256 overpay) internal {
         (uint256 cost, uint256 fee) = collection.quoteBatchMint(group, amount);
         bool live = collection.mintGroupActive(group);
         bool passes = group == PUBLIC
             ? collection.publicMints(holder) + amount > collection.publicMaxMintPerWallet()
             : collection.quotaClaimed(group, holder) + amount > collection.mintQuotas(group, holder);
+        if (kind == Kind.OnBehalf && !collection.mintOnBehalfActive()) passes = true;
+        if (kind == Kind.Delegate && !registry.checkDelegateForContract(payer, holder, address(collection), "")) {
+            passes = true;
+        }
         uint256 before = payer.balance;
         bool landed;
         vm.prank(payer);
@@ -523,7 +543,7 @@ contract CollectionHandler is Reach {
         if (!landed) return;
         if (!live) mintedWhileNotLive = true;
         if (passes) capOrQuotaPassed = true;
-        if (before - payer.balance != cost) chargedOtherThanQuote = true;
+        if (payer.balance + cost != before) chargedOtherThanQuote = true;
         platformCharged += fee;
         proceedsCharged += cost - fee;
         if (group == PUBLIC) publicMintsOf[holder] += amount;
@@ -543,7 +563,7 @@ contract CollectionHandler is Reach {
         } catch {
             return false;
         }
-        if (before - creator.balance != fee) chargedOtherThanQuote = true;
+        if (creator.balance + fee != before) chargedOtherThanQuote = true;
         platformCharged += fee;
         airdropped += total;
     }
@@ -618,8 +638,8 @@ contract InvariantsTest is BaseTest {
                          FEE CUSTODY AND PROCEEDS
     //////////////////////////////////////////////////////////////*/
     /// @dev Every wei the collection holds is owed to the creator, the platform or a refund held for an account the
-    ///      handlers reach, which only EtherRejecter's failed refunds ever are; and every mint and airdrop took exactly
-    ///      its quote, the excess returned or held.
+    ///      handlers reach, which only EtherRejecter's failed refunds ever are; every mint and airdrop took exactly
+    ///      its quote, the excess returned or held; and no claim of a held refund was refused.
     function invariant_balanceEqualsWhatIsOwed() public view {
         uint256 held = collection.pendingBalance(creator);
         for (uint256 i = 0; i < holders.length; i++) {
@@ -629,21 +649,24 @@ contract InvariantsTest is BaseTest {
         assertEq(collection.pendingBalance(address(rejecter)), handler.heldCredited() - handler.heldClaimed());
         assertEq(handler.heldReceived(), handler.heldClaimed());
         assertFalse(handler.chargedOtherThanQuote());
+        assertFalse(handler.heldClaimRefused());
     }
 
-    /// @dev Platform fees are owed or were withdrawn, and only the treasuries received them.
+    /// @dev Platform fees are owed or were withdrawn, only the treasuries received them, and no withdrawal of them was
+    ///      refused.
     function invariant_platformFeesReachOnlyTheTreasury() public view {
         assertEq(handler.platformCharged(), collection.platformBalance() + handler.feesWithdrawn());
         assertEq(handler.feesReceived(), handler.feesWithdrawn());
         assertEq(treasury.balance + treasury2.balance, handler.feesReceived() + factoryHandler.artReceived());
-        assertFalse(handler.withdrawalRefused());
+        assertFalse(handler.feesWithdrawalRefused());
     }
 
-    /// @dev Mint proceeds are owed or were withdrawn, and only the payout address received them, whoever asked.
+    /// @dev Mint proceeds are owed or were withdrawn, only the payout address received them, whoever asked, and no
+    ///      withdrawal of them was refused.
     function invariant_proceedsReachOnlyThePayout() public view {
         assertEq(handler.proceedsCharged(), collection.creatorBalance() + handler.proceedsWithdrawn());
         assertEq(handler.proceedsReceived(), handler.proceedsWithdrawn());
-        assertFalse(handler.withdrawalRefused());
+        assertFalse(handler.proceedsWithdrawalRefused());
     }
 
     /// @dev The fees are the admin's last setting, the factory's defaults at the deploy before any.
@@ -714,8 +737,8 @@ contract InvariantsTest is BaseTest {
         assertFalse(handler.mintedWhileNotLive());
     }
 
-    /// @dev No mint passed the public cap or a quota as they stood when it landed, and no claimed count went down,
-    ///      a chunk written again included.
+    /// @dev No mint passed the public cap or a quota as they stood when it landed, or spent one without the right to
+    ///      (the on-behalf switch off, no delegation), and no claimed count went down, a chunk written again included.
     function invariant_capsAndQuotasHeld() public view {
         assertFalse(handler.capOrQuotaPassed());
         assertFalse(handler.claimedWentDown());
