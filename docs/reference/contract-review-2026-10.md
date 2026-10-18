@@ -167,8 +167,8 @@ The thirteen invariants, in four groups:
 Results:
 
 - CI's default campaign, on every push to `main` and every pull request: 256 runs of depth 500, 128,000 calls per
-  invariant, every action between 3,948 and 4,313 of them, no call reverting; all thirteen pass in 61 s, beside the 87
-  unit tests (100 in all).
+  invariant, every action between 3,948 and 4,313 of them, no call reverting; all thirteen pass in 61 s on a 12-core
+  laptop, beside the 87 unit tests (100 in all).
 - The deep run, once, on `1011644` (`FOUNDRY_PROFILE=deep forge test`, by hand and never in CI): 1,000 runs of depth
   1,000, 1,000,000 calls per invariant, every action between 31,669 and 32,720 of them, no call reverting, and the one
   fuzz test (`testFuzz_quoteBatchMint`) at 10,000 runs; all 100 tests pass, in 661 s (about 11 minutes) on a 12-core
