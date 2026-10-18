@@ -59,6 +59,11 @@ once, survives a replay, a restart and a backfill, and reaches the Overview, Air
    plain `fetch` to PostgREST (a second client shape beside the worker's); a login role with execute on the four
    functions only (least privilege, but a direct Postgres connection, a driver and a password no migration can hold;
    listed for Phase 7).
+
+   > **18 October 2026:** The login role replaced the service role key
+   > ([2026-10-17-production-hardening.md](2026-10-17-production-hardening.md), decision 7): the indexer connects as
+   > `cobweb_indexer` over postgres.js from `INDEXER_DATABASE_URL`, with verified TLS to any database off the machine,
+   > and `@supabase/supabase-js` left `apps/freshness`.
 4. **What it indexes.** Decision: every collection whose row is `deployed` with a `deployments` row on a served chain,
    read through `indexer_targets` every 60 s; a new one starts at its deploy transaction's block, read once from its
    receipt. Considered: the factory's `CollectionDeployed` logs (a collection deployed outside Cobweb's flow has no row
@@ -828,6 +833,8 @@ carries `activity` for any collection the indexer reads, published or not, since
   receiver (a delegated mint's hot wallet, a mint on behalf's receiver), never the payer; an export of tens of thousands
   of recipients takes a few seconds; a collection the indexer meets long after its deploy is backfilled at about ten
   scans of 500 blocks a second, the provider allowing.
+
+> **18 October 2026:** Two Phase 7 items landed ([2026-10-17-production-hardening.md](2026-10-17-production-hardening.md)): the role, so the owner's Railway step is now `INDEXER_DATABASE_URL` (the session pooler string for `cobweb_indexer.<project ref>` and the password the owner sets) in place of `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, which the server names as no longer read; and the alerts, `/health`'s `status` and `problems` with the indexer's `failedPassesRecent`, `lastGoodPassAt` and `behindSince`.
 
 ## 13. Acceptance criteria
 

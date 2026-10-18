@@ -504,6 +504,8 @@ tick read, null before one; `lastGoodTickAt` is that tick's time (ISO); `lastErr
 (`HttpRequestError`, for example), never its message; `tier` is null while the chain has no hot entry. `/health`
 answers 200 with `Cache-Control: no-store` whatever it reports, and HEAD likewise.
 
+> **18 October 2026:** `/health` gains `status: 'ok' | 'degraded'` and `problems`, one sentence per threshold crossed ([2026-10-17-production-hardening.md](2026-10-17-production-hardening.md), section 8.2): for a chain with hot collections, no good read for 60 s or a head 120 s old; more than 10 failed reads in 5 minutes (`failedTicksRecent`); for its indexer, no good pass for 120 s, collections behind for 900 s or more than 5 failed passes in 5 minutes. It stays 200, so Railway's deploy check never refuses a deployment during an RPC outage; a monitor keys on the body.
+
 ### 6.10 What the mint page relies on
 
 The second sub-project builds on these answers:

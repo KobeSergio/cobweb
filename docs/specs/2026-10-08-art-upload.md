@@ -41,6 +41,12 @@ upload rows this one writes.
   every file and fails a job with a clear error if a file does not match its row.
 - CloudFront, lifecycle deletion after 90 days, and copying objects when a project is duplicated.
   The key shape leaves room for all three.
+
+  > **18 October 2026:** The lifecycle deletion landed as a daily cron in the app, not as R2's rules, which count from each
+  > object's upload ([2026-10-17-production-hardening.md](2026-10-17-production-hardening.md), decision 6): a
+  > collection's `layers`, `assets` and `placeholders` folders go 90 days after its deploy and its final render, and
+  > its thumbnails stay. `record_upload` now runs for the service role alone, so a row's size is the one the upload
+  > action read from storage.
 - Resumable multipart uploads (decided 8 October 2026: single PUT, retry restarts).
 
 ### Decisions carried in

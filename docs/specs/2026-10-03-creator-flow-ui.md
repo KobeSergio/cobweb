@@ -84,6 +84,8 @@ Rules:
 - New collection dialog: name, symbol, type (four choice cards), supply (limit depends on type;
   4,000 for single asset). The mint page address is not chosen here; it is reserved in Deploy.
 
+> **18 October 2026:** Sign-in runs Cloudflare Turnstile's browser check above "Sign in as ..." when a site key is set ([2026-10-17-production-hardening.md](2026-10-17-production-hardening.md), section 6.2): the button reads "Checking your browser…" until a token is held, a failed check says "The browser check could not run. Reload the page and try again.", and a refusal from Supabase reads "The browser check did not pass. Try again." The Create collection dialog refuses a wallet's collection past its cap of collections that are not deployed (20 unless support raised it) with "This wallet already has <cap> collections that are not deployed, the most it can hold. Delete a draft or deploy one, then create this one."
+
 ### 4.2 Details
 
 Name, symbol, description, supply, type (read-only), and a read-only line showing the mint page

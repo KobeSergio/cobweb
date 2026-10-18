@@ -228,6 +228,8 @@ role and the storage credentials, lists objects in the `art` bucket, and for eac
 only. Refuses to run against anything but localhost unless `--allow-remote` is passed, so it can be
 scheduled later with care. Documented in CLAUDE.md commands.
 
+> **18 October 2026:** Scheduled ([2026-10-17-production-hardening.md](2026-10-17-production-hardening.md), section 14, point 8): `/api/cron/upload-sweep` runs the same core every day at 07:00 UTC over the art bucket and over the mint-page bucket's files no page names, each over a day old, dry until `UPLOAD_SWEEP_DELETE=1`. `record_upload` runs for the service role alone, called by `confirmUpload` with the owner it checked and the size it read from storage.
+
 ## 10. Testing
 
 - Unit (vitest): `onchainJobId` round trip; quote arithmetic (`fee x count`, zero for single

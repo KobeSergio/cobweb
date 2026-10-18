@@ -50,6 +50,11 @@ the state after the mint: the browser half of Phase 6's exit criterion.
    minute whatever the number of viewers; the tab's actions expire the tag with `updateTag`. Considered: `anon` grants
    and policies on the tables (each column would need its own rule, and one missed leaks); the freshness server joining
    the database (rejected in its spec).
+
+   > **18 October 2026:** The page renders per request, so its scripts carry the response's nonce
+   > ([2026-10-17-production-hardening.md](2026-10-17-production-hardening.md), decision 9): `generateStaticParams` and
+   > `revalidate` are gone and the build lists `ƒ /[slug]`. The document is still read through `readMintPage`'s 60 s
+   > cache under `mint-page:<slug>`, so the database sees one read per link a minute.
 3. **Chain state only in the browser.** Decision: the HTML carries no chain state; the first answer comes from the
    browser's first poll at hydration, and until it lands the panel and the phase list show skeletons and the button
    reads "Reading the chain". Considered: the map's server-side fetch for the first paint (an ISR page caches its HTML,
@@ -876,6 +881,8 @@ shows where, by the state's `revealed`:
   completed", nothing sent); the check is retried once on `MintGroupInactive`; a hidden phase still mints for anyone who
   calls the contract; the first visit to a link after a revalidation costs one function and one database read; the
   verify's collection has three tokens, so its tiers cover three ranks.
+
+> **18 October 2026:** The full Content-Security-Policy landed ([2026-10-17-production-hardening.md](2026-10-17-production-hardening.md)): `connect-src` lists the Supabase, freshness, storage and gateway origins, each launch chain's public RPC and the WalletConnect and MetaMask hosts of the pinned versions (Coinbase's SDK is not among RainbowKit's default wallets); images come from any https host, and media from the storage, media and gateway origins. The page renders per request for its nonce. The sweep of mint page files no page names runs daily with the upload sweep, dry until `UPLOAD_SWEEP_DELETE=1`.
 
 > **17 October 2026:** The third sub-project's items landed ([2026-10-16-indexer-overview.md](2026-10-16-indexer-overview.md)): the state body carries `activity`, the holders and the 10 latest mints from the indexer's memory, so the page shows a Holders row in Details and Recent mints under the phases, and neither while `activity` is null; the Overview shows holders, recent mints and "Paid by minters" on real data.
 
