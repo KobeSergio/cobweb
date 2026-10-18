@@ -35,7 +35,10 @@ export const SUPPLY_SOURCE: Record<ProjectType, string> = {
 export const SINGLE_ASSET_MAX_SUPPLY = 4000
 export const MAX_SUPPLY = 100_000
 
-/** Routes the app owns. A collection's mint page lives at /<slug>, so these cannot be slugs. */
+/**
+ * Routes the app owns, and `demo`, the folder of the sample art (public/demo). A collection's mint page lives at
+ * /<slug>, so these cannot be slugs; the database's check and `reserve_slug` list the same.
+ */
 export const RESERVED_SLUGS = [
   'collections',
   'api',
@@ -47,6 +50,7 @@ export const RESERVED_SLUGS = [
   'docs',
   'terms',
   'privacy',
+  'demo',
 ]
 
 /** Turns a collection name into a slug suggestion. */

@@ -3,7 +3,7 @@
 -- cobweb_indexer, the login role the freshness server's indexer connects as, which executes its four functions and
 -- nothing else; and the layer sources' lifecycle: collections.art_sources_deleted_at, the two service-role functions
 -- the daily source sweep calls, and the triggers that refuse a new upload or render job once a collection's
--- original files are gone.
+-- original files are gone. Last, `demo` joins the reserved mint page links.
 
 -- ---------------------------------------------------------------------------------------------
 -- The draft cap (section 4.1)
@@ -56,6 +56,8 @@ begin
   end if;
 end;
 $$;
+-- Whether the role was made just now or outlived a reset, it gets these attributes.
+alter role cobweb_indexer with login noinherit nocreatedb nocreaterole nobypassrls connection limit 8;
 alter role cobweb_indexer set statement_timeout = '10s';
 alter role cobweb_indexer set idle_in_transaction_session_timeout = '30s';
 
@@ -180,18 +182,22 @@ grant execute on function public.collection_sources_deleted(uuid) to service_rol
 
 -- Once a collection is marked, a new uploads row or render job for it is refused: the app reaches neither path
 -- after a final render, since the art stays locked, and these stop a direct call from writing rows whose files are
--- gone.
+-- gone. The collection's row is locked for key share (as the foreign key's own check locks it) before the mark is
+-- read, so an insert racing a mark collection_sources_deleted has not committed waits for it, then reads it.
 create function public.refuse_after_sources_deleted()
 returns trigger
 language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  v_marked timestamptz;
 begin
-  if exists (
-    select 1 from public.collections c
-    where c.id = new.collection_id and c.art_sources_deleted_at is not null
-  ) then
+  select c.art_sources_deleted_at into v_marked
+  from public.collections c
+  where c.id = new.collection_id
+  for key share;
+  if v_marked is not null then
     raise exception 'This collection''s art files were deleted 90 days after its deploy, so its art cannot change.'
       using errcode = '23514';
   end if;
@@ -208,3 +214,61 @@ for each row execute function public.refuse_after_sources_deleted();
 create trigger render_jobs_refuse_after_sources_deleted
 before insert on public.render_jobs
 for each row execute function public.refuse_after_sources_deleted();
+
+-- ---------------------------------------------------------------------------------------------
+-- The demo link (section 5.3)
+-- ---------------------------------------------------------------------------------------------
+-- /demo/ serves the sample art as static files (apps/web/public/demo), which the proxy's matcher skips, so a
+-- collection may not take `demo` as its mint page link: the format check and reserve_slug list it beside the app's
+-- own routes, as RESERVED_SLUGS in apps/web/src/lib/collections.ts does. No collection holds it locally; the
+-- check is validated against every row, so a hosted one holding it would stop this migration.
+alter table public.collections drop constraint collections_slug_check;
+alter table public.collections add constraint collections_slug_check check (
+  slug ~ '^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$'
+  and slug not in ('collections', 'api', 'admin', 'create', 'assets', 'auth', 'help', 'docs', 'terms', 'privacy', 'demo')
+);
+
+-- As in 20261004064246_remove_metadata_type, with `demo` reserved.
+create or replace function private.reserve_slug(p_collection_id uuid, p_slug text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := (select auth.uid());
+  v_owner uuid;
+  v_status public.collection_status;
+begin
+  if v_uid is null or not exists (select 1 from public.profiles p where p.id = v_uid) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+
+  select c.owner_id, c.status into v_owner, v_status
+  from public.collections c
+  where c.id = p_collection_id
+  for update;
+  if not found or v_owner <> v_uid then
+    raise exception 'collection not found' using errcode = '42501';
+  end if;
+
+  if p_slug is null
+    or p_slug !~ '^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$'
+    or p_slug in ('collections', 'api', 'admin', 'create', 'assets', 'auth', 'help', 'docs', 'terms', 'privacy', 'demo')
+  then
+    raise exception 'invalid mint page link' using errcode = '23514';
+  end if;
+
+  update public.collections c
+  set slug = null, slug_reserved_at = null
+  where c.slug = p_slug
+    and c.id <> p_collection_id
+    and c.status <> 'deployed'
+    and c.slug_reserved_at < now() - interval '3 days';
+
+  update public.collections c
+  set slug = p_slug,
+      slug_reserved_at = case when v_status = 'deployed' then null else now() end
+  where c.id = p_collection_id;
+end;
+$$;

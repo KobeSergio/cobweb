@@ -623,6 +623,23 @@ async function main(): Promise<void> {
       return (await stored(target.row.id))?.slug === null ? null : 'a slug was stored'
     })
   }
+  await check(
+    'reserve_slug: the link "demo" (the folder of the sample art) is refused as a reserved link, and the check constraint refuses it from the service role too',
+    async () => {
+      const target = await insertCollection(A.client)
+      if (!target.row) return `setup: ${describe(target.error)}`
+      const problem = expectSentence(
+        await reserve(A.client, target.row.id, 'demo'),
+        CHECK,
+        'invalid mint page link',
+      )
+      if (problem) return problem
+      const direct = await admin.from('collections').update({ slug: 'demo' }).eq('id', target.row.id).select()
+      const constraint = expectError(direct.error as DbError, CHECK, direct.data)
+      if (constraint) return `the service role: ${constraint}`
+      return (await stored(target.row.id))?.slug === null ? null : 'a slug was stored'
+    },
+  )
   await check('constraints: lowercase symbol rejected', () =>
     expectRejectedInsert(A.client, { symbol: 'vfy' }, CHECK),
   )
@@ -8121,8 +8138,11 @@ const SOURCES_GONE_SENTENCE =
   "This collection's art files were deleted 90 days after its deploy, so its art cannot change."
 const INDEXER_FUNCTIONS = ['indexer_record', 'indexer_start', 'indexer_summaries', 'indexer_targets']
 
-/** The local database as its superuser, from `supabase status`'s DB_URL, for the catalog reads and the race. */
-function superuser(max = 1): postgres.Sql {
+/**
+ * The local database as `postgres`, from `supabase status`'s DB_URL, for the catalog reads and the races. Locally
+ * `postgres` owns the tables but is not a superuser.
+ */
+function localDb(max = 1): postgres.Sql {
   const dbUrl = config('SUPABASE_DB_URL', ['DB_URL'])
   if (!['localhost', '127.0.0.1'].includes(new URL(dbUrl).hostname)) throw new Error('DB_URL is not local.')
   return postgres(dbUrl, { max, onnotice: () => {} })
@@ -8133,7 +8153,7 @@ function superuser(max = 1): postgres.Sql {
  * when the second waited on the first's lock and was then refused with the cap's message (Review Focus 5).
  */
 async function raceForLastPlace(ownerId: string): Promise<string | null> {
-  const sql = superuser(2)
+  const sql = localDb(2)
   const first = await sql.reserve()
   const second = await sql.reserve()
   const row = () => ({ owner_id: ownerId, name: uniqueName(), symbol: 'RACE', project_type: 'generative' })
@@ -8162,6 +8182,46 @@ async function raceForLastPlace(ownerId: string): Promise<string | null> {
   } finally {
     first.release()
     second.release()
+    await sql.end()
+  }
+}
+
+/**
+ * An upload row inserted straight into `uploads` while a mark of its collection is open, locked as
+ * collection_sources_deleted locks it (the row for update, then the mark): null when the insert waited for the
+ * mark and, once it committed, was refused with the guard's sentence.
+ */
+async function raceTheMark(collectionId: string): Promise<string | null> {
+  const sql = localDb(2)
+  const marking = await sql.reserve()
+  const inserting = await sql.reserve()
+  try {
+    await marking`begin`
+    await marking`select 1 from public.collections where id = ${collectionId} for update`
+    await marking`update public.collections set art_sources_deleted_at = now() where id = ${collectionId}`
+    let settled = false
+    const racing = inserting`insert into public.uploads ${inserting(uploadInput(collectionId))}`
+      .then(
+        () => null,
+        (error: { code?: string; message?: string }) => error,
+      )
+      .finally(() => {
+        settled = true
+      })
+    await pause(300)
+    if (settled) {
+      await marking`rollback`
+      const early = await racing
+      return `the insert did not wait for the mark: ${early ? `${early.code} ${early.message}` : 'landed'}`
+    }
+    await marking`commit`
+    const refused = await racing
+    return refused?.code === '23514' && refused.message === SOURCES_GONE_SENTENCE
+      ? null
+      : `the insert: ${refused ? `${refused.code} ${refused.message}` : 'landed'}`
+  } finally {
+    marking.release()
+    inserting.release()
     await sql.end()
   }
 }
@@ -8277,7 +8337,7 @@ async function artHardening(): Promise<void> {
   )
 
   await check(
-    'sessions: getClaims verifies that token five times with at most one key-set read and no call to /auth/v1/user, and refuses it with its signature altered',
+    'sessions: getClaims verifies that token on five fresh clients with at most one key-set read among them and no call to /auth/v1/user, and refuses it with its signature altered',
     async () => {
       const token = await accessToken(C)
       const paths: string[] = []
@@ -8285,9 +8345,11 @@ async function artHardening(): Promise<void> {
         paths.push(new URL(input instanceof Request ? input.url : String(input)).pathname)
         return fetch(input, init)
       }) as typeof fetch
-      const client = createClient(url, publishableKey, { ...clientOptions, global: { fetch: counting } })
+      // A fresh client for each read, as each request on the server builds its own: auth-js keeps the key set it
+      // read for every client of the same project, which this pins against an upgrade.
+      const fresh = () => createClient(url, publishableKey, { ...clientOptions, global: { fetch: counting } })
       for (let n = 1; n <= 5; n++) {
-        const { data, error } = await client.auth.getClaims(token)
+        const { data, error } = await fresh().auth.getClaims(token)
         if (error || data?.claims.sub !== C.userId) return `read ${n}: ${error?.message ?? 'another subject'}`
       }
       const keyReads = paths.filter((path) => path === '/auth/v1/.well-known/jwks.json').length
@@ -8295,24 +8357,42 @@ async function artHardening(): Promise<void> {
       if (keyReads > 1 || userCalls > 0) return `${keyReads} key-set reads and ${userCalls} user calls`
       const [head, body, signature = ''] = token.split('.')
       const altered = `${head}.${body}.${signature.slice(0, 10)}${signature[10] === 'A' ? 'B' : 'A'}${signature.slice(11)}`
-      const refused = await client.auth.getClaims(altered)
+      const refused = await fresh().auth.getClaims(altered)
       if (!refused.error) return 'an altered signature was accepted'
       return paths.includes('/auth/v1/user') ? 'the altered token was sent to /auth/v1/user' : null
     },
   )
 
   await check(
-    'indexer role: cobweb_indexer can log in, neither inherits nor bypasses row-level security, and executes the four indexer functions',
+    'indexer role: cobweb_indexer can log in at most 8 times at once, neither inherits nor bypasses row-level security, is a member of no role, and executes the four indexer functions',
     async () => {
-      const sql = superuser()
+      const sql = localDb()
       try {
         const [role] = await sql<
-          { rolcanlogin: boolean; rolinherit: boolean; rolbypassrls: boolean; rolsuper: boolean }[]
+          {
+            rolcanlogin: boolean
+            rolinherit: boolean
+            rolbypassrls: boolean
+            rolsuper: boolean
+            rolconnlimit: number
+          }[]
         >`
-          select rolcanlogin, rolinherit, rolbypassrls, rolsuper from pg_catalog.pg_roles where rolname = 'cobweb_indexer'`
+          select rolcanlogin, rolinherit, rolbypassrls, rolsuper, rolconnlimit from pg_catalog.pg_roles
+          where rolname = 'cobweb_indexer'`
         if (!role) return 'the role does not exist'
-        if (!role.rolcanlogin || role.rolinherit || role.rolbypassrls || role.rolsuper)
+        if (
+          !role.rolcanlogin ||
+          role.rolinherit ||
+          role.rolbypassrls ||
+          role.rolsuper ||
+          role.rolconnlimit !== 8
+        )
           return `attributes ${JSON.stringify(role)}`
+        const memberships = await sql<{ name: string }[]>`
+          select r.rolname as name from pg_catalog.pg_auth_members m
+          join pg_catalog.pg_roles r on r.oid = m.roleid
+          join pg_catalog.pg_roles me on me.oid = m.member where me.rolname = 'cobweb_indexer'`
+        if (memberships.length) return `a member of ${memberships.map((row) => row.name).join(', ')}`
         const [settings] = await sql<{ setconfig: string[] }[]>`
           select s.setconfig from pg_catalog.pg_db_role_setting s
           join pg_catalog.pg_roles r on r.oid = s.setrole where r.rolname = 'cobweb_indexer' and s.setdatabase = 0`
@@ -8342,9 +8422,9 @@ async function artHardening(): Promise<void> {
   )
 
   await check(
-    'indexer role: it reads no table or view in public, private, auth or storage, and executes no other function anon cannot',
+    'indexer role: it reads no table or view in public, private, auth or storage, by a grant on the table or on any of its columns, and executes no other function anon cannot',
     async () => {
-      const sql = superuser()
+      const sql = localDb()
       try {
         const readable = await sql<{ name: string }[]>`
           select n.nspname || '.' || c.relname as name from pg_catalog.pg_class c
@@ -8352,6 +8432,13 @@ async function artHardening(): Promise<void> {
           where n.nspname in ('public', 'private', 'auth', 'storage') and c.relkind in ('r', 'v', 'm', 'p', 'f')
             and has_table_privilege('cobweb_indexer', c.oid, 'select')`
         if (readable.length) return `reads ${readable.map((row) => row.name).join(', ')}`
+        // A column grant is not a table grant: any column it may read, write or reference counts.
+        const byColumn = await sql<{ name: string }[]>`
+          select n.nspname || '.' || c.relname as name from pg_catalog.pg_class c
+          join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+          where n.nspname in ('public', 'private', 'auth', 'storage') and c.relkind in ('r', 'v', 'm', 'p', 'f')
+            and has_any_column_privilege('cobweb_indexer', c.oid, 'select, insert, update, references')`
+        if (byColumn.length) return `holds a column grant on ${byColumn.map((row) => row.name).join(', ')}`
         const extra = await sql<{ name: string }[]>`
           select n.nspname || '.' || p.proname as name from pg_catalog.pg_proc p
           join pg_catalog.pg_namespace n on n.oid = p.pronamespace
@@ -8474,6 +8561,18 @@ async function artHardening(): Promise<void> {
       const rows =
         (await countRows('uploads', 'collection_id', cid)) +
         (await countRows('render_jobs', 'collection_id', cid))
+      return rows === 0 ? null : `${rows} row(s) written`
+    },
+  )
+
+  await check(
+    "sources: an uploads row inserted while a mark of its collection is open waits for the mark, then is refused with the guard's sentence",
+    async () => {
+      const racing = await insertCollection(C.client)
+      if (!racing.row) return `setup: ${describe(racing.error)}`
+      const problem = await raceTheMark(racing.row.id)
+      if (problem) return problem
+      const rows = await countRows('uploads', 'collection_id', racing.row.id)
       return rows === 0 ? null : `${rows} row(s) written`
     },
   )

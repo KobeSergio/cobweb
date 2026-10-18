@@ -188,8 +188,9 @@ jwt_expiry = 600
 # Path to JWT signing key. DO NOT commit your signing keys file to git.
 # The local ES256 session key (docs/specs/2026-10-17-production-hardening.md, section 4.5), so local sessions are
 # verified against the key set as production's are after the owner's rotation. Written once, before the first
-# `supabase start`, by `echo '[]' > supabase/signing_keys.json && supabase gen signing-key --algorithm ES256 --yes`
-# (the CLI reads the file before it writes); .gitignore keeps it out.
+# `supabase start`, by the command below (the CLI reads the file before it writes; the umask leaves the private key
+# readable by its owner alone); .gitignore keeps it out.
+#   (umask 077 && echo '[]' > supabase/signing_keys.json) && supabase gen signing-key --algorithm ES256 --yes
 signing_keys_path = "./signing_keys.json"
 # If disabled, the refresh token will never expire.
 enable_refresh_token_rotation = true

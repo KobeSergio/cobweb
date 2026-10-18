@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import { DRAFT_CAP_DEFAULT, DRAFT_CAP_REFUSAL, draftCapOf, draftCapSentence } from './collections'
+import {
+  DRAFT_CAP_DEFAULT,
+  DRAFT_CAP_REFUSAL,
+  draftCapOf,
+  draftCapSentence,
+  RESERVED_SLUGS,
+  slugSchema,
+} from './collections'
+
+describe('the mint page link', () => {
+  it('refuses the reserved links, demo among them, as the database does', () => {
+    expect(RESERVED_SLUGS).toContain('demo')
+    for (const slug of ['demo', 'api', 'privacy'])
+      expect(slugSchema.safeParse(slug).error?.issues[0]?.message).toBe(
+        'That link is reserved. Choose another.',
+      )
+    expect(slugSchema.safeParse('demo-drop').success).toBe(true)
+  })
+})
 
 describe('the draft cap (docs/specs/2026-10-17-production-hardening.md, section 6.4)', () => {
   it("words the dialog's refusal with the wallet's cap", () => {
