@@ -1,3 +1,4 @@
+import { rootCertificates } from 'node:tls'
 import type { Address, Hex } from 'viem'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { errorLine, failureLine, failureName } from './health.ts'
@@ -169,7 +170,8 @@ describe("indexerConnectionOf: the connection's TLS", () => {
   const LOCAL = 'postgresql://cobweb_indexer:pw@127.0.0.1:55322/postgres'
   const HOSTED =
     'postgres://cobweb_indexer.abcdefghijklmnopqrst:pw@aws-0-us-east-1.pooler.supabase.com:5432/postgres'
-  const PEM = '-----BEGIN CERTIFICATE-----\nMIIBkTCB+wIJAN\n-----END CERTIFICATE-----'
+  /** A certificate in PEM: one of Node's own root certificates, so no certificate is kept in the repository. */
+  const PEM: string = rootCertificates[0]!
   /** A file reader that records each path and answers the PEM. */
   const reader = (read: string[]) => (path: string) => {
     read.push(path)
@@ -205,11 +207,14 @@ describe("indexerConnectionOf: the connection's TLS", () => {
     await sql.end()
   })
 
-  it('trusts the CA the file INDEXER_DATABASE_SSL_CA names, or else the one sslrootcert names, dropping that parameter', () => {
+  it('trusts the CA INDEXER_DATABASE_SSL_CA gives, as PEM text or as the path of its file, or else the one sslrootcert names, dropping that parameter', () => {
     const read: string[] = []
-    expect(
-      indexerConnectionOf({ databaseUrl: HOSTED, sslCaFile: '/app/certs/ca.crt' }, reader(read)),
-    ).toEqual({
+    expect(indexerConnectionOf({ databaseUrl: HOSTED, sslCa: PEM }, reader(read))).toEqual({
+      databaseUrl: HOSTED,
+      ssl: { rejectUnauthorized: true, ca: PEM },
+    })
+    expect(read).toEqual([])
+    expect(indexerConnectionOf({ databaseUrl: HOSTED, sslCa: '/app/certs/ca.crt' }, reader(read))).toEqual({
       databaseUrl: HOSTED,
       ssl: { rejectUnauthorized: true, ca: PEM },
     })
@@ -230,7 +235,7 @@ describe("indexerConnectionOf: the connection's TLS", () => {
     }
     const refusals: unknown[] = []
     for (const options of [
-      { databaseUrl: HOSTED, sslCaFile: '/secret/ca.crt' },
+      { databaseUrl: HOSTED, sslCa: '/secret/ca.crt' },
       { databaseUrl: `${HOSTED}?sslrootcert=/secret/ca.crt` },
     ])
       try {
@@ -350,6 +355,36 @@ describe('postgresIndexerDb', () => {
       'IndexerWriteError (TLS)',
     ])
     expect(errors.map((error) => failureLine(error)).join(' ')).not.toContain('db.example')
+  })
+
+  it("names TLS each certificate check Node can fail and each of OpenSSL's own errors, and NETWORK a code it does not know", async () => {
+    const codes: string[] = [
+      'ERR_TLS_CERT_ALTNAME_INVALID',
+      'DEPTH_ZERO_SELF_SIGNED_CERT',
+      'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+      'SELF_SIGNED_CERT_IN_CHAIN',
+      'CERT_HAS_EXPIRED',
+      'CERT_NOT_YET_VALID',
+      'UNABLE_TO_GET_ISSUER_CERT',
+      'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+      'CERT_REVOKED',
+      'CERT_UNTRUSTED',
+      'HOSTNAME_MISMATCH',
+      'INVALID_CA',
+      'ERR_OSSL_PEM_NO_START_LINE',
+      'ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE',
+      'ECONNRESET',
+    ]
+    const { db } = fakeSql(
+      ...codes.map((code) => Object.assign(new Error(`${code} at db.example:5432`), { code })),
+    )
+    const named: string[] = []
+    for (const code of codes) {
+      void code
+      const error = await settled(db.summaries(31337))
+      named.push(error instanceof IndexerWriteError ? error.code : String(error))
+    }
+    expect(named).toEqual([...Array<string>(codes.length - 1).fill('TLS'), 'NETWORK'])
   })
 
   it('abandons and cancels a call that has not answered after 10 s, so it cannot hold a pass', async () => {

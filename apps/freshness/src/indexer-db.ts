@@ -3,7 +3,7 @@ import type { MintBody } from '@cobweb/shared'
 import postgres from 'postgres'
 import { BaseError, type Address, type Hex } from 'viem'
 import type { Summary } from './activity.ts'
-import { isLoopbackHost, type IndexerOptions } from './config.ts'
+import { caCertificateOf, isLoopbackHost, type IndexerOptions } from './config.ts'
 import type { Records } from './indexer-records.ts'
 
 /**
@@ -180,19 +180,13 @@ export type IndexerSql = {
  */
 export type IndexerTls = { rejectUnauthorized: true; ca?: string } | undefined
 
-/** A CA certificate that cannot be read refuses the start, naming the variable that named it, never the path. */
-const unreadableCa = (variable: string, error: unknown) =>
-  new BaseError(`${variable} names a CA certificate file that cannot be read.`, {
-    name: 'ConfigurationError',
-    cause: error as Error,
-  })
-
 /**
  * The connection string postgres.js gets and its TLS (docs/specs/2026-10-17-production-hardening.md, section 8.1):
  * for a database on another machine, always verified (`rejectUnauthorized: true` with Node's host check), trusting
- * the CA certificate `INDEXER_DATABASE_SSL_CA` names, or else the file the string's `sslrootcert` names, when one
- * is given; for this machine, whatever the string says unless a CA is given. The string loses `sslrootcert`, which
- * postgres.js would send the server as a setting; `sslrootcert=system` means the system's CAs, the default.
+ * the CA certificate `INDEXER_DATABASE_SSL_CA` gives (PEM text, or the path of its file, as `caCertificateOf`
+ * reads it), or else the file the string's `sslrootcert` names, when one is given; for this machine, whatever the
+ * string says unless a CA is given. The string loses `sslrootcert`, which postgres.js would send the server as a
+ * setting; `sslrootcert=system` means the system's CAs, the default.
  */
 export function indexerConnectionOf(
   options: IndexerOptions,
@@ -203,17 +197,16 @@ export function indexerConnectionOf(
   url.searchParams.delete('sslrootcert')
   const databaseUrl = url.toString()
   let ca: string | undefined
-  if (options.sslCaFile)
-    try {
-      ca = readCa(options.sslCaFile)
-    } catch (error) {
-      throw unreadableCa('INDEXER_DATABASE_SSL_CA', error)
-    }
+  if (options.sslCa) ca = caCertificateOf(options.sslCa, readCa)
   else if (rootCert && rootCert !== 'system')
     try {
       ca = readCa(rootCert)
     } catch (error) {
-      throw unreadableCa('INDEXER_DATABASE_URL', error)
+      // A CA certificate that cannot be read refuses the start, naming the variable that named it, never the path.
+      throw new BaseError('INDEXER_DATABASE_URL names a CA certificate file that cannot be read.', {
+        name: 'ConfigurationError',
+        cause: error as Error,
+      })
     }
   if (ca) return { databaseUrl, ssl: { rejectUnauthorized: true, ca } }
   if (isLoopbackHost(url.hostname)) return { databaseUrl, ssl: undefined }
@@ -237,26 +230,53 @@ export function connect(databaseUrl: string, ssl: IndexerTls): postgres.Sql {
 }
 
 /**
- * The certificate checks a database's certificate can fail, as OpenSSL names them; Node's own TLS codes start
- * with ERR_TLS_ or ERR_SSL_.
+ * The checks a database's certificate can fail, as Node names OpenSSL's certificate verification errors (every
+ * one Node 26 names but OUT_OF_MEM). Node's own TLS codes start with ERR_TLS_ or ERR_SSL_, and OpenSSL's other
+ * errors, such as a CA in PEM it cannot read, with ERR_OSSL_.
  */
 const CERTIFICATE_CODES: readonly string[] = [
-  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
-  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
-  'SELF_SIGNED_CERT_IN_CHAIN',
-  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'UNABLE_TO_GET_CRL',
+  'UNABLE_TO_DECRYPT_CERT_SIGNATURE',
+  'UNABLE_TO_DECRYPT_CRL_SIGNATURE',
+  'UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY',
+  'CERT_SIGNATURE_FAILURE',
+  'CRL_SIGNATURE_FAILURE',
+  'CERT_NOT_YET_VALID',
   'CERT_HAS_EXPIRED',
+  'CRL_NOT_YET_VALID',
+  'CRL_HAS_EXPIRED',
+  'ERROR_IN_CERT_NOT_BEFORE_FIELD',
+  'ERROR_IN_CERT_NOT_AFTER_FIELD',
+  'ERROR_IN_CRL_LAST_UPDATE_FIELD',
+  'ERROR_IN_CRL_NEXT_UPDATE_FIELD',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'CERT_CHAIN_TOO_LONG',
+  'CERT_REVOKED',
+  'INVALID_CA',
+  'PATH_LENGTH_EXCEEDED',
+  'INVALID_PURPOSE',
+  'CERT_UNTRUSTED',
+  'CERT_REJECTED',
+  'HOSTNAME_MISMATCH',
 ]
+
+/** The code prefixes of Node's TLS errors and OpenSSL's own. */
+const TLS_PREFIXES: readonly string[] = ['ERR_TLS_', 'ERR_SSL_', 'ERR_OSSL_']
 
 /**
  * A Postgres refusal's code; TLS for a certificate or a handshake Node refused, whose error postgres.js passes
- * through unchanged; anything else (a refused connection, a reset, a closed socket) is NETWORK.
+ * through unchanged, so a missing CA or a host the certificate does not name is told from an unreachable database;
+ * anything else (a refused connection, a reset, a closed socket) is NETWORK.
  */
 const codeOf = (error: unknown) => {
   const failure = error as { name?: unknown; code?: unknown }
   if (failure?.name === 'PostgresError' && typeof failure.code === 'string') return failure.code
   const code = typeof failure?.code === 'string' ? failure.code : ''
-  return code.startsWith('ERR_TLS_') || code.startsWith('ERR_SSL_') || CERTIFICATE_CODES.includes(code)
+  return TLS_PREFIXES.some((prefix) => code.startsWith(prefix)) || CERTIFICATE_CODES.includes(code)
     ? 'TLS'
     : 'NETWORK'
 }
@@ -265,7 +285,7 @@ const codeOf = (error: unknown) => {
  * The port as the cobweb_indexer role, over verified TLS to any database not on this machine: each call is
  * `select public.<fn>(<parameters with casts>) as answer`, abandoned and cancelled after `DB_TIMEOUT_MS`, so a
  * connection that never answers cannot hold a chain's passes, which never overlap, or the server's close. `end`
- * closes the connections. A CA certificate file that cannot be read refuses the start.
+ * closes the connections. A CA certificate that cannot be read refuses the start.
  */
 export function postgresIndexerDb(
   options: IndexerOptions,

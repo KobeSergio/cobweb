@@ -1,9 +1,15 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { rootCertificates } from 'node:tls'
 import { availableChains } from '@cobweb/shared'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  caCertificateOf,
   checkIndexerOptions,
   DEFAULT_PORT,
   indexerOptionsOf,
+  isLoopbackHost,
   portOf,
   servedChains,
   unreadIndexerVariables,
@@ -139,8 +145,9 @@ describe('indexerOptionsOf (docs/specs/2026-10-17-production-hardening.md, secti
         `postgresql://%E0%A4%A:${PASSWORD}@db.example:5432/postgres`,
         'must connect as the cobweb_indexer role',
       ],
-      // postgres.js would throw a bare URIError on it as it builds its client.
+      // postgres.js would throw a bare URIError on either as it builds its client.
       [`postgresql://cobweb_indexer:%zz${PASSWORD}@db.example:5432/postgres`, 'has a malformed password'],
+      [`postgresql://cobweb_indexer:${PASSWORD}@db%zz.example:5432/postgres`, 'has a malformed host'],
     ]
     for (const [value, sentence] of cases) {
       const line = errorLine(thrownBy(() => indexerOptionsOf({ INDEXER_DATABASE_URL: value })))
@@ -154,6 +161,7 @@ describe('indexerOptionsOf (docs/specs/2026-10-17-production-hardening.md, secti
         'mysql',
         '%E0',
         '%zz',
+        'db%',
       ])
         expect(line).not.toContain(part)
     }
@@ -185,6 +193,23 @@ describe('indexerOptionsOf (docs/specs/2026-10-17-production-hardening.md, secti
     })
   })
 
+  it('reads a host on this machine whatever its case, as a postgres:// string keeps the case it is given', () => {
+    expect(['localhost', 'LOCALHOST', 'LocalHost', '127.0.0.1', '[::1]'].map(isLoopbackHost)).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+    ])
+    expect(['db.example', 'localhost.example', '127.0.0.2'].map(isLoopbackHost)).toEqual([
+      false,
+      false,
+      false,
+    ])
+    const named = `postgresql://cobweb_indexer:${PASSWORD}@LocalHost:55322/postgres?sslmode=disable`
+    expect(indexerOptionsOf({ INDEXER_DATABASE_URL: named })).toEqual({ databaseUrl: named })
+  })
+
   it('reads every sslmode and ssl a string names, since postgres.js takes the last of each', () => {
     for (const weak of ['sslmode=verify-full&sslmode=disable', 'ssl=verify-ca&ssl=false'])
       expect(errorLine(thrownBy(() => indexerOptionsOf({ INDEXER_DATABASE_URL: `${POOLER}?${weak}` })))).toBe(
@@ -194,14 +219,66 @@ describe('indexerOptionsOf (docs/specs/2026-10-17-production-hardening.md, secti
     expect(indexerOptionsOf({ INDEXER_DATABASE_URL: verified })).toEqual({ databaseUrl: verified })
   })
 
-  it("takes the path of the database's CA certificate from INDEXER_DATABASE_SSL_CA when it is set", () => {
-    const path = '/app/certs/supabase-ca.crt'
-    expect(indexerOptionsOf({ INDEXER_DATABASE_URL: POOLER, INDEXER_DATABASE_SSL_CA: ` ${path} ` })).toEqual({
-      databaseUrl: POOLER,
-      sslCaFile: path,
+  describe("the database's CA certificate (INDEXER_DATABASE_SSL_CA)", () => {
+    /** A certificate in PEM: one of Node's own root certificates, so no certificate is kept in the repository. */
+    const PEM: string = rootCertificates[0]!
+    let folder = ''
+    let file = ''
+    let notCertificate = ''
+    beforeAll(() => {
+      folder = mkdtempSync(join(tmpdir(), 'cobweb-ca-'))
+      file = join(folder, 'prod-ca-2021.crt')
+      writeFileSync(file, `${PEM}\n`)
+      notCertificate = join(folder, 'notes.txt')
+      writeFileSync(notCertificate, 'not a certificate\n')
     })
-    expect(indexerOptionsOf({ INDEXER_DATABASE_URL: POOLER, INDEXER_DATABASE_SSL_CA: ' ' })).toEqual({
-      databaseUrl: POOLER,
+    afterAll(() => rmSync(folder, { recursive: true, force: true }))
+
+    const optionsWith = (value: string) =>
+      indexerOptionsOf({ INDEXER_DATABASE_URL: POOLER, INDEXER_DATABASE_SSL_CA: value })
+
+    it('takes the certificate itself, as PEM text a Railway variable carries', () => {
+      expect(optionsWith(`${PEM}\n`)).toEqual({ databaseUrl: POOLER, sslCa: PEM })
+      expect(caCertificateOf(PEM)).toBe(PEM)
+    })
+
+    it('takes the path of a file that holds it, and reads the file', () => {
+      expect(optionsWith(` ${file} `)).toEqual({ databaseUrl: POOLER, sslCa: file })
+      expect(caCertificateOf(file)).toBe(`${PEM}\n`)
+    })
+
+    it('reads a blank value as unset', () => {
+      expect(optionsWith(' ')).toEqual({ databaseUrl: POOLER })
+    })
+
+    it('refuses a path that cannot be read, naming the variable, never the path', () => {
+      const missing = join(folder, 'missing.crt')
+      const line = errorLine(thrownBy(() => optionsWith(missing)))
+      expect(line).toBe(
+        'ConfigurationError: INDEXER_DATABASE_SSL_CA names a CA certificate file that cannot be read.',
+      )
+      expect(line).not.toContain(folder)
+    })
+
+    it('refuses a value that is neither a certificate nor the path of a file holding one, never quoting it', () => {
+      for (const value of [
+        '-----BEGIN CERTIFICATE-----\nMIIBkTCB+wIJAN\n-----END CERTIFICATE-----',
+        PEM.replaceAll('\n', '\\n'),
+        '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBg\n-----END PRIVATE KEY-----',
+        notCertificate,
+      ]) {
+        const line = errorLine(thrownBy(() => optionsWith(value)))
+        expect(line).toBe(
+          'ConfigurationError: INDEXER_DATABASE_SSL_CA must be a CA certificate in PEM or the path of a file that holds one.',
+        )
+        expect(line).not.toMatch(/MII|notes/)
+      }
+    })
+
+    it("checks a caller's options the same way", () => {
+      expect(
+        errorLine(thrownBy(() => checkIndexerOptions({ databaseUrl: POOLER, sslCa: notCertificate }))),
+      ).toContain('INDEXER_DATABASE_SSL_CA must be a CA certificate')
     })
   })
 

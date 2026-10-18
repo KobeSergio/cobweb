@@ -13,16 +13,17 @@
 // The fixture (scripts/deploy-fixture.ts) reads the settings from the environment, `supabase status -o env` and
 // apps/web/.env.local, and refuses non-local endpoints. The server's indexer connects to the local database as the
 // cobweb_indexer role (docs/specs/2026-10-17-production-hardening.md, section 8.1): through INDEXER_DATABASE_URL
-// when the environment sets a local one, else at a random password this run sets through `supabase status`'s
-// DB_URL as a SCRAM-SHA-256 verifier, so the clear password never leaves this process (the database's log and
-// pg_stat_statements keep the statement as sent), and clears in its cleanup. The script prints no key, password,
-// verifier or URL, and a thrown error prints viem's short message or its first line (chain-fixture.ts). Stop any
-// other indexer on the same database first (a running `pnpm --filter @cobweb/freshness dev` with
+// when the environment sets a local one, else at a random password this run sets through `supabase status`'s DB_URL
+// as a SCRAM-SHA-256 verifier, so the clear password never leaves this process, and clears in its cleanup; both
+// statements run with statement logging off for their transaction, so neither reaches the database's log or
+// pg_stat_statements. Check 1 logs in at that password and is refused at a wrong one. The script prints no key,
+// password, verifier or URL, and a thrown error prints viem's short message or its first line (chain-fixture.ts).
+// Stop any other indexer on the same database first (a running `pnpm --filter @cobweb/freshness dev` with
 // INDEXER_DATABASE_URL set): it would race checks 11, 13 and 15, and its sessions would fail check 15's count. The
 // indexer reads every collection deployed on Anvil the database lists, the earlier walks' among them, so each
 // server start logs once each one whose deploy is not on this chain, and the cursors it starts or moves for them
-// stay. The cleanup closes the server and deletes the run's own rows: its collection's, with the indexer's for
-// it. What stays is on Anvil: the collection with its mint, airdrop, burn, withdrawal and two transfers, the three
+// stay. The cleanup closes the server and deletes the run's own rows: its collection's, with the indexer's for it.
+// What stays is on Anvil: the collection with its mint, airdrop, burn, withdrawal and two transfers, the three
 // fresh accounts, 1,200 more blocks and the chain's clock about 1,200 s ahead. Runs under
 // `node --conditions=react-server --import ./scripts/resolve-ts.mjs`.
 
@@ -117,9 +118,22 @@ function scramVerifier(password: string): string {
 }
 
 /**
+ * Runs a statement that sets or clears the role's password in a transaction whose statements reach neither the
+ * database's log (no statement logged, nor one that fails) nor pg_stat_statements.
+ */
+async function unlogged(statement: string): Promise<void> {
+  await owner().begin(async (tx) => {
+    await tx.unsafe("set local log_statement = 'none'")
+    await tx.unsafe("set local log_min_error_statement = 'panic'")
+    await tx.unsafe('set local pg_stat_statements.track_utility = off')
+    await tx.unsafe(statement)
+  })
+}
+
+/**
  * The role's connection string: a local INDEXER_DATABASE_URL already set, else the local database as
- * cobweb_indexer at a random password, sent to the database as its verifier through DB_URL and cleared in the
- * cleanup. The clear password lives only in this process, in the string the server gets.
+ * cobweb_indexer at a random password, sent to the database as its verifier through DB_URL, unlogged, and cleared
+ * in the cleanup. The clear password lives only in this process, in the string the server gets.
  */
 async function indexerDatabaseUrl(): Promise<string> {
   const given = process.env.INDEXER_DATABASE_URL?.trim()
@@ -129,7 +143,7 @@ async function indexerDatabaseUrl(): Promise<string> {
   }
   const password = randomBytes(24).toString('hex')
   passwordSet = true
-  await owner().unsafe(`alter role cobweb_indexer with password '${scramVerifier(password)}'`)
+  await unlogged(`alter role cobweb_indexer with password '${scramVerifier(password)}'`)
   const url = new URL(ownerUrl())
   url.username = 'cobweb_indexer'
   url.password = password
@@ -307,7 +321,7 @@ async function main(): Promise<void> {
   let before: { counted: boolean } | null = null
 
   await check(
-    "1. setup: Anvil answers as 31337 with the factory approving the shipped code hash, Supabase answers, cobweb_indexer logs in through the run's connection string, and the freshness server serves 31337 with its indexer on as cobweb_indexer",
+    "1. setup: Anvil answers as 31337 with the factory approving the shipped code hash, Supabase answers, cobweb_indexer logs in through the run's connection string and is refused (28P01) at a wrong password, and the freshness server serves 31337 with its indexer on as cobweb_indexer",
     async () => {
       const unready = await chainReady()
       if (unready) return unready
@@ -324,6 +338,15 @@ async function main(): Promise<void> {
       indexer ??= { databaseUrl: await indexerDatabaseUrl(), ...PACE }
       const role = await loginRole(indexer.databaseUrl)
       if (role !== 'cobweb_indexer') return `the run's connection string logs in as ${role}`
+      // A password the role was not given is refused, so the login above proves the verifier.
+      const wrong = new URL(indexer.databaseUrl)
+      wrong.password = randomBytes(24).toString('hex')
+      const refused = await loginRole(wrong.toString()).then(
+        (as) => `a wrong password logged in as ${as}`,
+        (error: { code?: unknown }) =>
+          error.code === '28P01' ? null : `a wrong password: ${String(error.code)}`,
+      )
+      if (refused) return refused
       await startServer()
       const { body } = await healthOf()
       const entry = body.chains.find((chainHealth) => chainHealth.chainId === 31337)
@@ -875,7 +898,7 @@ async function cleanup(): Promise<void> {
         }),
         await attempt('removing the fixtures', removeFixtures),
         await attempt('clearing the role password', async () => {
-          if (passwordSet) await owner().unsafe('alter role cobweb_indexer with password null')
+          if (passwordSet) await unlogged('alter role cobweb_indexer with password null')
           await ownerSql?.end()
         }),
       ]
