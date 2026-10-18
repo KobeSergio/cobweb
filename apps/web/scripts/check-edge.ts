@@ -3,7 +3,9 @@
 // the verify scripts' form, each failure naming the setting to look at, judged by src/lib/edge/edge-checks.ts. The
 // owner runs it once the zone is set (docs/reference/cloudflare-setup.md) and after any change to it. Checks 3, 5, 6
 // and 8 send the page's own request headers; checks 4 and 8 depend on timing, so one failure on a slow line is decided
-// by a rerun. Reads no secret and writes nothing; it proves the colo nearest the machine that runs it.
+// by a rerun. Checks 3, 5, 6 and 7 take two tries, since the state's 1 s copy can expire between a check's priming
+// poll and its judged poll, and an edge set wrong never answers a HIT on them. Reads no secret and writes nothing; it
+// proves the colo nearest the machine that runs it.
 //
 //   pnpm --filter @cobweb/web check:edge --app https://<app domain> --freshness https://<freshness domain> \
 //     --collection <chain id>/<address> [--slug <mint page link>]
@@ -99,6 +101,15 @@ async function check(n: number, judge: () => Promise<string | null>): Promise<vo
   }
 }
 
+/**
+ * Runs a judgement and, when it finds a problem, once more: the state's 1 s copy can expire between a check's priming
+ * poll and its judged poll, so a correct zone can read EXPIRED there. An edge set wrong never answers a HIT on checks
+ * 3, 5, 6 and 7, so the second try hides no defect and a spurious failure becomes rare.
+ */
+async function twice(judge: () => Promise<string | null>): Promise<string | null> {
+  return (await judge()) === null ? null : judge()
+}
+
 console.log(`Reading ${app.origin} and ${freshness.origin} from outside`)
 
 await check(1, async () =>
@@ -109,7 +120,9 @@ await check(2, async () =>
   judgeHealth([await ask(at(freshness, '/health')), await ask(at(freshness, '/health'))]),
 )
 
-await check(3, async () => judgeStateAtEdge(await poll(NO_CACHE), await poll(NO_CACHE), STATE_CACHE))
+await check(3, () =>
+  twice(async () => judgeStateAtEdge(await poll(NO_CACHE), await poll(NO_CACHE), STATE_CACHE)),
+)
 
 await check(4, async () => {
   const polls: EdgeAnswer[] = []
@@ -121,29 +134,36 @@ await check(4, async () => {
   return judgeOneSecond(polls)
 })
 
-await check(5, async () => {
-  const etag = (await poll(NO_CACHE)).headers.get('etag')
-  if (!etag) return 'the poll before it carried no ETag'
-  return judgeNotModified(await poll({ ...NO_CACHE, 'If-None-Match': etag }), etag)
-})
+await check(5, () =>
+  twice(async () => {
+    const etag = (await poll(NO_CACHE)).headers.get('etag')
+    if (!etag) return 'the poll before it carried no ETag'
+    return judgeNotModified(await poll({ ...NO_CACHE, 'If-None-Match': etag }), etag)
+  }),
+)
 
-await check(6, async () => {
-  await poll(NO_CACHE)
-  return judgeFirstPoll(await poll(RELOAD))
-})
+await check(6, () =>
+  twice(async () => {
+    await poll(NO_CACHE)
+    return judgeFirstPoll(await poll(RELOAD))
+  }),
+)
 
-await check(7, async () => {
-  await poll()
-  return judgeQuery(await poll({}, `?check-edge=${randomBytes(8).toString('hex')}`))
-})
+await check(7, () =>
+  twice(async () => {
+    await poll()
+    return judgeQuery(await poll({}, `?check-edge=${randomBytes(8).toString('hex')}`))
+  }),
+)
 
 await check(8, async () => {
   const wallet = at(
     freshness,
     `/v1/wallet/${args.chainId}/${args.address}/0x${randomBytes(20).toString('hex')}`,
   )
-  const sent = Date.now()
   const first = await ask(wallet, { headers: NO_CACHE })
+  // The edge's 5 s copy starts when the origin's answer reaches it, so the 6 s are counted from the first answer.
+  const sent = Date.now()
   const second = await ask(wallet, { headers: NO_CACHE })
   await wait(Math.max(0, 6_000 - (Date.now() - sent)))
   return judgeWallet(first, second, await ask(wallet, { headers: NO_CACHE }), WALLET_CACHE)
