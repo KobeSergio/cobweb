@@ -90,6 +90,10 @@ export function chainReader(
   const recentFailures = recentCounter()
   /** When a noted failure was last logged; null before the first. */
   let notedAt: number | null = null
+  /** Whether the chain had no hot collection at its last tick, as before its first. */
+  let cold = true
+  /** When the chain last turned hot: the wake, or failing one the tick, that found it cold; null before the first. */
+  let hotSince: number | null = null
 
   const getLogs: GetLogs = (filter) =>
     client.request({
@@ -237,7 +241,12 @@ export function chainReader(
     const entries = hot.onChain(chain.id)
     if (!entries.length) {
       scanned = null
+      cold = true
       return null
+    }
+    if (cold) {
+      cold = false
+      hotSince = startedAt
     }
     try {
       // cacheTime 0: viem would otherwise reuse a recent head for its polling interval.
@@ -328,6 +337,11 @@ export function chainReader(
   return {
     wake() {
       if (stopped) return
+      // A collection asked for while the chain was cold turns it hot now, before its first tick ends.
+      if (cold) {
+        cold = false
+        hotSince = Date.now()
+      }
       if (running) again = true
       else start()
     },
@@ -359,6 +373,7 @@ export function chainReader(
         lastError,
         logGaps,
         failedTicksRecent: recentFailures.count(Date.now()),
+        hotSince: entries.length && hotSince !== null ? new Date(hotSince).toISOString() : null,
       }
     },
     /**

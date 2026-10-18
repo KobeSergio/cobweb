@@ -14,9 +14,11 @@ describe('recentCounter (docs/specs/2026-10-17-production-hardening.md, section 
   })
 
   it('keeps the latest at most, as many as its cap', () => {
-    const counter = recentCounter(RECENT_WINDOW_MS, 3)
+    // At 1,002 the window keeps the notes after 2: the latest three, 3 to 5, all count, where keeping the first
+    // three (1 to 3) would count one.
+    const counter = recentCounter(1_000, 3)
     for (let at = 1; at <= 5; at++) counter.note(at)
-    expect(counter.count(10)).toBe(3)
+    expect(counter.count(1_002)).toBe(3)
     expect(recentCounter(1_000).count(0)).toBe(0)
   })
 })

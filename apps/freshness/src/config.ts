@@ -194,6 +194,14 @@ export function checkIndexerOptions(options: IndexerOptions): IndexerOptions {
   return options
 }
 
+/**
+ * Whether this run is hosted, where the indexer must run: on Railway, which sets RAILWAY_ENVIRONMENT (a blank one
+ * reads as unset), or under NODE_ENV=production. Locally the indexer is optional.
+ */
+export function isHostedRun(env: Record<string, string | undefined>): boolean {
+  return Boolean(env.RAILWAY_ENVIRONMENT?.trim()) || env.NODE_ENV === 'production'
+}
+
 /** `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` where still set: `index.ts` logs them as no longer read. */
 export function unreadIndexerVariables(env: Record<string, string | undefined>): string[] {
   return OLD_VARIABLES.filter((name) => Boolean(env[name]?.trim()))

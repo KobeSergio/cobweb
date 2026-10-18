@@ -9,6 +9,7 @@ import {
   checkIndexerOptions,
   DEFAULT_PORT,
   indexerOptionsOf,
+  isHostedRun,
   isLoopbackHost,
   portOf,
   servedChains,
@@ -288,6 +289,15 @@ describe('indexerOptionsOf (docs/specs/2026-10-17-production-hardening.md, secti
     expect(errorLine(thrownBy(() => checkIndexerOptions({ databaseUrl: '' })))).toContain(
       'must be a postgres://',
     )
+  })
+})
+
+describe('isHostedRun (docs/specs/2026-10-17-production-hardening.md, section 8.2)', () => {
+  it('reads a run on Railway or under NODE_ENV=production as hosted, and any other as local', () => {
+    expect(isHostedRun({ RAILWAY_ENVIRONMENT: 'production' })).toBe(true)
+    expect(isHostedRun({ NODE_ENV: 'production' })).toBe(true)
+    expect(isHostedRun({ RAILWAY_ENVIRONMENT: ' ', NODE_ENV: 'development' })).toBe(false)
+    expect(isHostedRun({})).toBe(false)
   })
 })
 

@@ -32,6 +32,11 @@ export type ReaderHealth = {
   logGaps: number
   /** Failed ticks and noted factory failures in the last 5 minutes. */
   failedTicksRecent: number
+  /**
+   * When the chain last turned hot, a collection asked for while it had none (ISO); null while it has no hot
+   * collection. A read counts as stale from the later of this and the last good tick.
+   */
+  hotSince: string | null
 }
 
 /** A chain's indexer on /health (docs/specs/2026-10-16-indexer-overview.md, section 6.7). */
@@ -85,8 +90,9 @@ export type HealthBody = {
  * The thresholds /health answers `degraded` past (docs/specs/2026-10-17-production-hardening.md, section 8.2). It
  * stays 200, so Railway's deploy check never refuses a deployment during an RPC outage; a monitor keys on the body:
  * the keyword `"status":"ok"`, and the `problems` in its alert. Per chain:
- * - readerStaleS: with hot collections, no good read for more than 60 s (counted from the start while there was
- *   none): the chain's RPC is down or refusing;
+ * - readerStaleS: with hot collections, no good read for more than 60 s (counted from the later of the last good
+ *   read and the moment the chain turned hot, or from the start while there was neither): the chain's RPC is down
+ *   or refusing;
  * - readerLagS: with hot collections, the newest block read is more than 120 s old: the node is stuck, or a quiet
  *   chain makes no block;
  * - readerFailures: more than 10 failed reads (ticks and factory reads) in 5 minutes: the RPC is flapping;
@@ -104,9 +110,22 @@ export const HEALTH_LIMITS = {
   indexerFailures: 5,
 } as const
 
+/**
+ * The start line's sentence while the indexer is off, which /health also answers as its problem on a hosted run
+ * (`isHostedRun`), where the indexer must run.
+ */
+export const INDEXER_OFF = 'The indexer is off: set INDEXER_DATABASE_URL to run it.'
+
+/** Limits of the same names, any numbers: `healthProblems` reads `HEALTH_LIMITS` unless given others. */
+export type HealthLimits = { readonly [K in keyof typeof HEALTH_LIMITS]: number }
+
 /** Whole seconds from an ISO time, or from the start while there is none, to `now`. */
 const secondsSince = (iso: string | null, startedAt: number, now: number) =>
   Math.floor((now - (iso === null ? startedAt : Date.parse(iso))) / 1_000)
+
+/** The later of two ISO times, either of which may be missing; null when both are. */
+const laterOf = (a: string | null, b: string | null): string | null =>
+  a === null ? b : b === null || Date.parse(a) >= Date.parse(b) ? a : b
 
 /**
  * One sentence per threshold crossed, per chain, in the order of `HEALTH_LIMITS`. A chain with no hot collection
@@ -116,12 +135,12 @@ export function healthProblems(
   chains: readonly ChainHealth[],
   now: number,
   startedAt: number,
-  limits: typeof HEALTH_LIMITS = HEALTH_LIMITS,
+  limits: HealthLimits = HEALTH_LIMITS,
 ): string[] {
   return chains.flatMap((chain) => {
     const problems: string[] = []
     if (chain.hot > 0) {
-      const stale = secondsSince(chain.lastGoodTickAt, startedAt, now)
+      const stale = secondsSince(laterOf(chain.lastGoodTickAt, chain.hotSince), startedAt, now)
       if (stale > limits.readerStaleS)
         problems.push(`${chain.name}: no good read for ${stale} s (limit ${limits.readerStaleS} s).`)
       if (chain.lagSeconds !== null && chain.lagSeconds > limits.readerLagS)
@@ -138,11 +157,12 @@ export function healthProblems(
       const stale = secondsSince(indexer.lastGoodPassAt, startedAt, now)
       if (stale > limits.indexerStaleS)
         problems.push(`${chain.name}: no good index pass for ${stale} s (limit ${limits.indexerStaleS} s).`)
-      if (indexer.behindSince !== null) {
+      if (indexer.behindSince !== null && indexer.behind > 0) {
         const behind = secondsSince(indexer.behindSince, startedAt, now)
+        const collections = indexer.behind === 1 ? 'collection' : 'collections'
         if (behind > limits.indexerBehindS)
           problems.push(
-            `${chain.name}: ${indexer.behind} collections behind for ${behind} s (limit ${limits.indexerBehindS} s).`,
+            `${chain.name}: ${indexer.behind} ${collections} behind for ${behind} s (limit ${limits.indexerBehindS} s).`,
           )
       }
       if (indexer.failedPassesRecent > limits.indexerFailures)

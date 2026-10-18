@@ -783,10 +783,13 @@ async function main(): Promise<void> {
       const cursors = await admin.from('indexer_cursors').select('collection_id').eq('chain_id', 31337)
       if (cursors.error) return `cursors: ${cursors.error.message}`
       if (!cursors.data.some((row) => row.collection_id === cid)) return 'no cursor for the collection'
+      // behindSince changes only at a pass's end, so a read between a catch-up pass's scans waits for the next.
       const health = await until(async () => {
         const read = await healthOf()
         const indexer = read.body.chains.find((entry) => entry.chainId === 31337)?.indexer
-        return indexer && indexer.block === head && indexer.behind === 0 ? { ...read, indexer } : null
+        return indexer && indexer.block === head && indexer.behind === 0 && indexer.behindSince === null
+          ? { ...read, indexer }
+          : null
       }, RECORDED_WITHIN_MS)
       if (!health) return `health ${JSON.stringify((await healthOf()).body.chains)}`
       const { indexer, text, body } = health
@@ -862,9 +865,15 @@ async function cleanup(): Promise<void> {
         await attempt('closing the freshness server', async () => {
           // A server already down cannot show that close() stops its indexer.
           if (!freshness) return 'the freshness server was not running at the stop'
-          const open = await indexerSessions()
+          // The count is taken, the server stopped whatever it reads, then the count judged, so a low count never
+          // leaves the indexer running beside the cleanup.
+          let open: number
+          try {
+            open = await indexerSessions()
+          } finally {
+            await stopServer()
+          }
           if (open < 1) return `${open} sessions as cobweb_indexer before close()`
-          await stopServer()
           // close() ends the indexer's connections (db.end()); left open, an idle one would stay for 60 s.
           if (!(await until(async () => (await indexerSessions()) === 0, 2_000)))
             return `${await indexerSessions()} sessions as cobweb_indexer after close()`

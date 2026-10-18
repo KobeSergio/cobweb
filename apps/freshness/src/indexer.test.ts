@@ -961,6 +961,56 @@ describe('chainIndexer (docs/specs/2026-10-16-indexer-overview.md, section 6.5)'
     await indexer.stop()
   })
 
+  it('keeps its last good pass unset after a pass that reached the chain but failed a scan or a write (docs/specs/2026-10-17-production-hardening.md, section 8.2)', async () => {
+    const { chain, client } = fakeChain()
+    const { db, port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 100n)])
+    chain.head = 103n
+    chain.logs = mintAt(102n, 1n)
+    chain.logsFailures = 1
+    db.recordFailures = [new IndexerWriteError('indexer_record', 'TIMEOUT', false)]
+    const indexer = indexerOn(client, port)
+    await settle()
+    // The scan failed: the pass ended, but not as a good one.
+    expect(indexer.health()).toMatchObject({
+      lastPassAt: new Date(1_000_000).toISOString(),
+      lastGoodPassAt: null,
+      failedPasses: 1,
+    })
+    // The fast delay, then a pass whose write fails.
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(db.calls.filter((call) => call.startsWith('record'))).toHaveLength(1)
+    expect(indexer.health()).toMatchObject({
+      lastPassAt: new Date(1_005_000).toISOString(),
+      lastGoodPassAt: null,
+      failedPasses: 2,
+    })
+    // Then a pass with no failure.
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(indexer.health()).toMatchObject({
+      lastGoodPassAt: new Date(1_010_000).toISOString(),
+      failedPasses: 2,
+    })
+    await indexer.stop()
+  })
+
+  it('keeps the time its collections fell behind across passes that end still behind', async () => {
+    const { chain, client } = fakeChain()
+    const { port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 100n)])
+    // 1,100 blocks behind: two more scans of 500 after the first pass's.
+    chain.head = 1_200n
+    const indexer = indexerOn(client, port)
+    await settle()
+    const fellBehind = new Date(1_000_000).toISOString()
+    expect(indexer.health()).toMatchObject({ behind: 1, behindSince: fellBehind })
+    // The backfill's second pass, 1 s later, ends behind still: the time stays the first pass's.
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(indexer.health()).toMatchObject({ behind: 1, behindSince: fellBehind, block: 1_200 })
+    // The third reaches the safe block.
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(indexer.health()).toMatchObject({ behind: 0, behindSince: null })
+    await indexer.stop()
+  })
+
   it('notes since when its collections are behind at the end of each pass, and clears it once none is', async () => {
     const { chain, client } = fakeChain()
     const { port } = fakeDb([targetAt(ID_A, A, DEPLOY_A, 100n)])

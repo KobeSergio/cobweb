@@ -9,6 +9,7 @@ import {
   HEALTH_LIMITS,
   healthProblems,
   type ChainHealth,
+  type HealthLimits,
   type IndexerHealth,
   type ReaderHealth,
 } from './health.ts'
@@ -101,6 +102,7 @@ describe('chainHealth (docs/specs/2026-10-16-indexer-overview.md, section 6.7)',
     lastError: null,
     logGaps: 0,
     failedTicksRecent: 0,
+    hotSince: '2026-10-16T11:59:00.000Z',
   }
   const indexer: IndexerHealth = {
     collections: 2,
@@ -139,7 +141,7 @@ describe('healthProblems (docs/specs/2026-10-17-production-hardening.md, section
   const START = Date.parse('2026-10-17T12:00:00.000Z')
   /** ISO for `seconds` after the start. */
   const at = (seconds: number) => new Date(START + seconds * 1_000).toISOString()
-  /** A chain read well and indexed well at 1,000 s past the start, with one hot collection. */
+  /** A chain hot since the start, read well and indexed well at 1,000 s past it, with one hot collection. */
   const healthy = (
     changes: Partial<ReaderHealth> = {},
     indexer: Partial<IndexerHealth> | null = {},
@@ -155,6 +157,7 @@ describe('healthProblems (docs/specs/2026-10-17-production-hardening.md, section
     lastError: 'HttpRequestError',
     logGaps: 0,
     failedTicksRecent: 0,
+    hotSince: at(0),
     ...changes,
     indexer:
       indexer === null
@@ -187,9 +190,14 @@ describe('healthProblems (docs/specs/2026-10-17-production-hardening.md, section
     })
     const atLimits = healthy(
       { lagSeconds: 120, failedTicksRecent: 10 },
-      { failedPassesRecent: 5, behind: 1, behindSince: at(160) },
+      { failedPassesRecent: 5, behind: 1, behindSince: at(160), lastGoodPassAt: at(940) },
     )
     expect(problemsAt(1_060, atLimits)).toEqual([])
+    expect(problemsAt(1_061, atLimits)).toEqual([
+      'Anvil: no good read for 61 s (limit 60 s).',
+      'Anvil: no good index pass for 121 s (limit 120 s).',
+      'Anvil: 1 collection behind for 901 s (limit 900 s).',
+    ])
   })
 
   it("says one sentence for each limit a chain's reader passes", () => {
@@ -211,6 +219,36 @@ describe('healthProblems (docs/specs/2026-10-17-production-hardening.md, section
     expect(problemsAt(1_000, healthy({}, { failedPassesRecent: 6 }))).toEqual([
       'Anvil: 6 failed index passes in 5 minutes (limit 5).',
     ])
+  })
+
+  it('names one collection behind in the singular, and none while no collection is behind', () => {
+    expect(problemsAt(1_000, healthy({}, { behind: 1, behindSince: at(99) }))).toEqual([
+      'Anvil: 1 collection behind for 901 s (limit 900 s).',
+    ])
+    // Between a catch-up pass's last scan and its end the count reads 0 while the time is still set.
+    expect(problemsAt(1_000, healthy({}, { behind: 0, behindSince: at(99) }))).toEqual([])
+  })
+
+  it('counts a stale read from the later of the last good read and the moment the chain turned hot', () => {
+    // Cold for 100 s after its last good read, then hot again: its first tick has 60 s to end.
+    const rewoken = healthy({ lastGoodTickAt: at(1_000), hotSince: at(1_100) }, null)
+    expect(problemsAt(1_160, rewoken)).toEqual([])
+    expect(problemsAt(1_161, rewoken)).toEqual(['Anvil: no good read for 61 s (limit 60 s).'])
+    // Hot all along: the last good read counts.
+    expect(problemsAt(1_061, healthy({ hotSince: at(10) }, null))).toEqual([
+      'Anvil: no good read for 61 s (limit 60 s).',
+    ])
+    // Hot with no good read since the start.
+    expect(problemsAt(61, healthy({ lastGoodTickAt: null, hotSince: at(0) }, null))).toEqual([
+      'Anvil: no good read for 61 s (limit 60 s).',
+    ])
+  })
+
+  it('reads the limits it is given', () => {
+    const tight: HealthLimits = { ...HEALTH_LIMITS, readerStaleS: 30, indexerFailures: 1 }
+    expect(healthProblems([healthy({}, { failedPassesRecent: 2 })], START + 1_031_000, START, tight)).toEqual(
+      ['Anvil: no good read for 31 s (limit 30 s).', 'Anvil: 2 failed index passes in 5 minutes (limit 1).'],
+    )
   })
 
   it('counts from the start while there was no good read or pass yet', () => {

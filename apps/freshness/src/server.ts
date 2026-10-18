@@ -5,8 +5,14 @@ import { publicClientFor } from '@cobweb/shared/clients'
 import type { Address } from 'viem'
 import { chainReader } from './chain-reader.ts'
 import { collectionCheck } from './collection-check.ts'
-import { checkIndexerOptions, INDEXER_ROLE, servedChains, type IndexerOptions } from './config.ts'
-import { chainHealth, failureLine, healthProblems, type HealthBody } from './health.ts'
+import {
+  checkIndexerOptions,
+  INDEXER_ROLE,
+  isHostedRun,
+  servedChains,
+  type IndexerOptions,
+} from './config.ts'
+import { chainHealth, failureLine, healthProblems, INDEXER_OFF, type HealthBody } from './health.ts'
 import { hotSet, JOIN_WAIT_MS, type HotEntry } from './hot-set.ts'
 import { chainIndexer, type ChainIndexer } from './indexer.ts'
 import { postgresIndexerDb } from './indexer-db.ts'
@@ -59,6 +65,8 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
   const startedMs = Date.now()
   const startedAt = new Date(startedMs).toISOString()
   const indexing = options.indexer ?? null
+  // On a hosted run the indexer must run: without its database /health names the problem (read once, at start).
+  const indexerMissing = indexing === null && isHostedRun(process.env)
   // Checked and built before the server listens, so options it refuses never leave a caller in process with a
   // listening server; postgres.js connects on the first call, and the indexers' passes start once it listens.
   const db = indexing ? postgresIndexerDb(checkIndexerOptions(indexing)) : null
@@ -141,7 +149,8 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
 
   /**
    * /health: each chain's reader and indexer, the wallet windows, and `degraded` with one sentence per threshold
-   * crossed (docs/specs/2026-10-17-production-hardening.md, section 8.2). Always 200.
+   * crossed (docs/specs/2026-10-17-production-hardening.md, section 8.2), and first, on a hosted run, the indexer
+   * left off. Always 200.
    */
   function health(): HealthBody {
     const chains = [...served.values()]
@@ -150,7 +159,10 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
     const entries = chains.map(({ reader, indexer }) =>
       chainHealth(reader.health(), indexer?.health() ?? null),
     )
-    const problems = healthProblems(entries, Date.now(), startedMs)
+    const problems = [
+      ...(indexerMissing ? [INDEXER_OFF] : []),
+      ...healthProblems(entries, Date.now(), startedMs),
+    ]
     return {
       status: problems.length ? 'degraded' : 'ok',
       problems,
@@ -221,9 +233,7 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
   const listed = names.length ? names.join(', ') : 'no chain'
   console.log(
     `The freshness server listens on port ${port}, serving ${listed}. ${
-      indexing
-        ? `The indexer runs on ${listed} as ${INDEXER_ROLE}.`
-        : 'The indexer is off: set INDEXER_DATABASE_URL to run it.'
+      indexing ? `The indexer runs on ${listed} as ${INDEXER_ROLE}.` : INDEXER_OFF
     }`,
   )
 

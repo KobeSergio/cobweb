@@ -525,6 +525,33 @@ describe('chainReader (docs/specs/2026-10-16-freshness-server.md, section 6.4)',
     await reader.stop()
   })
 
+  it('reports when the chain turned hot: the wake that found it cold, kept while it stays hot, and none while it is cold (docs/specs/2026-10-17-production-hardening.md, section 8.2)', async () => {
+    const { client } = fakeChain()
+    const hot = hotSet()
+    const reader = chainReader(ANVIL, hot, client)
+    expect(reader.health().hotSince).toBeNull()
+    hot.join(31337, A, Date.now())
+    reader.wake()
+    await settle()
+    expect(reader.health().hotSince).toBe(new Date(1_000_000).toISOString())
+    // A second collection while the chain is hot leaves the time as it was.
+    await vi.advanceTimersByTimeAsync(2_000)
+    hot.join(31337, B, Date.now())
+    reader.wake()
+    await settle()
+    expect(reader.health().hotSince).toBe(new Date(1_000_000).toISOString())
+    // Ten minutes without a request and both leave: the chain is cold.
+    await vi.advanceTimersByTimeAsync(660_000)
+    expect(reader.health()).toMatchObject({ hot: 0, hotSince: null })
+    // An hour later a collection is asked for: the chain turned hot then, before its first tick ends.
+    vi.setSystemTime(Date.now() + 3_600_000)
+    const rewoken = Date.now()
+    hot.join(31337, A, rewoken)
+    reader.wake()
+    expect(reader.health()).toMatchObject({ hot: 1, hotSince: new Date(rewoken).toISOString() })
+    await reader.stop()
+  })
+
   it('counts a head unchanged since the last read as a read now, with no log scan and no call (reconciliation 10)', async () => {
     const { chain, client } = fakeChain()
     const hot = hotSet()
