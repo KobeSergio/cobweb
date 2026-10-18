@@ -15,6 +15,7 @@ dist/
 out/
 cache/
 contracts/broadcast/
+contracts/crytic-export/
 coverage/
 
 # Local tooling

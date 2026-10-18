@@ -48,3 +48,20 @@ jobs:
         working-directory: ${{ github.workspace }}
       - run: pnpm --filter @cobweb/shared test
         working-directory: ${{ github.workspace }}
+
+  slither:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      # Slither over both contracts (docs/specs/2026-10-18-load-run-contract-review-and-cloudflare.md, section 7.3):
+      # a medium or high finding that contracts/slither.db.json does not hold fails the job; low and informational
+      # findings print and pass. contracts/slither.triage.md gives each held finding's verdict and reason.
+      - uses: crytic/slither-action@v0.4.2
+        with:
+          target: contracts
+          slither-version: 0.11.6
+          slither-config: contracts/slither.config.json
+          slither-args: --triage-database contracts/slither.db.json
+          fail-on: medium
