@@ -79,6 +79,63 @@ describe('startFreshness with the indexer (docs/specs/2026-10-17-production-hard
   })
 })
 
+/** /health's `requests` with nothing counted. */
+const NO_REQUESTS: HealthBody['requests'] = {
+  windowS: 60,
+  state: 0,
+  notModified: 0,
+  wallet: 0,
+  refused: 0,
+  collections: 0,
+  busiest: 0,
+}
+
+describe("/health's request counts (docs/specs/2026-10-18-load-run-contract-review-and-cloudflare.md, section 4.2)", () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.stubEnv('RAILWAY_ENVIRONMENT', undefined)
+    vi.stubEnv('NODE_ENV', 'test')
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.restoreAllMocks()
+  })
+
+  it('carries requests, counting a 404 for an unknown path and a 400 for a malformed address as refused, and neither a preflight nor /health itself', async () => {
+    const freshness = await startFreshness({ port: 0, host: '127.0.0.1', chainIds: [] })
+    try {
+      const requests = async () =>
+        ((await (await fetch(`${freshness.url}/health`)).json()) as HealthBody).requests
+      expect(await requests()).toEqual(NO_REQUESTS)
+      expect((await fetch(`${freshness.url}/v1/collections`)).status).toBe(404)
+      expect((await fetch(`${freshness.url}/v1/state/31337/0x5fbdb2315678`)).status).toBe(400)
+      const preflight = await fetch(`${freshness.url}/v1/state/31337/0x${'5f'.repeat(20)}`, {
+        method: 'OPTIONS',
+      })
+      expect(preflight.status).toBe(204)
+      expect(await requests()).toEqual({ ...NO_REQUESTS, refused: 2 })
+    } finally {
+      await freshness.close()
+    }
+  })
+
+  it('counts an address spray against the state route as refusals, keying no collection (Review Focus 1)', async () => {
+    const freshness = await startFreshness({ port: 0, host: '127.0.0.1', chainIds: [] })
+    try {
+      const addresses = Array.from({ length: 50 }, (_, n) => `0x${(n + 1).toString(16).padStart(40, '0')}`)
+      const answers = await Promise.all(
+        addresses.map((address) => fetch(`${freshness.url}/v1/state/31337/${address}`)),
+      )
+      expect(answers.map((answer) => answer.status)).toEqual(Array<number>(50).fill(404))
+      const body = (await (await fetch(`${freshness.url}/health`)).json()) as HealthBody
+      expect(body.requests).toEqual({ ...NO_REQUESTS, refused: 50 })
+    } finally {
+      await freshness.close()
+    }
+  })
+})
+
 /** The server's /health body, the server started with `chainIds` and closed again. */
 async function healthWith(chainIds: number[]): Promise<HealthBody> {
   const freshness = await startFreshness({ port: 0, host: '127.0.0.1', chainIds })

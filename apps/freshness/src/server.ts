@@ -16,6 +16,7 @@ import { chainHealth, failureLine, healthProblems, INDEXER_OFF, type HealthBody 
 import { hotSet, JOIN_WAIT_MS, type HotEntry } from './hot-set.ts'
 import { chainIndexer, type ChainIndexer } from './indexer.ts'
 import { postgresIndexerDb } from './indexer-db.ts'
+import { requestCounts } from './requests.ts'
 import {
   healthAnswer,
   PREFLIGHT,
@@ -24,6 +25,7 @@ import {
   stateAnswer,
   walletAnswer,
   type Answer,
+  type Route,
 } from './routes.ts'
 import { etagMatches, etagOf, stateBody } from './state-body.ts'
 import { isDegraded } from './tiers.ts'
@@ -31,6 +33,8 @@ import { walletWindows } from './wallet.ts'
 
 export type { IndexerOptions } from './config.ts'
 export type { HealthBody } from './health.ts'
+export type { RequestsHealth } from './requests.ts'
+export { STATE_CACHE, WALLET_CACHE } from './routes.ts'
 export type { StateBody } from './state-body.ts'
 export { TIER_MS } from './tiers.ts'
 export type { WalletBody } from './wallet.ts'
@@ -71,6 +75,8 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
   // listening server; postgres.js connects on the first call, and the indexers' passes start once it listens.
   const db = indexing ? postgresIndexerDb(checkIndexerOptions(indexing)) : null
   const hot = hotSet()
+  // The origin's answers over the last minute, for /health's `requests`.
+  const counts = requestCounts()
   const served = new Map(
     servedChains(options.chainIds).map((chain) => {
       const client = publicClientFor(chain.id)
@@ -170,11 +176,11 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
       hot: hot.size(),
       chains: entries,
       wallet: { windows: total('windows'), answered: total('answered'), waiting: total('waiting') },
+      requests: counts.health(Date.now()),
     }
   }
 
-  async function answerOf(request: IncomingMessage): Promise<Answer> {
-    const route = routeOf(request.method, request.url)
+  async function answerOf(route: Route, request: IncomingMessage): Promise<Answer> {
     if (route.kind === 'refused') return refusal(route.status, route.error)
     if (route.kind === 'preflight') return PREFLIGHT
     if (route.kind === 'health') return healthAnswer(health())
@@ -192,18 +198,37 @@ export async function startFreshness(options: FreshnessOptions): Promise<Freshne
     response.end(head || answer.body === null ? undefined : answer.body)
   }
 
+  /**
+   * Counts an answer on /health's `requests` as it is written
+   * (docs/specs/2026-10-18-load-run-contract-review-and-cloudflare.md, section 4.1): a refusal of 400 or above on
+   * any route, else a state answer under its collection or a wallet answer. Preflights and /health itself are not
+   * counted.
+   */
+  function count(route: Route, answer: Answer): void {
+    if (route.kind === 'preflight' || route.kind === 'health') return
+    const now = Date.now()
+    if (answer.status >= 400) counts.refused(now)
+    else if (route.kind === 'state')
+      counts.state(now, `${route.chainId}:${route.address.toLowerCase()}`, answer.status === 304)
+    else if (route.kind === 'wallet') counts.wallet(now)
+  }
+
   /** The requests being answered; each leaves once its answer is written, and `close()` waits for them. */
   const answering = new Set<Promise<void>>()
 
   // Requests are not logged; a failure is, as its name, viem's short message and its code, never its message.
   const server = createServer((request, response) => {
     const head = request.method === 'HEAD'
-    const answered: Promise<void> = answerOf(request)
+    const route = routeOf(request.method, request.url)
+    const answered: Promise<void> = answerOf(route, request)
       .catch((error: unknown) => {
         console.error(`A request failed: ${failureLine(error)}`)
         return refusal(500, 'internal')
       })
-      .then((answer) => send(response, head, answer))
+      .then((answer) => {
+        count(route, answer)
+        send(response, head, answer)
+      })
       .finally(() => answering.delete(answered))
     answering.add(answered)
   })

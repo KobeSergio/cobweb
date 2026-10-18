@@ -1,4 +1,5 @@
 import { BaseError } from 'viem'
+import type { RequestsHealth } from './requests.ts'
 import type { Tier } from './tiers.ts'
 
 /**
@@ -84,6 +85,11 @@ export type HealthBody = {
   hot: number
   chains: ChainHealth[]
   wallet: { windows: number; answered: number; waiting: number }
+  /**
+   * The origin's answers over the last 60 s by route, which `status` and `problems` do not read
+   * (docs/specs/2026-10-18-load-run-contract-review-and-cloudflare.md, section 4.2). It names no address.
+   */
+  requests: RequestsHealth
 }
 
 /**
