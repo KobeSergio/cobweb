@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { UploadKind } from './keys'
 import { admissionInputProblem, servedKeyOf, servedUrl, toRecord } from './uploads-service'
 
 const row = {
@@ -63,8 +64,8 @@ describe('uploads service helpers', () => {
 })
 
 describe('servedKeyOf (docs/specs/2026-10-17-production-hardening.md, section 7.3)', () => {
-  const original = {
-    kind: 'layer_image' as const,
+  const original: { kind: UploadKind; key: string; thumbnailKey: string } = {
+    kind: 'layer_image',
     key: 'c/layers/a.png',
     thumbnailKey: 'c/thumbnails/a.webp',
   }

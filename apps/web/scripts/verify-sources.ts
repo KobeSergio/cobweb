@@ -1,5 +1,5 @@
 // Checks the layer sources' lifecycle against LOCAL Supabase and local storage (docs/specs/2026-10-17-production-
-// hardening.md, section 10): a creator with three collections recorded as deployed through
+// hardening.md, section 10): a creator with four collections recorded as deployed through
 // collection_record_deploy, as verify:local's section 9j records one, each with originals and thumbnails stored
 // in the art bucket, their deploys and renders moved back with the service role; collections_sources_due, the
 // sweep through the app's own port (its due list kept to this run's collections), a dry run, a sweep, a second
@@ -135,7 +135,8 @@ type Fixture = { cid: string; originals: string[] }
 type UploadKind = Database['public']['Enums']['upload_kind']
 let userId: string | null = null
 let creator: Client | null = null
-const fixtures: Record<'A' | 'B' | 'C', Fixture | null> = { A: null, B: null, C: null }
+type Tag = 'A' | 'B' | 'C' | 'D'
+const fixtures: Record<Tag, Fixture | null> = { A: null, B: null, C: null, D: null }
 const jobIds: string[] = []
 const cids = () => Object.values(fixtures).flatMap((fixture) => (fixture ? [fixture.cid] : []))
 
@@ -175,7 +176,7 @@ function must(step: string, error: { code?: string; message: string } | null): v
  */
 async function deployedFixture(
   creator: Client,
-  tag: 'A' | 'B' | 'C',
+  tag: Tag,
   options: { deferred: boolean; deployedDaysAgo: number; renderedDaysAgo: number },
 ): Promise<Fixture> {
   const made = await creator
@@ -324,12 +325,13 @@ function runDeps(): SourceSweepDeps {
 
 async function main(): Promise<void> {
   await check(
-    'setup: a creator with three collections recorded as deployed, each with recorded originals and thumbnails in the art bucket: A deployed and finally rendered 91 days ago, B deployed 91 days ago and rendered 10 days ago, C deployed 91 days ago with only its placeholder rendered',
+    'setup: a creator with four collections recorded as deployed, each with recorded originals and thumbnails in the art bucket: A deployed and finally rendered 91 days ago, B deployed 91 days ago and rendered 10 days ago, C deployed 91 days ago with only its placeholder rendered, D deployed 10 days ago and finally rendered 91 days ago',
     async () => {
       const creator = await signIn()
       await deployedFixture(creator, 'A', { deferred: false, deployedDaysAgo: 91, renderedDaysAgo: 91 })
       await deployedFixture(creator, 'B', { deferred: false, deployedDaysAgo: 91, renderedDaysAgo: 10 })
       await deployedFixture(creator, 'C', { deferred: true, deployedDaysAgo: 91, renderedDaysAgo: 91 })
+      await deployedFixture(creator, 'D', { deferred: false, deployedDaysAgo: 10, renderedDaysAgo: 91 })
       for (const fixture of Object.values(fixtures)) {
         const { originals, thumbnails } = await stored(fixture!.cid)
         if (originals !== 4 || thumbnails !== 4)
@@ -341,11 +343,11 @@ async function main(): Promise<void> {
         : 'not every collection is deployed'
     },
   )
-  const { A, B, C } = fixtures as Record<'A' | 'B' | 'C', Fixture>
+  const { A, B, C, D } = fixtures as Record<Tag, Fixture>
   const owner = creator!
 
   await check(
-    "due: collections_sources_due lists A alone with its originals' count and size; neither a signed-out caller nor the creator can call it or collection_sources_deleted",
+    "due: collections_sources_due lists A alone with its originals' count and size (not B, rendered 10 days ago, C, never finally rendered, or D, deployed 10 days ago); neither a signed-out caller nor the creator can call it or collection_sources_deleted",
     async () => {
       const due = await admin.rpc('collections_sources_due', { p_limit: 1000 })
       must('due', due.error)
@@ -386,7 +388,7 @@ async function main(): Promise<void> {
   })
 
   await check(
-    "sweep: A's layers, assets and placeholders are deleted, its thumbnails stay, it is marked, and B's and C's objects are untouched",
+    "sweep: A's layers, assets and placeholders are deleted, its thumbnails stay, it is marked, and B's, C's and D's objects are untouched",
     async () => {
       const report = await sweepSources(runDeps(), { dryRun: false, log: () => {} })
       if (
@@ -397,7 +399,7 @@ async function main(): Promise<void> {
       const a = await stored(A.cid)
       if (a.originals !== 0 || a.thumbnails !== 4) return `A stores ${JSON.stringify(a)}`
       if ((await markOf(A.cid)) === null) return 'A is not marked'
-      for (const other of [B, C]) {
+      for (const other of [B, C, D]) {
         const left = await stored(other.cid)
         if (left.originals !== 4 || left.thumbnails !== 4)
           return `${other.cid} stores ${JSON.stringify(left)}`
@@ -420,19 +422,23 @@ async function main(): Promise<void> {
   })
 
   await check(
-    "resume: with A's mark cleared and one original put back, a run deletes it and marks A again",
+    "resume: with A's mark cleared and one original put back, a run deletes it, says so with that file's size alone, and marks A again",
     async () => {
       must(
         'clear',
         (await admin.from('collections').update({ art_sources_deleted_at: null }).eq('id', A.cid)).error,
       )
       await put(A.originals[0]!, 'image/png')
-      const report = await sweepSources(runDeps(), { dryRun: false, log: () => {} })
+      const lines: string[] = []
+      const report = await sweepSources(runDeps(), { dryRun: false, log: (line) => lines.push(line) })
       if (
         JSON.stringify(report) !==
         JSON.stringify({ dryRun: false, due: 1, deleted: 1, marked: 1, failed: [] })
       )
         return `report ${JSON.stringify(report)}`
+      // The size the listing gave the file deleted, not the four originals' recorded total.
+      const deleted = `Source sweep: deleted 1 original files (${PNG.byteLength} B) of ${A.cid}.`
+      if (lines.join('\n') !== deleted) return `logged ${lines.join(' | ')}`
       return (await stored(A.cid)).originals === 0 && (await markOf(A.cid)) !== null
         ? null
         : 'A was not swept again'

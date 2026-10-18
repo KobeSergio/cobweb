@@ -68,8 +68,11 @@ export type SweepCounts = { listed: number; old: number; orphaned: number; delet
 export type SweepOutcome = SweepCounts | { failed: string }
 export type UploadSweepReport = { dryRun: boolean; art: SweepOutcome; media: SweepOutcome }
 
-/** A failure by its name alone, the default: a message can carry a URL or a key, so none reaches the report. */
-const failureName = (error: unknown): string => (error instanceof Error ? error.name : 'Unknown error')
+/**
+ * A failure by its name alone, the sweeps' default: a message can carry a URL or a key, so none reaches the report
+ * or the log. Each cron passes the worker's masked `errorSummary` in its place, the one masking rule.
+ */
+export const failureName = (error: unknown): string => (error instanceof Error ? error.name : 'Unknown error')
 
 /**
  * The daily upload sweep (docs/specs/2026-10-17-production-hardening.md, section 14, point 8): the art bucket's

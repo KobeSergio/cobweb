@@ -73,13 +73,13 @@ export async function deleteObjects(keys: string[], options: { bucket?: string }
 }
 
 /**
- * The objects under a prefix with their last-modified time, a page of up to 1,000 at a time, on the art bucket
- * unless another is named.
+ * The objects under a prefix with their last-modified time and size in bytes, a page of up to 1,000 at a time, on
+ * the art bucket unless another is named.
  */
 export async function* listObjectPages(
   prefix: string,
   options: { bucket?: string } = {},
-): AsyncGenerator<{ key: string; lastModified: Date }[]> {
+): AsyncGenerator<{ key: string; lastModified: Date; bytes: number }[]> {
   const bucket = options.bucket ?? storageConfig().bucket
   let token: string | undefined
   do {
@@ -87,7 +87,9 @@ export async function* listObjectPages(
       new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix || undefined, ContinuationToken: token }),
     )
     yield (page.Contents ?? []).flatMap((entry) =>
-      entry.Key && entry.LastModified ? [{ key: entry.Key, lastModified: entry.LastModified }] : [],
+      entry.Key && entry.LastModified
+        ? [{ key: entry.Key, lastModified: entry.LastModified, bytes: Number(entry.Size ?? 0) }]
+        : [],
     )
     token = page.IsTruncated ? page.NextContinuationToken : undefined
   } while (token)

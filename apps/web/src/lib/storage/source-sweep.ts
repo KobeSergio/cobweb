@@ -1,3 +1,5 @@
+import { failureName } from './sweep'
+
 /**
  * The layer sources' lifecycle (docs/specs/2026-10-17-production-hardening.md, section 7.1), pure: a daily sweep
  * deletes a collection's original files, the `layers`, `assets` and `placeholders` folders under its id in the art
@@ -14,11 +16,14 @@ export const SOURCE_FOLDERS = ['layers', 'assets', 'placeholders'] as const
 
 export type DueCollection = { collectionId: string; objects: number; bytes: number }
 
+/** An object as the art bucket lists it: its key and its size in bytes. */
+export type ListedObject = { key: string; bytes: number }
+
 export type SourceSweepDeps = {
   /** The due collections, oldest deploy first, at most `limit`. */
   due(limit: number): Promise<DueCollection[]>
-  /** The art bucket's objects under a prefix, a page at a time. */
-  list(prefix: string): AsyncIterable<{ key: string }[]>
+  /** The art bucket's objects under a prefix with their sizes, a page at a time. */
+  list(prefix: string): AsyncIterable<ListedObject[]>
   remove(keys: string[]): Promise<void>
   /** Marks the collection's originals deleted: true when this call set the mark. */
   mark(collectionId: string): Promise<boolean>
@@ -56,30 +61,39 @@ export function sizeText(bytes: number): string {
   return `${value.toFixed(1)} ${units[unit]}`
 }
 
-/** A failure as the log writes it: its name and its first line, any URL replaced, cut at 200 characters. */
-function failureText(error: unknown): string {
-  if (!(error instanceof Error)) return 'Unknown error'
-  const line = (error.message.split('\n')[0] ?? '').replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, '[url]')
-  return `${error.name}: ${line}`.slice(0, 200)
-}
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
-/** The keys under a collection's three folders, a page at a time. */
-async function* sourcePages(deps: SourceSweepDeps, collectionId: string): AsyncGenerator<string[]> {
+/** The total size of listed objects. */
+const sizeOf = (page: readonly ListedObject[]) => page.reduce((sum, entry) => sum + entry.bytes, 0)
+
+/**
+ * The objects under a collection's three folders, a page at a time. A key a store lists outside the folder asked for
+ * is left out, so nothing outside the collection's three folders is ever deleted, whatever the store answers.
+ */
+async function* sourcePages(deps: SourceSweepDeps, collectionId: string): AsyncGenerator<ListedObject[]> {
   for (const prefix of sourcePrefixes(collectionId))
-    for await (const page of deps.list(prefix)) yield page.map((entry) => entry.key)
+    for await (const page of deps.list(prefix)) yield page.filter((entry) => entry.key.startsWith(prefix))
 }
 
 /**
- * One run: the due collections (20 by default), each listed folder by folder. A dry run logs each one's files and
- * recorded size and deletes nothing. Otherwise the keys are removed a page at a time, the folders listed again to
- * confirm none is left, and the collection marked. A failure for one collection is logged and listed, leaves no
- * mark, and the run goes on to the next.
+ * One run: the due collections (20 by default), each listed folder by folder; an id that is not a UUID is refused
+ * before any listing. A dry run logs each one's files and their listed size and deletes nothing. Otherwise the keys
+ * are removed a page at a time, the folders listed again to confirm none is left, and the collection marked; the
+ * line pairs the files deleted with their size. A failure for one collection is logged with the files deleted before
+ * it, worded by `describe` (the cron passes its masked summary; by default the error's name alone), and listed; it
+ * leaves no mark, and the run goes on to the next. The report counts every file deleted, a failed collection's too.
  */
 export async function sweepSources(
   deps: SourceSweepDeps,
-  options: { dryRun: boolean; limit?: number; log?: (line: string) => void },
+  options: {
+    dryRun: boolean
+    limit?: number
+    log?: (line: string) => void
+    describe?: (error: unknown) => string
+  },
 ): Promise<SourceSweepReport> {
   const log = options.log ?? ((line: string) => console.log(line))
+  const describe = options.describe ?? failureName
   const due = await deps.due(options.limit ?? SOURCES_PER_RUN)
   const report: SourceSweepReport = {
     dryRun: options.dryRun,
@@ -89,31 +103,41 @@ export async function sweepSources(
     failed: [],
   }
   for (const entry of due) {
+    let deleted = 0
+    let bytes = 0
     try {
+      if (!UUID.test(entry.collectionId)) throw new Error('The due collection id is not a UUID.')
       if (options.dryRun) {
         let found = 0
-        for await (const keys of sourcePages(deps, entry.collectionId)) found += keys.length
+        let size = 0
+        for await (const page of sourcePages(deps, entry.collectionId)) {
+          found += page.length
+          size += sizeOf(page)
+        }
         log(
-          `Source sweep (dry run): ${entry.collectionId} has ${found} original files (${sizeText(entry.bytes)}) due; nothing was deleted.`,
+          `Source sweep (dry run): ${entry.collectionId} has ${found} original files (${sizeText(size)}) due; nothing was deleted.`,
         )
         continue
       }
-      let deleted = 0
-      for await (const keys of sourcePages(deps, entry.collectionId)) {
-        if (!keys.length) continue
-        await deps.remove(keys)
-        deleted += keys.length
+      for await (const page of sourcePages(deps, entry.collectionId)) {
+        if (!page.length) continue
+        await deps.remove(page.map((object) => object.key))
+        deleted += page.length
+        bytes += sizeOf(page)
       }
-      for await (const keys of sourcePages(deps, entry.collectionId))
-        if (keys.length) throw new Error(`${keys.length} original files are still stored.`)
+      for await (const page of sourcePages(deps, entry.collectionId))
+        if (page.length) throw new Error(`${page.length} original files are still stored.`)
       if (await deps.mark(entry.collectionId)) report.marked++
-      report.deleted += deleted
-      log(
-        `Source sweep: deleted ${deleted} original files (${sizeText(entry.bytes)}) of ${entry.collectionId}.`,
-      )
+      log(`Source sweep: deleted ${deleted} original files (${sizeText(bytes)}) of ${entry.collectionId}.`)
     } catch (error) {
       report.failed.push(entry.collectionId)
-      log(`Source sweep: ${entry.collectionId} failed and is tried again tomorrow: ${failureText(error)}`)
+      log(
+        options.dryRun
+          ? `Source sweep: ${entry.collectionId} failed and is tried again tomorrow: ${describe(error)}`
+          : `Source sweep: ${entry.collectionId} failed after deleting ${deleted} original files (${sizeText(bytes)}) and is tried again tomorrow: ${describe(error)}`,
+      )
+    } finally {
+      report.deleted += deleted
     }
   }
   return report
