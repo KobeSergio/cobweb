@@ -10,7 +10,10 @@ import {
 import { parse } from '@/lib/art/schemas'
 import type { Tables } from '@/lib/database.types'
 import type { PhasesContext } from '@/lib/manage/phases-core'
+import { MEDIA_SLOTS, mediaKeysOf, type MintPageMediaRow } from './media'
+import type { StoredSections } from './page-doc'
 import {
+  keysOf,
   mediaAsksSchema,
   presignMintPageMediaCore,
   saveMintPageCore,
@@ -291,5 +294,48 @@ describe("setMintPagePublishedCore and the database's refusals (final fix wave M
       )
       expect(await setMintPagePublishedCore(ctxOf(client), true)).toEqual({ refused })
     }
+  })
+})
+
+describe('the upload sweep beside the save (docs/specs/2026-10-17-production-hardening.md, section 14, point 8)', () => {
+  it('keeps every key a page names with each media slot filled, as the save reads them', () => {
+    const key = (n: number, extension = 'png') =>
+      `${COLLECTION}/${n.toString(16).padStart(64, '0')}.${extension}`
+    const member = (n: number, imageKey: string | null): StoredSections['team']['members'][number] => ({
+      id: `member-${n}`,
+      name: `Member ${n}`,
+      role: 'Artist',
+      bio: '',
+      imageKey,
+    })
+    const sections: StoredSections = {
+      team: { enabled: true, members: [member(1, key(4)), member(2, null), member(3, key(5, 'webp'))] },
+      roadmap: { enabled: true, items: [{ id: 'r1', date: 'Q4', title: 'Mint', description: '' }] },
+      faq: { enabled: true, items: [{ id: 'f1', question: 'When?', answer: 'Soon.' }] },
+      music: { enabled: true, key: key(7, 'mp3'), fileName: 'theme.mp3' },
+      carousel: {
+        enabled: true,
+        items: [
+          { id: 's1', kind: 'upload', key: key(6, 'mp4'), fileName: 'clip.mp4', mediaType: 'video' },
+          { id: 's2', kind: 'token', tokenId: 3 },
+          { id: 's3', kind: 'upload', key: key(8, 'gif'), fileName: 'loop.gif', mediaType: 'image' },
+        ],
+      },
+    }
+    const row: MintPageMediaRow = {
+      banner_key: key(1),
+      avatar_key: key(2, 'jpg'),
+      about_banner_key: key(3, 'webp'),
+      sections,
+    }
+    const saved = keysOf({
+      banner: row.banner_key,
+      avatar: row.avatar_key,
+      about: row.about_banner_key,
+      sections,
+    })
+    // Every slot holds a file here, so a slot added to MediaSlot fails this line until the row fills it.
+    expect(new Set(saved.map(({ slot }) => slot))).toEqual(new Set(Object.keys(MEDIA_SLOTS)))
+    expect(new Set(mediaKeysOf(row))).toEqual(new Set(saved.map(({ key }) => key)))
   })
 })

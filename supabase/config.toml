@@ -456,9 +456,12 @@ additional_redirect_urls = ["https://cobweb-cobweb3.vercel.app/**"]
 
 # The hosted captcha check on wallet sign-in (docs/specs/2026-10-17-production-hardening.md, sections 4.5 and 12):
 # Supabase Auth verifies the Cloudflare Turnstile token with this secret before it checks the signature. Off
-# locally. The owner uncomments it in the change that turns captcha on, once NEXT_PUBLIC_TURNSTILE_SITE_KEY is
-# live on Vercel: a `supabase config push` with it on before the site key is live locks every sign-in out, and
-# one without it turns the hosted check off.
+# locally. This block is the hosted switch's only home: captcha is never turned on or off in the dashboard, since
+# every `supabase config push` sets the hosted auth settings to this file's and would undo it there. The owner
+# uncomments the block in the change that turns captcha on, once NEXT_PUBLIC_TURNSTILE_SITE_KEY is live on
+# Vercel, and it stays uncommented from then on: a push with it on before the site key is live locks every
+# sign-in out, and a push without it turns the hosted check off. After every push the no-token probe runs again:
+# a POST to /auth/v1/token?grant_type=web3 without a captcha token must answer 400 captcha_failed.
 # [remotes.cobweb.auth.captcha]
 # enabled = true
 # provider = "turnstile"

@@ -187,8 +187,11 @@ export function editableSectionsOf(stored: StoredSections, url: (key: string) =>
   }
 }
 
-/** Every media key a row, or a save, names, with its slot. */
-function keysOf(fields: {
+/**
+ * Every media key a row, or a save, names, with its slot. The upload sweep keeps the keys `mediaKeysOf` (media.ts)
+ * names, and a test holds that list to this one, so a slot added here and not there fails it.
+ */
+export function keysOf(fields: {
   banner: string | null
   avatar: string | null
   about: string | null

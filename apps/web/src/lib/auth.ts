@@ -34,7 +34,10 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
  * For anything that changes data: the signed-in creator, confirmed with the auth server.
  * `getSessionUser` verifies the token's signature and expiry locally, which is right for reading,
  * but a token stays valid until it expires even after sign-out. This asks the server, so a
- * signed-out or revoked session is refused at once.
+ * signed-out or revoked session is refused at once. Writes keep this call after the session keys
+ * are rotated to ES256: from then on reads verify against the published key set with no call to
+ * the auth server, and every write still makes its one
+ * (docs/specs/2026-10-17-production-hardening.md, section 6.3).
  */
 export async function getVerifiedUser(): Promise<SessionUser | null> {
   const supabase = await createClient()
