@@ -9,7 +9,8 @@ export const TURNSTILE_SCRIPT_URL = 'https://challenges.cloudflare.com/turnstile
 export const TURNSTILE_LOAD_MS = 15_000
 
 export type TurnstileApi = {
-  render(container: HTMLElement, options: Record<string, unknown>): string
+  /** The new widget's id, or nothing when Turnstile cannot render one into the container. */
+  render(container: HTMLElement, options: Record<string, unknown>): string | undefined
   reset(widgetId: string): void
   remove(widgetId: string): void
 }

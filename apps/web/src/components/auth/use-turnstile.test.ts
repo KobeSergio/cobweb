@@ -158,7 +158,7 @@ const containerElement = () => ({}) as HTMLDivElement
 function fakeTurnstile() {
   const widgets: Record<string, unknown>[] = []
   const api = {
-    render: vi.fn((_container: HTMLElement, options: Record<string, unknown>) => {
+    render: vi.fn<TurnstileApi['render']>((_container, options) => {
       widgets.push(options)
       return `widget-${widgets.length}`
     }),
@@ -171,9 +171,23 @@ function fakeTurnstile() {
 }
 
 describe('useTurnstile (docs/specs/2026-10-17-production-hardening.md, section 6.1)', () => {
+  const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
   beforeEach(() => {
     turnstile.loadTurnstile.mockReset()
+    consoleError.mockClear()
   })
+
+  /** A hook whose widget rendered into its container and holds the token `token-1`. */
+  async function holding() {
+    const fake = fakeTurnstile()
+    turnstile.loadTurnstile.mockResolvedValue(fake.api)
+    const hook = react.mount(() => useTurnstile(SITE_KEY))
+    hook.current.container(containerElement())
+    await settled()
+    fake.call(1, 'callback', 'token-1')
+    expect(hook.current).toMatchObject({ ready: true, failed: false })
+    return { ...fake, hook }
+  }
 
   it('is ready and renders nothing without a site key', async () => {
     const hook = react.mount(() => useTurnstile(null))
@@ -193,6 +207,7 @@ describe('useTurnstile (docs/specs/2026-10-17-production-hardening.md, section 6
     hook.current.container(container)
     await settled()
     expect(api.render).toHaveBeenCalledOnce()
+    expect(api.render.mock.calls[0]![0]).toBe(container)
     expect(api.render).toHaveBeenCalledWith(
       container,
       expect.objectContaining({
@@ -208,6 +223,38 @@ describe('useTurnstile (docs/specs/2026-10-17-production-hardening.md, section 6
     call(1, 'callback', 'token-1')
     expect(hook.current).toMatchObject({ ready: true, failed: false })
     expect(hook.current.token()).toBe('token-1')
+    expect(consoleError).not.toHaveBeenCalled()
+  })
+
+  it('drops the token when it expires, and is ready again with the next one', async () => {
+    const { call, hook } = await holding()
+    call(1, 'expired-callback')
+    expect(hook.current).toMatchObject({ ready: false, failed: false })
+    expect(hook.current.token()).toBeNull()
+    call(1, 'callback', 'token-2')
+    expect(hook.current).toMatchObject({ ready: true, failed: false })
+    expect(hook.current.token()).toBe('token-2')
+  })
+
+  it('fails and drops the token when the check errs, and clears the failure with a new token', async () => {
+    const { call, hook } = await holding()
+    call(1, 'error-callback')
+    expect(hook.current).toMatchObject({ ready: false, failed: true })
+    expect(hook.current.token()).toBeNull()
+    call(1, 'callback', 'token-2')
+    expect(hook.current).toMatchObject({ ready: true, failed: false })
+    expect(hook.current.token()).toBe('token-2')
+  })
+
+  it('asks the live widget for a new token on reset, and drops the one it held', async () => {
+    const { api, call, hook } = await holding()
+    hook.current.reset()
+    expect(api.reset).toHaveBeenCalledExactlyOnceWith('widget-1')
+    expect(hook.current).toMatchObject({ ready: false, failed: false })
+    expect(hook.current.token()).toBeNull()
+    call(1, 'callback', 'token-2')
+    expect(hook.current.ready).toBe(true)
+    expect(hook.current.token()).toBe('token-2')
   })
 
   it('drops the held token when its container goes away, so the next wallet waits for a new one', async () => {
@@ -260,17 +307,40 @@ describe('useTurnstile (docs/specs/2026-10-17-production-hardening.md, section 6
     expect(hook.current).toMatchObject({ ready: false, failed: true })
   })
 
-  it('fails, and holds no widget, when Turnstile refuses to render one', async () => {
+  it('fails, logs the refusal and holds no widget when Turnstile refuses to render one', async () => {
     const { api } = fakeTurnstile()
+    const refusal = new Error('Invalid input for parameter "sitekey".')
     api.render.mockImplementation(() => {
-      throw new Error('Invalid input for parameter "sitekey".')
+      throw refusal
     })
     turnstile.loadTurnstile.mockResolvedValue(api)
     const hook = react.mount(() => useTurnstile(SITE_KEY))
     hook.current.container(containerElement())
     await settled()
     expect(hook.current).toMatchObject({ ready: false, failed: true })
+    expect(consoleError).toHaveBeenCalledExactlyOnceWith(
+      'The browser check could not render its widget.',
+      refusal,
+    )
     hook.current.reset()
     expect(api.reset).not.toHaveBeenCalled()
+  })
+
+  it('fails, logs it and holds no widget when Turnstile answers no widget id', async () => {
+    const { api } = fakeTurnstile()
+    api.render.mockImplementation(() => undefined)
+    turnstile.loadTurnstile.mockResolvedValue(api)
+    const hook = react.mount(() => useTurnstile(SITE_KEY))
+    hook.current.container(containerElement())
+    await settled()
+    expect(hook.current).toMatchObject({ ready: false, failed: true })
+    expect(consoleError).toHaveBeenCalledExactlyOnceWith(
+      'The browser check could not render its widget.',
+      expect.any(Error),
+    )
+    hook.current.reset()
+    hook.current.container(null)
+    expect(api.reset).not.toHaveBeenCalled()
+    expect(api.remove).not.toHaveBeenCalled()
   })
 })

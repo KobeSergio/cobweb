@@ -52,9 +52,12 @@ export function useTurnstile(siteKey: string | null): {
               setFailed(true)
             },
           })
+          if (!id) throw new Error('Turnstile rendered no widget into the container.')
           widget.current = { api, id }
-        } catch {
-          // Turnstile throws when it refuses a parameter, and this promise would swallow the error unseen.
+        } catch (error) {
+          // Turnstile throws when it refuses a parameter and answers no id when it renders no widget; this
+          // promise would swallow either unseen, so it is logged before the check fails.
+          console.error('The browser check could not render its widget.', error)
           setFailed(true)
         }
       },
