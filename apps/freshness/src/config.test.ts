@@ -139,13 +139,27 @@ describe('indexerOptionsOf (docs/specs/2026-10-17-production-hardening.md, secti
         `postgresql://%E0%A4%A:${PASSWORD}@db.example:5432/postgres`,
         'must connect as the cobweb_indexer role',
       ],
+      // postgres.js would throw a bare URIError on it as it builds its client.
+      [`postgresql://cobweb_indexer:%zz${PASSWORD}@db.example:5432/postgres`, 'has a malformed password'],
     ]
     for (const [value, sentence] of cases) {
       const line = errorLine(thrownBy(() => indexerOptionsOf({ INDEXER_DATABASE_URL: value })))
       expect(line).toContain(`ConfigurationError: INDEXER_DATABASE_URL ${sentence}`)
-      for (const part of [PASSWORD, '127.0.0.1', 'db.example', '55322', 'service_role', 'mysql', '%E0'])
+      for (const part of [
+        PASSWORD,
+        '127.0.0.1',
+        'db.example',
+        '55322',
+        'service_role',
+        'mysql',
+        '%E0',
+        '%zz',
+      ])
         expect(line).not.toContain(part)
     }
+    // A password whose special characters are percent-encoded is taken.
+    const encoded = 'postgresql://cobweb_indexer:p%40ss%25w0rd@db.example:5432/postgres'
+    expect(indexerOptionsOf({ INDEXER_DATABASE_URL: encoded })).toEqual({ databaseUrl: encoded })
   })
 
   it('refuses a connection string that asks for unverified TLS to another machine, and lets this machine use plain TCP', () => {
@@ -169,6 +183,15 @@ describe('indexerOptionsOf (docs/specs/2026-10-17-production-hardening.md, secti
     expect(indexerOptionsOf({ INDEXER_DATABASE_URL: `${LOCAL}?sslmode=disable` })).toEqual({
       databaseUrl: `${LOCAL}?sslmode=disable`,
     })
+  })
+
+  it('reads every sslmode and ssl a string names, since postgres.js takes the last of each', () => {
+    for (const weak of ['sslmode=verify-full&sslmode=disable', 'ssl=verify-ca&ssl=false'])
+      expect(errorLine(thrownBy(() => indexerOptionsOf({ INDEXER_DATABASE_URL: `${POOLER}?${weak}` })))).toBe(
+        'ConfigurationError: INDEXER_DATABASE_URL must verify TLS for a database on another machine: leave sslmode out, or set it to verify-full.',
+      )
+    const verified = `${POOLER}?sslmode=verify-ca&sslmode=verify-full`
+    expect(indexerOptionsOf({ INDEXER_DATABASE_URL: verified })).toEqual({ databaseUrl: verified })
   })
 
   it("takes the path of the database's CA certificate from INDEXER_DATABASE_SSL_CA when it is set", () => {

@@ -13,10 +13,12 @@
 // The fixture (scripts/deploy-fixture.ts) reads the settings from the environment, `supabase status -o env` and
 // apps/web/.env.local, and refuses non-local endpoints. The server's indexer connects to the local database as the
 // cobweb_indexer role (docs/specs/2026-10-17-production-hardening.md, section 8.1): through INDEXER_DATABASE_URL
-// when the environment sets a local one, else at a password this run sets through `supabase status`'s DB_URL and
-// clears in its cleanup. The script prints no key, no password and no URL, and a thrown error prints viem's short
-// message or its first line (chain-fixture.ts). Stop any other indexer on the same database first (a running
-// `pnpm --filter @cobweb/freshness dev` with INDEXER_DATABASE_URL set): it would race checks 11, 13 and 15. The
+// when the environment sets a local one, else at a random password this run sets through `supabase status`'s
+// DB_URL as a SCRAM-SHA-256 verifier, so the clear password never leaves this process (the database's log and
+// pg_stat_statements keep the statement as sent), and clears in its cleanup. The script prints no key, password,
+// verifier or URL, and a thrown error prints viem's short message or its first line (chain-fixture.ts). Stop any
+// other indexer on the same database first (a running `pnpm --filter @cobweb/freshness dev` with
+// INDEXER_DATABASE_URL set): it would race checks 11, 13 and 15, and its sessions would fail check 15's count. The
 // indexer reads every collection deployed on Anvil the database lists, the earlier walks' among them, so each
 // server start logs once each one whose deploy is not on this chain, and the cursors it starts or moves for them
 // stay. The cleanup closes the server and deletes the run's own rows: its collection's, with the indexer's for
@@ -24,7 +26,7 @@
 // fresh accounts, 1,200 more blocks and the chain's clock about 1,200 s ahead. Runs under
 // `node --conditions=react-server --import ./scripts/resolve-ts.mjs`.
 
-import { randomBytes } from 'node:crypto'
+import { createHash, createHmac, pbkdf2Sync, randomBytes } from 'node:crypto'
 import postgres from 'postgres'
 import { isAddressEqual, parseEther, type Address, type Hex } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
@@ -79,12 +81,45 @@ const FEE = 100_000_000_000_000n
 const PACE = { passMs: { behind: 200, fast: 500, idle: 500 }, targetsEveryMs: 1_000 }
 /** The indexer's options, its database set at the first start. */
 let indexer: IndexerOptions | null = null
-/** Clears the password this run set on cobweb_indexer, when it set one. */
-let clearPassword: (() => Promise<void>) | null = null
+/**
+ * The local database as `postgres`, from DB_URL, once opened: it sets and clears the role's password and counts
+ * the role's sessions.
+ */
+let ownerSql: postgres.Sql | null = null
+/** Whether this run may have set a password on cobweb_indexer, which the cleanup then clears. */
+let passwordSet = false
+
+/** The local database's URL as `postgres`, from the environment or `supabase status`; a non-local one exits. */
+function ownerUrl(): string {
+  const dbUrl = config('SUPABASE_DB_URL', ['DB_URL'])
+  refuseRemote(dbUrl)
+  return dbUrl
+}
+
+/** The connection as `postgres`, opened at its first use. */
+function owner(): postgres.Sql {
+  ownerSql ??= postgres(ownerUrl(), { max: 1, onnotice: () => {} })
+  return ownerSql
+}
+
+/**
+ * A SCRAM-SHA-256 verifier of a password, which Postgres stores as it is given (RFC 5802 and 7677): the salted
+ * password is PBKDF2 with SHA-256 over a random 16-byte salt at 4,096 iterations, StoredKey the SHA-256 of its
+ * HMAC over "Client Key" and ServerKey its HMAC over "Server Key". The clear password never reaches the database.
+ */
+function scramVerifier(password: string): string {
+  const salt = randomBytes(16)
+  const salted = pbkdf2Sync(password, salt, 4096, 32, 'sha256')
+  const hmac = (text: string) => createHmac('sha256', salted).update(text).digest()
+  const storedKey = createHash('sha256').update(hmac('Client Key')).digest()
+  const base64 = (bytes: Buffer) => bytes.toString('base64')
+  return `SCRAM-SHA-256$4096:${base64(salt)}$${base64(storedKey)}:${base64(hmac('Server Key'))}`
+}
 
 /**
  * The role's connection string: a local INDEXER_DATABASE_URL already set, else the local database as
- * cobweb_indexer at a password set here through DB_URL, which the cleanup clears.
+ * cobweb_indexer at a random password, sent to the database as its verifier through DB_URL and cleared in the
+ * cleanup. The clear password lives only in this process, in the string the server gets.
  */
 async function indexerDatabaseUrl(): Promise<string> {
   const given = process.env.INDEXER_DATABASE_URL?.trim()
@@ -92,19 +127,32 @@ async function indexerDatabaseUrl(): Promise<string> {
     refuseRemote(given)
     return given
   }
-  const dbUrl = config('SUPABASE_DB_URL', ['DB_URL'])
-  refuseRemote(dbUrl)
   const password = randomBytes(24).toString('hex')
-  const owner = postgres(dbUrl, { max: 1, onnotice: () => {} })
-  await owner.unsafe(`alter role cobweb_indexer with password '${password}'`)
-  clearPassword = async () => {
-    await owner.unsafe('alter role cobweb_indexer with password null')
-    await owner.end()
-  }
-  const url = new URL(dbUrl)
+  passwordSet = true
+  await owner().unsafe(`alter role cobweb_indexer with password '${scramVerifier(password)}'`)
+  const url = new URL(ownerUrl())
   url.username = 'cobweb_indexer'
   url.password = password
   return url.toString()
+}
+
+/** The role a connection string logs in as (`select current_user`), its connection closed again. */
+async function loginRole(databaseUrl: string): Promise<string> {
+  const sql = postgres(databaseUrl, { max: 1, onnotice: () => {} })
+  try {
+    const [row] = await sql.unsafe<{ role: string }[]>('select current_user as role')
+    return row?.role ?? 'no role'
+  } finally {
+    await sql.end()
+  }
+}
+
+/** The sessions the database holds as cobweb_indexer, counted as `postgres`. */
+async function indexerSessions(): Promise<number> {
+  const [row] = await owner().unsafe<{ sessions: number }[]>(
+    "select count(*)::int as sessions from pg_stat_activity where usename = 'cobweb_indexer'",
+  )
+  return row?.sessions ?? -1
 }
 /** How long a change may take to reach the tables: a pass, a write and the reads. */
 const RECORDED_WITHIN_MS = 5_000
@@ -259,7 +307,7 @@ async function main(): Promise<void> {
   let before: { counted: boolean } | null = null
 
   await check(
-    '1. setup: Anvil answers as 31337 with the factory approving the shipped code hash, Supabase answers, and the freshness server serves 31337 with its indexer on as cobweb_indexer',
+    "1. setup: Anvil answers as 31337 with the factory approving the shipped code hash, Supabase answers, cobweb_indexer logs in through the run's connection string, and the freshness server serves 31337 with its indexer on as cobweb_indexer",
     async () => {
       const unready = await chainReady()
       if (unready) return unready
@@ -272,6 +320,10 @@ async function main(): Promise<void> {
       const view = await activityViewCore(deployed.ctx)
       if (!('data' in view)) return `the view before: ${JSON.stringify(view)}`
       before = view.data
+      // The role logs in at the password only this process holds, so the verifier set for it is right.
+      indexer ??= { databaseUrl: await indexerDatabaseUrl(), ...PACE }
+      const role = await loginRole(indexer.databaseUrl)
+      if (role !== 'cobweb_indexer') return `the run's connection string logs in as ${role}`
       await startServer()
       const { body } = await healthOf()
       const entry = body.chains.find((chainHealth) => chainHealth.chainId === 31337)
@@ -780,14 +832,19 @@ async function cursorWrites(): Promise<string> {
 
 async function cleanup(): Promise<void> {
   await check(
-    '15. stop: close() ends the indexer: a transfer sent after it changes no row and no cursor is written for 3 s; and the fixtures are removed',
+    '15. stop: close() ends the indexer and its database sessions: none is left as cobweb_indexer, a transfer sent after it changes no row and no cursor is written for 3 s; and the fixtures are removed',
     async () => {
       const run = subject
       const problems: (string | null)[] = [
         await attempt('closing the freshness server', async () => {
           // A server already down cannot show that close() stops its indexer.
           if (!freshness) return 'the freshness server was not running at the stop'
+          const open = await indexerSessions()
+          if (open < 1) return `${open} sessions as cobweb_indexer before close()`
           await stopServer()
+          // close() ends the indexer's connections (db.end()); left open, an idle one would stay for 60 s.
+          if (!(await until(async () => (await indexerSessions()) === 0, 2_000)))
+            return `${await indexerSessions()} sessions as cobweb_indexer after close()`
           const writes = await cursorWrites()
           const rows = run ? await indexedRows(run.deployed.cid) : null
           if (run) {
@@ -817,7 +874,10 @@ async function cleanup(): Promise<void> {
           return run && (await indexedRows(run.deployed.cid)) !== rows ? 'a row changed after close()' : null
         }),
         await attempt('removing the fixtures', removeFixtures),
-        await attempt('clearing the role password', async () => clearPassword?.()),
+        await attempt('clearing the role password', async () => {
+          if (passwordSet) await owner().unsafe('alter role cobweb_indexer with password null')
+          await ownerSql?.end()
+        }),
       ]
       if (run)
         problems.push(

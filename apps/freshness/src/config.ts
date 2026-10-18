@@ -85,13 +85,24 @@ export function indexerOptionsOf(env: Record<string, string | undefined>): Index
 
 const refusal = (sentence: string) => new BaseError(sentence, { name: 'ConfigurationError' })
 
+/** Whether a percent-encoded part of a URL decodes, as postgres.js decodes the password it is given. */
+function decodes(value: string): boolean {
+  try {
+    decodeURIComponent(value)
+    return true
+  } catch {
+    return false
+  }
+}
+
 /**
  * The indexer's options, answered as they are once checked: a `postgres://` or `postgresql://` connection string
- * with a password, whose user is cobweb_indexer, or the session pooler's cobweb_indexer.<project ref>, and which
- * asks for no unverified connection to a database that is not on this machine (an `sslmode` or `ssl` parameter,
- * when given, of verify-ca or verify-full; require, prefer, allow and disable each leave the certificate unchecked
- * or TLS off). A refusal is a viem `BaseError` named `ConfigurationError` whose sentence never carries any part of
- * the value. `startFreshness` checks its options with it before it listens.
+ * with a password that decodes, whose user is cobweb_indexer, or the session pooler's
+ * cobweb_indexer.<project ref>, and which asks for no unverified connection to a database that is not on this
+ * machine (every `sslmode` or `ssl` value, when given, verify-ca or verify-full; require, prefer, allow and
+ * disable each leave the certificate unchecked or TLS off). A refusal is a viem `BaseError` named
+ * `ConfigurationError` whose sentence never carries any part of the value. `startFreshness` checks its
+ * options with it before it listens.
  */
 export function checkIndexerOptions(options: IndexerOptions): IndexerOptions {
   let url: URL | null
@@ -104,6 +115,8 @@ export function checkIndexerOptions(options: IndexerOptions): IndexerOptions {
     throw refusal('INDEXER_DATABASE_URL must be a postgres:// or postgresql:// connection string.')
   if (!url.password)
     throw refusal("INDEXER_DATABASE_URL has no password; include the cobweb_indexer role's password.")
+  if (!decodes(url.password))
+    throw refusal('INDEXER_DATABASE_URL has a malformed password; percent-encode its special characters.')
   let user: string
   try {
     user = decodeURIComponent(url.username)
@@ -112,14 +125,14 @@ export function checkIndexerOptions(options: IndexerOptions): IndexerOptions {
   }
   if (user !== INDEXER_ROLE && !POOLER_USER.test(user))
     throw refusal('INDEXER_DATABASE_URL must connect as the cobweb_indexer role.')
+  // Every value of each: postgres.js takes the last one a string names.
   if (!isLoopbackHost(url.hostname))
-    for (const name of ['sslmode', 'ssl']) {
-      const mode = url.searchParams.get(name)
-      if (mode !== null && !VERIFIED_MODES.includes(mode))
-        throw refusal(
-          'INDEXER_DATABASE_URL must verify TLS for a database on another machine: leave sslmode out, or set it to verify-full.',
-        )
-    }
+    for (const name of ['sslmode', 'ssl'])
+      for (const mode of url.searchParams.getAll(name))
+        if (!VERIFIED_MODES.includes(mode))
+          throw refusal(
+            'INDEXER_DATABASE_URL must verify TLS for a database on another machine: leave sslmode out, or set it to verify-full.',
+          )
   return options
 }
 

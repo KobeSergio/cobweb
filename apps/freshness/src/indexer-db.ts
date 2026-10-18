@@ -66,8 +66,9 @@ const GAP_SENTENCES: readonly string[] = [
 /**
  * A database call that failed: the function and the code, a Postgres code such as 23514, 42501 (a grant is
  * missing), 42883 (the function is missing) or 28P01 (the password is refused), TIMEOUT when the call was
- * abandoned, or NETWORK when no answer came. `gap` when the refusal means the cursors in memory no longer match
- * the database's, so the targets are read again.
+ * abandoned, TLS when Node refused the database's certificate or the handshake, or NETWORK when no answer
+ * came. `gap` when the refusal means the cursors in memory no longer match the database's, so the targets are
+ * read again.
  */
 export class IndexerWriteError extends Error {
   readonly code: string
@@ -219,21 +220,45 @@ export function indexerConnectionOf(
   return { databaseUrl, ssl: { rejectUnauthorized: true } }
 }
 
-/** postgres.js on the connection string: at most 4 connections, no prepared statements, so either pooler mode serves. */
-const connect = (databaseUrl: string, ssl: IndexerTls): IndexerSql =>
-  postgres(databaseUrl, {
+/**
+ * postgres.js on the connection string: at most 4 connections, no prepared statements, so either pooler mode
+ * serves. The TLS object goes in as the `ssl` option, which postgres.js takes over any `sslmode` or `ssl` the
+ * string names, so the string cannot turn the verification off. Building it opens no connection.
+ */
+export function connect(databaseUrl: string, ssl: IndexerTls): postgres.Sql {
+  return postgres(databaseUrl, {
     max: 4,
     prepare: false,
     connect_timeout: 10,
     idle_timeout: 60,
     onnotice: () => {},
     ...(ssl === undefined ? {} : { ssl }),
-  }) as unknown as IndexerSql
+  })
+}
 
-/** A Postgres refusal's code; anything else (a refused connection, a reset, a closed socket) is NETWORK. */
+/**
+ * The certificate checks a database's certificate can fail, as OpenSSL names them; Node's own TLS codes start
+ * with ERR_TLS_ or ERR_SSL_.
+ */
+const CERTIFICATE_CODES: readonly string[] = [
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'CERT_HAS_EXPIRED',
+]
+
+/**
+ * A Postgres refusal's code; TLS for a certificate or a handshake Node refused, whose error postgres.js passes
+ * through unchanged; anything else (a refused connection, a reset, a closed socket) is NETWORK.
+ */
 const codeOf = (error: unknown) => {
   const failure = error as { name?: unknown; code?: unknown }
-  return failure?.name === 'PostgresError' && typeof failure.code === 'string' ? failure.code : 'NETWORK'
+  if (failure?.name === 'PostgresError' && typeof failure.code === 'string') return failure.code
+  const code = typeof failure?.code === 'string' ? failure.code : ''
+  return code.startsWith('ERR_TLS_') || code.startsWith('ERR_SSL_') || CERTIFICATE_CODES.includes(code)
+    ? 'TLS'
+    : 'NETWORK'
 }
 
 /**
@@ -244,7 +269,8 @@ const codeOf = (error: unknown) => {
  */
 export function postgresIndexerDb(
   options: IndexerOptions,
-  open: (databaseUrl: string, ssl: IndexerTls) => IndexerSql = connect,
+  open: (databaseUrl: string, ssl: IndexerTls) => IndexerSql = (databaseUrl, ssl) =>
+    connect(databaseUrl, ssl) as unknown as IndexerSql,
 ): IndexerDb & { end(): Promise<void> } {
   const { databaseUrl, ssl } = indexerConnectionOf(options)
   const sql = open(databaseUrl, ssl)
@@ -267,6 +293,7 @@ export function postgresIndexerDb(
     } catch (error) {
       if (error instanceof IndexerWriteError) throw error
       const message = (error as { message?: unknown })?.message
+      // No cause, by design: postgres.js attaches the query's parameters and the database's message to its error.
       throw new IndexerWriteError(fn, codeOf(error), GAP_SENTENCES.includes(String(message)))
     } finally {
       clearTimeout(timer)

@@ -1,7 +1,8 @@
 import type { Address, Hex } from 'viem'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { errorLine, failureLine } from './health.ts'
+import { errorLine, failureLine, failureName } from './health.ts'
 import {
+  connect,
   DB_TIMEOUT_MS,
   indexerConnectionOf,
   indexerDbOf,
@@ -188,10 +189,20 @@ describe("indexerConnectionOf: the connection's TLS", () => {
     })
     const verified = `${HOSTED}?sslmode=verify-full`
     expect(indexerConnectionOf({ databaseUrl: verified }).ssl).toEqual({ rejectUnauthorized: true })
+    // A string asking for less, were it past the check, is verified all the same.
+    for (const weak of [`${HOSTED}?sslmode=require`, `${HOSTED}?sslmode=disable`])
+      expect(indexerConnectionOf({ databaseUrl: weak }).ssl).toEqual({ rejectUnauthorized: true })
     expect(indexerConnectionOf({ databaseUrl: `${HOSTED}?sslrootcert=system` })).toEqual({
       databaseUrl: HOSTED,
       ssl: { rejectUnauthorized: true },
     })
+  })
+
+  it("hands postgres.js the TLS object as its ssl option, which wins over the string's own sslmode", async () => {
+    // Building the client opens no connection, so end() has none to close.
+    const sql = connect(`${HOSTED}?sslmode=disable`, { rejectUnauthorized: true })
+    expect(sql.options.ssl).toEqual({ rejectUnauthorized: true })
+    await sql.end()
   })
 
   it('trusts the CA the file INDEXER_DATABASE_SSL_CA names, or else the one sslrootcert names, dropping that parameter', () => {
@@ -308,6 +319,37 @@ describe('postgresIndexerDb', () => {
       ['NETWORK', false],
     ])
     expect(errors.map((error) => failureLine(error)).join(' ')).not.toContain('s3cret')
+  })
+
+  it('names a certificate or a handshake Node refused TLS, apart from an unreachable database, never its message', async () => {
+    const altnames = Object.assign(
+      new Error(
+        "Hostname/IP does not match certificate's altnames: Host: db.example. is not in the cert's altnames",
+      ),
+      { code: 'ERR_TLS_CERT_ALTNAME_INVALID' },
+    )
+    const version = Object.assign(new Error('wrong version number'), { code: 'ERR_SSL_WRONG_VERSION_NUMBER' })
+    const selfSigned = Object.assign(new Error('self-signed certificate in certificate chain'), {
+      code: 'SELF_SIGNED_CERT_IN_CHAIN',
+    })
+    const { db } = fakeSql(altnames, version, selfSigned)
+    const errors = [
+      await settled(db.targets(31337)),
+      await settled(db.summaries(31337)),
+      await settled(db.record(WRITE)),
+    ]
+    expect(errors.map(codeOf)).toEqual([
+      ['TLS', false],
+      ['TLS', false],
+      ['TLS', false],
+    ])
+    expect((errors[0] as Error).message).toBe("The indexer's indexer_targets call failed (TLS).")
+    expect(errors.map((error) => failureName(error))).toEqual([
+      'IndexerWriteError (TLS)',
+      'IndexerWriteError (TLS)',
+      'IndexerWriteError (TLS)',
+    ])
+    expect(errors.map((error) => failureLine(error)).join(' ')).not.toContain('db.example')
   })
 
   it('abandons and cancels a call that has not answered after 10 s, so it cannot hold a pass', async () => {
