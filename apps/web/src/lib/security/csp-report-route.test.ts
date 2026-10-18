@@ -35,7 +35,10 @@ const lineBreaks = (text: string) =>
 describe('POST /api/csp-report (docs/specs/2026-10-17-production-hardening.md, section 5.5)', () => {
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
   beforeEach(() => warn.mockClear())
-  afterEach(() => vi.useRealTimers())
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllEnvs()
+  })
 
   it('answers 204 and logs one JSON line per violation', async () => {
     const POST = await route()
@@ -90,6 +93,36 @@ describe('POST /api/csp-report (docs/specs/2026-10-17-production-hardening.md, s
     })
     expect((await POST(post(stream, 'application/csp-report'))).status).toBe(413)
     expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('answers 413 from a declared length over 16 KB alone, before it reads a small body', async () => {
+    const POST = await route()
+    expect(report.length).toBeLessThan(1_024)
+    expect((await POST(post(report, 'application/csp-report', 16_385))).status).toBe(413)
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it("logs a report that names no disposition under the deploy's own mode", async () => {
+    const unnamed = legacy({ disposition: undefined })
+    /** CSP_MODE and VERCEL: report-only named, enforce named on Vercel, then unset on Vercel and off it. */
+    const deploys: [string, string][] = [
+      ['report-only', ''],
+      ['enforce', '1'],
+      ['', '1'],
+      ['', ''],
+    ]
+    const POST = await route()
+    for (const [mode, vercel] of deploys) {
+      vi.stubEnv('CSP_MODE', mode)
+      vi.stubEnv('VERCEL', vercel)
+      expect((await POST(post(unnamed, 'application/csp-report'))).status).toBe(204)
+    }
+    expect(warn.mock.calls.map(([line]) => (JSON.parse(String(line)) as { csp: string }).csp)).toEqual([
+      'report',
+      'enforce',
+      'report',
+      'enforce',
+    ])
   })
 
   it('logs 100 lines a minute, then the count it held back once the minute is over', async () => {

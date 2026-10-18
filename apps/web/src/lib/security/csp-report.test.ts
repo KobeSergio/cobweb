@@ -45,6 +45,9 @@ const lineBreaks = (text: string) =>
 /** The characters a logged field never carries: controls, the C1 range and the line and paragraph separators. */
 const CONTROLS = String.fromCharCode(0x0a, 0x0d, 0x09, 0x00, 0x1b, 0x7f, 0x85, 0x2028, 0x2029)
 
+/** 256 lone high surrogates: no two of them make a pair, and JSON escapes each as `\ud800`. */
+const LONE = String.fromCharCode(0xd800).repeat(256)
+
 const first = (contentType: string, body: unknown) => violationsOf(contentType, body).violations[0]!
 
 describe('violationsOf (docs/specs/2026-10-17-production-hardening.md, section 5.5)', () => {
@@ -151,6 +154,40 @@ describe('violationsOf (docs/specs/2026-10-17-production-hardening.md, section 5
     expect(violationsOf('application/json', legacy({}))).toEqual({ violations: [], malformed: 0 })
     expect(violationsOf('text/plain', [reporting({})])).toEqual({ violations: [], malformed: 0 })
   })
+
+  it("reads a report that names no disposition as the fallback, the deploy's own mode, and enforce without one", () => {
+    const unnamed = legacy({ disposition: undefined })
+    expect(first('application/csp-report', unnamed).disposition).toBe('enforce')
+    expect(violationsOf('application/csp-report', unnamed, 'report').violations[0]!.disposition).toBe(
+      'report',
+    )
+    expect(
+      violationsOf('application/reports+json', [reporting({ disposition: undefined })], 'report')
+        .violations[0]!.disposition,
+    ).toBe('report')
+    // A disposition the browser names is kept, whatever the fallback.
+    expect(violationsOf('application/csp-report', legacy({}), 'report').violations[0]!.disposition).toBe(
+      'enforce',
+    )
+  })
+
+  it('takes null for the blocked URL, the source file and its position in either format, read as absent (CSP3)', () => {
+    const absent = { blocked: 'unknown', source: null, line: null, column: null }
+    expect(
+      violationsOf(
+        'application/csp-report',
+        legacy({ 'blocked-uri': null, 'source-file': null, 'line-number': null, 'column-number': null }),
+      ),
+    ).toEqual({ violations: [{ ...first('application/csp-report', legacy({})), ...absent }], malformed: 0 })
+    expect(
+      violationsOf('application/reports+json', [
+        reporting({ blockedURL: null, sourceFile: null, lineNumber: null, columnNumber: null }),
+      ]),
+    ).toEqual({
+      violations: [{ disposition: 'report', directive: 'connect-src', page: '/collections', ...absent }],
+      malformed: 0,
+    })
+  })
 })
 
 describe('cleanField', () => {
@@ -159,6 +196,12 @@ describe('cleanField', () => {
     expect(cleanField('  \n kept \n ')).toBe('kept')
     expect(cleanField(undefined)).toBe('')
     expect(cleanField('x'.repeat(10_000))).toHaveLength(256)
+  })
+
+  it('drops a lone surrogate, which JSON writes as six characters, and keeps a pair', () => {
+    const pair = String.fromCodePoint(0x1f578)
+    expect(cleanField(`a${LONE.slice(0, 3)}b${String.fromCharCode(0xdc00)}c`)).toBe('abc')
+    expect(cleanField(`a${pair}b`)).toBe(`a${pair}b`)
   })
 })
 
@@ -198,6 +241,22 @@ describe('violationLine', () => {
       blocked: 'inline{"csp":"enforce","directive":"forged"}',
     })
     expect(line).not.toContain('original-policy')
+  })
+
+  it('keeps a report whose every field is 256 lone surrogates to one line near 2 KB', () => {
+    const line = violationLine(
+      first(
+        'application/csp-report',
+        legacy({
+          'effective-directive': LONE,
+          'blocked-uri': LONE,
+          'source-file': LONE,
+          'document-uri': `https://cobweb.example/${LONE}`,
+        }),
+      ),
+    )
+    expect(line.length).toBeLessThan(2_048)
+    expect(line).not.toContain('\\ud')
   })
 })
 

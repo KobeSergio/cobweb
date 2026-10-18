@@ -1,9 +1,11 @@
+import { cspModeOf } from '@/lib/security/csp'
 import { REPORT_MAX_BYTES, reportLimiter, violationLine, violationsOf } from '@/lib/security/csp-report'
 
 /**
  * Where browsers post the policy's violations (docs/specs/2026-10-17-production-hardening.md, section 5.5), in
  * either report format, up to 16 KB: one JSON line per violation, at most 100 a minute per instance, then the
  * count held back. A body that does not parse or fails the report schema is counted with those and never logged.
+ * A report that names no disposition is logged under this deploy's own mode, the one its page was sent with.
  * No session, no database: the proxy's matcher skips this route. 415 for another type, 413 above 16 KB, 400 for
  * a body that is not a report, 204 otherwise.
  */
@@ -51,7 +53,8 @@ export async function POST(request: Request): Promise<Response> {
     logDropped(now)
     return new Response(null, { status: 400 })
   }
-  const { violations, malformed } = violationsOf(type, body)
+  const fallback = cspModeOf(process.env) === 'report-only' ? 'report' : 'enforce'
+  const { violations, malformed } = violationsOf(type, body, fallback)
   for (const violation of violations) if (limiter.allow(now)) console.warn(violationLine(violation))
   for (let count = 0; count < malformed; count++) limiter.drop(now)
   logDropped(now)

@@ -4,9 +4,9 @@ import { z } from 'zod'
  * The policy's violation reports (docs/specs/2026-10-17-production-hardening.md, section 5.5), pure. A report is
  * attacker-controlled input bound for the log, so nothing of it is written as it arrives: each format is read
  * through a schema of allow-listed fields (any other, the original policy among them, is dropped), every string
- * loses its control characters and is cut to 256 characters, the document is kept as its path without query or
- * fragment and a blocked or source URL as its origin or keyword, and the line is one JSON object. A body that
- * fails the schema is counted and dropped unread. The limiter keeps one instance to 100 lines a minute.
+ * loses its control characters and lone surrogates and is cut to 256 characters, the document is kept as its path
+ * without query or fragment and a blocked or source URL as its origin or keyword, and the line is one JSON object.
+ * A body that fails the schema is counted and dropped unread. The limiter keeps one instance to 100 lines a minute.
  */
 
 export const REPORT_MAX_BYTES = 16_384
@@ -31,7 +31,9 @@ export type Violation = {
 const MINUTE_MS = 60_000
 
 const optionalText = z.string().optional()
-const position = z.number().int().nonnegative().optional()
+/** CSP3 declares the blocked URL, the source file and its line and column nullable: null reads as absent. */
+const nullableText = z.string().nullish()
+const position = z.number().int().nonnegative().nullish()
 const disposition = z.enum(['enforce', 'report']).optional()
 
 /** The report-uri format (`application/csp-report`): the fields Cobweb reads, every other one dropped. */
@@ -40,8 +42,8 @@ const legacyReport = z.object({
     'document-uri': optionalText,
     'violated-directive': optionalText,
     'effective-directive': optionalText,
-    'blocked-uri': optionalText,
-    'source-file': optionalText,
+    'blocked-uri': nullableText,
+    'source-file': nullableText,
     'line-number': position,
     'column-number': position,
     disposition,
@@ -52,18 +54,28 @@ const legacyReport = z.object({
 const reportingBody = z.object({
   documentURL: optionalText,
   effectiveDirective: optionalText,
-  blockedURL: optionalText,
-  sourceFile: optionalText,
+  blockedURL: nullableText,
+  sourceFile: nullableText,
   lineNumber: position,
   columnNumber: position,
   disposition,
 })
 
-/** Every code point below 0x20, 0x7f, the C1 range and the line and paragraph separators. */
+/**
+ * Every code point below 0x20, 0x7f, the C1 range, the line and paragraph separators, and a lone surrogate (a
+ * string iterates a pair as one code point above 0xffff), which JSON writes as six characters.
+ */
 const isControl = (code: number) =>
-  code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029
+  code < 0x20 ||
+  (code >= 0x7f && code <= 0x9f) ||
+  code === 0x2028 ||
+  code === 0x2029 ||
+  (code >= 0xd800 && code <= 0xdfff)
 
-/** A string without control characters, so nothing in it can start a log line, trimmed and cut to 256. */
+/**
+ * A string without control characters, so nothing in it can start a log line, and without lone surrogates, so its
+ * JSON stays near its length; trimmed and cut to 256.
+ */
 export function cleanField(value: string | undefined): string {
   return [...(value ?? '')]
     .filter((char) => !isControl(char.codePointAt(0)!))
@@ -95,18 +107,21 @@ function pathOf(value: string | undefined): string {
   }
 }
 
-function violationOf(fields: {
-  disposition?: 'enforce' | 'report'
-  effective?: string
-  violated?: string
-  blocked?: string
-  document?: string
-  source?: string
-  line?: number
-  column?: number
-}): Violation {
+function violationOf(
+  fields: {
+    disposition?: Violation['disposition']
+    effective?: string
+    violated?: string
+    blocked?: string
+    document?: string
+    source?: string
+    line?: number
+    column?: number
+  },
+  fallback: Violation['disposition'],
+): Violation {
   return {
-    disposition: fields.disposition ?? 'enforce',
+    disposition: fields.disposition ?? fallback,
     directive: cleanField(fields.effective) || cleanField(fields.violated).split(' ')[0] || 'unknown',
     blocked: originOrKeyword(fields.blocked) ?? 'unknown',
     page: pathOf(fields.document),
@@ -119,11 +134,13 @@ function violationOf(fields: {
 /**
  * The violations of a report body, and how many reports in it failed the schema (counted, never logged). The
  * report-uri format holds one; a Reporting API list holds one per `csp-violation` report, other report types
- * skipped. Another content type holds none.
+ * skipped. Another content type holds none. A report that names no disposition takes `fallback`: the route passes
+ * the deploy's own mode, under which the browser sent it.
  */
 export function violationsOf(
   contentType: string,
   body: unknown,
+  fallback: Violation['disposition'] = 'enforce',
 ): { violations: Violation[]; malformed: number } {
   const type = contentType.split(';')[0]!.trim().toLowerCase()
   if (type === 'application/csp-report') {
@@ -132,16 +149,19 @@ export function violationsOf(
     const report = parsed.data['csp-report']
     return {
       violations: [
-        violationOf({
-          disposition: report.disposition,
-          effective: report['effective-directive'],
-          violated: report['violated-directive'],
-          blocked: report['blocked-uri'],
-          document: report['document-uri'],
-          source: report['source-file'],
-          line: report['line-number'],
-          column: report['column-number'],
-        }),
+        violationOf(
+          {
+            disposition: report.disposition,
+            effective: report['effective-directive'],
+            violated: report['violated-directive'],
+            blocked: report['blocked-uri'] ?? undefined,
+            document: report['document-uri'],
+            source: report['source-file'] ?? undefined,
+            line: report['line-number'] ?? undefined,
+            column: report['column-number'] ?? undefined,
+          },
+          fallback,
+        ),
       ],
       malformed: 0,
     }
@@ -163,15 +183,18 @@ export function violationsOf(
       continue
     }
     violations.push(
-      violationOf({
-        disposition: parsed.data.disposition,
-        effective: parsed.data.effectiveDirective,
-        blocked: parsed.data.blockedURL,
-        document: parsed.data.documentURL,
-        source: parsed.data.sourceFile,
-        line: parsed.data.lineNumber,
-        column: parsed.data.columnNumber,
-      }),
+      violationOf(
+        {
+          disposition: parsed.data.disposition,
+          effective: parsed.data.effectiveDirective,
+          blocked: parsed.data.blockedURL ?? undefined,
+          document: parsed.data.documentURL,
+          source: parsed.data.sourceFile ?? undefined,
+          line: parsed.data.lineNumber ?? undefined,
+          column: parsed.data.columnNumber ?? undefined,
+        },
+        fallback,
+      ),
     )
   }
   return { violations, malformed }
