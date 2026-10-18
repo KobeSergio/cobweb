@@ -4,10 +4,10 @@
 // it with a minimum age of 0, and never touches the recorded one. Also checks the script refuses a
 // remote Supabase. Then the daily cron's two ports (docs/specs/2026-10-17-production-hardening.md,
 // section 14, point 8) on the same collection's prefix: the art bucket's, and the mint-page bucket's
-// against the collection's page, and 80 day-old objects under that prefix, 40 of them recorded, more
-// than one read of 100 keys could name past the API gateway's 8 KB request line, judged by the script
-// and the art port. Anything unset is discovered with `supabase status -o env`. Never prints a key.
-// Runs under `node --conditions=react-server --import ./scripts/resolve-ts.mjs`.
+// against the collection's page, and 80 day-old objects under that prefix, 40 of them recorded: more
+// objects than one read can name under the API gateway's 8 KB request line (68 keys of this shape),
+// judged by the script and the art port. Anything unset is discovered with `supabase status -o env`.
+// Never prints a key. Runs under `node --conditions=react-server --import ./scripts/resolve-ts.mjs`.
 //
 //   pnpm --filter @cobweb/web verify:sweep
 
@@ -239,7 +239,7 @@ await check(
   },
 )
 
-/** More objects than one read of 100 keys can name: the gateway refuses a request line over 8 KB with 414. */
+/** More objects than one read can name under the gateway's 8 KB request line (68 keys of this shape). */
 const BULK = 80
 const bulkKeys: string[] = []
 await check(
