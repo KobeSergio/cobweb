@@ -15,3 +15,14 @@ line_length = 120
 
 [lint]
 lint_on_build = false
+
+# The deep invariant run (docs/specs/2026-10-18-load-run-contract-review-and-cloudflare.md, section 7.6), run once by
+# hand as `FOUNDRY_PROFILE=deep forge test` and never in CI, which runs the default campaign of 256 runs of depth 500.
+[profile.deep.invariant]
+runs = 1000
+depth = 1000
+fail_on_revert = false
+show_metrics = true
+
+[profile.deep.fuzz]
+runs = 10000

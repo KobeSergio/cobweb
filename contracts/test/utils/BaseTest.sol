@@ -42,6 +42,11 @@ contract EtherRejecter {
         collection.batchMint{value: msg.value}(amount, mintGroup);
     }
 
+    /// @dev Claims the refunds held for this contract to an address that can receive them.
+    function claimTo(CobwebCollection collection, address to) external returns (uint256) {
+        return collection.withdrawPendingBalanceTo(to);
+    }
+
     function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
         return this.onERC721Received.selector;
     }
