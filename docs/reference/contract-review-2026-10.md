@@ -78,8 +78,9 @@ leaves through a withdrawal of its own, each reverting on a failed transfer and,
 before the transfer: `withdrawMintFunds` sends the creator's balance to the payout address, `withdrawPlatformFees` the
 platform's to the factory's current treasury, `withdrawPendingBalance` and `withdrawPendingBalanceTo` (two entry points
 to one internal function) a caller's own held refunds, and the factory's `withdraw` its whole balance to the treasury.
-So the collection holds exactly the creator's balance, the platform's and the held refunds, which invariant 1 holds;
-ether forced in from outside (a selfdestruct) or sent with a transfer or an approval is owed to no one and stays.
+So the collection holds exactly what it owes, unless ether arrives outside a mint or airdrop: the creator's balance,
+the platform's and the held refunds, which invariant 1 holds; ether forced in from outside (a selfdestruct) or sent
+with a transfer or an approval is owed to no one and stays.
 
 **Access.** The owner (the creator) controls the sale: groups, prices, supplies, schedules, quotas, the public cap, the
 on-behalf switch, the base URI, the payout address, royalties, airdrops and the transfer validator. The payout address
@@ -251,4 +252,6 @@ owes a new approval.
     first chunk is minted, the token count grows chunk by chunk), and no on-chain decision reads them.
   - `approve`, `transferFrom` and both `safeTransferFrom` are `payable` in ERC721A 4.2.3, as ERC-721 declares them:
     ether sent with one credits no one, reaches no ledger, and no withdrawal sends it out. No handler sends ether with
-    them.
+    them. It is not a lock under the spec's decision 11, so the review found nothing to fix there: only the sender's own
+    mistaken ether stays, the signatures are ones every ERC721A collection shares, and a fix would move the creation
+    code hash.
