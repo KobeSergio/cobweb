@@ -6,13 +6,15 @@ sections 9 and 13). It names the zone's domain `<zone>`, the app's `<app domain>
 and the freshness server's `<freshness domain>` (a first-level subdomain such as `fresh.<zone>`, since the free edge
 certificate covers the apex and one level of subdomains). `pnpm --filter @cobweb/web check:edge` reads the result from
 outside in 13 checks; run it once the zone is set and again after any change to it. The sections follow the spec's
-section 13: Before the zone is its step 1, sections 1 to 8 are its steps 2 to 10 (section 8 holds steps 9 and 10), and
-sections 9 to 11 are its steps 11 to 13.
+section 13: Before the zone is its step 1, sections 1 to 8 are its steps 2 to 10 (section 8 holds steps 9 and 10 and
+moves the `/health` monitor), and sections 9 to 11 are its steps 11 to 13, section 9 ending with step 5's removal of
+Railway's generated domain.
 
 ## What the setup relies on, and the check that proves it
 
 - Cloudflare caches by file extension unless a rule makes an answer eligible; with the rule's edge TTL taken from the
-  origin, `s-maxage` sets it: 1 s for a state and 5 s for a wallet (checks 3, 4 and 8).
+  origin, the server sends `Cloudflare-CDN-Cache-Control` and the edge reads its `max-age` and stale directives from it,
+  with `Cache-Control`'s `s-maxage` as the fallback, so a state holds 1 s and a wallet 5 s (checks 3, 4 and 8).
 - The edge keeps the origin's weak ETag and answers 304 to a matching `If-None-Match` from its copy (checks 3 and 5).
 - The edge does not let a browser's request directives pass its copy: the mint page's first poll carries
   `Cache-Control: no-cache` and `Pragma: no-cache`, and every later one `Cache-Control: max-age=0` (checks 3, 5 and 6).
@@ -49,11 +51,8 @@ Phase 1 owes.
 - Railway (service freshness, Settings, Networking): add `<freshness domain>` as a custom domain.
 - Cloudflare DNS: a CNAME for `<freshness domain>` to the target Railway shows, DNS only.
 - Once Railway shows its certificate, switch the record to Proxied.
-- Once `https://<freshness domain>/health` answers through Cloudflare (a `cf-ray` header in the output of
-  `curl -s -D - -o /dev/null https://<freshness domain>/health`) and no deployment polls Railway's generated domain,
-  remove that domain from the service, so no client can poll the origin around the edge. If Vercel's
-  `NEXT_PUBLIC_FRESHNESS_URL` still names it, remove it after section 8's redeploy: removed sooner, the mint pages lose
-  their live data until then.
+- Railway's generated domain stays until `check:edge` passes in section 9, which removes it: removed sooner, the mint
+  pages of a deployment that still polls it lose their live data.
 
 Supabase, R2's S3 endpoint and the IPFS gateway stay outside the zone; Cloudflare never fronts Supabase.
 
@@ -73,11 +72,13 @@ Make each Cache Rule on the Cache Rules page (Caching, Cache Rules): Create rule
   - Respect Strong ETags: off (the default).
 - Cache Rule "Freshness health":
   - When: `(http.host eq "<freshness domain>" and http.request.uri.path eq "/health")`
-  - Cache eligibility: Bypass cache.
+  - Cache eligibility: Bypass cache. The rule changes nothing while the `/v1/` rule is the only one making anything
+    cacheable (`/health` reads DYNAMIC without it), so a FAIL 2 does not mean this rule is missing: another rule or a
+    changed header reached `/health`.
 - Tiered Cache: Smart Tiered Caching Topology on, so every colo fills from one upper tier and the origin sees about one
   state request a second per collection however many colos serve a launch.
 - Caching, Configuration: Browser Cache TTL "Respect Existing Headers"; Always Online off, so an origin failure is met by
-  the edge's copy under `stale-if-error`, not an archived page.
+  the edge's copy under the `stale-if-error` of `Cloudflare-CDN-Cache-Control`, not an archived page.
 - No other cache rule, and never Cache Everything on `<app domain>`: each page carries its own response's nonce, and a
   cached page would hand every visitor the same one.
 
@@ -87,7 +88,8 @@ Each injects a script the nonce policy would block or rewrites what the app send
 that show in the answers they read.
 
 - [ ] Rocket Loader (Speed, Settings, Content Optimization)
-- [ ] Speed Brain (Speed, Settings, Content Optimization; it adds a `Speculation-Rules` header to the app's answers)
+- [ ] Speed Brain (Speed, Settings, Content Optimization; it adds a `Speculation-Rules` header to the app's answers;
+  on by default on the Free plan)
 - [ ] Cloudflare Fonts (Speed, Settings, Content Optimization)
 - [ ] Email Address Obfuscation (Security, Settings, filtered by Client-side abuse; on by default for a new zone)
 - [ ] Web Analytics' automatic setup (its beacon; the Web Analytics page, Manage site, Disable)
@@ -109,8 +111,9 @@ that show in the answers they read.
 
 - Turnstile: add `<app domain>` to the sign-in widget's hostnames.
 - Vercel: `NEXT_PUBLIC_FRESHNESS_URL=https://<freshness domain>` on Production and Preview, then a redeploy: the value is
-  read at build time, and the policy's `connect-src` follows it. If section 4 waited for this redeploy, remove
-  Railway's generated domain now.
+  read at build time, and the policy's `connect-src` follows it.
+- The `/health` monitor: point it at `https://<freshness domain>/health` (the keyword `"status":"ok"` every minute, as
+  before), since section 9 removes Railway's generated domain.
 - Railway: nothing else; the freshness server reads no setting of the zone.
 
 ## 9. check:edge
@@ -142,9 +145,15 @@ two tries is decided by the owner's rerun, as it is for checks 4 and 8. A failur
 | 12. nothing injected | the feature named, in the list that stays off. |
 | 13. transport | Always Use HTTPS, and HSTS (Vercel's header, or Cloudflare's if Vercel sends none). |
 
-If check 4 shows the edge ignoring `s-maxage`, the fix is the controller's (decision 21): the state answer adds
-`Cloudflare-CDN-Cache-Control: max-age=1, stale-while-revalidate=1, stale-if-error=60` and the wallet answer
-`Cloudflare-CDN-Cache-Control: max-age=5`, a header Cloudflare reads before `Cache-Control` and no browser reads.
+The server sends `Cloudflare-CDN-Cache-Control: max-age=1, stale-while-revalidate=1, stale-if-error=60` with the state
+and `Cloudflare-CDN-Cache-Control: max-age=5, stale-if-error=60` with a wallet, a header Cloudflare reads before
+`Cache-Control` and no browser reads. The edge takes its `max-age` and stale directives from it, with `Cache-Control`'s
+`s-maxage` as the fallback, since `s-maxage` alone turns `stale-while-revalidate` off and leaves `stale-if-error`
+unread.
+
+Once `check:edge` reads `13 passed, 0 failed`, remove Railway's generated domain from the service (Railway, service
+freshness, Settings, Networking), so no client can poll the origin around the edge: check 11 has shown the rebuilt
+policy's `connect-src` naming the freshness origin, and the `/health` monitor reads the custom domain since section 8.
 
 ## 10. The report week's positive control
 
@@ -158,8 +167,8 @@ Vercel log shows a line that begins `{"csp":"report","directive":"script-src-att
 From the repository root, on a machine with 8 cores and 16 GB of memory on a steady line, with k6 installed, once
 check:edge passes: a rehearsal first, which also proves the machine, with the Railway service restarted once in its
 second minute (Railway, service freshness, Deployments, Restart; its failed rate, `Age` and edge counts recorded, not
-gated). The restart can fail the rehearsal's thresholds, so what it proves about the machine is read from the
-`Dropped iterations` figure in its `Failed:` summary line, not from every threshold passing:
+gated). k6's thresholds on `Age`, the failed rate and `/health` fail around the restart by design, so the machine is
+proven by the `Failed:` summary line alone, with `Dropped iterations` at most 1,005 and `Edge mitigations: 0`:
 
 ```
 k6 run --include-system-env-vars=false \
@@ -194,16 +203,14 @@ lower the zone's protection for the run.
   BYPASS entries over the 180 s hosted run), which are uncached by design and not part of the cache thresholds.
 - Until Railway's generated domain is removed, the origin answers around the edge.
 - A Cloudflare outage or a wrong setting takes the mint page's live data with it: the page raises its own degraded
-  banner after 10 s, and the way back is a Railway domain generated again (Railway, service freshness, Settings,
-  Networking), `NEXT_PUBLIC_FRESHNESS_URL` set to it and a redeploy, the policy following. For a wrong setting alone,
-  the freshness record set to DNS only is quicker and needs no redeploy, since Railway holds the custom domain's
-  certificate.
+  banner after 10 s, and the way back is the freshness record switched to DNS only: Railway serves the custom domain on
+  its own certificate, so the mint pages reach the origin with no redeploy and the policy unchanged.
 - Creators sign in on the Vercel domain until the third sub-project adds `<app domain>` to the sign-in origins; visitors
   read and mint on either.
 - A creator's text with an email address shows as written only while Email Address Obfuscation stays off.
 - `check:edge` reads from one place, so it proves the colo nearest the machine that runs it.
 - Check 12 reads PASS when no HTML page was read, and check 10 then fails with a status or type other than 200 HTML; so
-  beside such a FAIL 10, a PASS 12 means the app domain served no page, not a clean page.
+  beside such a FAIL 10, when the FAIL 10 names `/`, a PASS 12 means the app domain served no page, not a clean page.
 - A PASS on check 13 does not prove Always Use HTTPS is on: Vercel redirects http by itself behind Full (strict), and
   the check's sentence is about the redirect.
 - The script's page reads carry Node's default request headers rather than a browser's, so a feature that reacts only
