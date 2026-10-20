@@ -5,12 +5,14 @@ The zone the owner sets by hand in Cloudflare's dashboard, in this order, and th
 sections 9 and 13). It names the zone's domain `<zone>`, the app's `<app domain>` (the apex or a first-level subdomain)
 and the freshness server's `<freshness domain>` (a first-level subdomain such as `fresh.<zone>`, since the free edge
 certificate covers the apex and one level of subdomains). `pnpm --filter @cobweb/web check:edge` reads the result from
-outside in 13 checks; run it once the zone is set and again after any change to it.
+outside in 13 checks; run it once the zone is set and again after any change to it. The sections follow the spec's
+section 13: Before the zone is its step 1, sections 1 to 8 are its steps 2 to 10 (section 8 holds steps 9 and 10), and
+sections 9 to 11 are its steps 11 to 13.
 
 ## What the setup relies on, and the check that proves it
 
 - Cloudflare caches by file extension unless a rule makes an answer eligible; with the rule's edge TTL taken from the
-  origin, `s-maxage` sets it: 1 s for a state, 5 s for a wallet, 10 s for a refusal (checks 3, 4 and 8).
+  origin, `s-maxage` sets it: 1 s for a state and 5 s for a wallet (checks 3, 4 and 8).
 - The edge keeps the origin's weak ETag and answers 304 to a matching `If-None-Match` from its copy (checks 3 and 5).
 - The edge does not let a browser's request directives pass its copy: the mint page's first poll carries
   `Cache-Control: no-cache` and `Pragma: no-cache`, and every later one `Cache-Control: max-age=0` (checks 3, 5 and 6).
@@ -29,10 +31,11 @@ Phase 1 owes.
 
 ## 2. TLS
 
-- SSL/TLS encryption mode: Full (strict), so the edge verifies each origin's certificate.
+- SSL/TLS encryption mode (SSL/TLS, Overview): Custom SSL/TLS, then Full (strict), so the edge verifies each origin's
+  certificate. The Overview defaults to Automatic SSL/TLS.
 - Edge Certificates: Always Use HTTPS on; Minimum TLS Version 1.2; Automatic HTTPS Rewrites as it is.
-- HSTS: off, unless check 13 finds no `Strict-Transport-Security` on `/`; then on at six months, without
-  `includeSubDomains` and without preload. A preload waits until after the launch.
+- HSTS (SSL/TLS, Edge Certificates): off, unless check 13 finds no `Strict-Transport-Security` on `/`; then on at six
+  months, without `includeSubDomains` and without preload. A preload waits until after the launch.
 
 ## 3. The app domain
 
@@ -46,12 +49,18 @@ Phase 1 owes.
 - Railway (service freshness, Settings, Networking): add `<freshness domain>` as a custom domain.
 - Cloudflare DNS: a CNAME for `<freshness domain>` to the target Railway shows, DNS only.
 - Once Railway shows its certificate, switch the record to Proxied.
-- Once `https://<freshness domain>/health` answers through Cloudflare (a `cf-ray` header), remove Railway's generated
-  domain from the service, so no client can poll the origin around the edge.
+- Once `https://<freshness domain>/health` answers through Cloudflare (a `cf-ray` header in the output of
+  `curl -s -D - -o /dev/null https://<freshness domain>/health`) and no deployment polls Railway's generated domain,
+  remove that domain from the service, so no client can poll the origin around the edge. If Vercel's
+  `NEXT_PUBLIC_FRESHNESS_URL` still names it, remove it after section 8's redeploy: removed sooner, the mint pages lose
+  their live data until then.
 
 Supabase, R2's S3 endpoint and the IPFS gateway stay outside the zone; Cloudflare never fronts Supabase.
 
 ## 5. Cache
+
+Make each Cache Rule on the Cache Rules page (Caching, Cache Rules): Create rule, then Custom filter expression under
+"When incoming requests match", then Edit expression to paste the When line.
 
 - Cache Rule "Freshness API":
   - When: `(http.host eq "<freshness domain>" and starts_with(http.request.uri.path, "/v1/"))`
@@ -77,14 +86,14 @@ Supabase, R2's S3 endpoint and the IPFS gateway stay outside the zone; Cloudflar
 Each injects a script the nonce policy would block or rewrites what the app sends; checks 9, 11 and 12 fail on those
 that show in the answers they read.
 
-- [ ] Rocket Loader (Speed, Optimization)
-- [ ] Speed Brain (it adds a `Speculation-Rules` header to the app's answers)
-- [ ] Cloudflare Fonts
-- [ ] Email Address Obfuscation (Scrape Shield; on by default for a new zone)
-- [ ] Web Analytics' automatic setup (its beacon)
-- [ ] Zaraz
-- [ ] Bot Fight Mode and its JavaScript detections
-- [ ] Managed Transforms (Rules, Transform Rules)
+- [ ] Rocket Loader (Speed, Settings, Content Optimization)
+- [ ] Speed Brain (Speed, Settings, Content Optimization; it adds a `Speculation-Rules` header to the app's answers)
+- [ ] Cloudflare Fonts (Speed, Settings, Content Optimization)
+- [ ] Email Address Obfuscation (Security, Settings, filtered by Client-side abuse; on by default for a new zone)
+- [ ] Web Analytics' automatic setup (its beacon; the Web Analytics page, Manage site, Disable)
+- [ ] Zaraz (Zaraz, Settings: Auto-inject script off)
+- [ ] Bot Fight Mode and its JavaScript detections (Security, Settings, filtered by Bot traffic)
+- [ ] Managed Transforms (Rules, Settings, the Managed Transforms tab)
 
 ## 7. Security
 
@@ -100,7 +109,8 @@ that show in the answers they read.
 
 - Turnstile: add `<app domain>` to the sign-in widget's hostnames.
 - Vercel: `NEXT_PUBLIC_FRESHNESS_URL=https://<freshness domain>` on Production and Preview, then a redeploy: the value is
-  read at build time, and the policy's `connect-src` follows it.
+  read at build time, and the policy's `connect-src` follows it. If section 4 waited for this redeploy, remove
+  Railway's generated domain now.
 - Railway: nothing else; the freshness server reads no setting of the zone.
 
 ## 9. check:edge
@@ -109,12 +119,12 @@ that show in the answers they read.
 pnpm --filter @cobweb/web check:edge --app https://<app domain> --freshness https://<freshness domain> --collection <chain id>/<address>
 ```
 
-Add `--slug <mint page link>` once the hosted app leaves sample mode: the owner's test collection's mint page carries
-an email address (`hello@<app domain>`) in its description, so check 12 can see Email Address Obfuscation; until then
-that setting is checked by eye. Expected: `13 passed, 0 failed`. Checks 4 and 8 depend on timing, so one failure on a
-slow line is decided by a rerun. Checks 3, 5, 6 and 7 take two tries in the script before a failure stands, since the
-state's 1 s copy can expire between a check's priming poll and its judged poll on a correct zone; a failure after two
-tries is decided by the owner's rerun, as it is for checks 4 and 8. A failure names the setting to look at:
+Add `--slug <mint page link>` once the hosted app leaves sample mode: put an email address (`hello@<app domain>`) in the
+description of the test collection's mint page and publish it, so check 12 can see Email Address Obfuscation; until
+then that setting is checked by eye. Expected: `13 passed, 0 failed`. Checks 4 and 8 depend on timing, so one failure
+on a slow line is decided by a rerun. Checks 3, 5, 6 and 7 take two tries in the script before a failure stands, since
+the state's 1 s copy can expire between a check's priming poll and its judged poll on a correct zone; a failure after
+two tries is decided by the owner's rerun, as it is for checks 4 and 8. A failure names the setting to look at:
 
 | Check | Look at |
 | --- | --- |
@@ -147,7 +157,9 @@ Vercel log shows a line that begins `{"csp":"report","directive":"script-src-att
 
 From the repository root, on a machine with 8 cores and 16 GB of memory on a steady line, with k6 installed, once
 check:edge passes: a rehearsal first, which also proves the machine, with the Railway service restarted once in its
-second minute (its failed rate, `Age` and edge counts recorded, not gated):
+second minute (Railway, service freshness, Deployments, Restart; its failed rate, `Age` and edge counts recorded, not
+gated). The restart can fail the rehearsal's thresholds, so what it proves about the machine is read from the
+`Dropped iterations` figure in its `Failed:` summary line, not from every threshold passing:
 
 ```
 k6 run --include-system-env-vars=false \
@@ -165,14 +177,14 @@ k6 run --include-system-env-vars=false \
 ```
 
 Both commands carry `--include-system-env-vars=false`: k6 passes the shell's variables into `__ENV` by default, so a
-`POLLERS`, `INTERVAL_S`, `WALLETS` or `SUMMARY_FILE` left exported from the rehearsal would change the full run without
-a word.
+`POLLERS`, `INTERVAL_S` or `WALLETS` left exported from the rehearsal would change the full run without a word.
 
 `COLLECTIONS` lists one to three deployed Cobweb collections on a chain the hosted freshness service serves, the
 pollers shared among them. The summary lines and the JSON summary go to the controller for the dated notes. If
 `Edge mitigations` reads above 0, Cloudflare's automatic protection challenged the single machine: run the same command
-on two or three machines with `POLLERS` and `WALLETS` divided between them, and never lower the zone's protection for
-the run.
+on two or three machines with `POLLERS` and `WALLETS` divided between them, as whole `-e` numbers (two machines:
+`-e POLLERS=10000 -e WALLETS=2500` on each; three machines: `-e POLLERS=6667 -e WALLETS=1667` on each), and never
+lower the zone's protection for the run.
 
 ## Known
 
@@ -182,14 +194,16 @@ the run.
   BYPASS entries over the 180 s hosted run), which are uncached by design and not part of the cache thresholds.
 - Until Railway's generated domain is removed, the origin answers around the edge.
 - A Cloudflare outage or a wrong setting takes the mint page's live data with it: the page raises its own degraded
-  banner after 10 s, and the way back is `NEXT_PUBLIC_FRESHNESS_URL` set to Railway's domain and a redeploy, the policy
-  following.
+  banner after 10 s, and the way back is a Railway domain generated again (Railway, service freshness, Settings,
+  Networking), `NEXT_PUBLIC_FRESHNESS_URL` set to it and a redeploy, the policy following. For a wrong setting alone,
+  the freshness record set to DNS only is quicker and needs no redeploy, since Railway holds the custom domain's
+  certificate.
 - Creators sign in on the Vercel domain until the third sub-project adds `<app domain>` to the sign-in origins; visitors
   read and mint on either.
 - A creator's text with an email address shows as written only while Email Address Obfuscation stays off.
 - `check:edge` reads from one place, so it proves the colo nearest the machine that runs it.
-- Check 12 reads PASS when no HTML page was read, and check 10 then fails, so a run with FAIL 10 and PASS 12 means the
-  app domain served no page, not a clean page.
+- Check 12 reads PASS when no HTML page was read, and check 10 then fails with a status or type other than 200 HTML; so
+  beside such a FAIL 10, a PASS 12 means the app domain served no page, not a clean page.
 - A PASS on check 13 does not prove Always Use HTTPS is on: Vercel redirects http by itself behind Full (strict), and
   the check's sentence is about the redirect.
 - The script's page reads carry Node's default request headers rather than a browser's, so a feature that reacts only
