@@ -506,6 +506,8 @@ answers 200 with `Cache-Control: no-store` whatever it reports, and HEAD likewis
 
 > **18 October 2026:** `/health` gains `status: 'ok' | 'degraded'` and `problems`, one sentence per threshold crossed ([2026-10-17-production-hardening.md](2026-10-17-production-hardening.md), section 8.2): for a chain with hot collections, no good read for 60 s or a head 120 s old; more than 10 failed reads in 5 minutes (`failedTicksRecent`); for its indexer, no good pass for 120 s, collections behind for 900 s or more than 5 failed passes in 5 minutes. It stays 200, so Railway's deploy check never refuses a deployment during an RPC outage; a monitor keys on the body.
 
+> **20 October 2026:** `/health` gains `requests`, the origin's answers over the last 60 s ([2026-10-18-load-run-contract-review-and-cloudflare.md](2026-10-18-load-run-contract-review-and-cloudflare.md), section 4): state answers of 200 or 304 (HEAD as GET) and the 304s among them, wallet answers of 200 and refusals of 400 or above on any route, with the number of collections asked for and the busiest one's count, kept per whole second and naming no address. Preflights and `/health` itself are not counted, and `status` and `problems` do not read it.
+
 ### 6.10 What the mint page relies on
 
 The second sub-project builds on these answers:
@@ -741,6 +743,8 @@ Owed to Phase 7:
   staleness from `readAt` on 200s, since a 304 keeps an older body by design.
 - Alerts on `/health`'s lag, failed ticks and gaps; the second replica; the freshness origin in the full CSP's
   `connect-src`.
+
+> **20 October 2026:** The Cloudflare rule landed as a checklist the owner applies by hand ([../reference/cloudflare-setup.md](../reference/cloudflare-setup.md)) and `check:edge`, which proves the zone from outside in 13 checks, among them the 1 s edge, the weak ETags kept, the 304s from the edge's copy and the browser's directives never passing it ([2026-10-18-load-run-contract-review-and-cloudflare.md](2026-10-18-load-run-contract-review-and-cloudflare.md), sections 8 and 9). No rate limit (its decision 19): `/health`'s `refused` count shows a spray, and the Known "No origin rate limit" stands. The k6 run landed with two profiles, a local one `verify:load` runs on Anvil and a hosted one the owner runs behind Cloudflare; it judges staleness as the page does, by `Age` and `degraded`, not by `readAt` (its reconciliation 4).
 
 Owed to the second sub-project: the database and the public read path (`mint_pages`, the `mint-page` bucket,
 `public.mint_page`), the mint page on the answers of 6.10 with the web app's variable for the freshness origin, and a

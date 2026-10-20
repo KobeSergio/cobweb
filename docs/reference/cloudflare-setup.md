@@ -167,7 +167,7 @@ Vercel log shows a line that begins `{"csp":"report","directive":"script-src-att
 From the repository root, on a machine with 8 cores and 16 GB of memory on a steady line, with k6 installed, once
 check:edge passes: a rehearsal first, which also proves the machine, with the Railway service restarted once in its
 second minute (Railway, service freshness, Deployments, Restart; its failed rate, `Age` and edge counts recorded, not
-gated). k6's thresholds on `Age`, the failed rate and `/health` fail around the restart by design, so the machine is
+gated). k6's thresholds on `Age` and `/health` fail around the restart by design, and the failed rate stays under 1% only if the edge serves the state stale, so the machine is
 proven by the `Failed:` summary line alone, with `Dropped iterations` at most 1,005 and `Edge mitigations: 0`:
 
 ```
@@ -204,7 +204,7 @@ lower the zone's protection for the run.
 - Until Railway's generated domain is removed, the origin answers around the edge.
 - A Cloudflare outage or a wrong setting takes the mint page's live data with it: the page raises its own degraded
   banner after 10 s, and the way back is the freshness record switched to DNS only: Railway serves the custom domain on
-  its own certificate, so the mint pages reach the origin with no redeploy and the policy unchanged.
+  its own certificate, so the mint pages reach the origin with no redeploy and the policy unchanged. In an outage that takes Cloudflare's dashboard down with the proxy, a Railway domain generated again (Railway, service freshness, Settings, Networking), `NEXT_PUBLIC_FRESHNESS_URL` set to it and a redeploy restore live data without Cloudflare.
 - Creators sign in on the Vercel domain until the third sub-project adds `<app domain>` to the sign-in origins; visitors
   read and mint on either.
 - A creator's text with an email address shows as written only while Email Address Obfuscation stays off.

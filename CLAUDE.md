@@ -31,6 +31,8 @@ pnpm install
 pnpm typecheck | lint | test | build     # all packages, through Turborepo
 pnpm format                               # Prettier
 cd contracts && forge test                # contracts
+cd contracts && uvx --python 3.12 --from slither-analyzer==0.11.6 slither . --config-file slither.config.json   # Slither with the triage database; brew install uv once
+cd contracts && FOUNDRY_PROFILE=deep forge test   # the deep invariant run, about 11 minutes
 (umask 077 && echo '[]' > supabase/signing_keys.json) && supabase gen signing-key --algorithm ES256 --yes   # once, before the first supabase start: the local ES256 session key in supabase/signing_keys.json (gitignored)
 supabase start && pnpm --filter @cobweb/web dev      # web app against local Supabase
 pnpm --filter @cobweb/web verify:local    # sign-in and access-rule checks; run after any migration change
@@ -54,6 +56,9 @@ pnpm --filter @cobweb/freshness test      # the freshness server: tiers, the hot
 pnpm --filter @cobweb/web verify:freshness   # the freshness server in process against Anvil: liveness at T-1 and at T, the ETag, the refusals, the wallet endpoint and degraded
 pnpm --filter @cobweb/web verify:mint-page   # the public page against local Supabase, local storage, Anvil and the freshness server in process: save, media and publish, liveness at T-1 and T, a mint through the page's path and the state after it, the tiers
 pnpm --filter @cobweb/web verify:indexer   # the indexer in the freshness server against local Supabase and Anvil: mints, owners, airdrops and withdrawals once each, a replay, a restart and a backfill, the Overview, Airdrop and the state body
+pnpm --filter @cobweb/web verify:load   # k6's local profile against the freshness server in process and Anvil: polls and wallet reads under load, the 304s, liveness at a start, /health's request counts
+pnpm --filter @cobweb/web check:edge --app https://<app domain> --freshness https://<freshness domain> --collection <chain id>/<address>   # Cloudflare in front, read from outside (docs/reference/cloudflare-setup.md)
+k6 run --no-usage-report --include-system-env-vars=false -e PROFILE=hosted -e BASE=https://<freshness domain> -e COLLECTIONS=<chain id>/<address> apps/freshness/load/k6-freshness.js   # the owner's load run behind Cloudflare
 pnpm --filter @cobweb/web verify:csp   # the policy on a sample-mode production build: a nonce on every page and script, the origins, report-only, the report endpoint
 pnpm --filter @cobweb/web verify:sources   # the source sweep against local Supabase and local storage: due, dry run, delete, resume, the guards
 pnpm --filter @cobweb/web render:local <collectionId>   # renders the collection's paid jobs on the laptop against local Supabase, local storage and Anvil; CARs go to a temp folder

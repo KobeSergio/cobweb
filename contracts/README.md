@@ -350,13 +350,23 @@ forge test
 forge coverage
 ```
 
-| Suite                         | What it covers                                                                                                                                         |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `test/CobwebFactory.t.sol`    | Deployment, address prediction, identical bytecode, admin controls, art payment                                                                        |
-| `test/CobwebCollection.t.sol` | Liveness, public and allowlist minting, supply, groups, mint on behalf, delegated mint, airdrops, withdrawals, fees, metadata, views, transfer locking |
-| `test/Invariants.t.sol`       | Random sequences of mints, airdrops, withdrawals and setting changes; checks that the balance always equals what is owed and supply limits always hold |
+| Suite                         | What it covers                                                                                                                                                                                                                                                                                                                                                                                             |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test/CobwebFactory.t.sol`    | Deployment, address prediction, identical bytecode, admin controls, art payment                                                                                                                                                                                                                                                                                                                            |
+| `test/CobwebCollection.t.sol` | Liveness, public and allowlist minting, supply, groups, mint on behalf, delegated mint, airdrops, withdrawals, fees, metadata, views, transfer locking                                                                                                                                                                                                                                                     |
+| `test/Invariants.t.sol`       | Thirty-one actions over a 200-token collection and the factory: mints of each kind, a refund held for a contract that rejects ether, airdrops, burns, every withdrawal but `withdrawPendingBalance`, fee, treasury and admin changes, phase edits with time moving, whitelist chunks, transfers and art payments; thirteen invariants for fee custody and proceeds, the admins, phase bounds and ownership |
 
-Current figures: 92 tests passing, about 95% line coverage on the collection and 97% on the factory. `CobwebCollection` is 17.8 KB of runtime code against the 24 KB limit. Deploying a collection through the factory costs about 4.5M gas.
+Current figures: 100 tests passing, about 96% line coverage on the collection and 97% on the factory. `CobwebCollection` is 17.8 KB of runtime code against the 24 KB limit. Deploying a collection through the factory costs about 4.5M gas.
+
+**Slither.** `brew install uv` once, then from `contracts/`:
+
+```
+uvx --python 3.12 --from slither-analyzer==0.11.6 slither . --config-file slither.config.json
+```
+
+It reads `slither.db.json`, the triage database, so it prints only what nobody has judged; `slither.triage.md` gives every finding's verdict and reason. CI's `slither` job runs the same analyzer and fails on a medium or high finding the database does not hold. A finding that cites a statement is keyed by its source lines, so any edit that moves the cited lines opens it again: judge it in that change (add `--triage-mode` to hold it, then its row) or fix it. No `slither-disable` comment goes into `src/`, since it would move the creation code hash.
+
+**The deep invariant run.** `FOUNDRY_PROFILE=deep forge test` runs the invariant suite at 1,000 runs of depth 1,000 and the fuzz test at 10,000 runs, by hand and never in CI, in about 11 minutes on a 12-core laptop. The October 2026 review's record is [docs/reference/contract-review-2026-10.md](../docs/reference/contract-review-2026-10.md).
 
 **Deploying to a chain.** Copy `.env.example` to `.env`, fill it in, then:
 
