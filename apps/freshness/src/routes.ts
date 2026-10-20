@@ -98,18 +98,32 @@ export function refusal(status: 400 | 404 | 405 | 500 | 503, error: RefusalCode)
   return { status, headers, body: JSON.stringify({ error }) }
 }
 
-/** The state: 200 with the body, or 304 without one when `If-None-Match` matched, both with the tag. */
+/**
+ * The state: 200 with the body, or 304 without one when `If-None-Match` matched, both with the tag and with
+ * `Cloudflare-CDN-Cache-Control`, which Cloudflare reads before `Cache-Control` and no browser reads: given
+ * `s-maxage`, Cloudflare turns `stale-while-revalidate` off and ignores `stale-if-error`.
+ */
 export function stateAnswer(body: StateBody, etag: string, notModified: boolean): Answer {
-  const headers = { ETag: etag, 'Cache-Control': STATE_CACHE, ...CORS }
+  const headers = {
+    ETag: etag,
+    'Cache-Control': STATE_CACHE,
+    'Cloudflare-CDN-Cache-Control': 'max-age=1, stale-while-revalidate=1, stale-if-error=60',
+    ...CORS,
+  }
   if (notModified) return { status: 304, headers, body: null }
   return { status: 200, headers: { ...headers, 'Content-Type': JSON_TYPE }, body: JSON.stringify(body) }
 }
 
-/** A wallet's quotas and vaults: 5 s at the edge, no tag. */
+/** A wallet's quotas and vaults: 5 s at the edge, with Cloudflare's own header as on the state; no tag. */
 export function walletAnswer(body: WalletBody): Answer {
   return {
     status: 200,
-    headers: { ...CORS, 'Content-Type': JSON_TYPE, 'Cache-Control': WALLET_CACHE },
+    headers: {
+      ...CORS,
+      'Content-Type': JSON_TYPE,
+      'Cache-Control': WALLET_CACHE,
+      'Cloudflare-CDN-Cache-Control': 'max-age=5, stale-if-error=60',
+    },
     body: JSON.stringify(body),
   }
 }

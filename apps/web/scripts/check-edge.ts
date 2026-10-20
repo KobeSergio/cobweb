@@ -4,8 +4,8 @@
 // owner runs it once the zone is set (docs/reference/cloudflare-setup.md) and after any change to it. Checks 3, 5, 6
 // and 8 send the page's own request headers; checks 4 and 8 depend on timing, so one failure on a slow line is decided
 // by a rerun. Checks 3, 5, 6 and 7 take two tries, since the state's 1 s copy can expire between a check's priming
-// poll and its judged poll, and an edge set wrong never answers a HIT on them. Reads no secret and writes nothing; it
-// proves the colo nearest the machine that runs it.
+// poll and its judged poll, and every misconfiguration they name fails each try alike. Reads no secret and writes
+// nothing; it proves the colo nearest the machine that runs it.
 //
 //   pnpm --filter @cobweb/web check:edge --app https://<app domain> --freshness https://<freshness domain> \
 //     --collection <chain id>/<address> [--slug <mint page link>]
@@ -103,8 +103,8 @@ async function check(n: number, judge: () => Promise<string | null>): Promise<vo
 
 /**
  * Runs a judgement and, when it finds a problem, once more: the state's 1 s copy can expire between a check's priming
- * poll and its judged poll, so a correct zone can read EXPIRED there. An edge set wrong never answers a HIT on checks
- * 3, 5, 6 and 7, so the second try hides no defect and a spurious failure becomes rare.
+ * poll and its judged poll, so a correct zone can read EXPIRED there. Every misconfiguration checks 3, 5, 6 and 7 name
+ * fails each try alike, so the second try hides no defect and a spurious failure becomes rare.
  */
 async function twice(judge: () => Promise<string | null>): Promise<string | null> {
   return (await judge()) === null ? null : judge()

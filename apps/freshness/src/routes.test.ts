@@ -165,6 +165,7 @@ describe('the answers', () => {
     const headers = {
       ETag: 'W/"tag"',
       'Cache-Control': 'public, max-age=0, s-maxage=1, stale-while-revalidate=1, stale-if-error=60',
+      'Cloudflare-CDN-Cache-Control': 'max-age=1, stale-while-revalidate=1, stale-if-error=60',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Expose-Headers': 'ETag, Retry-After, Age',
     }
@@ -182,6 +183,7 @@ describe('the answers', () => {
       'Access-Control-Expose-Headers': 'ETag, Retry-After, Age',
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'public, max-age=0, s-maxage=5',
+      'Cloudflare-CDN-Cache-Control': 'max-age=5, stale-if-error=60',
     })
     expect(healthAnswer({ status: 'ok' } as HealthBody)).toEqual({
       status: 200,

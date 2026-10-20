@@ -216,6 +216,9 @@ export function injectedIn(html: string): string[] {
 /** A cf-cache-status for a problem line. */
 const statusText = (answer: EdgeAnswer) => cacheStatusOf(answer) ?? 'no cf-cache-status'
 
+/** Whether the edge answered from its copy: a HIT, or UPDATING, its expired copy served while it asks the origin. */
+const fromCopy = (answer: EdgeAnswer) => ['HIT', 'UPDATING'].includes(cacheStatusOf(answer) ?? '')
+
 /** Whether /health answered 200 with `"status":"ok"`. */
 function healthOk(answer: EdgeAnswer): boolean {
   try {
@@ -247,7 +250,9 @@ export function judgeHealth(reads: readonly EdgeAnswer[]): string | null {
   return null
 }
 
-/** Check 3: both polls 200 with the origin's Cache-Control and a weak ETag; the second a HIT with Age 0 or 1. */
+/**
+ * Check 3: both polls 200 with the origin's Cache-Control and a weak ETag; the second from the edge's copy, Age 0 or 1.
+ */
 export function judgeStateAtEdge(first: EdgeAnswer, second: EdgeAnswer, stateCache: string): string | null {
   for (const [index, poll] of [first, second].entries()) {
     if (poll.status !== 200) return `poll ${index + 1} answered ${poll.status}`
@@ -257,9 +262,7 @@ export function judgeStateAtEdge(first: EdgeAnswer, second: EdgeAnswer, stateCac
       return `poll ${index + 1} carried ETag ${poll.headers.get('etag')}`
   }
   const age = ageOf(second) ?? 0
-  return cacheStatusOf(second) === 'HIT' && age <= 1
-    ? null
-    : `the second poll was ${statusText(second)} with Age ${age}`
+  return fromCopy(second) && age <= 1 ? null : `the second poll was ${statusText(second)} with Age ${age}`
 }
 
 /**
@@ -281,25 +284,25 @@ export function judgeNotModified(answer: EdgeAnswer, etag: string): string | nul
   const returned = answer.headers.get('etag')
   if (returned !== etag) return `the 304 carried ETag ${returned}, not ${etag}`
   const status = cacheStatusOf(answer)
-  return status === 'HIT' || status === 'REVALIDATED' ? null : `the 304 was ${statusText(answer)}`
+  return fromCopy(answer) || status === 'REVALIDATED' ? null : `the 304 was ${statusText(answer)}`
 }
 
 /** Checks 6 and 7: the poll was answered 200 from the edge's copy. */
 function judgeHit(answer: EdgeAnswer, poll: string): string | null {
-  return answer.status === 200 && cacheStatusOf(answer) === 'HIT'
+  return answer.status === 200 && fromCopy(answer)
     ? null
     : `the ${poll} answered ${answer.status}, ${statusText(answer)}`
 }
 
 /**
- * Check 6: a poll carrying the page's reload headers is a HIT, so the edge never lets a browser's request directives
- * send its first poll to the origin (Review Focus 2).
+ * Check 6: a poll carrying the page's reload headers is answered from the edge's copy, so the edge never lets a
+ * browser's request directives send its first poll to the origin (Review Focus 2).
  */
 export function judgeFirstPoll(answer: EdgeAnswer): string | null {
   return judgeHit(answer, 'reload poll')
 }
 
-/** Check 7: a poll with a random query string, right after a cached one, is a HIT. */
+/** Check 7: a poll with a random query string, right after a cached one, is answered from the edge's copy. */
 export function judgeQuery(answer: EdgeAnswer): string | null {
   return judgeHit(answer, 'poll with a random query')
 }

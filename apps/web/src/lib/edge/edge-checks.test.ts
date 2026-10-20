@@ -132,6 +132,7 @@ describe('edgeArgsOf (docs/specs/2026-10-18-load-run-contract-review-and-cloudfl
     const unusable: string[][] = [
       [],
       ARGS.slice(2),
+      [...ARGS.slice(0, 2), ...ARGS.slice(4)],
       ARGS.slice(0, 4),
       [...ARGS.slice(0, 5)],
       ['--app', 'http://cobweb.example', ...ARGS.slice(2)],
@@ -256,11 +257,15 @@ describe('the judges (section 8.2)', () => {
     )
   })
 
-  it("check 3: the origin's Cache-Control and weak ETag kept, the second poll a HIT with Age 0 or 1", () => {
+  it("check 3: the origin's Cache-Control and weak ETag kept, the second poll a HIT or UPDATING with Age 0 or 1", () => {
     expect(judgeStateAtEdge(state('MISS'), state('HIT', 0), STATE_CACHE)).toBeNull()
     expect(judgeStateAtEdge(state('EXPIRED'), state('HIT'), STATE_CACHE)).toBeNull()
+    expect(judgeStateAtEdge(state('HIT', 0), state('UPDATING', 1), STATE_CACHE)).toBeNull()
     expect(judgeStateAtEdge(state('MISS'), state('EXPIRED', 0), STATE_CACHE)).toBe(
       'the second poll was EXPIRED with Age 0',
+    )
+    expect(judgeStateAtEdge(state('MISS'), state('HIT', 2), STATE_CACHE)).toBe(
+      'the second poll was HIT with Age 2',
     )
     const browserTtl = state('HIT', 0, { 'cache-control': 'public, max-age=14400' })
     expect(judgeStateAtEdge(state('MISS'), browserTtl, STATE_CACHE)).toBe(
@@ -287,6 +292,7 @@ describe('the judges (section 8.2)', () => {
       answer(304, { etag, 'cache-control': STATE_CACHE, 'cf-cache-status': cache, 'cf-ray': RAY })
     expect(judgeNotModified(notModified('HIT'), ETAG)).toBeNull()
     expect(judgeNotModified(notModified('REVALIDATED'), ETAG)).toBeNull()
+    expect(judgeNotModified(notModified('UPDATING'), ETAG)).toBeNull()
     expect(judgeNotModified(state('HIT'), ETAG)).toBe(`the poll carrying ${ETAG} answered 200`)
     expect(judgeNotModified(notModified('HIT', 'W/"0"'), ETAG)).toBe(
       `the 304 carried ETag W/"0", not ${ETAG}`,
@@ -296,13 +302,15 @@ describe('the judges (section 8.2)', () => {
 
   it("check 6: an edge that lets a page's reload poll through to the origin fails (Review Focus 2)", () => {
     expect(judgeFirstPoll(state('HIT', 0))).toBeNull()
-    for (const cache of ['MISS', 'EXPIRED', 'REVALIDATED', 'BYPASS', 'DYNAMIC'])
+    expect(judgeFirstPoll(state('UPDATING', 1))).toBeNull()
+    for (const cache of ['MISS', 'EXPIRED', 'REVALIDATED', 'STALE', 'BYPASS', 'DYNAMIC'])
       expect(judgeFirstPoll(state(cache, 0))).toBe(`the reload poll answered 200, ${cache}`)
     expect(judgeFirstPoll(state(null))).toBe('the reload poll answered 200, no cf-cache-status')
   })
 
-  it('check 7: a random query right after a cached poll is a HIT', () => {
+  it('check 7: a random query right after a cached poll is a HIT or UPDATING', () => {
     expect(judgeQuery(state('HIT', 0))).toBeNull()
+    expect(judgeQuery(state('UPDATING', 1))).toBeNull()
     expect(judgeQuery(state('MISS'))).toBe('the poll with a random query answered 200, MISS')
   })
 
@@ -319,6 +327,9 @@ describe('the judges (section 8.2)', () => {
     expect(judgeWallet(read('MISS'), read('MISS'), read('MISS'), WALLET_CACHE)).toBe(
       'the second read was MISS with Age 0',
     )
+    expect(judgeWallet(read('MISS'), read('HIT', 6), read('EXPIRED'), WALLET_CACHE)).toBe(
+      'the second read was HIT with Age 6',
+    )
     expect(judgeWallet(read('MISS'), read('HIT', 0), read('HIT', 6), WALLET_CACHE)).toBe(
       'the read 6 s after the first was a HIT with Age 6',
     )
@@ -333,18 +344,27 @@ describe('the judges (section 8.2)', () => {
   })
 
   it("check 9: the preflight allows the page's headers for a day, and the state exposes ETag, Retry-After and Age", () => {
-    const preflight = (allowed: string) =>
+    const preflight = (allowed: string, maxAge = '86400') =>
       answer(204, {
         'access-control-allow-origin': '*',
         'access-control-allow-methods': 'GET, HEAD',
         'access-control-allow-headers': allowed,
-        'access-control-max-age': '86400',
+        'access-control-max-age': maxAge,
         'cf-ray': RAY,
       })
     expect(judgeCors(preflight('If-None-Match, Cache-Control, Pragma'), state('HIT'))).toBeNull()
     expect(judgeCors(preflight('If-None-Match'), state('HIT'))).toBe(
       'the preflight does not allow cache-control, pragma',
     )
+    expect(judgeCors(preflight('If-None-Match, Cache-Control, Pragma', '600'), state('HIT'))).toBe(
+      'the preflight carried Access-Control-Max-Age 600',
+    )
+    expect(
+      judgeCors(
+        preflight('If-None-Match, Cache-Control, Pragma'),
+        state('HIT', 0, { 'access-control-allow-origin': APP }),
+      ),
+    ).toBe(`the state answer carried Access-Control-Allow-Origin ${APP}`)
     expect(
       judgeCors(
         preflight('If-None-Match, Cache-Control, Pragma'),
@@ -381,6 +401,15 @@ describe('the judges (section 8.2)', () => {
     expect(judgePolicy(earlier, args)).toBe(`connect-src does not list ${FRESHNESS}`)
     expect(judgePolicy(page(NONCE, {}, html(NONCE, ROCKET_LOADED)), args)).toBe(
       "1 of the 5 scripts lack the response's nonce",
+    )
+    expect(
+      judgePolicy(
+        page(NONCE, { 'content-security-policy': policy(NONCE).replace(" 'strict-dynamic'", '') }),
+        args,
+      ),
+    ).toBe("the enforce policy's script-src has no 'strict-dynamic'")
+    expect(judgePolicy(page(NONCE, {}, '<!DOCTYPE html><html><body></body></html>'), args)).toBe(
+      "0 of the 0 scripts lack the response's nonce",
     )
     expect(judgePolicy(page(NONCE, { 'x-frame-options': null }), args)).toBe(
       'x-frame-options arrived as null',
