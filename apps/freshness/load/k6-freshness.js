@@ -7,7 +7,8 @@
  * per route); nothing of it is copied. `verify:load` runs the local profile against Anvil; the owner runs the hosted
  * one behind Cloudflare:
  *
- *   k6 run --no-usage-report -e PROFILE=hosted -e BASE=https://<freshness domain> \
+ *   k6 run --include-system-env-vars=false \
+ *     --no-usage-report -e PROFILE=hosted -e BASE=https://<freshness domain> \
  *     -e COLLECTIONS=<chain id>/<address> -e SUMMARY_FILE=$HOME/k6-hosted.json apps/freshness/load/k6-freshness.js
  */
 import { check, sleep } from 'k6'
@@ -153,7 +154,7 @@ export function watch() {
         )
       lastWindows = { windows: body.wallet.windows, at: now }
     }
-  }
+  } else healthCountsMissing.add(1)
   sleep(5)
 }
 
