@@ -17,7 +17,7 @@ vi.mock('@vercel/queue', () => ({
 vi.mock('@/lib/render/worker', () => ({ renderDeps: () => ({}) }))
 
 import { maxDuration, POST } from '@/app/api/queues/render/route'
-import { withoutPushedMessage } from '@/lib/render/queue-request'
+import { RENDER_CONSUMER_GROUP, RENDER_TOPIC, withoutPushedMessage } from '@/lib/render/queue-request'
 
 const pushed = (headers: Record<string, string> = {}, body = '{"jobId":"j","step":"start","retries":0}') =>
   new Request('https://cobweb.test/api/queues/render', {
@@ -25,7 +25,7 @@ const pushed = (headers: Record<string, string> = {}, body = '{"jobId":"j","step
     headers: {
       'ce-type': 'com.vercel.queue.v2beta',
       'ce-vqsqueuename': 'render',
-      'ce-vqsconsumergroup': 'render',
+      'ce-vqsconsumergroup': RENDER_CONSUMER_GROUP,
       'ce-vqsmessageid': 'msg_1',
       'ce-vqsreceipthandle': 'forged-handle',
       'ce-vqsdeliverycount': '4',
@@ -52,15 +52,79 @@ describe('the render queue consumer route', () => {
     expect(maxDuration).toBe(800)
   })
 
-  it('hands the SDK a request without the receipt handle and the delivery count, so it fetches the message by id', async () => {
+  it('hands the SDK the request as it came when the flag is unset or not 1', async () => {
+    for (const value of [undefined, '0', 'true']) {
+      vi.stubEnv('RENDER_QUEUE_FETCH_BY_ID', value as string)
+      if (value === undefined) vi.unstubAllEnvs()
+      mocks.seen.length = 0
+      const request = pushed()
+      await POST(request)
+      expect(mocks.seen).toEqual([request])
+      expect(mocks.seen[0]!.headers.get('ce-vqsreceipthandle')).toBe('forged-handle')
+    }
+    vi.unstubAllEnvs()
+  })
+
+  it('hands the SDK a request without the receipt handle and the delivery count when the flag is 1, read per request', async () => {
     mocks.seen.length = 0
+    vi.stubEnv('RENDER_QUEUE_FETCH_BY_ID', '1')
     await POST(pushed())
+    vi.unstubAllEnvs()
     expect(mocks.seen).toHaveLength(1)
     const seen = mocks.seen[0]!
     expect(seen.headers.has('ce-vqsreceipthandle')).toBe(false)
     expect(seen.headers.has('ce-vqsdeliverycount')).toBe(false)
     expect(seen.headers.get('ce-vqsmessageid')).toBe('msg_1')
     expect(seen.headers.get('ce-type')).toBe('com.vercel.queue.v2beta')
+  })
+
+  it('answers 404 before the SDK when the topic is another one, with the flag on or off', async () => {
+    for (const flag of [undefined, '1']) {
+      if (flag) vi.stubEnv('RENDER_QUEUE_FETCH_BY_ID', flag)
+      mocks.seen.length = 0
+      const response = await POST(pushed({ 'ce-vqsqueuename': 'other' }))
+      expect(response.status).toBe(404)
+      expect(mocks.seen).toEqual([])
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('answers 404 for another consumer group when the flag is on, and passes it through when off', async () => {
+    mocks.seen.length = 0
+    vi.stubEnv('RENDER_QUEUE_FETCH_BY_ID', '1')
+    expect((await POST(pushed({ 'ce-vqsconsumergroup': 'other' }))).status).toBe(404)
+    expect(mocks.seen).toEqual([])
+    vi.unstubAllEnvs()
+    await POST(pushed({ 'ce-vqsconsumergroup': 'other' }))
+    expect(mocks.seen).toHaveLength(1)
+  })
+
+  it('passes the genuine topic and group, and a push that omits both headers, through', async () => {
+    vi.stubEnv('RENDER_QUEUE_FETCH_BY_ID', '1')
+    mocks.seen.length = 0
+    await POST(pushed({ 'ce-vqsqueuename': RENDER_TOPIC, 'ce-vqsconsumergroup': RENDER_CONSUMER_GROUP }))
+    const bare = new Request('https://cobweb.test/api/queues/render', { method: 'POST', body: '{}' })
+    await POST(bare)
+    vi.unstubAllEnvs()
+    expect(mocks.seen).toHaveLength(2)
+  })
+
+  it('derives the consumer group from the route path in vercel.json as the SDK does', () => {
+    const encode = (path: string) =>
+      [...path]
+        .map((c) =>
+          c === '_'
+            ? '__'
+            : c === '/'
+              ? '_S'
+              : c === '.'
+                ? '_D'
+                : /[A-Za-z0-9-]/.test(c)
+                  ? c
+                  : `_${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`,
+        )
+        .join('')
+    expect(RENDER_CONSUMER_GROUP).toBe(encode('src/app/api/queues/render/route.ts'))
   })
 })
 
