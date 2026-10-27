@@ -74,7 +74,7 @@ These are screenshots of the running app in flow order, taken against local Supa
 
 ![Manage mint page](docs/images/manage-mint-page.png)
 
-**13. The public mint page.** What a collector sees, polling the freshness server for shared state. The "Wrong network" badge is the dev wallet sitting on another chain than the collection's.
+**13. The public mint page.** What a collector sees, polling the freshness server for shared state. The wallet is connected on the collection's chain, so the primary button is live.
 
 ![Mint page](docs/images/mint-page.png)
 
@@ -360,7 +360,7 @@ What is enforced, and where. Every item below is in the code or in a document li
 
 **Money.** Fees are flat native amounts snapshotted into the collection at deploy, read from the factory in the constructor; there is no oracle, and only a factory admin can change a deployed collection's fee. Render jobs run only when `paid` or `waived`: the payment is decoded from a receipt on chain, re-checked by the worker, and backed by a database constraint (see section f above).
 
-**Contracts.** The October 2026 review is in [`docs/reference/contract-review-2026-10.md`](docs/reference/contract-review-2026-10.md): Slither 0.11.6 over both contracts with 22 findings from 15 of 102 detectors, none confirmed and every one triaged with a reason ([`slither.triage.md`](contracts/slither.triage.md)); a CI job that runs Slither on every push and pull request and fails on any medium or high finding the triage database does not hold ([`ci.yml:52-66`](.github/workflows/ci.yml#L52-L66)); 13 invariants driven by 31 handler actions, each shown to fail against a deliberate mutation of the contracts; the deep run of 1,000 runs at depth 1,000 (1,000,000 calls per invariant), all 100 tests passing; and about 96% line coverage on the collection and 97% on the factory. The review changed no contract. It is not an external audit: the external look is the owner's decision before mainnet, with the review as its brief, and the review's section 7 lists what is still owed.
+**Contracts.** The October 2026 review is in [`docs/reference/contract-review-2026-10.md`](docs/reference/contract-review-2026-10.md): Slither 0.11.6 over both contracts with 22 findings from 15 of 102 detectors, none confirmed and every one triaged with a reason ([`slither.triage.md`](contracts/slither.triage.md)); a CI job that runs Slither on every push and pull request and fails on any medium or high finding the triage database does not hold ([`ci.yml:52-67`](.github/workflows/ci.yml#L52-L67)); 13 invariants driven by 31 handler actions, each shown to fail against a deliberate mutation of the contracts; the deep run of 1,000 runs at depth 1,000 (1,000,000 calls per invariant), all 100 tests passing; and about 96% line coverage on the collection and 97% on the factory. The review changed no contract. It is not an external audit: the external look is the owner's decision before mainnet, with the review as its brief, and the review's section 7 lists what is still owed.
 
 **Secrets.** Nothing sensitive is in the repository. A gitleaks scan of all 469 commits on 27 October 2026 found no leaks. `.env` files (except `.env.example`), the local signing key and the `legacy/` folder of old repositories are gitignored ([`.gitignore`](.gitignore)). The indexer's database role holds no service-role key, and cron endpoints answer only a bearer secret.
 
