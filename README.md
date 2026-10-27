@@ -220,7 +220,11 @@ The web app predicts the address before the creator signs anything. Its TypeScri
 
 ```ts
 export function predictCollectionAddress(input: {
-  factory: Address; deployer: Address; salt: Hex; creationCode: Hex; args: Hex
+  factory: Address
+  deployer: Address
+  salt: Hex
+  creationCode: Hex
+  args: Hex
 }): Address {
   const finalSalt = keccak256(
     encodeAbiParameters([{ type: 'address' }, { type: 'bytes32' }], [input.deployer, input.salt]),
@@ -378,7 +382,7 @@ packages/dna       Trait assignment engine, shared by browser and server
 packages/ui        Component library: shadcn components themed with the shared tokens
 packages/shared    Chain config, factory and collection ABIs, job ids, the render queue contract, pure chain readers, viem clients
 supabase/          Migrations and policies
-docs/              Plan, master plan, specs, plans, legacy context, reference contract and reviews
+docs/              Plan, master plan, specs, plans, legacy context (local only, not in git), reference contract and reviews
 legacy/            Old repos. Reference only, not in git
 ```
 
@@ -464,28 +468,28 @@ What grows with success, in the order we would feel it: Filebase storage as coll
 
 ## Libraries and tools
 
-| Area      | Library                                        | Used for                                                                          |
-| --------- | ---------------------------------------------- | --------------------------------------------------------------------------------- |
-| Tooling   | pnpm workspaces, Turborepo                     | Monorepo and task running                                                         |
-| Tooling   | TypeScript 6                                   | Pinned to 6 until typescript-eslint supports 7                                    |
-| Tooling   | ESLint, typescript-eslint, Prettier            | Lint and format                                                                   |
-| Tooling   | Vitest                                         | Unit tests                                                                        |
-| Tooling   | k6                                             | The freshness server's load profiles                                              |
-| Contracts | Foundry, Solidity 0.8.30                       | Build, test (including invariants), deploy                                        |
-| Contracts | Slither                                        | Static analysis with a triage database, in CI                                     |
-| Contracts | Limit Break creator-token-standards (ERC721AC) | Collection base, transfer validator, locking                                      |
-| Contracts | OpenZeppelin Contracts                         | Ownable, AccessControl, ERC2981 royalties, ReentrancyGuard                        |
-| Contracts | delegate.xyz registry                          | Delegated minting                                                                 |
-| Web       | Next.js, React                                 | `apps/web`                                                                        |
-| Web       | Tailwind CSS, shadcn/ui                        | Styling and `packages/ui`                                                         |
-| Web       | Motion, dnd-kit                                | Animation, layer reordering                                                       |
-| Web       | RainbowKit, wagmi, viem                        | Wallet connection and contract calls                                              |
-| Web       | Supabase JS and SSR client                     | Database access and sessions                                                      |
-| Render    | sharp                                          | Decoding and encoding; compositing itself is integer arithmetic in `blend.ts`     |
-| Render    | `@ipld/unixfs`, `@ipld/car`                    | CAR packing, with the CID computed locally and asserted against Filebase's answer |
+| Area      | Library                                        | Used for                                                                                  |
+| --------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Tooling   | pnpm workspaces, Turborepo                     | Monorepo and task running                                                                 |
+| Tooling   | TypeScript 6                                   | Pinned to 6 until typescript-eslint supports 7                                            |
+| Tooling   | ESLint, typescript-eslint, Prettier            | Lint and format                                                                           |
+| Tooling   | Vitest                                         | Unit tests                                                                                |
+| Tooling   | k6                                             | The freshness server's load profiles                                                      |
+| Contracts | Foundry, Solidity 0.8.30                       | Build, test (including invariants), deploy                                                |
+| Contracts | Slither                                        | Static analysis with a triage database, in CI                                             |
+| Contracts | Limit Break creator-token-standards (ERC721AC) | Collection base, transfer validator, locking                                              |
+| Contracts | OpenZeppelin Contracts                         | Ownable, AccessControl, ERC2981 royalties, ReentrancyGuard                                |
+| Contracts | delegate.xyz registry                          | Delegated minting                                                                         |
+| Web       | Next.js, React                                 | `apps/web`                                                                                |
+| Web       | Tailwind CSS, shadcn/ui                        | Styling and `packages/ui`                                                                 |
+| Web       | Motion, dnd-kit                                | Animation, layer reordering                                                               |
+| Web       | RainbowKit, wagmi, viem                        | Wallet connection and contract calls                                                      |
+| Web       | Supabase JS and SSR client                     | Database access and sessions                                                              |
+| Render    | sharp                                          | Decoding and encoding; compositing itself is integer arithmetic in `blend.ts`             |
+| Render    | `@ipld/unixfs`, `@ipld/car`                    | CAR packing, with the CID computed locally and asserted against Filebase's answer         |
 | Render    | AWS SDK (S3 client)                            | Presigned uploads and storage reads over the S3 protocol (Supabase Storage, R2, Filebase) |
-| Render    | Vercel Queues (`@vercel/queue`)                | Render job fan-out                                                                |
-| Freshness | viem                                           | Multicall, logs, and the indexer's reads                                          |
+| Render    | Vercel Queues (`@vercel/queue`)                | Render job fan-out                                                                        |
+| Freshness | viem                                           | Multicall, logs, and the indexer's reads                                                  |
 
 ## Contracts in brief
 
@@ -551,27 +555,27 @@ Before porting anything, open the matching context doc: it says which files impl
 
 Each phase's tasks, exit criteria and status line are in [docs/MASTER_PLAN.md](docs/MASTER_PLAN.md); this table is the summary.
 
-| Phase | Area                                     | State                                                                                                                                  |
-| ----- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| 0     | Scaffold: workspace, packages, CI        | Done                                                                                                                                   |
-| 1     | Contracts: factory, collection           | Done, except the testnet deploy and verification, which need a funded deployer wallet, an RPC URL and an explorer key                  |
-| 2     | Web shell, auth and schema               | Done locally                                                                                                                           |
-| 3     | Art generator: trait engine, upload, lock and pay | Complete                                                                                                                      |
-| 4     | Render pipeline: Vercel Queues, Vercel Functions, Filebase | Complete                                                                                                                     |
-| 5     | Deploy and manage: phases, whitelist, airdrop, settings | In progress per the master plan; each sub-project is built and has its own `verify:*` script                                  |
-| 6     | Freshness server, mint page on live data, indexer | In progress per the master plan; built and verified locally, hosted service and edge steps owed to the owner                  |
-| 7     | Hardening and launch                     | In progress: production hardening, the load run profiles, the contract review and Cloudflare in front are done in code; the hosted deploys, the hosted load run, the external contract look and mainnet deploys are owed |
+| Phase | Area                                                       | State                                                                                                                                                                                                                    |
+| ----- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0     | Scaffold: workspace, packages, CI                          | Done                                                                                                                                                                                                                     |
+| 1     | Contracts: factory, collection                             | Done, except the testnet deploy and verification, which need a funded deployer wallet, an RPC URL and an explorer key                                                                                                    |
+| 2     | Web shell, auth and schema                                 | Done locally                                                                                                                                                                                                             |
+| 3     | Art generator: trait engine, upload, lock and pay          | Complete                                                                                                                                                                                                                 |
+| 4     | Render pipeline: Vercel Queues, Vercel Functions, Filebase | Complete                                                                                                                                                                                                                 |
+| 5     | Deploy and manage: phases, whitelist, airdrop, settings    | In progress per the master plan; each sub-project is built and has its own `verify:*` script                                                                                                                             |
+| 6     | Freshness server, mint page on live data, indexer          | In progress per the master plan; built and verified locally, hosted service and edge steps owed to the owner                                                                                                             |
+| 7     | Hardening and launch                                       | In progress: production hardening, the load run profiles, the contract review and Cloudflare in front are done in code; the hosted deploys, the hosted load run, the external contract look and mainnet deploys are owed |
 
 ## Further reading
 
-| Doc                                                                                    | What it is                                                                                                |
-| -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| [docs/MASTER_PLAN.md](docs/MASTER_PLAN.md)                                             | Build order, exit criteria per phase, and every product decision. Where it differs from the plan, it wins |
-| [docs/PLAN.md](docs/PLAN.md)                                                           | The source plan: scope, costs, revenue, load. Kept verbatim                                               |
-| [docs/reference/contract-review-2026-10.md](docs/reference/contract-review-2026-10.md) | The contract review: Slither, the six-area reading, the invariants and their mutations                    |
-| [docs/specs/2026-10-17-production-hardening.md](docs/specs/2026-10-17-production-hardening.md) | The CSP, the captcha, the session keys, the draft cap and the source lifecycle                    |
-| [docs/reference/cloudflare-setup.md](docs/reference/cloudflare-setup.md)               | The Cloudflare zone, by hand, and what `check:edge` proves                                                |
-| [docs/legacy/README.md](docs/legacy/README.md)                                         | Index of the legacy context docs                                                                          |
-| [docs/reference/the-suits-mint-analysis.md](docs/reference/the-suits-mint-analysis.md) | How the reference contract mints, and what to fix when porting it                                         |
-| [docs/SKILLS.md](docs/SKILLS.md)                                                       | Claude Code skills worth building for this repo                                                           |
-| [CLAUDE.md](CLAUDE.md)                                                                 | Rules for AI agents working in this repo, and every command                                               |
+| Doc                                                                                            | What it is                                                                                                |
+| ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| [docs/MASTER_PLAN.md](docs/MASTER_PLAN.md)                                                     | Build order, exit criteria per phase, and every product decision. Where it differs from the plan, it wins |
+| [docs/PLAN.md](docs/PLAN.md)                                                                   | The source plan: scope, costs, revenue, load. Kept verbatim                                               |
+| [docs/reference/contract-review-2026-10.md](docs/reference/contract-review-2026-10.md)         | The contract review: Slither, the six-area reading, the invariants and their mutations                    |
+| [docs/specs/2026-10-17-production-hardening.md](docs/specs/2026-10-17-production-hardening.md) | The CSP, the captcha, the session keys, the draft cap and the source lifecycle                            |
+| [docs/reference/cloudflare-setup.md](docs/reference/cloudflare-setup.md)                       | The Cloudflare zone, by hand, and what `check:edge` proves                                                |
+| `docs/legacy/README.md` (local only, not in git)                                               | Index of the legacy context docs, kept out of the repository by the `legacy/` ignore rule                 |
+| [docs/reference/the-suits-mint-analysis.md](docs/reference/the-suits-mint-analysis.md)         | How the reference contract mints, and what to fix when porting it                                         |
+| [docs/SKILLS.md](docs/SKILLS.md)                                                               | Claude Code skills worth building for this repo                                                           |
+| [CLAUDE.md](CLAUDE.md)                                                                         | Rules for AI agents working in this repo, and every command                                               |
