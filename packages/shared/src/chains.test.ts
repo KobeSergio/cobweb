@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   availableChains,
   chainById,
+  configuredChains,
   confirmationsFor,
   factoryAddress,
   hasConfirmations,
@@ -74,6 +75,44 @@ describe('factoryAddress and rpcUrl', () => {
       'The factory address for chain 31337 is not configured.',
     )
     expect(() => rpcUrl(10, env, false)).toThrow('The RPC URL for chain 10 is not configured.')
+  })
+})
+
+describe('configuredChains', () => {
+  const address = '0x5fbdb2315678afecb367f032d93f642f64180aa3'
+  const ids = (env: Record<string, string | undefined>, hide: boolean) =>
+    configuredChains(env, hide).map((chain) => chain.id)
+
+  it('offers nothing when no variable is set', () => {
+    expect(ids({}, true)).toEqual([])
+    expect(ids({}, false)).toEqual([])
+  })
+
+  it('offers Robinhood Chain alone when only its factory and RPC are set', () => {
+    expect(ids({ FACTORY_ADDRESS_4663: address, RPC_URL_4663: 'https://rpc.example' }, true)).toEqual([4663])
+  })
+
+  it('adds a chain when its variables are set, in the launch order, with no other change', () => {
+    const env = {
+      FACTORY_ADDRESS_4663: address,
+      RPC_URL_4663: 'https://rpc.example',
+      FACTORY_ADDRESS_8453: address,
+      RPC_URL_8453: 'https://base.example',
+    }
+    expect(ids(env, true)).toEqual([8453, 4663])
+  })
+
+  it('leaves out a chain with a malformed factory address or a missing RPC URL', () => {
+    expect(ids({ FACTORY_ADDRESS_4663: 'nope', RPC_URL_4663: 'https://rpc.example' }, true)).toEqual([])
+    expect(ids({ FACTORY_ADDRESS_4663: address }, true)).toEqual([])
+    expect(ids({ RPC_URL_4663: 'https://rpc.example' }, true)).toEqual([])
+    expect(ids({ FACTORY_ADDRESS_4663: '', RPC_URL_4663: 'https://rpc.example' }, true)).toEqual([])
+  })
+
+  it('hides a configured test chain in production and shows it elsewhere', () => {
+    const env = { FACTORY_ADDRESS_31337: address, RPC_URL_31337: 'http://127.0.0.1:8545' }
+    expect(ids(env, true)).toEqual([])
+    expect(ids(env, false)).toEqual([31337])
   })
 })
 

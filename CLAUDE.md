@@ -81,6 +81,6 @@ pnpm --filter @cobweb/web render:local <collectionId>   # renders the collection
 - Colours come from tokens, never hard-coded hex values.
 - All UI is built from shadcn components in `packages/ui`. Legacy hand-rolled components are not copied; a lifted screen keeps the legacy layout and structure, rebuilt on shadcn. Respect what the legacy screen could do, but prefer a better or simpler way where one exists, and note what changed. Never drop a function by accident.
 - Layer images are square, at most 2048 x 2048, the same size across a project, 10 MB per file.
-- Launch chains: Ethereum, Arbitrum, Base, Berachain, Monad, Robinhood Chain.
+- Launch chains: Ethereum, Arbitrum, Base, Berachain, Monad, Robinhood Chain, v1 on Robinhood Chain first; the app offers a chain only when its FACTORY_ADDRESS_<id> is set.
 - Wallet and chain stack: RainbowKit for wallet connection (as on TheSuits), wagmi hooks in components, viem for every chain call, ABI encoding and address check. No ethers, no web3.js.
 - Shared client state uses React Context (plus React Query for server data). No Zustand, Jotai, Redux or similar.

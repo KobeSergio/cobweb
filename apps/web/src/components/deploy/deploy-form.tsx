@@ -143,38 +143,42 @@ export function DeployForm({
             )
           }
         >
-          <ChoiceCards
-            aria-label="Chain"
-            aria-invalid={!!errors.chainId}
-            aria-describedby={errors.chainId ? 'deploy-chain-error' : undefined}
-            value={values.chainId === null ? '' : String(values.chainId)}
-            onValueChange={(value) => onChange({ chainId: Number(value) })}
-            disabled={readOnly}
-            className="sm:grid-cols-2 xl:grid-cols-3"
-          >
-            {chains.map((chain) => (
-              <ChoiceCard
-                key={chain.id}
-                value={String(chain.id)}
-                icon={<ChainIcon chainId={chain.id} className="size-5" />}
-                title={
-                  <span className="flex flex-wrap items-center gap-2">
-                    {chain.name}
-                    {chain.id === walletChainId && (
-                      <Badge variant="secondary" className="font-medium">
-                        Connected
-                      </Badge>
-                    )}
-                  </span>
-                }
-                description={
-                  <>
-                    Pays in <span className="numeric">{chain.nativeSymbol}</span>
-                  </>
-                }
-              />
-            ))}
-          </ChoiceCards>
+          {chains.length === 0 ? (
+            <FieldDescription>No launch chain is configured yet.</FieldDescription>
+          ) : (
+            <ChoiceCards
+              aria-label="Chain"
+              aria-invalid={!!errors.chainId}
+              aria-describedby={errors.chainId ? 'deploy-chain-error' : undefined}
+              value={values.chainId === null ? '' : String(values.chainId)}
+              onValueChange={(value) => onChange({ chainId: Number(value) })}
+              disabled={readOnly}
+              className="sm:grid-cols-2 xl:grid-cols-3"
+            >
+              {chains.map((chain) => (
+                <ChoiceCard
+                  key={chain.id}
+                  value={String(chain.id)}
+                  icon={<ChainIcon chainId={chain.id} className="size-5" />}
+                  title={
+                    <span className="flex flex-wrap items-center gap-2">
+                      {chain.name}
+                      {chain.id === walletChainId && (
+                        <Badge variant="secondary" className="font-medium">
+                          Connected
+                        </Badge>
+                      )}
+                    </span>
+                  }
+                  description={
+                    <>
+                      Pays in <span className="numeric">{chain.nativeSymbol}</span>
+                    </>
+                  }
+                />
+              ))}
+            </ChoiceCards>
+          )}
           <FieldError id="deploy-chain-error" className="mt-3">
             {errors.chainId}
           </FieldError>

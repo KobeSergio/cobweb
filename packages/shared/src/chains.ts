@@ -78,6 +78,23 @@ export function availableChains(hideTestChains = hidesTestChains()): readonly Ch
   return hideTestChains ? LAUNCH_CHAINS : [...LAUNCH_CHAINS, ...TEST_CHAINS]
 }
 
+/**
+ * The chains a creator can be offered: each of `availableChains()` whose `FACTORY_ADDRESS_<id>` is an address
+ * and whose `RPC_URL_<id>` is set. A chain joins the list when its two variables are set, with no code change,
+ * so v1 can launch on one chain (Robinhood Chain, 4663) and the others follow as their factories are deployed.
+ * An unset or malformed variable leaves the chain out, as `factoryAddress` does when it throws. Both variables
+ * are server only, so call this on the server and pass the result down.
+ */
+export function configuredChains(
+  env: Env = process.env,
+  hideTestChains = hidesTestChains(),
+): readonly ChainConfig[] {
+  return availableChains(hideTestChains).filter((chain) => {
+    const factory = env[chain.factoryEnv]
+    return Boolean(env[chain.rpcEnv]) && Boolean(factory) && isAddress(factory ?? '', { strict: false })
+  })
+}
+
 export function chainById(id: number, hideTestChains = hidesTestChains()): ChainConfig | undefined {
   return availableChains(hideTestChains).find((chain) => chain.id === id)
 }

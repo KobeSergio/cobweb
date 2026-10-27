@@ -80,7 +80,7 @@ export default async function DeployPage({
       {/* The screen renders the footer: Deploy is its action, and Manage drop opens once deployed. */}
       <DeployScreen
         collection={collection}
-        chains={deployChains()}
+        chains={deployChains(ctx.demo)}
         view={view}
         sample={ctx.demo}
         sampleDeployed={sampleDeployed}

@@ -82,6 +82,8 @@ Build order and product decisions for Cobweb. [PLAN.md](PLAN.md) is the original
 
 All six are standard EVM chains, so one factory build and one collection artifact cover them. The CREATE2 deployer, the delegate.xyz registry and Limit Break's default validator all have code on each of them.
 
+**v1 chain** (decided 27 October 2026). v1 launches on Robinhood Chain first, for time and cost. The other five launch chains follow, each when its factory is deployed. The app offers a launch chain to a creator only when that chain's factory address is configured (`FACTORY_ADDRESS_<id>`, with `RPC_URL_<id>`), so setting `FACTORY_ADDRESS_4663` alone makes Robinhood Chain the only choice, and a chain appears when its variables are set, with no code change. Sample mode has no factories and keeps listing every chain.
+
 ### Lock
 
 Locking uses what ERC721AC already provides. The collection's transfers are checked by the Limit Break transfer validator, and the creator changes the collection's security level on that validator: the non-transferable level to lock, back to the default to unlock. Marketplaces are blocked automatically while it is set.

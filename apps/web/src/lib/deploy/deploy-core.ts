@@ -1,6 +1,7 @@
 import {
   availableChains,
   chainById,
+  configuredChains,
   collectionSalt,
   confirmationsFor,
   encodeCollectionArgs,
@@ -88,9 +89,16 @@ function factoryOn(chainId: number): Address | null {
   }
 }
 
-/** The chains the deploy screen offers (the launch chains, plus Sepolia and Anvil outside production), each with its factory when configured. */
-export function deployChains(): DeployChain[] {
-  return availableChains().map((chain) => ({ ...chainView(chain.id), factory: factoryOn(chain.id) }))
+/**
+ * The chains the deploy screen offers, each with its factory when configured. Real mode offers only the chains
+ * whose `FACTORY_ADDRESS_<id>` and `RPC_URL_<id>` are set (v1: Robinhood Chain first); sample mode has no
+ * factories, so it lists every available chain as it always has.
+ */
+export function deployChains(sample: boolean): DeployChain[] {
+  return (sample ? availableChains() : configuredChains()).map((chain) => ({
+    ...chainView(chain.id),
+    factory: factoryOn(chain.id),
+  }))
 }
 
 /** The collection's latest done job of a kind, or null. Settings reads its base URI as a reveal target. */
