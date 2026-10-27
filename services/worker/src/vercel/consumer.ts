@@ -2,16 +2,18 @@
  * The render queue's consumer on Vercel Queues (docs/specs/2026-10-13-render-worker-vercel.md,
  * section 6). The web app's route hands the function `queueConsumer` returns to the SDK's
  * `handleCallback`: a message is acknowledged when it returns and delivered again when it throws.
- * Vercel Queues has no dead-letter queue, so the third failed delivery is dead-lettered here.
+ * Vercel Queues has no dead-letter queue, so the third failed delivery is dead-lettered here. The
+ * failed deliveries are counted on the database (`Jobs.deliveryFailed`), never read from the request:
+ * the SDK takes a delivery count from a header, and a request that is not the queue's could set it.
  */
-import { parseRenderMessage } from '@cobweb/shared/render-queue'
+import { messageKey, parseRenderMessage } from '@cobweb/shared/render-queue'
 import type { RenderMessage } from '@cobweb/shared/render-queue'
 import { consoleLog, errorSummary } from '../log.ts'
 import type { Log } from '../log.ts'
 import { handle, handleDead } from '../steps.ts'
 import type { Deps } from '../steps.ts'
 
-/** The delivery on which a message whose run throws is handed to `handleDead`. */
+/** The failed run, counted on the database, on which a message is handed to `handleDead`. */
 export const MAX_DELIVERIES = 3
 /** The wait after a first failed delivery: a transient fault is tried again soon. */
 export const FIRST_RETRY_SECONDS = 120
@@ -21,7 +23,10 @@ export const FIRST_RETRY_SECONDS = 120
  */
 export const LATER_RETRY_SECONDS = 3600
 
-/** The part of the SDK's message metadata the consumer reads. */
+/**
+ * The part of the SDK's message metadata the consumer reads. The delivery count is logged only: on a
+ * pushed delivery it comes from a request header and decides nothing.
+ */
 export type DeliveryMetadata = { messageId: string; deliveryCount: number }
 
 /**
@@ -29,19 +34,28 @@ export type DeliveryMetadata = { messageId: string; deliveryCount: number }
  * a thrown error whole, and viem and storage errors can carry a URL with a key in it.
  */
 export class MessageFailed extends Error {
-  static from(error: unknown): MessageFailed {
-    return new MessageFailed(errorSummary(error))
+  /** How many failed runs of this message the database holds, this one included. */
+  readonly failedDeliveries: number
+
+  static from(error: unknown, failedDeliveries: number): MessageFailed {
+    return new MessageFailed(errorSummary(error), failedDeliveries)
   }
 
-  private constructor(summary: string) {
+  private constructor(summary: string, failedDeliveries: number) {
     super(summary)
     this.name = 'MessageFailed'
+    this.failedDeliveries = failedDeliveries
   }
 }
 
-/** The SDK's `retry` answer: 120 seconds after the first delivery, an hour after any later one. */
-export function retryAfter(metadata: { deliveryCount: number }): { afterSeconds: number } {
-  return { afterSeconds: metadata.deliveryCount <= 1 ? FIRST_RETRY_SECONDS : LATER_RETRY_SECONDS }
+/**
+ * The SDK's `retry` answer: 120 seconds after the first failed delivery, an hour after any later one.
+ * The count is the database's, carried by the `MessageFailed` the consumer threw; any other error
+ * counts as a first failure.
+ */
+export function retryAfter(error: unknown): { afterSeconds: number } {
+  const failed = error instanceof MessageFailed ? error.failedDeliveries : 1
+  return { afterSeconds: failed <= 1 ? FIRST_RETRY_SECONDS : LATER_RETRY_SECONDS }
 }
 
 /** A body the SDK decoded, as a render message, or null for anything else. */
@@ -77,28 +91,47 @@ export function queueConsumer(
       log('message ignored', { messageId: metadata.messageId })
       return
     }
+    const key = messageKey(message)
     const fields = {
       messageId: metadata.messageId,
       jobId: message.jobId,
       step: message.step,
       delivery: metadata.deliveryCount,
     }
-    // A delivery past the third comes back only because the dead-letter report threw: report again.
-    if (metadata.deliveryCount <= MAX_DELIVERIES) {
+    // Nothing below can count a failure without the ports or the database: the message comes back.
+    let ports: Deps
+    let failed: number
+    try {
+      ports = await deps()
+      failed = await ports.jobs.deliveryFailures(message.jobId, key)
+    } catch (error) {
+      log('message failed', { ...fields, error: errorSummary(error) })
+      throw MessageFailed.from(error, 1)
+    }
+    // A message already at the limit comes back only because the dead-letter report threw: report again.
+    if (failed < MAX_DELIVERIES) {
       try {
-        await handle(message, await deps())
+        await handle(message, ports)
         return
       } catch (error) {
         log('message failed', { ...fields, error: errorSummary(error) })
-        if (metadata.deliveryCount < MAX_DELIVERIES) throw MessageFailed.from(error)
+        let count: number | null
+        try {
+          count = await ports.jobs.deliveryFailed(message.jobId, key)
+        } catch (countError) {
+          log('failure count failed', { ...fields, error: errorSummary(countError) })
+          throw MessageFailed.from(error, failed + 1)
+        }
+        // A job that is gone has nothing left to retry (null): it is reported like an exhausted one.
+        if (count !== null && count < MAX_DELIVERIES) throw MessageFailed.from(error, count)
       }
     }
     try {
-      await handleDead(message, await deps())
+      await handleDead(message, ports)
     } catch (error) {
       // The database could not be reached: the message comes back and the report is made then.
       log('dead letter failed', { ...fields, error: errorSummary(error) })
-      throw MessageFailed.from(error)
+      throw MessageFailed.from(error, MAX_DELIVERIES)
     }
     log('message dead', fields)
   }

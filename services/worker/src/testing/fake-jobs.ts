@@ -23,6 +23,8 @@ export type FakeJobs = Jobs & {
   stuckJobs: { id: string; retries: number }[]
   /** The ids `touch` was called with, in order. */
   touched: string[]
+  /** Failed runs per message key, as `deliveryFailed` counts them. */
+  deliveryFailureCounts: Map<string, number>
 }
 
 export function fakeJobs(
@@ -39,6 +41,7 @@ export function fakeJobs(
     calls: [],
     stuckJobs: [],
     touched: [],
+    deliveryFailureCounts: new Map(),
 
     async job(jobId) {
       fake.calls.push('job')
@@ -151,6 +154,17 @@ export function fakeJobs(
     async touch(jobId) {
       fake.calls.push('touch')
       fake.touched.push(jobId)
+    },
+
+    async deliveryFailed(jobId, messageKey) {
+      if (jobId !== record.id) return null
+      const failures = (fake.deliveryFailureCounts.get(messageKey) ?? 0) + 1
+      fake.deliveryFailureCounts.set(messageKey, failures)
+      return failures
+    },
+
+    async deliveryFailures(_jobId, messageKey) {
+      return fake.deliveryFailureCounts.get(messageKey) ?? 0
     },
 
     async stuck(_olderThanMinutes, onlyJobId) {

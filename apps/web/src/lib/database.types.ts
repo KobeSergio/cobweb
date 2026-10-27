@@ -695,6 +695,35 @@ export type Database = {
           },
         ]
       }
+      render_delivery_failures: {
+        Row: {
+          failures: number
+          job_id: string
+          message_key: string
+          updated_at: string
+        }
+        Insert: {
+          failures?: number
+          job_id: string
+          message_key: string
+          updated_at?: string
+        }
+        Update: {
+          failures?: number
+          job_id?: string
+          message_key?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'render_delivery_failures_job_id_fkey'
+            columns: ['job_id']
+            isOneToOne: false
+            referencedRelation: 'render_jobs'
+            referencedColumns: ['id']
+          },
+        ]
+      }
       render_jobs: {
         Row: {
           allow_duplicates: boolean
@@ -1543,7 +1572,18 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      art_render_credit: { Args: { p_collection_id: string; p_token_count: number }; Returns: string }
+      art_render_credit: {
+        Args: { p_collection_id: string; p_token_count: number }
+        Returns: string
+      }
+      art_render_delivery_failed: {
+        Args: { p_job_id: string; p_message_key: string }
+        Returns: number
+      }
+      art_render_delivery_failures: {
+        Args: { p_job_id: string; p_message_key: string }
+        Returns: number
+      }
       art_render_finish: {
         Args: {
           p_base_uri: string
@@ -1800,14 +1840,8 @@ export type Database = {
         Args: { p_collection_id: string; p_from_block: number }
         Returns: Json
       }
-      indexer_summaries: {
-        Args: { p_chain_id: number }
-        Returns: Json
-      }
-      indexer_targets: {
-        Args: { p_chain_id: number }
-        Returns: Json
-      }
+      indexer_summaries: { Args: { p_chain_id: number }; Returns: Json }
+      indexer_targets: { Args: { p_chain_id: number }; Returns: Json }
       mint_group_move: {
         Args: { p_collection_id: string; p_onchain_id: number; p_up: boolean }
         Returns: undefined
@@ -1853,14 +1887,8 @@ export type Database = {
         }
         Returns: boolean
       }
-      mint_page: {
-        Args: { p_slug: string }
-        Returns: Json
-      }
-      mint_page_preview: {
-        Args: { p_slug: string }
-        Returns: Json
-      }
+      mint_page: { Args: { p_slug: string }; Returns: Json }
+      mint_page_preview: { Args: { p_slug: string }; Returns: Json }
       mint_page_tiers: {
         Args: { p_base_uri: string; p_ids: number[]; p_slug: string }
         Returns: Json

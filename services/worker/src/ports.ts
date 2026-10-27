@@ -128,6 +128,14 @@ export type Jobs = {
    * return it again until a full threshold has passed. `updated_at` therefore also means "last swept".
    */
   touch(jobId: string): Promise<void>
+  /**
+   * Counts one more failed run of the message with this key (`messageKey`) and returns the count, or
+   * null when the job no longer exists. The queue consumer dead-letters on this count, never on a
+   * delivery count a request header carries (docs/specs/2026-10-13-render-worker-vercel.md, notes).
+   */
+  deliveryFailed(jobId: string, messageKey: string): Promise<number | null>
+  /** How many failed runs are recorded for the message with this key; 0 when none. */
+  deliveryFailures(jobId: string, messageKey: string): Promise<number>
   stuck(olderThanMinutes: number, onlyJobId?: string): Promise<{ id: string; retries: number }[]>
 }
 

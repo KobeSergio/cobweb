@@ -417,6 +417,24 @@ export function supabaseJobs(client: WorkerClient, options: { now?: () => number
       if (error) throw failure('Touching the job', error)
     },
 
+    async deliveryFailed(jobId, messageKey) {
+      const { data, error } = await client.rpc('art_render_delivery_failed', {
+        p_job_id: jobId,
+        p_message_key: messageKey,
+      })
+      if (error) throw failure('Counting the failed delivery', error)
+      return typeof data === 'number' ? data : null
+    },
+
+    async deliveryFailures(jobId, messageKey) {
+      const { data, error } = await client.rpc('art_render_delivery_failures', {
+        p_job_id: jobId,
+        p_message_key: messageKey,
+      })
+      if (error) throw failure('Reading the failed deliveries', error)
+      return typeof data === 'number' ? data : 0
+    },
+
     async stuck(olderThanMinutes, onlyJobId) {
       const cutoff = new Date(now() - olderThanMinutes * 60_000).toISOString()
       let query = client

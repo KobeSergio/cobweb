@@ -30,7 +30,7 @@ local runner) and [docs/specs/2026-10-13-render-worker-vercel.md](../../docs/spe
   second message with the same key for 24 hours, so a rerun step or a sweep never renders a batch twice
   within a day. A creator's retry raises `retries` and so gets new keys.
 - A message whose run throws is delivered again after 120 seconds the first time and an hour after
-  that. On its third delivery a failure fails the job with `dead-letter` and the message is
+  that. On its third failed delivery (counted in the database) a failure fails the job with `dead-letter` and the message is
   acknowledged. If that report cannot be written (a database outage) the message comes back and the
   report is made then. The trigger's `maxDeliveries` of 10 bounds a runaway; it is never the normal
   path.
@@ -69,7 +69,7 @@ A local or CI build of the web app prints "[QueueClient] Region not detected" tw
    database sits beside the functions.
 4. Production environment values for every name in the table above, and `CRON_SECRET`.
 5. Settings, Environment Variables: keep "Automatically expose System Environment Variables" on, so `VERCEL` and `VERCEL_REGION` reach the functions. Without it every start send falls to the logging branch and the sweep adds about 15 minutes to every job.
-6. Before entering any production value, probe the consumer: send `POST /api/queues/render` to the preview with forged v2beta headers (`ce-type`, `ce-vqsqueuename`, `ce-vqsconsumergroup`, `ce-vqsmessageid`, a made-up `ce-vqsreceipthandle`, and `ce-vqsdeliverycount: 4`) and a valid-looking start body for a random uuid, and confirm the platform refuses it before the handler runs (no `message ignored`, `message failed` or `message dead` line in the function logs). If it does not refuse it, add a guard in the route before `queueConsumer` runs, and only then enter production values.
+6. Before entering any production value, probe the consumer. The route removes `ce-vqsreceipthandle` and `ce-vqsdeliverycount` from every request before the queue SDK sees it, so the SDK fetches the message by its id from the queue service, which refuses an id it does not hold; the probe checks that this holds on the platform. Send `POST /api/queues/render` to the preview with forged v2beta headers (`ce-type`, `ce-vqsqueuename`, `ce-vqsconsumergroup`, `ce-vqsmessageid`, a made-up `ce-vqsreceipthandle`, and `ce-vqsdeliverycount: 4`) and a valid-looking start body for a random uuid, and confirm the request fails at the queue service before the handler runs (no `message ignored`, `message failed` or `message dead` line in the function logs, and the job, if the uuid is a real one, is untouched). If a log line shows the handler ran, the strip is not holding: stop and fix the route before entering production values. Dead-lettering is decided from the failed deliveries counted in the database (`render_delivery_failures`), never from a delivery count in the request.
 7. Crons run on production deployments only; the queue trigger is registered on every deployment.
 
 ## Cloudflare R2 (the owner)

@@ -523,6 +523,38 @@ describe('supabaseJobs: touch', () => {
   })
 })
 
+describe('supabaseJobs: delivery failures', () => {
+  const KEY = `${JOB_ID}:batch:0:0`
+
+  it('counts a failed delivery through the definer function and returns the count', async () => {
+    const { client, calls } = stubClient(() => ({ data: 2 }))
+    expect(await supabaseJobs(client).deliveryFailed(JOB_ID, KEY)).toBe(2)
+    expect(calls[0]!.fn).toBe('art_render_delivery_failed')
+    expect(calls[0]!.args).toEqual({ p_job_id: JOB_ID, p_message_key: KEY })
+  })
+
+  it('returns null when the job is gone', async () => {
+    const { client } = stubClient(() => ({ data: null }))
+    expect(await supabaseJobs(client).deliveryFailed(JOB_ID, KEY)).toBeNull()
+  })
+
+  it('reads the recorded count, 0 for none', async () => {
+    const { client, calls } = stubClient(() => ({ data: 0 }))
+    expect(await supabaseJobs(client).deliveryFailures(JOB_ID, KEY)).toBe(0)
+    expect(calls[0]!.fn).toBe('art_render_delivery_failures')
+  })
+
+  it('throws when either call fails, naming the call and not the database error', async () => {
+    const { client } = stubClient(() => ({ error: { code: 'XX000', message: 'boom' } }))
+    await expect(supabaseJobs(client).deliveryFailed(JOB_ID, KEY)).rejects.toThrow(
+      'Counting the failed delivery failed: XX000 boom',
+    )
+    await expect(supabaseJobs(client).deliveryFailures(JOB_ID, KEY)).rejects.toThrow(
+      'Reading the failed deliveries failed: XX000 boom',
+    )
+  })
+})
+
 describe('supabaseJobs: stuck', () => {
   const NOW = Date.parse('2026-10-12T12:00:00.000Z')
   const CUTOFF = '2026-10-12T11:45:00.000Z'
