@@ -537,7 +537,7 @@ Design conventions:
 
 ## Working with the legacy code
 
-Three old repos sit in `legacy/` on the machines of people who have them. They are not in this repository.
+Three old repos sit in `legacy/` on the machines of people who have them. They are not in this repository, and neither are the context docs below: the `.gitignore` rule for `legacy/` also matches `docs/legacy/`, so those docs stay on the machines that have them.
 
 | Legacy repo                                | What we take from it                                    | Context doc                                                                                                                                                         |
 | ------------------------------------------ | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -545,7 +545,7 @@ Three old repos sit in `legacy/` on the machines of people who have them. They a
 | `KingdomlyMasterContractFactory` (Foundry) | The factory's deploy path, test structure               | [contracts](docs/legacy/contracts.md)                                                                                                                               |
 | `ArtGenLambda` (serverless)                | sharp compositing, multi-collection handling            | [art pipeline](docs/legacy/artgen-lambda.md)                                                                                                                        |
 
-Before porting anything, open the matching context doc: it says which files implement a feature, what to change and what to leave behind. Start at [docs/legacy/README.md](docs/legacy/README.md).
+Before porting anything, open the matching context doc: it says which files implement a feature, what to change and what to leave behind. Start at `docs/legacy/README.md`.
 
 ## Build status
 

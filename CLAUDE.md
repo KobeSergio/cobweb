@@ -6,7 +6,7 @@ A no-code NFT launchpad with one linear flow: Details, Art (Layers, Rules, Gener
 
 - `docs/MASTER_PLAN.md`: build order, exit criteria per phase, and the Decisions section. It wins over `docs/PLAN.md` where they differ.
 - `docs/PLAN.md`: the source plan (scope, costs, revenue). Kept verbatim; do not edit it.
-- `docs/legacy/README.md`: index of the legacy context docs. Open the relevant one before porting anything.
+- `docs/legacy/README.md`: index of the legacy context docs. Open the relevant one before porting anything. These docs are local only, not in the repository, because the `.gitignore` rule for `legacy/` also matches `docs/legacy/`.
 - `docs/reference/the-suits-mint-analysis.md`: the model for mint groups, and the fixes to apply.
 
 ## Layout
