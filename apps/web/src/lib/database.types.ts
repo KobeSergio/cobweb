@@ -911,6 +911,35 @@ export type Database = {
           },
         ]
       }
+      snapshot_runs: {
+        Row: {
+          collection_id: string
+          id: string
+          owner_id: string
+          taken_at: string
+        }
+        Insert: {
+          collection_id: string
+          id?: string
+          owner_id: string
+          taken_at?: string
+        }
+        Update: {
+          collection_id?: string
+          id?: string
+          owner_id?: string
+          taken_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'snapshot_runs_collection_id_fkey'
+            columns: ['collection_id']
+            isOneToOne: false
+            referencedRelation: 'collections'
+            referencedColumns: ['id']
+          },
+        ]
+      }
       token_owners: {
         Row: {
           block: number
@@ -1923,6 +1952,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      snapshot_take: { Args: { p_collection_id: string }; Returns: boolean }
       swap_token_ids_for_check: {
         Args: { p_a: number; p_b: number; p_collection_id: string }
         Returns: undefined

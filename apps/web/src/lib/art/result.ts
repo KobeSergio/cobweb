@@ -129,6 +129,8 @@ export const NO_TOTAL_SUPPLY = 'This contract does not report its total supply.'
 export const SNAPSHOT_TOO_LARGE = 'Snapshots cover collections up to 20,000 tokens for now.'
 export const NO_HOLDERS = 'No holders found. Check the address and the chain.'
 export const SNAPSHOT_CHAIN = 'Cobweb cannot read this chain yet. Choose another chain.'
+export const SNAPSHOT_NOT_DEPLOYED = 'Holder snapshots are available once the collection is deployed.'
+export const SNAPSHOT_RATE = 'You have taken 5 snapshots in the last hour. Try again later.'
 export const SNAPSHOT_FAILED = 'The snapshot could not be taken. Try again in a moment.'
 
 // Airdrop and Settings (docs/specs/2026-10-15-airdrop-settings.md, section 6.6). Said by the server or the screen

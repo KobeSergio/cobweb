@@ -1099,6 +1099,7 @@ async function main(): Promise<void> {
   await artDeploy(A, B)
   await artPhases(A, B)
   await artWhitelist(A, B)
+  await snapshotRuns(A, B)
   await artAirdropSettings(A, B)
   await artMintPage(A, B)
   await artIndexer(A, B)
@@ -6352,6 +6353,69 @@ async function artWhitelist(A: Creator, B: Creator): Promise<void> {
         : `${JSON.stringify(data)} ${JSON.stringify([before, after])}`
     },
   )
+}
+
+// ---------------------------------------------------------------------------------------------
+// snapshot_take (docs/specs/2026-10-15-whitelist.md, section 6.4, note of 27 October 2026)
+// ---------------------------------------------------------------------------------------------
+async function snapshotRuns(A: Creator, B: Creator): Promise<void> {
+  const mine = await insertCollection(A.client)
+  const cid = mine.row?.id ?? ''
+  const take = (client: SupabaseClient, id: string) =>
+    callArt(client, 'snapshot_take', { p_collection_id: id })
+  const runsOf = async (owner: string): Promise<number> => countRows('snapshot_runs', 'owner_id', owner)
+
+  await check(
+    'snapshot_take: the owner may take 5 in an hour and the 6th is refused without a row',
+    async () => {
+      if (!cid) return 'no collection'
+      const answers: unknown[] = []
+      for (let i = 0; i < 6; i++) {
+        const { data, error } = await take(A.client, cid)
+        if (error) return `call ${i + 1}: ${describe(error)}`
+        answers.push(data)
+      }
+      if (JSON.stringify(answers) !== JSON.stringify([true, true, true, true, true, false]))
+        return `answers: ${JSON.stringify(answers)}`
+      const rows = await runsOf(A.userId)
+      return rows === 5 ? null : `${rows} rows`
+    },
+  )
+
+  await check('snapshot_take: runs older than an hour stop counting and are deleted', async () => {
+    const { error } = await admin
+      .from('snapshot_runs')
+      .update({ taken_at: new Date(Date.now() - 61 * 60 * 1000).toISOString() })
+      .eq('owner_id', A.userId)
+    if (error) return describe(error as DbError)
+    const { data, error: again } = await take(A.client, cid)
+    if (again) return describe(again)
+    const rows = await runsOf(A.userId)
+    return data === true && rows === 1 ? null : `answer ${String(data)}, ${rows} rows`
+  })
+
+  await check(
+    "snapshot_take: B cannot take a run on A's collection, and a signed-out caller cannot execute it",
+    async () => {
+      const stranger = await take(B.client, cid)
+      const problem = expectSentence(stranger.error, PERMISSION, 'could not be found')
+      if (problem) return `B: ${problem}`
+      const signedOut = await take(anon, cid)
+      const out = expectSentence(signedOut.error, PERMISSION, 'permission denied')
+      if (out) return `anon: ${out}`
+      return (await runsOf(B.userId)) === 0 ? null : 'a row was written for B'
+    },
+  )
+
+  await check('snapshot_runs: no client reads or writes the table', async () => {
+    const read = await A.client.from('snapshot_runs').select('id')
+    const write = await A.client.from('snapshot_runs').insert({ owner_id: A.userId, collection_id: cid })
+    const problems = [
+      expectError(read.error as DbError, PERMISSION, read.data),
+      expectError(write.error as DbError, PERMISSION, write.data),
+    ]
+    return problems.filter(Boolean).join('; ') || null
+  })
 }
 
 // ---------------------------------------------------------------------------------------------
